@@ -21,15 +21,33 @@ export default function Dashboard() {
   const ai = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
 
+  const sysUnauthorized = Boolean((sys.error as { isUnauthorized?: boolean } | null)?.isUnauthorized)
+  const sysBackendUnavailable = Boolean((sys.error as { isBackendUnavailable?: boolean } | null)?.isBackendUnavailable)
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+    <div className="space-y-8">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
+          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
+        </div>
+        <div className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)]">
+          live telemetry
+        </div>
+      </div>
 
       <Card title="Server">
         {sys.isLoading ? (
           <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-        ) : sys.error ? (
+        ) : sysUnauthorized ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-warning)]">Access handshake required</div>
+            <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
+          </div>
+        ) : sysBackendUnavailable ? (
           <div className="text-sm text-[var(--color-danger)]">Backend offline</div>
+        ) : sys.error ? (
+          <div className="text-sm text-[var(--color-danger)]">Telemetry unavailable</div>
         ) : sys.data ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Stat label="CPU" value={`${sys.data.cpu.usage.toFixed(1)}%`} sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`} />
@@ -40,7 +58,7 @@ export default function Dashboard() {
         ) : null}
       </Card>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
         <Card title="AI Usage (24h)">
           {ai.data ? (
             <>
@@ -66,7 +84,7 @@ export default function Dashboard() {
           {sessions.data && sessions.data.length > 0 ? (
             <div className="space-y-2">
               {sessions.data.map((s) => (
-                <div key={s.id} className="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-3 py-2 text-sm">
+                <div key={s.id} className="flex items-center justify-between rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
                   <div>
                     <div className="font-medium">{s.model}</div>
                     <div className="text-xs text-[var(--color-text-dim)]">PID {s.pid} · {fmtBytes(s.memory)}</div>
@@ -81,11 +99,11 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <Card title="Projects">
+      <Card title="Projects / Feeds">
         {projects.data && projects.data.length > 0 ? (
           <div className="divide-y divide-[var(--color-border)]">
             {projects.data.map((p) => (
-              <div key={p.path} className="flex items-center justify-between py-2 text-sm">
+              <div key={p.path} className="flex items-center justify-between py-3 text-sm">
                 <div>
                   <div className="font-medium">{p.name}</div>
                   <div className="text-xs text-[var(--color-text-dim)]">{p.path}</div>

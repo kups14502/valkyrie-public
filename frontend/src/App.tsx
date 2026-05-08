@@ -19,29 +19,47 @@ const navItems = [
   { to: '/trade', label: 'Trade Bot', icon: TrendingUp },
 ]
 
-function Sidebar() {
+function Shell() {
   return (
-    <aside className="w-56 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <h1 className="mb-6 text-lg font-semibold tracking-tight">Master Control</h1>
-      <nav className="space-y-1">
-        {navItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
-                isActive
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-              }`
-            }
-          >
-            <Icon size={16} />
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-    </aside>
+    <div className="min-h-full bg-[radial-gradient(circle_at_top,#151522_0%,#09090d_42%,#050507_100%)] text-[var(--color-text)]">
+      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[color:rgba(8,9,14,0.88)] backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-4">
+          <div className="shrink-0">
+            <div className="text-[10px] uppercase tracking-[0.45em] text-[var(--color-text-faint)]">Master Control</div>
+            <div className="mt-1 text-lg font-semibold tracking-[0.18em] text-[var(--color-accent)]">BRNDN//SYS</div>
+          </div>
+          <nav className="flex flex-1 items-center justify-start gap-2 overflow-x-auto">
+            {navItems.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  `group flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
+                    isActive
+                      ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.12)] text-[var(--color-text)] shadow-[0_0_18px_rgba(45,212,191,0.18)]'
+                      : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:bg-[color:rgba(255,255,255,0.03)] hover:text-[var(--color-text)]'
+                  }`
+                }
+              >
+                <Icon size={14} className="text-[var(--color-accent)]/90" />
+                <span className="whitespace-nowrap">{label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-6 py-8">
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/lights" element={<Lights />} />
+          <Route path="/game" element={<Game />} />
+          <Route path="/vault" element={<Vault />} />
+          <Route path="/trade" element={<TradeBot />} />
+        </Routes>
+      </main>
+    </div>
   )
 }
 
@@ -49,19 +67,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <div className="flex h-full">
-          <Sidebar />
-          <main className="flex-1 overflow-auto p-6">
-            <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/lights" element={<Lights />} />
-              <Route path="/game" element={<Game />} />
-              <Route path="/vault" element={<Vault />} />
-              <Route path="/trade" element={<TradeBot />} />
-            </Routes>
-          </main>
-        </div>
+        <Shell />
       </BrowserRouter>
     </QueryClientProvider>
   )

@@ -1,13 +1,40 @@
 import axios from 'axios'
 
-const baseURL = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : '/api'
+const configuredApiUrl = import.meta.env.VITE_API_URL
+
+const inferredApiOrigin = (() => {
+  if (typeof window === 'undefined') return undefined
+  const { protocol, hostname } = window.location
+  if (hostname === 'master-control.brendonkupsch.com') {
+    return `${protocol}//api.brendonkupsch.com`
+  }
+  return undefined
+})()
+
+const baseURL = configuredApiUrl
+  ? `${configuredApiUrl}/api`
+  : inferredApiOrigin
+    ? `${inferredApiOrigin}/api`
+    : '/api'
 
 export const api = axios.create({
   baseURL,
   withCredentials: true,
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status as number | undefined
+    const detail = error?.response?.data?.detail as string | undefined
+    return Promise.reject({
+      ...error,
+      isUnauthorized: status === 401,
+      isBackendUnavailable: !status || status >= 500,
+      detail,
+    })
+  },
+)
 
 export type SystemStatus = {
   cpu: { cores: number; loadAvg: [number, number, number]; usage: number }
