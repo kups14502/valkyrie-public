@@ -31,7 +31,9 @@ const getKey = (header: jwt.JwtHeader): Promise<string> =>
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (ALLOW_LOCAL) {
     const remoteIP = req.ip || req.socket.remoteAddress || ''
-    if (remoteIP === '127.0.0.1' || remoteIP === '::1' || remoteIP === '::ffff:127.0.0.1') {
+    const isLoopback = remoteIP === '127.0.0.1' || remoteIP === '::1' || remoteIP === '::ffff:127.0.0.1'
+    const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
+    if (isLoopback && !fromCloudflare) {
       return next()
     }
   }
