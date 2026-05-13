@@ -120,24 +120,47 @@ export default function Dashboard() {
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Claude</div>
-                {aiUsage.data.claude.session ? (
-                  <UsageBar
-                    pct={aiUsage.data.claude.session.pct}
-                    label="Current session"
-                    sub={aiUsage.data.claude.session.projection
-                      ? `Resets in ${aiUsage.data.claude.session.projection.remainingMinutes} min · ${fmtTokens(aiUsage.data.claude.session.totalTokens)} tokens`
-                      : `${fmtTokens(aiUsage.data.claude.session.totalTokens)} tokens`}
-                  />
+                {aiUsage.data.claude.quota ? (
+                  <>
+                    <UsageBar
+                      pct={aiUsage.data.claude.quota.sessionPct}
+                      label="Current session"
+                      sub={aiUsage.data.claude.quota.sessionResetsAt
+                        ? `Resets in ${Math.max(0, Math.round((new Date(aiUsage.data.claude.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min`
+                        : undefined}
+                    />
+                    <UsageBar
+                      pct={aiUsage.data.claude.quota.weeklyPct}
+                      label="This week"
+                      sub={aiUsage.data.claude.quota.weeklyResetsAt
+                        ? `Resets ${new Date(aiUsage.data.claude.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                        : undefined}
+                    />
+                  </>
+                ) : aiUsage.data.claude.session ? (
+                  <div className="text-xs text-[var(--color-text-dim)]">Session active · quota unavailable</div>
                 ) : (
                   <div className="text-xs text-[var(--color-text-dim)]">No active session</div>
                 )}
-                <UsageBar
-                  pct={aiUsage.data.claude.weeklyPct}
-                  label="This week vs last week"
-                  sub={`${fmtTokens(aiUsage.data.claude.last7d.tokens)} tokens`}
-                  warn={aiUsage.data.claude.weeklyPct > 150}
-                />
               </div>
+              {aiUsage.data.codex.rateLimits.session5h || aiUsage.data.codex.rateLimits.weekly ? (
+                <div className="space-y-3">
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
+                  {aiUsage.data.codex.rateLimits.session5h && (
+                    <UsageBar
+                      pct={aiUsage.data.codex.rateLimits.session5h.pct}
+                      label="5h session"
+                      sub={`Resets in ${Math.max(0, Math.round((aiUsage.data.codex.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
+                    />
+                  )}
+                  {aiUsage.data.codex.rateLimits.weekly && (
+                    <UsageBar
+                      pct={aiUsage.data.codex.rateLimits.weekly.pct}
+                      label="Weekly"
+                    />
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </Card>

@@ -52,9 +52,15 @@ export type ClaudeSession = {
   totalTokens: number
   costUSD: number
   models: string[]
-  pct: number
   projection: { totalTokens: number; totalCost: number; remainingMinutes: number } | null
   burnRate: { tokensPerMinute: number; costPerHour: number } | null
+}
+
+export type ClaudeQuota = {
+  sessionPct: number
+  weeklyPct: number
+  sessionResetsAt: string | null
+  weeklyResetsAt: string | null
 }
 
 export type CodexRateLimit = { pct: number; windowMins: number; resetsAt: number }
@@ -63,9 +69,9 @@ export type AIUsage = {
   claude: ProviderUsage & {
     byModel: Record<string, UsageBucket>
     session: ClaudeSession | null
-    weeklyPct: number
+    quota: ClaudeQuota | null
   }
-  codex: ProviderUsage & {
+  codex: {
     rateLimits: { session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }
   }
   updatedAt: string

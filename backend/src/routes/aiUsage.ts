@@ -23,6 +23,13 @@ type ClaudeBlock = {
   burnRate: { tokensPerMinute: number; costPerHour: number } | null
 }
 
+type ClaudeQuota = {
+  sessionPct: number
+  weeklyPct: number
+  sessionResetsAt: string | null
+  weeklyResetsAt: string | null
+}
+
 type CodexRateLimit = {
   pct: number
   windowMins: number
@@ -54,6 +61,66 @@ const OPENCLAW_AUTH_PROFILES = path.join(homedir(), '.openclaw', 'agents', 'main
 const CODEX_AUTH_JSON = path.join(homedir(), '.codex', 'auth.json')
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 
+// Claude.ai org UUID for the claude.ai Pro org (rate_limit_tier: default_claude_ai)
+// Discovered via /api/bootstrap; cached in-memory after first discovery
+let claudeAIOrgUUID: string | null = null
+
+const CLAUDE_AI_BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.5',
+  'Accept-Encoding': 'gzip, deflate, br, zstd',
+  'Referer': 'https://claude.ai/',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+  'DNT': '1',
+  'Connection': 'keep-alive',
+}
+
+async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
+  if (claudeAIOrgUUID) return claudeAIOrgUUID
+  try {
+    const resp = await fetch('https://claude.ai/api/bootstrap', {
+      headers: { ...CLAUDE_AI_BROWSER_HEADERS, 'Cookie': `sessionKey=${sessionKey}` },
+    })
+    if (!resp.ok) return null
+    const data = await resp.json() as { account?: { memberships?: Array<{ organization?: { uuid?: string; rate_limit_tier?: string } }> } }
+    const memberships = data.account?.memberships ?? []
+    const claudeAIOrg = memberships.find((m) => m.organization?.rate_limit_tier === 'default_claude_ai')
+    claudeAIOrgUUID = claudeAIOrg?.organization?.uuid ?? null
+    return claudeAIOrgUUID
+  } catch {
+    return null
+  }
+}
+
+async function readClaudeAIQuota(): Promise<ClaudeQuota | null> {
+  const sessionKey = process.env.CLAUDE_SESSION_KEY
+  if (!sessionKey) return null
+  try {
+    const orgUUID = await getClaudeAIOrgUUID(sessionKey)
+    if (!orgUUID) return null
+    const resp = await fetch(`https://claude.ai/api/organizations/${orgUUID}/usage`, {
+      headers: { ...CLAUDE_AI_BROWSER_HEADERS, 'Cookie': `sessionKey=${sessionKey}` },
+    })
+    if (!resp.ok) return null
+    const data = await resp.json() as {
+      five_hour?: { utilization?: number; resets_at?: string }
+      seven_day?: { utilization?: number; resets_at?: string }
+    }
+    return {
+      sessionPct: Math.round(data.five_hour?.utilization ?? 0),
+      weeklyPct: Math.round(data.seven_day?.utilization ?? 0),
+      sessionResetsAt: data.five_hour?.resets_at ?? null,
+      weeklyResetsAt: data.seven_day?.resets_at ?? null,
+    }
+  } catch (err) {
+    console.error('[ai-usage] claude.ai quota fetch failed', (err as Error).message)
+    return null
+  }
+}
+
 async function syncCodexAuth(): Promise<void> {
   const profiles = JSON.parse(readFileSync(OPENCLAW_AUTH_PROFILES, 'utf8'))
   const profile = profiles?.profiles?.['openai-codex:user@example.com']
@@ -76,13 +143,11 @@ async function syncCodexAuth(): Promise<void> {
     accessToken = tokenData.access_token
     refreshToken = tokenData.refresh_token ?? refreshToken
 
-    // Update OpenClaw auth profiles with new tokens
     profiles.profiles['openai-codex:user@example.com'].access = accessToken
     profiles.profiles['openai-codex:user@example.com'].refresh = refreshToken
     profiles.profiles['openai-codex:user@example.com'].expires = Date.now() + tokenData.expires_in * 1000
     writeFileSync(OPENCLAW_AUTH_PROFILES, JSON.stringify(profiles, null, 2))
 
-    // Also get id_token for codex auth.json
     const idToken = tokenData.id_token
     const now = new Date()
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000)
@@ -143,7 +208,6 @@ async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null
       const timer = setTimeout(() => { proc.kill(); finish() }, 20_000)
       proc.on('close', () => { clearTimeout(timer); finish() })
 
-      // Staggered send: init first, then rate limits after handshake
       proc.stdin.write(initMsg)
       setTimeout(() => {
         if (!done) {
@@ -158,7 +222,7 @@ async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null
   }
 }
 
-async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; weeklyPct: number; cur7dTokens: number }> {
+async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; cur7dTokens: number }> {
   try {
     const since = new Date()
     since.setDate(since.getDate() - 35)
@@ -176,22 +240,18 @@ async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; we
     })()
 
     const sevenCutoff = daysAgoMs(7)
-    const prev7dCutoff = daysAgoMs(14)
     let cur7dTokens = 0
-    let prev7dTokens = 0
     for (const b of blocks) {
       if (b.isGap || b.isActive) continue
       const t = Date.parse(b.startTime)
       if (t >= sevenCutoff) cur7dTokens += b.totalTokens ?? 0
-      else if (t >= prev7dCutoff) prev7dTokens += b.totalTokens ?? 0
     }
     if (activeBlock) cur7dTokens += activeBlock.totalTokens
 
-    const weeklyPct = prev7dTokens > 0 ? Math.round((cur7dTokens / prev7dTokens) * 100) : 0
-    return { activeBlock, weeklyPct, cur7dTokens }
+    return { activeBlock, cur7dTokens }
   } catch (err) {
     console.error('[ai-usage] ccusage blocks failed', (err as Error).message)
-    return { activeBlock: null, weeklyPct: 0, cur7dTokens: 0 }
+    return { activeBlock: null, cur7dTokens: 0 }
   }
 }
 
@@ -273,24 +333,21 @@ router.get('/ai-usage', async (_req, res) => {
     return res.json(cache.data)
   }
   try {
-    const [claudeBlocks, claude] = await Promise.all([
+    const [claudeBlocks, claude, claudeQuota, codexRateLimits] = await Promise.all([
       readClaudeBlocks(),
       readClaudeUsage(),
+      readClaudeAIQuota(),
+      readCodexRateLimits(),
     ])
-
-    const sessionPct = (() => {
-      const b = claudeBlocks.activeBlock
-      if (!b) return 0
-      if (b.projection?.totalTokens && b.projection.totalTokens > 0) return Math.min(Math.round((b.totalTokens / b.projection.totalTokens) * 100), 100)
-      const start = Date.parse(b.startTime); const end = Date.parse(b.endTime)
-      return Math.min(Math.round(((Date.now() - start) / (end - start)) * 100), 100)
-    })()
 
     const data = {
       claude: {
         ...claude,
-        session: claudeBlocks.activeBlock ? { ...claudeBlocks.activeBlock, pct: sessionPct } : null,
-        weeklyPct: claudeBlocks.weeklyPct,
+        session: claudeBlocks.activeBlock,
+        quota: claudeQuota,
+      },
+      codex: {
+        rateLimits: codexRateLimits,
       },
       updatedAt: new Date().toISOString(),
     }
