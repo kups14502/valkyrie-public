@@ -138,26 +138,6 @@ export default function Dashboard() {
                   warn={aiUsage.data.claude.weeklyPct > 150}
                 />
               </div>
-              <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-                <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
-                {aiUsage.data.codex.rateLimits.session5h ? (
-                  <UsageBar
-                    pct={aiUsage.data.codex.rateLimits.session5h.pct}
-                    label="5h window"
-                    sub={`Resets ${new Date(aiUsage.data.codex.rateLimits.session5h.resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-                  />
-                ) : null}
-                {aiUsage.data.codex.rateLimits.weekly ? (
-                  <UsageBar
-                    pct={aiUsage.data.codex.rateLimits.weekly.pct}
-                    label="Weekly"
-                    sub={`Resets ${new Date(aiUsage.data.codex.rateLimits.weekly.resetsAt * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' })}`}
-                  />
-                ) : null}
-                {!aiUsage.data.codex.rateLimits.session5h && !aiUsage.data.codex.rateLimits.weekly && (
-                  <div className="text-xs text-[var(--color-text-dim)]">{aiUsage.data.codex.last7d.messages} msgs this week · {fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens</div>
-                )}
-              </div>
             </div>
           ) : null}
         </Card>

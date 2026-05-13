@@ -273,11 +273,9 @@ router.get('/ai-usage', async (_req, res) => {
     return res.json(cache.data)
   }
   try {
-    const [claudeBlocks, claude, codexUsage, codexLimits] = await Promise.all([
+    const [claudeBlocks, claude] = await Promise.all([
       readClaudeBlocks(),
       readClaudeUsage(),
-      readCodexUsage(),
-      readCodexRateLimits(),
     ])
 
     const sessionPct = (() => {
@@ -293,10 +291,6 @@ router.get('/ai-usage', async (_req, res) => {
         ...claude,
         session: claudeBlocks.activeBlock ? { ...claudeBlocks.activeBlock, pct: sessionPct } : null,
         weeklyPct: claudeBlocks.weeklyPct,
-      },
-      codex: {
-        ...codexUsage,
-        rateLimits: codexLimits,
       },
       updatedAt: new Date().toISOString(),
     }
