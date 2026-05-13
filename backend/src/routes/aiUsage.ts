@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createReadStream, readdirSync, statSync } from 'node:fs'
+import { createReadStream, readdirSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -21,6 +21,12 @@ type ClaudeBlock = {
   models: string[]
   projection: { totalTokens: number; totalCost: number; remainingMinutes: number } | null
   burnRate: { tokensPerMinute: number; costPerHour: number } | null
+}
+
+type CodexRateLimit = {
+  pct: number
+  windowMins: number
+  resetsAt: number
 }
 
 const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
@@ -43,7 +49,116 @@ const localDateKey = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; weeklyPct: number; prev7dAvgDailyTokens: number; cur7dTokens: number }> {
+const CODEX_BIN = '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex'
+const OPENCLAW_AUTH_PROFILES = path.join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json')
+const CODEX_AUTH_JSON = path.join(homedir(), '.codex', 'auth.json')
+const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+
+async function syncCodexAuth(): Promise<void> {
+  const profiles = JSON.parse(readFileSync(OPENCLAW_AUTH_PROFILES, 'utf8'))
+  const profile = profiles?.profiles?.['openai-codex:user@example.com']
+  if (!profile?.access || !profile?.refresh) throw new Error('no openai-codex profile')
+
+  const accessExp = JSON.parse(Buffer.from(profile.access.split('.')[1], 'base64url').toString()).exp * 1000
+  const needsRefresh = Date.now() > accessExp - 60_000
+
+  let accessToken = profile.access
+  let refreshToken = profile.refresh
+
+  if (needsRefresh) {
+    const { stdout } = await exec('curl', [
+      '-s', '-X', 'POST', 'https://auth.openai.com/oauth/token',
+      '-H', 'Content-Type: application/x-www-form-urlencoded',
+      '-d', `grant_type=refresh_token&refresh_token=${refreshToken}&client_id=${OPENAI_CLIENT_ID}`,
+    ], { timeout: 15_000 })
+    const tokenData = JSON.parse(stdout)
+    if (!tokenData.access_token) throw new Error('refresh failed')
+    accessToken = tokenData.access_token
+    refreshToken = tokenData.refresh_token ?? refreshToken
+
+    // Update OpenClaw auth profiles with new tokens
+    profiles.profiles['openai-codex:user@example.com'].access = accessToken
+    profiles.profiles['openai-codex:user@example.com'].refresh = refreshToken
+    profiles.profiles['openai-codex:user@example.com'].expires = Date.now() + tokenData.expires_in * 1000
+    writeFileSync(OPENCLAW_AUTH_PROFILES, JSON.stringify(profiles, null, 2))
+
+    // Also get id_token for codex auth.json
+    const idToken = tokenData.id_token
+    const now = new Date()
+    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000)
+    const fmt = (d: Date) => d.toISOString().replace(/(\.\d{3})Z$/, 'Z')
+    writeFileSync(CODEX_AUTH_JSON, JSON.stringify({
+      tokens: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        id_token: idToken,
+        token_type: tokenData.token_type ?? 'Bearer',
+        scope: tokenData.scope ?? '',
+        expires_at: fmt(expiresAt),
+      },
+      last_refresh: fmt(now),
+    }, null, 2))
+  }
+}
+
+async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }> {
+  try {
+    if (!existsSync(CODEX_AUTH_JSON)) {
+      await syncCodexAuth()
+    }
+
+    const { spawn } = await import('node:child_process')
+    const initMsg = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'master-control', version: '1.0' } } }) + '\n'
+    const rateLimitsMsg = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'account/rateLimits/read', params: {} }) + '\n'
+
+    return await new Promise((resolve) => {
+      const proc = spawn(CODEX_BIN, ['app-server', '--listen', 'stdio://'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+
+      const lines: string[] = []
+      const rl = createInterface({ input: proc.stdout, crlfDelay: Infinity })
+      rl.on('line', (line) => lines.push(line))
+
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        proc.stdin.end()
+        const rateLimitLine = lines.find((l) => l.includes('"rateLimits"'))
+        if (!rateLimitLine) return resolve({ session5h: null, weekly: null })
+        try {
+          const parsed = JSON.parse(rateLimitLine)
+          const rl = parsed?.result?.rateLimits
+          if (!rl) return resolve({ session5h: null, weekly: null })
+          resolve({
+            session5h: rl.primary ? { pct: rl.primary.usedPercent, windowMins: rl.primary.windowDurationMins, resetsAt: rl.primary.resetsAt } : null,
+            weekly: rl.secondary ? { pct: rl.secondary.usedPercent, windowMins: rl.secondary.windowDurationMins, resetsAt: rl.secondary.resetsAt } : null,
+          })
+        } catch {
+          resolve({ session5h: null, weekly: null })
+        }
+      }
+
+      const timer = setTimeout(() => { proc.kill(); finish() }, 20_000)
+      proc.on('close', () => { clearTimeout(timer); finish() })
+
+      // Staggered send: init first, then rate limits after handshake
+      proc.stdin.write(initMsg)
+      setTimeout(() => {
+        if (!done) {
+          proc.stdin.write(rateLimitsMsg)
+          setTimeout(() => { proc.kill(); finish() }, 15_000)
+        }
+      }, 1_000)
+    })
+  } catch (err) {
+    console.error('[ai-usage] codex rate limits failed', (err as Error).message)
+    return { session5h: null, weekly: null }
+  }
+}
+
+async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; weeklyPct: number; cur7dTokens: number }> {
   try {
     const since = new Date()
     since.setDate(since.getDate() - 35)
@@ -57,16 +172,7 @@ async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; we
     const activeBlock: ClaudeBlock | null = (() => {
       const b = blocks.find((b: any) => b.isActive)
       if (!b) return null
-      return {
-        isActive: true,
-        startTime: b.startTime,
-        endTime: b.endTime,
-        totalTokens: b.totalTokens ?? 0,
-        costUSD: b.costUSD ?? 0,
-        models: b.models ?? [],
-        projection: b.projection ?? null,
-        burnRate: b.burnRate ?? null,
-      }
+      return { isActive: true, startTime: b.startTime, endTime: b.endTime, totalTokens: b.totalTokens ?? 0, costUSD: b.costUSD ?? 0, models: b.models ?? [], projection: b.projection ?? null, burnRate: b.burnRate ?? null }
     })()
 
     const sevenCutoff = daysAgoMs(7)
@@ -82,12 +188,10 @@ async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; we
     if (activeBlock) cur7dTokens += activeBlock.totalTokens
 
     const weeklyPct = prev7dTokens > 0 ? Math.round((cur7dTokens / prev7dTokens) * 100) : 0
-    const prev7dAvgDailyTokens = Math.round(prev7dTokens / 7)
-
-    return { activeBlock, weeklyPct, prev7dAvgDailyTokens, cur7dTokens }
+    return { activeBlock, weeklyPct, cur7dTokens }
   } catch (err) {
     console.error('[ai-usage] ccusage blocks failed', (err as Error).message)
-    return { activeBlock: null, weeklyPct: 0, prev7dAvgDailyTokens: 0, cur7dTokens: 0 }
+    return { activeBlock: null, weeklyPct: 0, cur7dTokens: 0 }
   }
 }
 
@@ -107,16 +211,8 @@ async function readClaudeUsage(): Promise<ProviderUsage & { byModel: Record<stri
       result.last30d.tokens += day.totalTokens
       result.last30d.costUSD += day.totalCost
       result.last30d.messages += 1
-      if (day.date >= sevenAgo) {
-        result.last7d.tokens += day.totalTokens
-        result.last7d.costUSD += day.totalCost
-        result.last7d.messages += 1
-      }
-      if (day.date === todayKey) {
-        result.today.tokens += day.totalTokens
-        result.today.costUSD += day.totalCost
-        result.today.messages += 1
-      }
+      if (day.date >= sevenAgo) { result.last7d.tokens += day.totalTokens; result.last7d.costUSD += day.totalCost; result.last7d.messages += 1 }
+      if (day.date === todayKey) { result.today.tokens += day.totalTokens; result.today.costUSD += day.totalCost; result.today.messages += 1 }
       for (const m of day.modelBreakdowns ?? []) {
         if (!result.byModel[m.modelName]) result.byModel[m.modelName] = emptyBucket()
         const b = result.byModel[m.modelName]
@@ -130,67 +226,45 @@ async function readClaudeUsage(): Promise<ProviderUsage & { byModel: Record<stri
   return result
 }
 
-async function readCodexUsage(): Promise<ProviderUsage & { weeklyPct: number }> {
+async function readCodexUsage(): Promise<ProviderUsage> {
   const sessionsDir = path.join(homedir(), '.openclaw', 'agents', 'main', 'sessions')
-  const out = { ...emptyProvider(), weeklyPct: 0 }
-  const cutoff = daysAgoMs(14)
+  const out = emptyProvider()
+  const cutoff = daysAgoMs(30)
   let files: string[] = []
   try {
     files = readdirSync(sessionsDir).filter((f) => f.endsWith('.jsonl') && !f.includes('.deleted.') && !f.includes('.reset.') && !f.includes('.trajectory.'))
-  } catch {
-    return out
-  }
+  } catch { return out }
   const todayCutoff = todayStartMs()
   const sevenCutoff = daysAgoMs(7)
-  const prev7dCutoff = daysAgoMs(14)
-  let prev7dTokens = 0
 
   await Promise.all(files.map(async (f) => {
     const full = path.join(sessionsDir, f)
     let stat
     try { stat = statSync(full) } catch { return }
     if (stat.mtimeMs < cutoff) return
-
     await new Promise<void>((resolve) => {
       const rl = createInterface({ input: createReadStream(full, { encoding: 'utf8' }), crlfDelay: Infinity })
       rl.on('line', (line) => {
         if (!line || line.length < 50) return
-        if (!line.includes('"provider":"openai-codex"') && !line.includes('"modelId":"gpt-')) return
+        if (!line.includes('"provider":"openai-codex"')) return
         let obj: any
         try { obj = JSON.parse(line) } catch { return }
         const msg = obj?.message
-        if (!msg) return
-        if (msg.provider !== 'openai-codex') return
+        if (!msg || msg.provider !== 'openai-codex') return
         const usage = msg.usage
         if (!usage) return
         const ts = typeof msg.timestamp === 'number' ? msg.timestamp : (typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN)
         if (!Number.isFinite(ts)) return
         const tokens = Number(usage.totalTokens ?? usage.total ?? (Number(usage.input) + Number(usage.output) + Number(usage.cacheRead || 0) + Number(usage.cacheWrite || 0)))
         const cost = Number(usage.cost?.total ?? 0)
-        if (ts >= sevenCutoff) {
-          out.last7d.tokens += tokens
-          out.last7d.costUSD += cost
-          out.last7d.messages += 1
-        } else if (ts >= prev7dCutoff) {
-          prev7dTokens += tokens
-        }
-        if (ts >= todayCutoff) {
-          out.today.tokens += tokens
-          out.today.costUSD += cost
-          out.today.messages += 1
-        }
-        if (ts >= cutoff) {
-          out.last30d.tokens += tokens
-          out.last30d.costUSD += cost
-          out.last30d.messages += 1
-        }
+        if (ts >= cutoff) { out.last30d.tokens += tokens; out.last30d.costUSD += cost; out.last30d.messages += 1 }
+        if (ts >= sevenCutoff) { out.last7d.tokens += tokens; out.last7d.costUSD += cost; out.last7d.messages += 1 }
+        if (ts >= todayCutoff) { out.today.tokens += tokens; out.today.costUSD += cost; out.today.messages += 1 }
       })
       rl.on('close', () => resolve())
       rl.on('error', () => resolve())
     })
   }))
-
-  out.weeklyPct = prev7dTokens > 0 ? Math.round((out.last7d.tokens / prev7dTokens) * 100) : 0
   return out
 }
 
@@ -199,31 +273,30 @@ router.get('/ai-usage', async (_req, res) => {
     return res.json(cache.data)
   }
   try {
-    const [claudeBlocks, claude, codex] = await Promise.all([readClaudeBlocks(), readClaudeUsage(), readCodexUsage()])
+    const [claudeBlocks, claude, codexUsage, codexLimits] = await Promise.all([
+      readClaudeBlocks(),
+      readClaudeUsage(),
+      readCodexUsage(),
+      readCodexRateLimits(),
+    ])
 
     const sessionPct = (() => {
       const b = claudeBlocks.activeBlock
       if (!b) return 0
-      if (b.projection?.totalTokens && b.projection.totalTokens > 0) {
-        return Math.min(Math.round((b.totalTokens / b.projection.totalTokens) * 100), 100)
-      }
-      const start = Date.parse(b.startTime)
-      const end = Date.parse(b.endTime)
-      const now = Date.now()
-      return Math.min(Math.round(((now - start) / (end - start)) * 100), 100)
+      if (b.projection?.totalTokens && b.projection.totalTokens > 0) return Math.min(Math.round((b.totalTokens / b.projection.totalTokens) * 100), 100)
+      const start = Date.parse(b.startTime); const end = Date.parse(b.endTime)
+      return Math.min(Math.round(((Date.now() - start) / (end - start)) * 100), 100)
     })()
 
     const data = {
       claude: {
         ...claude,
-        session: claudeBlocks.activeBlock ? {
-          ...claudeBlocks.activeBlock,
-          pct: sessionPct,
-        } : null,
+        session: claudeBlocks.activeBlock ? { ...claudeBlocks.activeBlock, pct: sessionPct } : null,
         weeklyPct: claudeBlocks.weeklyPct,
       },
       codex: {
-        ...codex,
+        ...codexUsage,
+        rateLimits: codexLimits,
       },
       updatedAt: new Date().toISOString(),
     }

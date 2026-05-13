@@ -57,13 +57,17 @@ export type ClaudeSession = {
   burnRate: { tokensPerMinute: number; costPerHour: number } | null
 }
 
+export type CodexRateLimit = { pct: number; windowMins: number; resetsAt: number }
+
 export type AIUsage = {
   claude: ProviderUsage & {
     byModel: Record<string, UsageBucket>
     session: ClaudeSession | null
     weeklyPct: number
   }
-  codex: ProviderUsage & { weeklyPct: number }
+  codex: ProviderUsage & {
+    rateLimits: { session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }
+  }
   updatedAt: string
 }
 

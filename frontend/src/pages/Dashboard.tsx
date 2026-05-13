@@ -140,24 +140,22 @@ export default function Dashboard() {
               </div>
               <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
                 <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
-                {aiUsage.data.codex.weeklyPct > 0 && aiUsage.data.codex.weeklyPct <= 500 ? (
+                {aiUsage.data.codex.rateLimits.session5h ? (
                   <UsageBar
-                    pct={aiUsage.data.codex.weeklyPct}
-                    label="This week vs last week"
-                    sub={`${fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens · ${aiUsage.data.codex.last7d.messages} msgs`}
-                    warn={aiUsage.data.codex.weeklyPct > 150}
+                    pct={aiUsage.data.codex.rateLimits.session5h.pct}
+                    label="5h window"
+                    sub={`Resets ${new Date(aiUsage.data.codex.rateLimits.session5h.resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                   />
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="flex items-baseline justify-between text-sm">
-                      <span className="text-[var(--color-text-dim)]">This week</span>
-                      <span className="font-semibold text-[var(--color-text)]">{aiUsage.data.codex.last7d.messages} msgs</span>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
-                      <div className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-500" style={{ width: '100%' }} />
-                    </div>
-                    <div className="text-[11px] text-[var(--color-text-faint)]">{fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens · new baseline</div>
-                  </div>
+                ) : null}
+                {aiUsage.data.codex.rateLimits.weekly ? (
+                  <UsageBar
+                    pct={aiUsage.data.codex.rateLimits.weekly.pct}
+                    label="Weekly"
+                    sub={`Resets ${new Date(aiUsage.data.codex.rateLimits.weekly.resetsAt * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' })}`}
+                  />
+                ) : null}
+                {!aiUsage.data.codex.rateLimits.session5h && !aiUsage.data.codex.rateLimits.weekly && (
+                  <div className="text-xs text-[var(--color-text-dim)]">{aiUsage.data.codex.last7d.messages} msgs this week · {fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens</div>
                 )}
               </div>
             </div>
