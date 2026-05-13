@@ -45,9 +45,25 @@ export type SessionInfo = {
 export type UsageBucket = { tokens: number; costUSD: number; messages: number }
 export type ProviderUsage = { today: UsageBucket; last7d: UsageBucket; last30d: UsageBucket }
 
+export type ClaudeSession = {
+  isActive: boolean
+  startTime: string
+  endTime: string
+  totalTokens: number
+  costUSD: number
+  models: string[]
+  pct: number
+  projection: { totalTokens: number; totalCost: number; remainingMinutes: number } | null
+  burnRate: { tokensPerMinute: number; costPerHour: number } | null
+}
+
 export type AIUsage = {
-  claude: ProviderUsage & { byModel: Record<string, UsageBucket> }
-  codex: ProviderUsage
+  claude: ProviderUsage & {
+    byModel: Record<string, UsageBucket>
+    session: ClaudeSession | null
+    weeklyPct: number
+  }
+  codex: ProviderUsage & { weeklyPct: number }
   updatedAt: string
 }
 

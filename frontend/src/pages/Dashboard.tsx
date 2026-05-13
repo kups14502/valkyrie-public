@@ -14,7 +14,22 @@ const fmtTokens = (n: number) => {
   return String(n)
 }
 
-const fmtCost = (n: number) => `$${n.toFixed(2)}`
+function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
+  const clamped = Math.min(pct, 100)
+  const color = warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="text-[var(--color-text-dim)]">{label}</span>
+        <span className="font-semibold text-[var(--color-text)]">{pct}% used</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${clamped}%`, backgroundColor: color }} />
+      </div>
+      {sub && <div className="text-[11px] text-[var(--color-text-faint)]">{sub}</div>}
+    </div>
+  )
+}
 
 const fmtUptime = (s: number) => {
   const d = Math.floor(s / 86400)
@@ -102,36 +117,51 @@ export default function Dashboard() {
           ) : aiUsage.error ? (
             <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
           ) : aiUsage.data ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-6">
               <div className="space-y-3">
-                <Stat label="Claude · today" value={fmtCost(aiUsage.data.claude.today.costUSD)} sub={`${fmtTokens(aiUsage.data.claude.today.tokens)} tokens`} />
-                <div className="text-xs text-[var(--color-text-dim)]">
-                  <div className="flex justify-between"><span>7d</span><span>{fmtCost(aiUsage.data.claude.last7d.costUSD)} · {fmtTokens(aiUsage.data.claude.last7d.tokens)}</span></div>
-                  <div className="flex justify-between"><span>30d</span><span>{fmtCost(aiUsage.data.claude.last30d.costUSD)} · {fmtTokens(aiUsage.data.claude.last30d.tokens)}</span></div>
-                </div>
+                <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Claude</div>
+                {aiUsage.data.claude.session ? (
+                  <UsageBar
+                    pct={aiUsage.data.claude.session.pct}
+                    label="Current session"
+                    sub={aiUsage.data.claude.session.projection
+                      ? `Resets in ${aiUsage.data.claude.session.projection.remainingMinutes} min · ${fmtTokens(aiUsage.data.claude.session.totalTokens)} tokens`
+                      : `${fmtTokens(aiUsage.data.claude.session.totalTokens)} tokens`}
+                  />
+                ) : (
+                  <div className="text-xs text-[var(--color-text-dim)]">No active session</div>
+                )}
+                <UsageBar
+                  pct={aiUsage.data.claude.weeklyPct}
+                  label="This week vs last week"
+                  sub={`${fmtTokens(aiUsage.data.claude.last7d.tokens)} tokens`}
+                  warn={aiUsage.data.claude.weeklyPct > 150}
+                />
               </div>
-              <div className="space-y-3">
-                <Stat label="Codex · today" value={fmtCost(aiUsage.data.codex.today.costUSD)} sub={`${fmtTokens(aiUsage.data.codex.today.tokens)} tokens · ${aiUsage.data.codex.today.messages} msgs`} />
-                <div className="text-xs text-[var(--color-text-dim)]">
-                  <div className="flex justify-between"><span>7d</span><span>{fmtCost(aiUsage.data.codex.last7d.costUSD)} · {fmtTokens(aiUsage.data.codex.last7d.tokens)}</span></div>
-                  <div className="flex justify-between"><span>30d</span><span>{fmtCost(aiUsage.data.codex.last30d.costUSD)} · {fmtTokens(aiUsage.data.codex.last30d.tokens)}</span></div>
-                </div>
+              <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
+                <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
+                {aiUsage.data.codex.weeklyPct > 0 && aiUsage.data.codex.weeklyPct <= 500 ? (
+                  <UsageBar
+                    pct={aiUsage.data.codex.weeklyPct}
+                    label="This week vs last week"
+                    sub={`${fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens · ${aiUsage.data.codex.last7d.messages} msgs`}
+                    warn={aiUsage.data.codex.weeklyPct > 150}
+                  />
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span className="text-[var(--color-text-dim)]">This week</span>
+                      <span className="font-semibold text-[var(--color-text)]">{aiUsage.data.codex.last7d.messages} msgs</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
+                      <div className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-500" style={{ width: '100%' }} />
+                    </div>
+                    <div className="text-[11px] text-[var(--color-text-faint)]">{fmtTokens(aiUsage.data.codex.last7d.tokens)} tokens · new baseline</div>
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
-          {aiUsage.data && Object.keys(aiUsage.data.claude.byModel).length > 0 && (
-            <div className="mt-4 space-y-1 border-t border-[var(--color-border)] pt-3">
-              <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">By model (30d)</div>
-              {Object.entries(aiUsage.data.claude.byModel)
-                .sort(([, a], [, b]) => b.costUSD - a.costUSD)
-                .map(([name, b]) => (
-                  <div key={name} className="flex items-center justify-between text-xs">
-                    <span className="text-[var(--color-text-dim)]">{name}</span>
-                    <span>{fmtCost(b.costUSD)} · {fmtTokens(b.tokens)}</span>
-                  </div>
-                ))}
-            </div>
-          )}
         </Card>
 
         <Card title={`Sessions (${sessionsList.length})`}>
