@@ -11,7 +11,7 @@ const fmtBytes = (b: number) => {
 function UsageBar({ pct, label, sub, warn, claude }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = claude
-    ? (pct >= 85 ? 'var(--color-danger)' : 'var(--color-warning)')
+    ? (pct >= 85 ? 'var(--color-danger)' : '#D97757')
     : (warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
