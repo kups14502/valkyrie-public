@@ -19,6 +19,8 @@ const navItems = [
   { to: '/trade', label: 'Trade Bot', icon: TrendingUp },
 ]
 
+const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
+
 function Shell() {
   return (
     <div className="min-h-full bg-[radial-gradient(circle_at_top,#151522_0%,#09090d_42%,#050507_100%)] text-[var(--color-text)]">
@@ -27,6 +29,7 @@ function Shell() {
           <div className="shrink-0">
             <div className="text-[10px] uppercase tracking-[0.45em] text-[var(--color-text-faint)]">Master Control</div>
             <div className="mt-1 text-lg font-semibold tracking-[0.18em] text-[var(--color-accent)]">BRNDN//SYS</div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">build {BUILD_ID}</div>
           </div>
           <nav className="flex flex-1 items-center justify-start gap-2 overflow-x-auto">
             {navItems.map(({ to, label, icon: Icon }) => (

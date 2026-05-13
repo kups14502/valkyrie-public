@@ -1,0 +1,7 @@
+/*
+  X-Frame-Options: SAMEORIGIN
+
+/api/*
+  Access-Control-Allow-Origin: https://master-control.brendonkupsch.com
+  Access-Control-Allow-Credentials: true
+  Cache-Control: no-store

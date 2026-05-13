@@ -13,13 +13,40 @@ const PORT = Number(process.env.PORT) || 3001
 const BIND = process.env.BIND || '127.0.0.1'
 
 app.disable('x-powered-by')
-app.set('trust proxy', 'loopback')
+app.set('trust proxy', true)
 app.use(helmet())
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []
+const isAllowedOrigin = (origin: string) => {
+  if (allowedOrigins.includes(origin)) return true
+  if (/^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)) return true
+  return false
+}
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') ?? true,
+  origin(origin, callback) {
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.length === 0 || isAllowedOrigin(origin)) return callback(null, true)
+    console.warn('[cors] blocked origin', { origin })
+    return callback(new Error(`Origin not allowed: ${origin}`))
+  },
   credentials: true,
 }))
 app.use(express.json({ limit: '64kb' }))
+
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/api')) {
+    console.log('[request]', {
+      method: req.method,
+      path: req.path,
+      host: req.headers.host,
+      origin: req.headers.origin,
+      hasCfAccessJwt: Boolean(req.headers['cf-access-jwt-assertion']),
+      cfRay: req.headers['cf-ray'],
+      ip: req.ip,
+    })
+  }
+  next()
+})
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 

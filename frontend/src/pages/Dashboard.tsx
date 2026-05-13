@@ -8,12 +8,6 @@ const fmtBytes = (b: number) => {
   return `${(b / 1024).toFixed(0)} KB`
 }
 
-const fmtTokens = (n: number) => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
-
 function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
