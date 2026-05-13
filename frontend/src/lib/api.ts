@@ -2,20 +2,9 @@ import axios from 'axios'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL
 
-const inferredApiOrigin = (() => {
-  if (typeof window === 'undefined') return undefined
-  const { protocol, hostname } = window.location
-  if (hostname === 'master-control.brendonkupsch.com') {
-    return `${protocol}//api.brendonkupsch.com`
-  }
-  return undefined
-})()
-
 const baseURL = configuredApiUrl
   ? `${configuredApiUrl}/api`
-  : inferredApiOrigin
-    ? `${inferredApiOrigin}/api`
-    : '/api'
+  : '/api'
 
 export const api = axios.create({
   baseURL,
@@ -53,11 +42,13 @@ export type SessionInfo = {
   memory: number
 }
 
+export type UsageBucket = { tokens: number; costUSD: number; messages: number }
+export type ProviderUsage = { today: UsageBucket; last7d: UsageBucket; last30d: UsageBucket }
+
 export type AIUsage = {
-  totalTokensInput: number
-  totalTokensOutput: number
-  totalCostUSD: number
-  byModel: Record<string, { input: number; output: number; costUSD: number }>
+  claude: ProviderUsage & { byModel: Record<string, UsageBucket> }
+  codex: ProviderUsage
+  updatedAt: string
 }
 
 export type ProjectStatus = {
@@ -67,7 +58,26 @@ export type ProjectStatus = {
   lastTouched: string
 }
 
-export const fetchSystem = () => api.get<SystemStatus>('/system').then((r) => r.data)
-export const fetchSessions = () => api.get<SessionInfo[]>('/sessions').then((r) => r.data)
-export const fetchAIUsage = () => api.get<AIUsage>('/ai-usage').then((r) => r.data)
-export const fetchProjects = () => api.get<ProjectStatus[]>('/projects').then((r) => r.data)
+export const fetchSystem = async () => {
+  const r = await api.get<SystemStatus | { error?: string; detail?: string }>('/system')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid system response')
+  return r.data as SystemStatus
+}
+
+export const fetchSessions = async () => {
+  const r = await api.get<SessionInfo[] | { error?: string; detail?: string }>('/sessions')
+  if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid sessions response')
+  return r.data as SessionInfo[]
+}
+
+export const fetchAIUsage = async () => {
+  const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')
+  return r.data as AIUsage
+}
+
+export const fetchProjects = async () => {
+  const r = await api.get<ProjectStatus[] | { error?: string; detail?: string }>('/projects')
+  if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid projects response')
+  return r.data as ProjectStatus[]
+}

@@ -1,12 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
-import { fetchSystem, fetchSessions, fetchAIUsage, fetchProjects } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
   if (b > 1024 ** 2) return `${(b / 1024 ** 2).toFixed(0)} MB`
   return `${(b / 1024).toFixed(0)} KB`
 }
+
+const fmtTokens = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+const fmtCost = (n: number) => `$${n.toFixed(2)}`
 
 const fmtUptime = (s: number) => {
   const d = Math.floor(s / 86400)
@@ -15,14 +23,35 @@ const fmtUptime = (s: number) => {
   return d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`
 }
 
+const hasSystemShape = (value: unknown): value is {
+  cpu: { usage: number; cores: number; loadAvg: [number, number, number] }
+  memory: { percent: number; used: number; total: number }
+  disk: { percent: number; used: number; total: number }
+  uptime: number
+  hostname: string
+} => {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, any>
+  return Boolean(
+    v.cpu && typeof v.cpu.usage === 'number' && typeof v.cpu.cores === 'number' && Array.isArray(v.cpu.loadAvg) &&
+    v.memory && typeof v.memory.percent === 'number' && typeof v.memory.used === 'number' && typeof v.memory.total === 'number' &&
+    v.disk && typeof v.disk.percent === 'number' && typeof v.disk.used === 'number' && typeof v.disk.total === 'number' &&
+    typeof v.uptime === 'number' && typeof v.hostname === 'string'
+  )
+}
+
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
-  const ai = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
+  const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
 
-  const sysUnauthorized = Boolean((sys.error as { isUnauthorized?: boolean } | null)?.isUnauthorized)
-  const sysBackendUnavailable = Boolean((sys.error as { isBackendUnavailable?: boolean } | null)?.isBackendUnavailable)
+  const sysError = sys.error as { isUnauthorized?: boolean; isBackendUnavailable?: boolean; detail?: string; message?: string } | null
+  const sysUnauthorized = Boolean(sysError?.isUnauthorized)
+  const sysBackendUnavailable = Boolean(sysError?.isBackendUnavailable)
+  const sysValid = hasSystemShape(sys.data)
+  const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
+  const projectsList = Array.isArray(projects.data) ? projects.data : []
 
   return (
     <div className="space-y-8">
@@ -45,45 +74,70 @@ export default function Dashboard() {
             <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
           </div>
         ) : sysBackendUnavailable ? (
-          <div className="text-sm text-[var(--color-danger)]">Backend offline</div>
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-danger)]">API route unavailable</div>
+            <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
+          </div>
         ) : sys.error ? (
-          <div className="text-sm text-[var(--color-danger)]">Telemetry unavailable</div>
-        ) : sys.data ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
+            {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
+          </div>
+        ) : sys.data && sysValid ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Stat label="CPU" value={`${sys.data.cpu.usage.toFixed(1)}%`} sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`} />
             <Stat label="Memory" value={`${sys.data.memory.percent.toFixed(0)}%`} sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`} />
             <Stat label="Disk" value={`${sys.data.disk.percent.toFixed(0)}%`} sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`} />
             <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
           </div>
+        ) : sys.data ? (
+          <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
         ) : null}
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
-        <Card title="AI Usage (24h)">
-          {ai.data ? (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <Stat label="Cost" value={`$${ai.data.totalCostUSD.toFixed(2)}`} />
-                <Stat label="Tokens" value={`${((ai.data.totalTokensInput + ai.data.totalTokensOutput) / 1000).toFixed(1)}k`} sub={`${(ai.data.totalTokensInput / 1000).toFixed(1)}k in / ${(ai.data.totalTokensOutput / 1000).toFixed(1)}k out`} />
+        <Card title="AI Clients">
+          {aiUsage.isLoading && !aiUsage.data ? (
+            <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+          ) : aiUsage.error ? (
+            <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
+          ) : aiUsage.data ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Stat label="Claude · today" value={fmtCost(aiUsage.data.claude.today.costUSD)} sub={`${fmtTokens(aiUsage.data.claude.today.tokens)} tokens`} />
+                <div className="text-xs text-[var(--color-text-dim)]">
+                  <div className="flex justify-between"><span>7d</span><span>{fmtCost(aiUsage.data.claude.last7d.costUSD)} · {fmtTokens(aiUsage.data.claude.last7d.tokens)}</span></div>
+                  <div className="flex justify-between"><span>30d</span><span>{fmtCost(aiUsage.data.claude.last30d.costUSD)} · {fmtTokens(aiUsage.data.claude.last30d.tokens)}</span></div>
+                </div>
               </div>
-              <div className="mt-4 space-y-1 border-t border-[var(--color-border)] pt-3">
-                {Object.entries(ai.data.byModel).map(([model, m]) => (
-                  <div key={model} className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--color-text-dim)]">{model}</span>
-                    <span>${m.costUSD.toFixed(2)}</span>
+              <div className="space-y-3">
+                <Stat label="Codex · today" value={fmtCost(aiUsage.data.codex.today.costUSD)} sub={`${fmtTokens(aiUsage.data.codex.today.tokens)} tokens · ${aiUsage.data.codex.today.messages} msgs`} />
+                <div className="text-xs text-[var(--color-text-dim)]">
+                  <div className="flex justify-between"><span>7d</span><span>{fmtCost(aiUsage.data.codex.last7d.costUSD)} · {fmtTokens(aiUsage.data.codex.last7d.tokens)}</span></div>
+                  <div className="flex justify-between"><span>30d</span><span>{fmtCost(aiUsage.data.codex.last30d.costUSD)} · {fmtTokens(aiUsage.data.codex.last30d.tokens)}</span></div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {aiUsage.data && Object.keys(aiUsage.data.claude.byModel).length > 0 && (
+            <div className="mt-4 space-y-1 border-t border-[var(--color-border)] pt-3">
+              <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">By model (30d)</div>
+              {Object.entries(aiUsage.data.claude.byModel)
+                .sort(([, a], [, b]) => b.costUSD - a.costUSD)
+                .map(([name, b]) => (
+                  <div key={name} className="flex items-center justify-between text-xs">
+                    <span className="text-[var(--color-text-dim)]">{name}</span>
+                    <span>{fmtCost(b.costUSD)} · {fmtTokens(b.tokens)}</span>
                   </div>
                 ))}
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-[var(--color-text-dim)]">{ai.isLoading ? 'Loading…' : 'No data'}</div>
+            </div>
           )}
         </Card>
 
-        <Card title={`Sessions (${sessions.data?.length ?? 0})`}>
-          {sessions.data && sessions.data.length > 0 ? (
+        <Card title={`Sessions (${sessionsList.length})`}>
+          {sessionsList.length > 0 ? (
             <div className="space-y-2">
-              {sessions.data.map((s) => (
+              {sessionsList.map((s) => (
                 <div key={s.id} className="flex items-center justify-between rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
                   <div>
                     <div className="font-medium">{s.model}</div>
@@ -100,9 +154,9 @@ export default function Dashboard() {
       </div>
 
       <Card title="Projects / Feeds">
-        {projects.data && projects.data.length > 0 ? (
+        {projectsList.length > 0 ? (
           <div className="divide-y divide-[var(--color-border)]">
-            {projects.data.map((p) => (
+            {projectsList.map((p) => (
               <div key={p.path} className="flex items-center justify-between py-3 text-sm">
                 <div>
                   <div className="font-medium">{p.name}</div>
@@ -120,7 +174,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-text-dim)]">{projects.isLoading ? 'Loading…' : 'No projects tracked'}</div>
+          <div className="text-sm text-[var(--color-text-dim)]">{projects.isLoading ? 'Loading…' : projects.data ? 'Project data shape was invalid.' : 'No projects tracked'}</div>
         )}
       </Card>
     </div>
