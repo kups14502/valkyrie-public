@@ -8,9 +8,11 @@ const fmtBytes = (b: number) => {
   return `${(b / 1024).toFixed(0)} KB`
 }
 
-function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
+function UsageBar({ pct, label, sub, warn, claude }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean }) {
   const clamped = Math.min(pct, 100)
-  const color = warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
+  const color = claude
+    ? (pct >= 85 ? 'var(--color-danger)' : 'var(--color-warning)')
+    : (warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between text-sm">
@@ -117,6 +119,7 @@ export default function Dashboard() {
                 {aiUsage.data.claude.quota ? (
                   <>
                     <UsageBar
+                      claude
                       pct={aiUsage.data.claude.quota.sessionPct}
                       label="Current session"
                       sub={aiUsage.data.claude.quota.sessionResetsAt
@@ -124,6 +127,7 @@ export default function Dashboard() {
                         : undefined}
                     />
                     <UsageBar
+                      claude
                       pct={aiUsage.data.claude.quota.weeklyPct}
                       label="This week"
                       sub={aiUsage.data.claude.quota.weeklyResetsAt
