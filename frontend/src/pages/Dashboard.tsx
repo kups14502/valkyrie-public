@@ -1,11 +1,42 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
   if (b > 1024 ** 2) return `${(b / 1024 ** 2).toFixed(0)} MB`
   return `${(b / 1024).toFixed(0)} KB`
+}
+
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  if (values.length < 2) return <div className="mt-1.5 h-4" />
+  const w = 100
+  const h = 18
+  let min = Math.min(...values)
+  let max = Math.max(...values)
+  if (max - min < 1) {
+    const mid = (min + max) / 2
+    min = mid - 1
+    max = mid + 1
+  }
+  const range = max - min
+  const pad = range * 0.15
+  min -= pad
+  max += pad
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w
+    const y = h - ((v - min) / (max - min)) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  })
+  const last = values[values.length - 1]
+  const lastY = h - ((last - min) / (max - min)) * h
+  const lastX = w
+  return (
+    <svg className="mt-1.5 block w-full" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={lastX - 1.5} cy={lastY} r={1.5} fill={color} />
+    </svg>
+  )
 }
 
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
@@ -173,6 +204,12 @@ export default function Dashboard() {
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
+  const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
+
+  const samples = history.data?.samples ?? []
+  const cpuSeries = samples.map((s) => s.cpu)
+  const memSeries = samples.map((s) => s.mem)
+  const diskSeries = samples.map((s) => s.disk)
 
   const sysError = sys.error as { isUnauthorized?: boolean; isBackendUnavailable?: boolean; detail?: string; message?: string } | null
   const sysUnauthorized = Boolean(sysError?.isUnauthorized)
@@ -214,9 +251,24 @@ export default function Dashboard() {
           </div>
         ) : sys.data && sysValid ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="CPU" value={`${sys.data.cpu.usage.toFixed(1)}%`} sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`} />
-            <Stat label="Memory" value={`${sys.data.memory.percent.toFixed(0)}%`} sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`} />
-            <Stat label="Disk" value={`${sys.data.disk.percent.toFixed(0)}%`} sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`} />
+            <Stat
+              label="CPU"
+              value={`${sys.data.cpu.usage.toFixed(1)}%`}
+              sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
+              chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
+            />
+            <Stat
+              label="Memory"
+              value={`${sys.data.memory.percent.toFixed(0)}%`}
+              sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
+              chart={<Sparkline values={memSeries} color="#7a5cff" />}
+            />
+            <Stat
+              label="Disk"
+              value={`${sys.data.disk.percent.toFixed(0)}%`}
+              sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
+              chart={<Sparkline values={diskSeries} color="#48e3ce" />}
+            />
             <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
           </div>
         ) : sys.data ? (

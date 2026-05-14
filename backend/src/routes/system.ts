@@ -27,6 +27,35 @@ const cpuUsage = () => {
   return 100 - (100 * idleDiff) / totalDiff
 }
 
+const HISTORY_SIZE = 60
+type Sample = { t: number; cpu: number; mem: number; disk: number }
+const history: Sample[] = []
+
+const sampleDisk = async (): Promise<number> => {
+  try {
+    const { stdout } = await exec('df', ['-B1', '/'])
+    const parts = stdout.trim().split('\n')[1].split(/\s+/)
+    const dTotal = Number(parts[1])
+    const dUsed = Number(parts[2])
+    return dTotal > 0 ? (dUsed / dTotal) * 100 : 0
+  } catch {
+    return 0
+  }
+}
+
+const recordSample = async () => {
+  const total = os.totalmem()
+  const free = os.freemem()
+  const mem = ((total - free) / total) * 100
+  const cpu = cpuUsage()
+  const disk = await sampleDisk()
+  history.push({ t: Date.now(), cpu, mem, disk })
+  while (history.length > HISTORY_SIZE) history.shift()
+}
+
+void recordSample()
+setInterval(() => void recordSample(), 60_000).unref()
+
 router.get('/system', async (_req, res) => {
   const total = os.totalmem()
   const free = os.freemem()
@@ -55,6 +84,14 @@ router.get('/system', async (_req, res) => {
     disk,
     uptime: os.uptime(),
     hostname: os.hostname(),
+  })
+})
+
+router.get('/system/history', (_req, res) => {
+  res.json({
+    samples: history.map((s) => ({ t: s.t, cpu: s.cpu, mem: s.mem, disk: s.disk })),
+    intervalMs: 60_000,
+    capacity: HISTORY_SIZE,
   })
 })
 

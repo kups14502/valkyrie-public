@@ -84,6 +84,34 @@ export type ProjectStatus = {
   lastTouched: string
 }
 
+export type LightState = {
+  entity_id: string
+  name: string
+  on: boolean
+  unavailable: boolean
+  brightness: number | null
+  rgb_color: [number, number, number] | null
+  color_temp_kelvin: number | null
+  color_mode: string | null
+  supported_color_modes: string[]
+  min_kelvin: number | null
+  max_kelvin: number | null
+}
+
+export type LightUpdate = {
+  entity_id: string | string[]
+  state: 'on' | 'off'
+  brightness?: number
+  rgb_color?: [number, number, number]
+  color_temp_kelvin?: number
+}
+
+export type SystemHistory = {
+  samples: { t: number; cpu: number; mem: number; disk: number }[]
+  intervalMs: number
+  capacity: number
+}
+
 export type VaultStatus = {
   container: {
     running: boolean
@@ -130,6 +158,24 @@ export const fetchAIUsage = async () => {
   const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')
   return r.data as AIUsage
+}
+
+export const fetchLights = async () => {
+  const r = await api.get<LightState[] | { error?: string; detail?: string }>('/lights')
+  if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid lights response')
+  return r.data as LightState[]
+}
+
+export const setLight = async (update: LightUpdate) => {
+  const r = await api.post<{ ok: boolean; error?: string; detail?: string }>('/lights/turn', update)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to update light')
+  return r.data
+}
+
+export const fetchSystemHistory = async () => {
+  const r = await api.get<SystemHistory | { error?: string; detail?: string }>('/system/history')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid history response')
+  return r.data as SystemHistory
 }
 
 export const fetchVault = async () => {

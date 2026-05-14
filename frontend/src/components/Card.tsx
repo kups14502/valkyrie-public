@@ -14,11 +14,12 @@ export function Card({ title, children, action }: { title?: string; children: Re
   )
 }
 
-export function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+export function Stat({ label, value, sub, chart }: { label: string; value: string | number; sub?: string; chart?: ReactNode }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--color-text)]">{value}</div>
+      {chart}
       {sub && <div className="mt-1 text-xs text-[var(--color-text-dim)]">{sub}</div>}
     </div>
   )
