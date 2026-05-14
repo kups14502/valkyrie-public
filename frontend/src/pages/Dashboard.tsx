@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -8,10 +8,12 @@ const fmtBytes = (b: number) => {
   return `${(b / 1024).toFixed(0)} KB`
 }
 
-function UsageBar({ pct, label, sub, warn, claude }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean }) {
+function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = claude
     ? (pct >= 85 ? 'var(--color-danger)' : '#D97757')
+    : codex
+    ? (pct >= 85 ? 'var(--color-danger)' : '#1E40AF')
     : (warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
@@ -51,6 +53,121 @@ const hasSystemShape = (value: unknown): value is {
   )
 }
 
+type Tone = 'ok' | 'watch' | 'alert' | 'dim'
+
+const toneDot: Record<Tone, string> = {
+  ok: 'bg-[var(--color-success)]',
+  watch: 'bg-[var(--color-warning)]',
+  alert: 'bg-[var(--color-danger)]',
+  dim: 'bg-[var(--color-text-faint)]',
+}
+
+const toneText: Record<Tone, string> = {
+  ok: 'text-[var(--color-text)]',
+  watch: 'text-[var(--color-warning)]',
+  alert: 'text-[var(--color-danger)]',
+  dim: 'text-[var(--color-text-dim)]',
+}
+
+function NowBanner() {
+  const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
+  const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
+  const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
+  const vault = useQuery({ queryKey: ['vault'], queryFn: fetchVault, refetchInterval: 60_000 })
+
+  const segments: { label: string; tone: Tone }[] = []
+  let alerts = 0
+  let watches = 0
+  const note = (label: string, tone: Tone) => {
+    segments.push({ label, tone })
+    if (tone === 'alert') alerts++
+    else if (tone === 'watch') watches++
+  }
+
+  const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
+  if (sessionsList.length > 0) note(`${sessionsList.length} session${sessionsList.length === 1 ? '' : 's'}`, 'ok')
+  else note('no sessions', 'dim')
+
+  const projectsList = Array.isArray(projects.data) ? projects.data : []
+  const activeProject = projectsList.find((p) => p.status === 'active')
+  if (activeProject) note(`${activeProject.name} active`, 'ok')
+
+  const claudeWeekly = aiUsage.data?.claude.quota?.weeklyPct
+  if (typeof claudeWeekly === 'number') {
+    const tone: Tone = claudeWeekly >= 85 ? 'alert' : claudeWeekly >= 70 ? 'watch' : 'ok'
+    note(`Claude ${claudeWeekly}% wk`, tone)
+  }
+
+  const claudeSessionPct = aiUsage.data?.claude.quota?.sessionPct
+  if (typeof claudeSessionPct === 'number' && claudeSessionPct >= 70) {
+    const tone: Tone = claudeSessionPct >= 85 ? 'alert' : 'watch'
+    note(`Claude ${claudeSessionPct}% 5h`, tone)
+  }
+
+  const codex5h = aiUsage.data?.codex.rateLimits.session5h?.pct
+  if (typeof codex5h === 'number' && codex5h > 0) {
+    const tone: Tone = codex5h >= 85 ? 'alert' : codex5h >= 70 ? 'watch' : 'ok'
+    note(`Codex ${codex5h}% 5h`, tone)
+  }
+
+  if (vault.data) {
+    const v = vault.data
+    if (!v.container.running) note('vault down', 'alert')
+    else if (v.container.healthy === false) note('vault unhealthy', 'alert')
+    else if (v.backups.stale) note('backups stale', 'alert')
+    else note('vault ok', 'ok')
+  }
+
+  if (sys.data) {
+    if (sys.data.disk.percent >= 90) note(`disk ${Math.round(sys.data.disk.percent)}%`, 'alert')
+    else if (sys.data.disk.percent >= 80) note(`disk ${Math.round(sys.data.disk.percent)}%`, 'watch')
+
+    const loadRatio = sys.data.cpu.loadAvg[0] / Math.max(sys.data.cpu.cores, 1)
+    if (loadRatio >= 0.9) note(`load ${loadRatio.toFixed(1)}`, 'alert')
+    else if (loadRatio >= 0.7) note(`load ${loadRatio.toFixed(1)}`, 'watch')
+
+    if (sys.data.memory.percent >= 90) note(`mem ${Math.round(sys.data.memory.percent)}%`, 'alert')
+    else if (sys.data.memory.percent >= 80) note(`mem ${Math.round(sys.data.memory.percent)}%`, 'watch')
+  }
+
+  const verdict = alerts > 0
+    ? `${alerts} need${alerts === 1 ? 's' : ''} attention`
+    : watches > 0
+    ? `watching ${watches}`
+    : 'all systems steady'
+  const verdictTone: Tone = alerts > 0 ? 'alert' : watches > 0 ? 'watch' : 'ok'
+
+  const loading = sys.isLoading && sessions.isLoading && aiUsage.isLoading && vault.isLoading
+
+  return (
+    <section className="rounded-2xl border border-[var(--color-border)] bg-[linear-gradient(180deg,rgba(14,19,29,0.96),rgba(9,12,18,0.96))] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.32em] text-[var(--color-text-faint)]">Now</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+          {loading ? (
+            <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
+          ) : segments.length === 0 ? (
+            <span className="text-xs text-[var(--color-text-dim)]">no signal yet</span>
+          ) : (
+            segments.map((s) => (
+              <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${toneDot[s.tone]}`} aria-hidden />
+                {s.label}
+              </span>
+            ))
+          )}
+        </div>
+        {!loading && (
+          <span className={`text-[11px] font-medium uppercase tracking-[0.22em] ${toneText[verdictTone]}`}>
+            {verdict}
+          </span>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
@@ -66,6 +183,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
+      <NowBanner />
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
@@ -146,6 +264,7 @@ export default function Dashboard() {
                   <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
                   {aiUsage.data.codex.rateLimits.session5h && (
                     <UsageBar
+                      codex
                       pct={aiUsage.data.codex.rateLimits.session5h.pct}
                       label="5h session"
                       sub={`Resets in ${Math.max(0, Math.round((aiUsage.data.codex.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
@@ -153,6 +272,7 @@ export default function Dashboard() {
                   )}
                   {aiUsage.data.codex.rateLimits.weekly && (
                     <UsageBar
+                      codex
                       pct={aiUsage.data.codex.rateLimits.weekly.pct}
                       label="Weekly"
                     />
