@@ -82,6 +82,10 @@ export type ProjectStatus = {
   path: string
   status: 'active' | 'paused' | 'idle'
   lastTouched: string
+  lastCommit: { subject: string; sha: string; relative: string } | null
+  dirty: boolean
+  dirtyCount: number
+  commitsToday: number
 }
 
 export type LightState = {

@@ -103,7 +103,7 @@ const toneText: Record<Tone, string> = {
 function NowBanner() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
-  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const vault = useQuery({ queryKey: ['vault'], queryFn: fetchVault, refetchInterval: 60_000 })
 
@@ -202,7 +202,7 @@ function NowBanner() {
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
-  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
 
@@ -358,12 +358,30 @@ export default function Dashboard() {
         {projectsList.length > 0 ? (
           <div className="divide-y divide-[var(--color-border)]">
             {projectsList.map((p) => (
-              <div key={p.path} className="flex items-center justify-between py-3 text-sm">
-                <div>
-                  <div className="font-medium">{p.name}</div>
-                  <div className="text-xs text-[var(--color-text-dim)]">{p.path}</div>
+              <div key={p.path} className="flex items-center justify-between gap-3 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{p.name}</span>
+                    {p.dirty && (
+                      <span className="rounded-full bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-warning)]">
+                        ●{p.dirtyCount} uncommitted
+                      </span>
+                    )}
+                    {p.commitsToday > 0 && (
+                      <span className="rounded-full bg-[var(--color-success)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-success)]">
+                        {p.commitsToday} today
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
+                    {p.lastCommit ? (
+                      <span><span className="font-mono text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
+                    ) : (
+                      <span>{p.path}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs ${
                     p.status === 'active' ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' :
                     p.status === 'paused' ? 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]' :
