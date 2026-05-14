@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
-import { fetchLights, setLight, type LightState } from '../lib/api'
+import { fetchLights, setLight, type LightState, type LightUpdate } from '../lib/api'
 
 const PRESETS: { label: string; rgb: [number, number, number] | null; kelvin: number | null }[] = [
   { label: 'Warm', rgb: null, kelvin: 2200 },
@@ -37,6 +37,15 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
   const [pendingPct, setPendingPct] = useState<number | null>(null)
   const displayPct = pendingPct ?? pctFromBrightness(light.brightness)
   const swatchColor = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : light.on ? '#ffd9a0' : '#1a1f2b'
+
+  useEffect(() => {
+    if (pendingPct === null) return
+    if (pctFromBrightness(light.brightness) === pendingPct) setPendingPct(null)
+  }, [light.brightness, pendingPct])
+
+  const commit = (pct: number) => {
+    onUpdate({ state: 'on', brightness: brightnessFromPct(pct) })
+  }
 
   return (
     <div className={`rounded-2xl border p-4 transition ${light.on ? 'border-[var(--color-warning)]/40 bg-[color:rgba(255,184,77,0.04)]' : 'border-[var(--color-border)] bg-[color:rgba(255,255,255,0.015)]'}`}>
@@ -75,14 +84,8 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
               max={100}
               value={displayPct}
               onChange={(e) => setPendingPct(Number(e.target.value))}
-              onMouseUp={(e) => {
-                onUpdate({ state: 'on', brightness: brightnessFromPct(Number((e.target as HTMLInputElement).value)) })
-                setPendingPct(null)
-              }}
-              onTouchEnd={(e) => {
-                onUpdate({ state: 'on', brightness: brightnessFromPct(Number((e.target as HTMLInputElement).value)) })
-                setPendingPct(null)
-              }}
+              onPointerUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
+              onTouchEnd={(e) => commit(Number((e.target as HTMLInputElement).value))}
               className="w-full accent-[var(--color-warning)]"
             />
           </div>
@@ -115,7 +118,29 @@ export default function Lights() {
 
   const mutation = useMutation({
     mutationFn: setLight,
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['lights'] }) },
+    onMutate: async (update: LightUpdate) => {
+      await qc.cancelQueries({ queryKey: ['lights'] })
+      const previous = qc.getQueryData<LightState[]>(['lights'])
+      const targets = new Set(Array.isArray(update.entity_id) ? update.entity_id : [update.entity_id])
+      qc.setQueryData<LightState[]>(['lights'], (old) => {
+        if (!old) return old
+        return old.map((l) => {
+          if (!targets.has(l.entity_id)) return l
+          return {
+            ...l,
+            on: update.state === 'on',
+            brightness: update.state === 'on' && typeof update.brightness === 'number' ? update.brightness : l.brightness,
+            rgb_color: update.state === 'on' && update.rgb_color ? update.rgb_color : l.rgb_color,
+            color_temp_kelvin: update.state === 'on' && typeof update.color_temp_kelvin === 'number' ? update.color_temp_kelvin : l.color_temp_kelvin,
+          }
+        })
+      })
+      return { previous }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['lights'], ctx.previous)
+    },
+    onSettled: () => { void qc.invalidateQueries({ queryKey: ['lights'] }) },
   })
 
   const all = lights.data ?? []
