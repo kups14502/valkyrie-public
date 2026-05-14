@@ -38,3 +38,53 @@ body {
 ::selection {
   background: rgba(72, 227, 206, 0.2);
 }
+
+.brightness-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  padding: 12px 0;
+  margin: -8px 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.brightness-slider:focus { outline: none; }
+
+.brightness-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.brightness-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+}
+
+.brightness-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  background: var(--color-warning);
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  margin-top: -10px;
+  cursor: grab;
+}
+.brightness-slider::-webkit-slider-thumb:active { cursor: grabbing; }
+
+.brightness-slider::-moz-range-thumb {
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  background: var(--color-warning);
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+}
+.brightness-slider::-moz-range-thumb:active { cursor: grabbing; }

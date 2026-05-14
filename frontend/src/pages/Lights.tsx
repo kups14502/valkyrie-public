@@ -137,7 +137,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
               }}
               onPointerUp={(e) => commitFinal(Number((e.target as HTMLInputElement).value))}
               onTouchEnd={(e) => commitFinal(Number((e.target as HTMLInputElement).value))}
-              className="w-full accent-[var(--color-warning)]"
+              className="brightness-slider"
             />
           </div>
           <div className="flex flex-wrap gap-2">
