@@ -84,6 +84,36 @@ export type ProjectStatus = {
   lastTouched: string
 }
 
+export type VaultStatus = {
+  container: {
+    running: boolean
+    healthy: boolean | null
+    status: string | null
+    startedAt: string | null
+  }
+  items: {
+    total: number
+    logins: number
+    notes: number
+    cards: number
+    identities: number
+    sshKeys: number
+    trash: number
+    folders: number
+    attachments: number
+    sends: number
+    users: number
+  } | null
+  backups: {
+    lastAt: string | null
+    lastSize: number | null
+    count: number
+    totalSize: number
+    stale: boolean
+  }
+  updatedAt: string
+}
+
 export const fetchSystem = async () => {
   const r = await api.get<SystemStatus | { error?: string; detail?: string }>('/system')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid system response')
@@ -100,6 +130,12 @@ export const fetchAIUsage = async () => {
   const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')
   return r.data as AIUsage
+}
+
+export const fetchVault = async () => {
+  const r = await api.get<VaultStatus | { error?: string; detail?: string }>('/vault')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid vault response')
+  return r.data as VaultStatus
 }
 
 export const fetchProjects = async () => {

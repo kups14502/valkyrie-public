@@ -7,6 +7,7 @@ import systemRoute from './routes/system.js'
 import sessionsRoute from './routes/sessions.js'
 import aiUsageRoute from './routes/aiUsage.js'
 import projectsRoute from './routes/projects.js'
+import vaultRoute from './routes/vault.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3001
@@ -55,6 +56,7 @@ app.use('/api', systemRoute)
 app.use('/api', sessionsRoute)
 app.use('/api', aiUsageRoute)
 app.use('/api', projectsRoute)
+app.use('/api', vaultRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
