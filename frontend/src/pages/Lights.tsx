@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { fetchLights, setLight, type LightState, type LightUpdate } from '../lib/api'
@@ -33,18 +33,64 @@ function presetSwatchStyle(p: { rgb: [number, number, number] | null; kelvin: nu
   return '#888'
 }
 
-function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: Partial<LightState> & { state: 'on' | 'off' }) => void }) {
+type Update = Omit<LightUpdate, 'entity_id'>
+
+const DRAG_THROTTLE_MS = 150
+
+const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (entity_id: string, update: Update) => void }) {
   const [pendingPct, setPendingPct] = useState<number | null>(null)
-  const displayPct = pendingPct ?? pctFromBrightness(light.brightness)
+  const lastExternalPct = pctFromBrightness(light.brightness)
+  const displayPct = pendingPct ?? lastExternalPct
   const swatchColor = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : light.on ? '#ffd9a0' : '#1a1f2b'
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const lastSentRef = useRef(0)
+  const trailingRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (pendingPct === null) return
-    if (pctFromBrightness(light.brightness) === pendingPct) setPendingPct(null)
-  }, [light.brightness, pendingPct])
+    if (lastExternalPct === pendingPct) setPendingPct(null)
+  }, [lastExternalPct, pendingPct])
 
-  const commit = (pct: number) => {
-    onUpdate({ state: 'on', brightness: brightnessFromPct(pct) })
+  useEffect(() => {
+    if (pendingPct === null && inputRef.current && Number(inputRef.current.value) !== lastExternalPct) {
+      inputRef.current.value = String(lastExternalPct)
+    }
+  }, [lastExternalPct, pendingPct])
+
+  useEffect(() => () => {
+    if (trailingRef.current !== null) {
+      clearTimeout(trailingRef.current)
+      trailingRef.current = null
+    }
+  }, [])
+
+  const sendBrightness = (pct: number) => {
+    const now = Date.now()
+    const elapsed = now - lastSentRef.current
+    if (trailingRef.current !== null) {
+      clearTimeout(trailingRef.current)
+      trailingRef.current = null
+    }
+    if (elapsed >= DRAG_THROTTLE_MS) {
+      lastSentRef.current = now
+      onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
+    } else {
+      trailingRef.current = window.setTimeout(() => {
+        lastSentRef.current = Date.now()
+        trailingRef.current = null
+        onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
+      }, DRAG_THROTTLE_MS - elapsed)
+    }
+  }
+
+  const commitFinal = (pct: number) => {
+    if (trailingRef.current !== null) {
+      clearTimeout(trailingRef.current)
+      trailingRef.current = null
+    }
+    lastSentRef.current = Date.now()
+    onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
   }
 
   return (
@@ -60,7 +106,7 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
         <button
           type="button"
           disabled={light.unavailable}
-          onClick={() => onUpdate({ state: light.on ? 'off' : 'on' })}
+          onClick={() => onUpdate(light.entity_id, { state: light.on ? 'off' : 'on' })}
           className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
             light.on
               ? 'bg-[var(--color-warning)]/20 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/30'
@@ -79,13 +125,18 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
               <span className="font-semibold text-[var(--color-text)]">{displayPct}%</span>
             </div>
             <input
+              ref={inputRef}
               type="range"
               min={1}
               max={100}
-              value={displayPct}
-              onChange={(e) => setPendingPct(Number(e.target.value))}
-              onPointerUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
-              onTouchEnd={(e) => commit(Number((e.target as HTMLInputElement).value))}
+              defaultValue={lastExternalPct}
+              onInput={(e) => {
+                const pct = Number((e.target as HTMLInputElement).value)
+                setPendingPct(pct)
+                sendBrightness(pct)
+              }}
+              onPointerUp={(e) => commitFinal(Number((e.target as HTMLInputElement).value))}
+              onTouchEnd={(e) => commitFinal(Number((e.target as HTMLInputElement).value))}
               className="w-full accent-[var(--color-warning)]"
             />
           </div>
@@ -94,7 +145,7 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
               <button
                 key={p.label}
                 type="button"
-                onClick={() => onUpdate({
+                onClick={() => onUpdate(light.entity_id, {
                   state: 'on',
                   ...(p.rgb ? { rgb_color: p.rgb } : {}),
                   ...(p.kelvin ? { color_temp_kelvin: p.kelvin } : {}),
@@ -110,7 +161,7 @@ function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (update: 
       )}
     </div>
   )
-}
+})
 
 export default function Lights() {
   const qc = useQueryClient()
@@ -140,8 +191,13 @@ export default function Lights() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) qc.setQueryData(['lights'], ctx.previous)
     },
-    onSettled: () => { void qc.invalidateQueries({ queryKey: ['lights'] }) },
   })
+
+  const { mutate } = mutation
+
+  const updateOne = useCallback((entity_id: string, update: Update) => {
+    mutate({ entity_id, ...update })
+  }, [mutate])
 
   const all = lights.data ?? []
   const anyOn = all.some((l) => l.on)
@@ -149,7 +205,7 @@ export default function Lights() {
   const bulk = (state: 'on' | 'off') => {
     const targets = all.filter((l) => !l.unavailable).map((l) => l.entity_id)
     if (targets.length === 0) return
-    mutation.mutate({ entity_id: targets, state })
+    mutate({ entity_id: targets, state })
   }
 
   return (
@@ -186,19 +242,7 @@ export default function Lights() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {all.map((light) => (
-            <LightCard
-              key={light.entity_id}
-              light={light}
-              onUpdate={(update) => {
-                const { state, brightness, rgb_color, color_temp_kelvin } = update as {
-                  state: 'on' | 'off'
-                  brightness?: number
-                  rgb_color?: [number, number, number]
-                  color_temp_kelvin?: number
-                }
-                mutation.mutate({ entity_id: light.entity_id, state, brightness, rgb_color, color_temp_kelvin })
-              }}
-            />
+            <LightCard key={light.entity_id} light={light} onUpdate={updateOne} />
           ))}
         </div>
       )}
