@@ -9,6 +9,7 @@ import aiUsageRoute from './routes/aiUsage.js'
 import projectsRoute from './routes/projects.js'
 import vaultRoute from './routes/vault.js'
 import lightsRoute from './routes/lights.js'
+import tradingRoute from './routes/trading.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3001
@@ -59,6 +60,7 @@ app.use('/api', aiUsageRoute)
 app.use('/api', projectsRoute)
 app.use('/api', vaultRoute)
 app.use('/api', lightsRoute)
+app.use('/api', tradingRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)

@@ -92,6 +92,56 @@ export type ProjectStatus = {
   commitsToday: number
 }
 
+export type TradingPosition = {
+  symbol: string
+  quantity: number
+  avgBuyPrice: number
+  currentPrice: number
+  pnlPct: number
+  locked: boolean
+}
+
+export type TradingSignal = {
+  symbol: string
+  direction: string
+  conviction: string
+  reasoning: string
+  suggestedInstrument: string | null
+  timeHorizon: string | null
+}
+
+export type PlannedTrade = {
+  action: string
+  assetType: string
+  symbol: string
+  quantity: number | null
+  dollarAmount: number | null
+  optionType: string | null
+  strikePrice: number | null
+  expirationDate: string | null
+  notes: string | null
+}
+
+export type TradingStatus = {
+  lastUpdated: string | null
+  marketRegime: string | null
+  marketSummary: string | null
+  signals: TradingSignal[]
+  portfolio: {
+    equity: number
+    buyingPower: number
+    stockPositions: TradingPosition[]
+    cryptoPositions: TradingPosition[]
+    optionsPositions: TradingPosition[]
+  } | null
+  latestRun: {
+    timestamp: string
+    sonnetSummary: string | null
+    plan: { reasoning: string; riskAssessment: string; trades: PlannedTrade[] } | null
+  } | null
+  runsToday: number
+}
+
 export type LightState = {
   entity_id: string
   name: string
@@ -166,6 +216,12 @@ export const fetchAIUsage = async () => {
   const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')
   return r.data as AIUsage
+}
+
+export const fetchTrading = async () => {
+  const r = await api.get<TradingStatus | { error?: string; detail?: string }>('/trading')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid trading response')
+  return r.data as TradingStatus
 }
 
 export const fetchLights = async () => {
