@@ -1,15 +1,25 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Gamepad2, KeyRound, TrendingUp } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
-import Lights from './pages/Lights'
-import Game from './pages/Game'
-import Vault from './pages/Vault'
-import TradeBot from './pages/TradeBot'
+
+const Lights = lazy(() => import('./pages/Lights'))
+const Game = lazy(() => import('./pages/Game'))
+const Vault = lazy(() => import('./pages/Vault'))
+const TradeBot = lazy(() => import('./pages/TradeBot'))
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchInterval: 5000, staleTime: 2000 } },
+  defaultOptions: { queries: { refetchInterval: 5000, staleTime: 10_000 } },
 })
+
+function PageFallback() {
+  return (
+    <div className="flex h-40 items-center justify-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">
+      loading…
+    </div>
+  )
+}
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -53,14 +63,16 @@ function Shell() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/lights" element={<Lights />} />
-          <Route path="/game" element={<Game />} />
-          <Route path="/vault" element={<Vault />} />
-          <Route path="/trade" element={<TradeBot />} />
-        </Routes>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/lights" element={<Lights />} />
+            <Route path="/game" element={<Game />} />
+            <Route path="/vault" element={<Vault />} />
+            <Route path="/trade" element={<TradeBot />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )
