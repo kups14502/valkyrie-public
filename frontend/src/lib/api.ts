@@ -110,6 +110,14 @@ export type TradingSignal = {
   timeHorizon: string | null
 }
 
+export type ExecutedTrade = {
+  symbol: string
+  action: string
+  assetType: string
+  status: string
+  timestamp: string
+}
+
 export type PlannedTrade = {
   action: string
   assetType: string
@@ -140,6 +148,7 @@ export type TradingStatus = {
     plan: { reasoning: string; riskAssessment: string; trades: PlannedTrade[] } | null
   } | null
   runsToday: number
+  executedToday: ExecutedTrade[]
 }
 
 export type LightState = {

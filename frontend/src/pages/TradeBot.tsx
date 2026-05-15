@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
-import { fetchTrading, type TradingPosition, type TradingSignal, type PlannedTrade } from '../lib/api'
+import { fetchTrading, type TradingPosition, type TradingSignal, type PlannedTrade, type ExecutedTrade } from '../lib/api'
 
 const fmtRelative = (iso: string | null): string => {
   if (!iso) return '—'
@@ -87,7 +87,14 @@ function SignalRow({ signal }: { signal: TradingSignal }) {
   )
 }
 
-function PlannedTradeRow({ trade }: { trade: PlannedTrade }) {
+function statusStyle(status: string): string {
+  const v = status.toLowerCase()
+  if (v.includes('filled') || v.includes('confirmed')) return 'bg-[var(--color-success)]/20 text-[var(--color-success)]'
+  if (v.includes('reject') || v.includes('fail') || v.includes('error')) return 'bg-[var(--color-danger)]/20 text-[var(--color-danger)]'
+  return 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]'
+}
+
+function PlannedTradeRow({ trade, execution }: { trade: PlannedTrade; execution: ExecutedTrade | null }) {
   const sizeLabel = trade.dollarAmount != null
     ? fmtUSD(trade.dollarAmount)
     : trade.quantity != null
@@ -103,10 +110,19 @@ function PlannedTradeRow({ trade }: { trade: PlannedTrade }) {
         <span className="text-[var(--color-text-dim)]">· {sizeLabel}</span>
         <span className="text-[11px] text-[var(--color-text-faint)]">· {trade.assetType}</span>
         {trade.optionType && <span className="text-[11px] text-[var(--color-text-faint)]">· {trade.optionType} {trade.strikePrice ? fmtUSD(trade.strikePrice) : ''} {trade.expirationDate ?? ''}</span>}
+        {execution && (
+          <span className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-[0.15em] ${statusStyle(execution.status)}`}>
+            {execution.status}
+          </span>
+        )}
       </div>
       {trade.notes && <div className="text-xs leading-relaxed text-[var(--color-text-dim)]">{trade.notes}</div>}
     </div>
   )
+}
+
+function findExecution(trade: PlannedTrade, executed: ExecutedTrade[]): ExecutedTrade | null {
+  return executed.find((e) => e.symbol === trade.symbol && e.action === trade.action.toLowerCase()) ?? null
 }
 
 export default function TradeBot() {
@@ -157,6 +173,11 @@ export default function TradeBot() {
                   sub={`${fmtUSD(totalValue - totalCost)} on ${fmtUSD(totalCost)}`}
                 />
               </div>
+              {data.latestRun && (
+                <div className="mt-4 text-[11px] text-[var(--color-text-faint)]">
+                  snapshot from {fmtRelative(data.latestRun.timestamp)} (start of run) — trades placed after may not be reflected
+                </div>
+              )}
             </Card>
           )}
 
@@ -191,8 +212,10 @@ export default function TradeBot() {
               <div className="space-y-4">
                 {data.latestRun.plan.trades.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Planned trades</div>
-                    {data.latestRun.plan.trades.map((t, i) => <PlannedTradeRow key={i} trade={t} />)}
+                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Today's trades</div>
+                    {data.latestRun.plan.trades.map((t, i) => (
+                      <PlannedTradeRow key={i} trade={t} execution={findExecution(t, data.executedToday)} />
+                    ))}
                   </div>
                 )}
                 {data.latestRun.plan.reasoning && (

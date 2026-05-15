@@ -7,6 +7,7 @@ const router = Router()
 const TRADING_DIR = '/home/brendon/trading'
 const ANALYSIS_FILE = path.join(TRADING_DIR, 'analysis.json')
 const LOGS_DIR = path.join(TRADING_DIR, 'logs')
+const TRADE_LOG = path.join(TRADING_DIR, 'trade.log')
 const CACHE_TTL_MS = 30_000
 
 type Position = {
@@ -25,6 +26,14 @@ type Signal = {
   reasoning: string
   suggestedInstrument: string | null
   timeHorizon: string | null
+}
+
+type ExecutedTrade = {
+  symbol: string
+  action: string
+  assetType: string
+  status: string
+  timestamp: string
 }
 
 type PlannedTrade = {
@@ -57,6 +66,7 @@ type TradingStatus = {
     plan: { reasoning: string; riskAssessment: string; trades: PlannedTrade[] } | null
   } | null
   runsToday: number
+  executedToday: ExecutedTrade[]
 }
 
 let cache: { at: number; data: TradingStatus } | null = null
@@ -150,9 +160,56 @@ async function readLatestLog(): Promise<{ portfolio: TradingStatus['portfolio'];
   }
 }
 
+async function readExecutedToday(): Promise<ExecutedTrade[]> {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const stat = await fs.stat(TRADE_LOG)
+    const start = Math.max(0, stat.size - 65_536)
+    const fh = await fs.open(TRADE_LOG, 'r')
+    try {
+      const buf = Buffer.alloc(stat.size - start)
+      await fh.read(buf, 0, buf.length, start)
+      const lines = buf.toString('utf8').split('\n')
+      const results: ExecutedTrade[] = []
+      let currentTs: string | null = null
+      let expecting = 0
+      for (const line of lines) {
+        const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d+)\]/)
+        if (tsMatch) currentTs = `${tsMatch[1]}T${tsMatch[2]}`
+        if (/Executing \d+ trade/.test(line)) {
+          const m = line.match(/Executing (\d+) trade/)
+          expecting = m ? Number(m[1]) : 0
+          continue
+        }
+        if (expecting > 0) {
+          const tradeMatch = line.match(/^\s+\[([\w.]+)\]\s+(\w+)\s+(\w+)(?:\s+[—-]\s+(.+))?$/)
+          if (tradeMatch) {
+            const [, symbol, action, assetType, status] = tradeMatch
+            if (currentTs && currentTs.startsWith(today)) {
+              results.push({
+                symbol,
+                action: action.toLowerCase(),
+                assetType: assetType.toLowerCase(),
+                status: (status ?? 'submitted').trim(),
+                timestamp: currentTs,
+              })
+            }
+            expecting--
+          }
+        }
+      }
+      return results
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return []
+  }
+}
+
 router.get('/trading', async (_req, res) => {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return res.json(cache.data)
-  const [analysis, log] = await Promise.all([readAnalysis(), readLatestLog()])
+  const [analysis, log, executedToday] = await Promise.all([readAnalysis(), readLatestLog(), readExecutedToday()])
   const data: TradingStatus = {
     lastUpdated: analysis.lastUpdated,
     marketRegime: analysis.regime,
@@ -161,6 +218,7 @@ router.get('/trading', async (_req, res) => {
     portfolio: log.portfolio,
     latestRun: log.latestRun,
     runsToday: log.runsToday,
+    executedToday,
   }
   cache = { at: Date.now(), data }
   res.json(data)
