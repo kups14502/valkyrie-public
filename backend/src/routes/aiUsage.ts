@@ -39,7 +39,8 @@ type CodexRateLimit = {
 const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
-const CACHE_TTL_MS = 60_000
+const CACHE_TTL_MS = 300_000
+const CCUSAGE_BIN = path.join('/home/brendon/master-control/backend', 'node_modules', '.bin', 'ccusage')
 let cache: { at: number; data: any } | null = null
 
 const todayStartMs = () => {
@@ -226,7 +227,7 @@ async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; cu
   try {
     const since = new Date()
     since.setDate(since.getDate() - 35)
-    const { stdout } = await exec('npx', ['-y', 'ccusage@latest', 'blocks', '--json', '--since', yyyymmdd(since)], {
+    const { stdout } = await exec(CCUSAGE_BIN, ['blocks', '--json', '--since', yyyymmdd(since)], {
       timeout: 30_000,
       maxBuffer: 32 * 1024 * 1024,
     })
@@ -260,7 +261,7 @@ async function readClaudeUsage(): Promise<ProviderUsage & { byModel: Record<stri
   since.setDate(since.getDate() - 30)
   const result = { ...emptyProvider(), byModel: {} as Record<string, Bucket> }
   try {
-    const { stdout } = await exec('npx', ['-y', 'ccusage@latest', 'daily', '--json', '--offline', '--since', yyyymmdd(since)], {
+    const { stdout } = await exec(CCUSAGE_BIN, ['daily', '--json', '--offline', '--since', yyyymmdd(since)], {
       timeout: 20_000,
       maxBuffer: 16 * 1024 * 1024,
     })

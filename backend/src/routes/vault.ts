@@ -10,7 +10,7 @@ const router = Router()
 const DB_PATH = '/home/brendon/vaultwarden/vw-data/db.sqlite3'
 const BACKUP_DIR = '/home/brendon/vaultwarden-backups'
 const BACKUP_STALE_HOURS = 36
-const CACHE_TTL_MS = 30_000
+const CACHE_TTL_MS = 120_000
 
 type ContainerInfo = {
   running: boolean

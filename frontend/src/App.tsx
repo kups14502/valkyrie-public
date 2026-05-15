@@ -10,7 +10,13 @@ const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchInterval: 5000, staleTime: 10_000 } },
+  defaultOptions: {
+    queries: {
+      refetchInterval: 15_000,
+      staleTime: 10_000,
+      refetchOnWindowFocus: false,
+    },
+  },
 })
 
 function PageFallback() {

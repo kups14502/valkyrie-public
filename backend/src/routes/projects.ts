@@ -16,7 +16,7 @@ const TRACKED = [
 ]
 
 const HOUR = 1000 * 60 * 60
-const CACHE_TTL_MS = 30_000
+const CACHE_TTL_MS = 60_000
 
 let cache: { at: number; data: ProjectInfo[] } | null = null
 
