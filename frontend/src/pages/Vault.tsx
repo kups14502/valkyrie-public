@@ -37,9 +37,8 @@ const fmtUptime = (iso: string | null) => {
 }
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
-  const bg = ok ? 'bg-[var(--color-success)]/20' : 'bg-[var(--color-danger)]/20'
   const text = ok ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'
-  return <span className={`rounded-full px-2.5 py-0.5 text-xs ${bg} ${text}`}>{label}</span>
+  return <span className={`text-xs ${text}`}>[{label}]</span>
 }
 
 function ItemRow({ label, count }: { label: string; count: number }) {
@@ -65,8 +64,8 @@ export default function Vault() {
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">Secure Layer</div>
           <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Vault</h1>
         </div>
-        <div className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)]">
-          tailnet only · 100.96.237.89:8443
+        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+          [tailnet:100.96.237.89:8443]
         </div>
       </div>
 
@@ -142,12 +141,12 @@ export default function Vault() {
                   <Stat label="Total on disk" value={fmtBytes(data.backups.totalSize)} sub="all backups" />
                 </div>
                 {data.backups.stale && data.backups.count > 0 && (
-                  <div className="rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-warning)]">
+                  <div className="border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-warning)]">
                     Last backup is more than 36 hours old — daily cron may have skipped.
                   </div>
                 )}
                 {data.backups.count === 0 && (
-                  <div className="rounded-xl border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
+                  <div className="border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
                     No backup files found in /home/brendon/vaultwarden-backups.
                   </div>
                 )}

@@ -39,29 +39,35 @@ const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
 
 function Shell() {
   return (
-    <div className="min-h-full bg-[radial-gradient(circle_at_top,#151522_0%,#09090d_42%,#050507_100%)] text-[var(--color-text)]">
-      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[color:rgba(8,9,14,0.88)] backdrop-blur">
+    <div className="min-h-full bg-[var(--color-bg)] text-[var(--color-text)]">
+      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-4">
           <div className="shrink-0">
-            <div className="text-[10px] uppercase tracking-[0.45em] text-[var(--color-text-faint)]">Master Control</div>
-            <div className="mt-1 text-lg font-semibold tracking-[0.18em] text-[var(--color-accent)]">BRNDN//SYS</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">build {BUILD_ID}</div>
+            <div className="text-[10px] uppercase tracking-[0.3em] text-[var(--color-text-faint)]">// master control</div>
+            <div className="mt-1 text-lg font-bold tracking-[0.14em] text-[var(--color-accent)]">BRNDN//SYS</div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">build:{BUILD_ID}</div>
           </div>
-          <nav className="flex flex-1 items-center justify-start gap-2 overflow-x-auto">
+          <nav className="flex flex-1 items-center justify-start gap-1 overflow-x-auto">
             {navItems.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
                 className={({ isActive }) =>
-                  `group flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
+                  `group flex items-center gap-2 border px-3 py-1.5 text-sm transition ${
                     isActive
-                      ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.12)] text-[var(--color-text)] shadow-[0_0_18px_rgba(45,212,191,0.18)]'
-                      : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:bg-[color:rgba(255,255,255,0.03)] hover:text-[var(--color-text)]'
+                      ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.08)] text-[var(--color-accent)]'
+                      : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'
                   }`
                 }
               >
-                <Icon size={14} className="text-[var(--color-accent)]/90" />
-                <span className="whitespace-nowrap">{label}</span>
+                {({ isActive }) => (
+                  <>
+                    <Icon size={13} className="text-[var(--color-accent)]/90" />
+                    <span className="whitespace-nowrap lowercase">
+                      {isActive ? `[${label}]` : label}
+                    </span>
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>

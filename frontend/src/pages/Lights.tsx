@@ -94,7 +94,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
   }
 
   return (
-    <div className={`rounded-2xl border p-4 transition ${light.on ? 'border-[var(--color-warning)]/40 bg-[color:rgba(255,184,77,0.04)]' : 'border-[var(--color-border)] bg-[color:rgba(255,255,255,0.015)]'}`}>
+    <div className={`border p-4 transition ${light.on ? 'border-[var(--color-warning)]/40 bg-[color:rgba(255,184,77,0.04)]' : 'border-[var(--color-border)] bg-[color:rgba(255,255,255,0.015)]'}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="inline-block h-6 w-6 rounded-full border border-[var(--color-border)] shadow-inner" style={{ backgroundColor: swatchColor }} aria-hidden />
@@ -107,13 +107,13 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
           type="button"
           disabled={light.unavailable}
           onClick={() => onUpdate(light.entity_id, { state: light.on ? 'off' : 'on' })}
-          className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`border px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
             light.on
-              ? 'bg-[var(--color-warning)]/20 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/30'
-              : 'bg-[color:rgba(255,255,255,0.04)] text-[var(--color-text-dim)] hover:bg-[color:rgba(255,255,255,0.07)]'
+              ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/10 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20'
+              : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'
           }`}
         >
-          {light.on ? 'On' : 'Off'}
+          [{light.on ? 'on' : 'off'}]
         </button>
       </div>
 
@@ -150,7 +150,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
                   ...(p.rgb ? { rgb_color: p.rgb } : {}),
                   ...(p.kelvin ? { color_temp_kelvin: p.kelvin } : {}),
                 })}
-                className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-2.5 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                className="flex items-center gap-1.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-2.5 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
               >
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
                 {p.label}
@@ -220,7 +220,7 @@ export default function Lights() {
             type="button"
             disabled={!all.length || mutation.isPending}
             onClick={() => bulk('on')}
-            className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
+            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
           >
             All on
           </button>
@@ -228,7 +228,7 @@ export default function Lights() {
             type="button"
             disabled={!anyOn || mutation.isPending}
             onClick={() => bulk('off')}
-            className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
+            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
           >
             All off
           </button>
@@ -248,7 +248,7 @@ export default function Lights() {
       )}
 
       {mutation.error && (
-        <div className="rounded-xl border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
+        <div className="border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
           {(mutation.error as Error).message}
         </div>
       )}

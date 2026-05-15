@@ -19,19 +19,19 @@ const fmtUSD = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionD
 const pnlColor = (pct: number): string =>
   pct > 0 ? 'text-[var(--color-success)]' : pct < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'
 
-const regimeStyle = (r: string | null): string => {
+const regimeColor = (r: string | null): string => {
   const v = (r ?? '').toLowerCase()
-  if (v.includes('bull')) return 'bg-[var(--color-success)]/20 text-[var(--color-success)]'
-  if (v.includes('bear')) return 'bg-[var(--color-danger)]/20 text-[var(--color-danger)]'
-  if (v.includes('neutral') || v.includes('chop')) return 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]'
-  return 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]'
+  if (v.includes('bull')) return 'text-[var(--color-success)]'
+  if (v.includes('bear')) return 'text-[var(--color-danger)]'
+  if (v.includes('neutral') || v.includes('chop')) return 'text-[var(--color-warning)]'
+  return 'text-[var(--color-text-dim)]'
 }
 
-const convictionStyle = (c: string): string => {
+const convictionColor = (c: string): string => {
   const v = c.toLowerCase()
-  if (v === 'high') return 'bg-[var(--color-success)]/20 text-[var(--color-success)]'
-  if (v === 'medium') return 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]'
-  return 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]'
+  if (v === 'high') return 'text-[var(--color-success)]'
+  if (v === 'medium') return 'text-[var(--color-warning)]'
+  return 'text-[var(--color-text-dim)]'
 }
 
 const directionStyle = (d: string): string => {
@@ -49,7 +49,7 @@ function PositionRow({ pos }: { pos: TradingPosition }) {
         <div className="flex items-center gap-2">
           <span className="font-medium text-[var(--color-text)]">{pos.symbol}</span>
           {pos.locked && (
-            <span className="rounded-full bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--color-warning)]">locked</span>
+            <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-warning)]">[locked]</span>
           )}
         </div>
         <div className="mt-0.5 text-[11px] text-[var(--color-text-faint)]">
@@ -72,8 +72,8 @@ function SignalRow({ signal }: { signal: TradingSignal }) {
       <div className="flex items-center gap-2">
         <span className="font-mono text-sm font-semibold text-[var(--color-text)]">{signal.symbol}</span>
         <span className={`text-[11px] uppercase tracking-[0.18em] ${directionStyle(signal.direction)}`}>{signal.direction}</span>
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-[0.15em] ${convictionStyle(signal.conviction)}`}>
-          {signal.conviction}
+        <span className={`text-[10px] uppercase tracking-[0.12em] ${convictionColor(signal.conviction)}`}>
+          [{signal.conviction}]
         </span>
         {signal.timeHorizon && (
           <span className="text-[11px] text-[var(--color-text-faint)]">· {signal.timeHorizon}</span>
@@ -87,11 +87,11 @@ function SignalRow({ signal }: { signal: TradingSignal }) {
   )
 }
 
-function statusStyle(status: string): string {
+function statusColor(status: string): string {
   const v = status.toLowerCase()
-  if (v.includes('filled') || v.includes('confirmed')) return 'bg-[var(--color-success)]/20 text-[var(--color-success)]'
-  if (v.includes('reject') || v.includes('fail') || v.includes('error')) return 'bg-[var(--color-danger)]/20 text-[var(--color-danger)]'
-  return 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]'
+  if (v.includes('filled') || v.includes('confirmed')) return 'text-[var(--color-success)]'
+  if (v.includes('reject') || v.includes('fail') || v.includes('error')) return 'text-[var(--color-danger)]'
+  return 'text-[var(--color-warning)]'
 }
 
 function PlannedTradeRow({ trade, execution }: { trade: PlannedTrade; execution: ExecutedTrade | null }) {
@@ -101,7 +101,7 @@ function PlannedTradeRow({ trade, execution }: { trade: PlannedTrade; execution:
     ? `${trade.quantity} ${trade.assetType}`
     : '—'
   return (
-    <div className="space-y-1 rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-sm">
+    <div className="space-y-1 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-sm">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className={`text-[11px] uppercase tracking-[0.18em] ${trade.action === 'buy' ? 'text-[var(--color-success)]' : trade.action === 'sell' ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
           {trade.action}
@@ -111,8 +111,8 @@ function PlannedTradeRow({ trade, execution }: { trade: PlannedTrade; execution:
         <span className="text-[11px] text-[var(--color-text-faint)]">· {trade.assetType}</span>
         {trade.optionType && <span className="text-[11px] text-[var(--color-text-faint)]">· {trade.optionType} {trade.strikePrice ? fmtUSD(trade.strikePrice) : ''} {trade.expirationDate ?? ''}</span>}
         {execution && (
-          <span className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-[0.15em] ${statusStyle(execution.status)}`}>
-            {execution.status}
+          <span className={`text-[10px] uppercase tracking-[0.12em] ${statusColor(execution.status)}`}>
+            [{execution.status}]
           </span>
         )}
       </div>
@@ -145,12 +145,12 @@ export default function TradeBot() {
         </div>
         <div className="flex items-center gap-2">
           {data?.marketRegime && (
-            <span className={`rounded-full px-2.5 py-0.5 text-xs uppercase tracking-[0.18em] ${regimeStyle(data.marketRegime)}`}>
-              {data.marketRegime}
+            <span className={`text-xs uppercase tracking-[0.18em] ${regimeColor(data.marketRegime)}`}>
+              [{data.marketRegime}]
             </span>
           )}
-          <span className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)]">
-            updated {fmtRelative(data?.lastUpdated ?? null)}
+          <span className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            [updated {fmtRelative(data?.lastUpdated ?? null)}]
           </span>
         </div>
       </div>

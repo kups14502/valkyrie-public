@@ -172,9 +172,9 @@ function NowBanner() {
   const loading = sys.isLoading && sessions.isLoading && aiUsage.isLoading && vault.isLoading
 
   return (
-    <section className="rounded-2xl border border-[var(--color-border)] bg-[linear-gradient(180deg,rgba(14,19,29,0.96),rgba(9,12,18,0.96))] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+    <section className="border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.32em] text-[var(--color-text-faint)]">Now</span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
         <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-2">
           {loading ? (
             <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
@@ -183,15 +183,15 @@ function NowBanner() {
           ) : (
             segments.map((s) => (
               <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${toneDot[s.tone]}`} aria-hidden />
-                {s.label}
+                <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
+                [{s.label}]
               </span>
             ))
           )}
         </div>
         {!loading && (
-          <span className={`text-[11px] font-medium uppercase tracking-[0.22em] ${toneText[verdictTone]}`}>
-            {verdict}
+          <span className={`text-[11px] font-bold uppercase tracking-[0.18em] ${toneText[verdictTone]}`}>
+            &gt; {verdict}
           </span>
         )}
       </div>
@@ -226,8 +226,8 @@ export default function Dashboard() {
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
           <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
         </div>
-        <div className="rounded-full border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[var(--color-text-dim)]">
-          live telemetry
+        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+          [live telemetry]
         </div>
       </div>
 
@@ -339,24 +339,24 @@ export default function Dashboard() {
           {sessionsList.length > 0 ? (
             <div className="space-y-2">
               {sessionsList.map((s) => (
-                <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
+                <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-medium">{s.model}</span>
+                      <span className="font-semibold">{s.model}</span>
                       {s.project && (
                         <span className="text-[var(--color-text-dim)]">· {s.project}</span>
                       )}
                       {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
-                        <span className="rounded-full bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-accent)]">
-                          {s.gitBranch}
+                        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
+                          [{s.gitBranch}]
                         </span>
                       )}
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                      PID {s.pid} · {fmtBytes(s.memory)}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                      pid:{s.pid} · {fmtBytes(s.memory)}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
                     </div>
                   </div>
-                  <div className="shrink-0 text-xs text-[var(--color-text-dim)]">{s.cpu.toFixed(1)}% CPU</div>
+                  <div className="shrink-0 text-xs text-[var(--color-text-dim)]">{s.cpu.toFixed(1)}% cpu</div>
                 </div>
               ))}
             </div>
@@ -372,33 +372,33 @@ export default function Dashboard() {
             {projectsList.map((p) => (
               <div key={p.path} className="flex items-center justify-between gap-3 py-3 text-sm">
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{p.name}</span>
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <span className="font-semibold">{p.name}</span>
                     {p.dirty && (
-                      <span className="rounded-full bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-warning)]">
-                        ●{p.dirtyCount} uncommitted
+                      <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-warning)]">
+                        [●{p.dirtyCount} uncommitted]
                       </span>
                     )}
                     {p.commitsToday > 0 && (
-                      <span className="rounded-full bg-[var(--color-success)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-success)]">
-                        {p.commitsToday} today
+                      <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-success)]">
+                        [{p.commitsToday} today]
                       </span>
                     )}
                   </div>
                   <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
                     {p.lastCommit ? (
-                      <span><span className="font-mono text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
+                      <span><span className="text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
                     ) : (
                       <span>{p.path}</span>
                     )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${
-                    p.status === 'active' ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' :
-                    p.status === 'paused' ? 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]' :
-                    'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]'
-                  }`}>{p.status}</span>
+                  <span className={`text-xs ${
+                    p.status === 'active' ? 'text-[var(--color-success)]' :
+                    p.status === 'paused' ? 'text-[var(--color-warning)]' :
+                    'text-[var(--color-text-dim)]'
+                  }`}>[{p.status}]</span>
                   <span className="text-xs text-[var(--color-text-dim)]">{p.lastTouched}</span>
                 </div>
               </div>
