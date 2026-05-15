@@ -40,6 +40,10 @@ export type SessionInfo = {
   startedAt: string
   cpu: number
   memory: number
+  project: string | null
+  cwd: string | null
+  gitBranch: string | null
+  lastActivity: number | null
 }
 
 export type UsageBucket = { tokens: number; costUSD: number; messages: number }

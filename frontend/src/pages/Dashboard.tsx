@@ -339,12 +339,24 @@ export default function Dashboard() {
           {sessionsList.length > 0 ? (
             <div className="space-y-2">
               {sessionsList.map((s) => (
-                <div key={s.id} className="flex items-center justify-between rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
-                  <div>
-                    <div className="font-medium">{s.model}</div>
-                    <div className="text-xs text-[var(--color-text-dim)]">PID {s.pid} · {fmtBytes(s.memory)}</div>
+                <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-medium">{s.model}</span>
+                      {s.project && (
+                        <span className="text-[var(--color-text-dim)]">· {s.project}</span>
+                      )}
+                      {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
+                        <span className="rounded-full bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--color-accent)]">
+                          {s.gitBranch}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+                      PID {s.pid} · {fmtBytes(s.memory)}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                    </div>
                   </div>
-                  <div className="text-xs text-[var(--color-text-dim)]">{s.cpu.toFixed(1)}% CPU</div>
+                  <div className="shrink-0 text-xs text-[var(--color-text-dim)]">{s.cpu.toFixed(1)}% CPU</div>
                 </div>
               ))}
             </div>
