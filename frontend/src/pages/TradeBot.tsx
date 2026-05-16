@@ -45,7 +45,7 @@ const directionStyle = (d: string): string => {
 function PositionRow({ pos }: { pos: TradingPosition }) {
   const value = pos.quantity * pos.currentPrice
   return (
-    <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
+    <div className={`flex items-center justify-between gap-3 py-2.5 text-sm ${pos.locked ? 'opacity-60' : ''}`}>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-[var(--color-text)]">{pos.symbol}</span>
@@ -133,9 +133,14 @@ export default function TradeBot() {
   const allPositions = data?.portfolio
     ? [...data.portfolio.stockPositions, ...data.portfolio.cryptoPositions, ...data.portfolio.optionsPositions]
     : []
-  const totalValue = allPositions.reduce((acc, p) => acc + p.quantity * p.currentPrice, 0)
-  const totalCost = allPositions.reduce((acc, p) => acc + p.quantity * p.avgBuyPrice, 0)
+  const tradeable = allPositions.filter((p) => !p.locked)
+  const lockedPositions = allPositions.filter((p) => p.locked)
+  const totalValue = tradeable.reduce((acc, p) => acc + p.quantity * p.currentPrice, 0)
+  const totalCost = tradeable.reduce((acc, p) => acc + p.quantity * p.avgBuyPrice, 0)
   const totalPnlPct = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0
+  const tradeableStocks = data?.portfolio?.stockPositions.filter((p) => !p.locked).length ?? 0
+  const tradeableCrypto = data?.portfolio?.cryptoPositions.filter((p) => !p.locked).length ?? 0
+  const tradeableOptions = data?.portfolio?.optionsPositions.filter((p) => !p.locked).length ?? 0
 
   return (
     <div className="space-y-8">
@@ -169,8 +174,8 @@ export default function TradeBot() {
                   label="Equity"
                   value={fmtUSD(data.portfolio.equity)}
                   sub={data.equityHistory.length > 1
-                    ? `${data.equityHistory.length} day${data.equityHistory.length === 1 ? '' : 's'} tracked`
-                    : 'total account'}
+                    ? `${data.equityHistory.length} day${data.equityHistory.length === 1 ? '' : 's'} · excl locked`
+                    : 'tradeable account'}
                   chart={data.equityHistory.length > 1
                     ? <Sparkline
                         values={data.equityHistory.map((p) => p.equity)}
@@ -179,7 +184,11 @@ export default function TradeBot() {
                     : undefined}
                 />
                 <Stat label="Buying power" value={fmtUSD(data.portfolio.buyingPower)} sub="deployable" />
-                <Stat label="Positions" value={allPositions.length} sub={`${data.portfolio.stockPositions.length}S · ${data.portfolio.cryptoPositions.length}C · ${data.portfolio.optionsPositions.length}O`} />
+                <Stat
+                  label="Positions"
+                  value={tradeable.length}
+                  sub={`${tradeableStocks}S · ${tradeableCrypto}C · ${tradeableOptions}O${lockedPositions.length > 0 ? ` · ${lockedPositions.length} locked` : ''}`}
+                />
                 <Stat
                   label="Unrealized P&L"
                   value={`${totalPnlPct > 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`}

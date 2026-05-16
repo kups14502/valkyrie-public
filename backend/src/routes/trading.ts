@@ -176,9 +176,8 @@ async function readEquityHistory(): Promise<EquityPoint[]> {
         const day = JSON.parse(raw) as { runs?: Array<{ portfolio_snapshot?: { equity?: number | string } }> }
         const runs = day.runs ?? []
         if (runs.length === 0) continue
-        const eqRaw = runs[runs.length - 1]?.portfolio_snapshot?.equity
-        const eq = typeof eqRaw === 'string' ? Number(eqRaw) : (eqRaw as number)
-        if (Number.isFinite(eq)) points.push({ date, equity: eq })
+        const eq = num(runs[runs.length - 1]?.portfolio_snapshot?.equity)
+        if (Number.isFinite(eq) && eq > 0) points.push({ date, equity: eq })
       } catch { /* skip malformed day */ }
     }
     return points
