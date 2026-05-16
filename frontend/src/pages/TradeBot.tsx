@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
+import { Sparkline } from '../components/Sparkline'
 import { fetchTrading, type TradingPosition, type TradingSignal, type PlannedTrade, type ExecutedTrade } from '../lib/api'
 
 const fmtRelative = (iso: string | null): string => {
@@ -164,7 +165,23 @@ export default function TradeBot() {
           {data.portfolio && (
             <Card title="Portfolio">
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <Stat label="Equity" value={fmtUSD(data.portfolio.equity)} sub="total account" />
+                <Stat
+                  label="Equity"
+                  value={fmtUSD(data.portfolio.equity)}
+                  sub={data.equityHistory.length > 1
+                    ? `${data.equityHistory.length} day${data.equityHistory.length === 1 ? '' : 's'} tracked`
+                    : 'total account'}
+                  chart={data.equityHistory.length > 1
+                    ? <Sparkline
+                        values={data.equityHistory.map((p) => p.equity)}
+                        color={
+                          data.equityHistory[data.equityHistory.length - 1].equity >=
+                          data.equityHistory[0].equity
+                            ? 'var(--color-success)' : 'var(--color-danger)'
+                        }
+                      />
+                    : undefined}
+                />
                 <Stat label="Buying power" value={fmtUSD(data.portfolio.buyingPower)} sub="deployable" />
                 <Stat label="Positions" value={allPositions.length} sub={`${data.portfolio.stockPositions.length}S · ${data.portfolio.cryptoPositions.length}C · ${data.portfolio.optionsPositions.length}O`} />
                 <Stat

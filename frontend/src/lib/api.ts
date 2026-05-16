@@ -149,6 +149,7 @@ export type TradingStatus = {
   } | null
   runsToday: number
   executedToday: ExecutedTrade[]
+  equityHistory: { date: string; equity: number }[]
 }
 
 export type LightState = {

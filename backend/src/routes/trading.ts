@@ -48,6 +48,8 @@ type PlannedTrade = {
   notes: string | null
 }
 
+type EquityPoint = { date: string; equity: number }
+
 type TradingStatus = {
   lastUpdated: string | null
   marketRegime: string | null
@@ -67,6 +69,7 @@ type TradingStatus = {
   } | null
   runsToday: number
   executedToday: ExecutedTrade[]
+  equityHistory: EquityPoint[]
 }
 
 let cache: { at: number; data: TradingStatus } | null = null
@@ -160,6 +163,30 @@ async function readLatestLog(): Promise<{ portfolio: TradingStatus['portfolio'];
   }
 }
 
+async function readEquityHistory(): Promise<EquityPoint[]> {
+  try {
+    const files = (await fs.readdir(LOGS_DIR))
+      .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .sort()
+    const points: EquityPoint[] = []
+    for (const file of files) {
+      const date = file.slice(0, 10)
+      try {
+        const raw = await fs.readFile(path.join(LOGS_DIR, file), 'utf8')
+        const day = JSON.parse(raw) as { runs?: Array<{ portfolio_snapshot?: { equity?: number | string } }> }
+        const runs = day.runs ?? []
+        if (runs.length === 0) continue
+        const eqRaw = runs[runs.length - 1]?.portfolio_snapshot?.equity
+        const eq = typeof eqRaw === 'string' ? Number(eqRaw) : (eqRaw as number)
+        if (Number.isFinite(eq)) points.push({ date, equity: eq })
+      } catch { /* skip malformed day */ }
+    }
+    return points
+  } catch {
+    return []
+  }
+}
+
 async function readExecutedToday(): Promise<ExecutedTrade[]> {
   try {
     const today = new Date().toISOString().slice(0, 10)
@@ -209,7 +236,9 @@ async function readExecutedToday(): Promise<ExecutedTrade[]> {
 
 router.get('/trading', async (_req, res) => {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return res.json(cache.data)
-  const [analysis, log, executedToday] = await Promise.all([readAnalysis(), readLatestLog(), readExecutedToday()])
+  const [analysis, log, executedToday, equityHistory] = await Promise.all([
+    readAnalysis(), readLatestLog(), readExecutedToday(), readEquityHistory(),
+  ])
   const data: TradingStatus = {
     lastUpdated: analysis.lastUpdated,
     marketRegime: analysis.regime,
@@ -219,6 +248,7 @@ router.get('/trading', async (_req, res) => {
     latestRun: log.latestRun,
     runsToday: log.runsToday,
     executedToday,
+    equityHistory,
   }
   cache = { at: Date.now(), data }
   res.json(data)

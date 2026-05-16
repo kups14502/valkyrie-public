@@ -1,42 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
+import { Sparkline } from '../components/Sparkline'
 import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
   if (b > 1024 ** 2) return `${(b / 1024 ** 2).toFixed(0)} MB`
   return `${(b / 1024).toFixed(0)} KB`
-}
-
-function Sparkline({ values, color }: { values: number[]; color: string }) {
-  if (values.length < 2) return <div className="mt-1.5 h-4" />
-  const w = 100
-  const h = 18
-  let min = Math.min(...values)
-  let max = Math.max(...values)
-  if (max - min < 1) {
-    const mid = (min + max) / 2
-    min = mid - 1
-    max = mid + 1
-  }
-  const range = max - min
-  const pad = range * 0.15
-  min -= pad
-  max += pad
-  const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * w
-    const y = h - ((v - min) / (max - min)) * h
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
-  const last = values[values.length - 1]
-  const lastY = h - ((last - min) / (max - min)) * h
-  const lastX = w
-  return (
-    <svg className="mt-1.5 block w-full" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={lastX - 1.5} cy={lastY} r={1.5} fill={color} />
-    </svg>
-  )
 }
 
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
