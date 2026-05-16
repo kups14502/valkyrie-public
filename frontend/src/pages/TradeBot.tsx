@@ -174,11 +174,7 @@ export default function TradeBot() {
                   chart={data.equityHistory.length > 1
                     ? <Sparkline
                         values={data.equityHistory.map((p) => p.equity)}
-                        color={
-                          data.equityHistory[data.equityHistory.length - 1].equity >=
-                          data.equityHistory[0].equity
-                            ? 'var(--color-success)' : 'var(--color-danger)'
-                        }
+                        color={totalPnlPct < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
                       />
                     : undefined}
                 />
