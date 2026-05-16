@@ -9,6 +9,16 @@ const fmtBytes = (b: number) => {
   return `${(b / 1024).toFixed(0)} KB`
 }
 
+const fmtAgo = (ms: number | null): string | null => {
+  if (ms == null) return null
+  const diff = Date.now() - ms
+  if (diff < 0) return 'now'
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = claude
@@ -326,7 +336,14 @@ export default function Dashboard() {
                       pid:{s.pid} · {fmtBytes(s.memory)}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
                     </div>
                   </div>
-                  <div className="shrink-0 text-xs text-[var(--color-text-dim)]">{s.cpu.toFixed(1)}% cpu</div>
+                  <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
+                    <div>{s.cpu.toFixed(1)}% cpu</div>
+                    {s.lastActivity != null && (
+                      <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
+                        {fmtAgo(s.lastActivity)}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

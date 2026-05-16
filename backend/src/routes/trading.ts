@@ -69,6 +69,7 @@ type TradingStatus = {
   } | null
   runsToday: number
   executedToday: ExecutedTrade[]
+  executedRecent: ExecutedTrade[]
   equityHistory: EquityPoint[]
 }
 
@@ -186,48 +187,39 @@ async function readEquityHistory(): Promise<EquityPoint[]> {
   }
 }
 
-async function readExecutedToday(): Promise<ExecutedTrade[]> {
+async function readExecutedTrades(): Promise<ExecutedTrade[]> {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const stat = await fs.stat(TRADE_LOG)
-    const start = Math.max(0, stat.size - 65_536)
-    const fh = await fs.open(TRADE_LOG, 'r')
-    try {
-      const buf = Buffer.alloc(stat.size - start)
-      await fh.read(buf, 0, buf.length, start)
-      const lines = buf.toString('utf8').split('\n')
-      const results: ExecutedTrade[] = []
-      let currentTs: string | null = null
-      let expecting = 0
-      for (const line of lines) {
-        const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d+)\]/)
-        if (tsMatch) currentTs = `${tsMatch[1]}T${tsMatch[2]}`
-        if (/Executing \d+ trade/.test(line)) {
-          const m = line.match(/Executing (\d+) trade/)
-          expecting = m ? Number(m[1]) : 0
-          continue
-        }
-        if (expecting > 0) {
-          const tradeMatch = line.match(/^\s+\[([\w.]+)\]\s+(\w+)\s+(\w+)(?:\s+[—-]\s+(.+))?$/)
-          if (tradeMatch) {
-            const [, symbol, action, assetType, status] = tradeMatch
-            if (currentTs && currentTs.startsWith(today)) {
-              results.push({
-                symbol,
-                action: action.toLowerCase(),
-                assetType: assetType.toLowerCase(),
-                status: (status ?? 'submitted').trim(),
-                timestamp: currentTs,
-              })
-            }
-            expecting--
+    const log = await fs.readFile(TRADE_LOG, 'utf8')
+    const lines = log.split('\n')
+    const results: ExecutedTrade[] = []
+    let currentTs: string | null = null
+    let expecting = 0
+    for (const line of lines) {
+      const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d+)\]/)
+      if (tsMatch) currentTs = `${tsMatch[1]}T${tsMatch[2]}`
+      if (/Executing \d+ trade/.test(line)) {
+        const m = line.match(/Executing (\d+) trade/)
+        expecting = m ? Number(m[1]) : 0
+        continue
+      }
+      if (expecting > 0) {
+        const tradeMatch = line.match(/^\s+\[([\w.]+)\]\s+(\w+)\s+(\w+)(?:\s+[—-]\s+(.+))?$/)
+        if (tradeMatch) {
+          const [, symbol, action, assetType, status] = tradeMatch
+          if (currentTs) {
+            results.push({
+              symbol,
+              action: action.toLowerCase(),
+              assetType: assetType.toLowerCase(),
+              status: (status ?? 'submitted').trim(),
+              timestamp: currentTs,
+            })
           }
+          expecting--
         }
       }
-      return results
-    } finally {
-      await fh.close()
     }
+    return results
   } catch {
     return []
   }
@@ -235,9 +227,12 @@ async function readExecutedToday(): Promise<ExecutedTrade[]> {
 
 router.get('/trading', async (_req, res) => {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return res.json(cache.data)
-  const [analysis, log, executedToday, equityHistory] = await Promise.all([
-    readAnalysis(), readLatestLog(), readExecutedToday(), readEquityHistory(),
+  const [analysis, log, executed, equityHistory] = await Promise.all([
+    readAnalysis(), readLatestLog(), readExecutedTrades(), readEquityHistory(),
   ])
+  const todayPrefix = new Date().toISOString().slice(0, 10)
+  const executedToday = executed.filter((e) => e.timestamp.startsWith(todayPrefix))
+  const executedRecent = executed.slice().reverse().slice(0, 20)
   const data: TradingStatus = {
     lastUpdated: analysis.lastUpdated,
     marketRegime: analysis.regime,
@@ -247,6 +242,7 @@ router.get('/trading', async (_req, res) => {
     latestRun: log.latestRun,
     runsToday: log.runsToday,
     executedToday,
+    executedRecent,
     equityHistory,
   }
   cache = { at: Date.now(), data }

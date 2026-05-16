@@ -256,6 +256,35 @@ export default function TradeBot() {
             </Card>
           )}
 
+          {data.executedRecent.length > 0 && (
+            <Card title={`Recent trades · ${data.executedRecent.length}`}>
+              <div className="divide-y divide-[var(--color-border)]">
+                {data.executedRecent.map((t, i) => {
+                  const d = new Date(t.timestamp)
+                  const datePart = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+                  const timePart = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                  return (
+                    <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <div className="flex min-w-0 items-baseline gap-3">
+                        <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                          {datePart} {timePart}
+                        </span>
+                        <span className={`text-[11px] uppercase tracking-[0.18em] ${t.action === 'buy' ? 'text-[var(--color-success)]' : t.action === 'sell' ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
+                          [{t.action}]
+                        </span>
+                        <span className="font-semibold text-[var(--color-text)]">{t.symbol}</span>
+                        <span className="text-[11px] text-[var(--color-text-faint)]">{t.assetType}</span>
+                      </div>
+                      <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${statusColor(t.status)}`}>
+                        [{t.status}]
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Card>
+          )}
+
           {data.marketSummary && (
             <Card title="Market read">
               <p className="text-sm leading-relaxed text-[var(--color-text-dim)]">{data.marketSummary}</p>
