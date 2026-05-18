@@ -180,6 +180,22 @@ export type LightUpdate = {
   color_temp_kelvin?: number
 }
 
+export type NarrativeChoice = { label: string; targetId: string | null }
+export type NarrativeNode = {
+  id: string
+  title: string
+  body: string
+  choices: NarrativeChoice[]
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+export type NarrativeTree = {
+  version: number
+  rootId: string | null
+  nodes: NarrativeNode[]
+}
+
 export type SystemHistory = {
   samples: { t: number; cpu: number; mem: number; disk: number }[]
   intervalMs: number
@@ -250,6 +266,18 @@ export const setLight = async (update: LightUpdate) => {
   const r = await api.post<{ ok: boolean; error?: string; detail?: string }>('/lights/turn', update)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to update light')
   return r.data
+}
+
+export const fetchNarrative = async () => {
+  const r = await api.get<NarrativeTree | { error?: string; detail?: string }>('/narrative')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid narrative response')
+  return r.data as NarrativeTree
+}
+
+export const saveNarrative = async (tree: NarrativeTree) => {
+  const r = await api.put<NarrativeTree | { error?: string; detail?: string }>('/narrative', tree)
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid narrative response')
+  return r.data as NarrativeTree
 }
 
 export const fetchSystemHistory = async () => {

@@ -10,6 +10,7 @@ import projectsRoute from './routes/projects.js'
 import vaultRoute from './routes/vault.js'
 import lightsRoute from './routes/lights.js'
 import tradingRoute from './routes/trading.js'
+import narrativeRoute from './routes/narrative.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3001
@@ -34,7 +35,7 @@ app.use(cors({
   },
   credentials: true,
 }))
-app.use(express.json({ limit: '64kb' }))
+app.use(express.json({ limit: '1mb' }))
 
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api')) {
@@ -61,6 +62,7 @@ app.use('/api', projectsRoute)
 app.use('/api', vaultRoute)
 app.use('/api', lightsRoute)
 app.use('/api', tradingRoute)
+app.use('/api', narrativeRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
