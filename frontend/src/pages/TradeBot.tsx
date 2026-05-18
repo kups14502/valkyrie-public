@@ -167,9 +167,14 @@ export default function TradeBot() {
         <Card><div className="text-sm text-[var(--color-danger)]">Trade bot status unavailable</div></Card>
       ) : (
         <>
-          {data.portfolio && (
+          {data.portfolio && (() => {
+            const unrealizedUSD = totalValue - totalCost
+            const realizedUSD = data.realized?.totalUSD ?? 0
+            const netUSD = unrealizedUSD + realizedUSD
+            const closedTrades = data.realized?.closedTrades ?? 0
+            return (
             <Card title="Portfolio">
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
                 <Stat
                   label="Equity"
                   value={fmtUSD(data.portfolio.equity)}
@@ -179,7 +184,7 @@ export default function TradeBot() {
                   chart={data.equityHistory.length > 1
                     ? <Sparkline
                         values={data.equityHistory.map((p) => p.equity)}
-                        color={totalPnlPct < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
+                        color={netUSD < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
                       />
                     : undefined}
                 />
@@ -192,7 +197,16 @@ export default function TradeBot() {
                 <Stat
                   label="Unrealized P&L"
                   value={`${totalPnlPct > 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`}
-                  sub={`${fmtUSD(totalValue - totalCost)} on ${fmtUSD(totalCost)}`}
+                  sub={`${fmtUSD(unrealizedUSD)} on ${fmtUSD(totalCost)}`}
+                />
+                <Stat
+                  label="Realized P&L"
+                  value={closedTrades > 0
+                    ? `${realizedUSD >= 0 ? '+' : ''}${fmtUSD(realizedUSD)}`
+                    : '—'}
+                  sub={closedTrades > 0
+                    ? `${closedTrades} closed · approx`
+                    : 'no closed trades yet'}
                 />
               </div>
               {data.latestRun && (
@@ -201,7 +215,8 @@ export default function TradeBot() {
                 </div>
               )}
             </Card>
-          )}
+            )
+          })()}
 
           {data.portfolio && allPositions.length > 0 && (
             <div className="grid gap-6 xl:grid-cols-3">

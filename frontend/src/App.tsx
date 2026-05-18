@@ -47,13 +47,15 @@ function Shell() {
             <div className="mt-1 text-lg font-bold tracking-[0.14em] text-[var(--color-accent)]">BRNDN//SYS</div>
             <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">build:{BUILD_ID}</div>
           </div>
-          <nav className="flex flex-1 items-center justify-start gap-1 overflow-x-auto">
+          <nav className="flex flex-1 items-center justify-end gap-1 sm:justify-start">
             {navItems.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
+                aria-label={label}
+                title={label}
                 className={({ isActive }) =>
-                  `group flex items-center gap-2 border px-3 py-1.5 text-sm transition ${
+                  `group flex items-center gap-2 border p-2 text-sm transition sm:px-3 sm:py-1.5 ${
                     isActive
                       ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.08)] text-[var(--color-accent)]'
                       : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'
@@ -62,8 +64,8 @@ function Shell() {
               >
                 {({ isActive }) => (
                   <>
-                    <Icon size={13} className="text-[var(--color-accent)]/90" />
-                    <span className="whitespace-nowrap lowercase">
+                    <Icon size={16} className="text-[var(--color-accent)]/90" />
+                    <span className="hidden whitespace-nowrap lowercase sm:inline">
                       {isActive ? `[${label}]` : label}
                     </span>
                   </>

@@ -151,6 +151,11 @@ export type TradingStatus = {
   executedToday: ExecutedTrade[]
   executedRecent: ExecutedTrade[]
   equityHistory: { date: string; equity: number }[]
+  realized: {
+    totalUSD: number
+    closedTrades: number
+    bySymbol: Record<string, { realizedUSD: number; trades: number }>
+  }
 }
 
 export type LightState = {

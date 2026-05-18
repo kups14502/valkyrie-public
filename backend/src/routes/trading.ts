@@ -50,6 +50,12 @@ type PlannedTrade = {
 
 type EquityPoint = { date: string; equity: number }
 
+type RealizedPnl = {
+  totalUSD: number
+  closedTrades: number
+  bySymbol: Record<string, { realizedUSD: number; trades: number }>
+}
+
 type TradingStatus = {
   lastUpdated: string | null
   marketRegime: string | null
@@ -71,6 +77,7 @@ type TradingStatus = {
   executedToday: ExecutedTrade[]
   executedRecent: ExecutedTrade[]
   equityHistory: EquityPoint[]
+  realized: RealizedPnl
 }
 
 let cache: { at: number; data: TradingStatus } | null = null
@@ -164,6 +171,108 @@ async function readLatestLog(): Promise<{ portfolio: TradingStatus['portfolio'];
   }
 }
 
+type SnapPos = { qty: number; avgBuyPrice: number; currentPrice: number; locked: boolean }
+type DateSnap = { date: string; positions: Record<string, SnapPos> }
+
+function collectPositions(snap: any): Record<string, SnapPos> {
+  const out: Record<string, SnapPos> = {}
+  const buckets = [snap?.stock_positions, snap?.crypto_positions, snap?.options_positions]
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue
+    for (const p of bucket) {
+      const sym = p?.symbol
+      if (!sym) continue
+      out[String(sym)] = {
+        qty: num(p.quantity),
+        avgBuyPrice: num(p.avg_buy_price),
+        currentPrice: num(p.current_price),
+        locked: Boolean(p.locked),
+      }
+    }
+  }
+  return out
+}
+
+async function readDailySnapshots(): Promise<DateSnap[]> {
+  try {
+    const files = (await fs.readdir(LOGS_DIR))
+      .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .sort()
+    const out: DateSnap[] = []
+    for (const file of files) {
+      const date = file.slice(0, 10)
+      try {
+        const raw = await fs.readFile(path.join(LOGS_DIR, file), 'utf8')
+        const day = JSON.parse(raw) as { runs?: Array<{ portfolio_snapshot?: any }> }
+        const runs = day.runs ?? []
+        if (runs.length === 0) continue
+        const snap = runs[runs.length - 1]?.portfolio_snapshot
+        if (snap) out.push({ date, positions: collectPositions(snap) })
+      } catch { /* skip */ }
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+function computeRealized(snaps: DateSnap[]): RealizedPnl {
+  const tracked: Record<string, { qty: number; cost: number; lastPrice: number }> = {}
+  const bySymbol: Record<string, { realizedUSD: number; trades: number }> = {}
+  let total = 0
+  let closedTrades = 0
+
+  const addRealized = (symbol: string, pnl: number) => {
+    if (!bySymbol[symbol]) bySymbol[symbol] = { realizedUSD: 0, trades: 0 }
+    bySymbol[symbol].realizedUSD += pnl
+    bySymbol[symbol].trades += 1
+    total += pnl
+    closedTrades += 1
+  }
+
+  for (let i = 0; i < snaps.length; i++) {
+    const cur = snaps[i].positions
+    const prev = i === 0 ? {} : snaps[i - 1].positions
+
+    // detect symbols that disappeared since last snap (full sell)
+    for (const [sym, posPrev] of Object.entries(prev)) {
+      if (posPrev.locked) continue
+      if (sym in cur) continue
+      const t = tracked[sym]
+      if (!t || t.qty <= 0) continue
+      const proceeds = t.qty * posPrev.currentPrice
+      addRealized(sym, proceeds - t.cost)
+      t.qty = 0
+      t.cost = 0
+    }
+
+    // process current snap symbols
+    for (const [sym, pos] of Object.entries(cur)) {
+      if (pos.locked) continue
+      const t = tracked[sym] ?? { qty: 0, cost: 0, lastPrice: 0 }
+      if (pos.qty > t.qty + 1e-9) {
+        // bought (initial or added); rebase cost basis to snapshot's running total
+        t.cost = pos.qty * pos.avgBuyPrice
+        t.qty = pos.qty
+      } else if (pos.qty < t.qty - 1e-9) {
+        // partial sell using PREVIOUS snapshot's price as sell price (within ~30s of execution)
+        const prevPos = prev[sym]
+        const sellPrice = prevPos ? prevPos.currentPrice : pos.currentPrice
+        const sellQty = t.qty - pos.qty
+        const costOfSold = t.qty > 0 ? (t.cost * sellQty) / t.qty : 0
+        const proceeds = sellQty * sellPrice
+        addRealized(sym, proceeds - costOfSold)
+        t.cost -= costOfSold
+        t.qty = pos.qty
+      }
+      t.lastPrice = pos.currentPrice
+      tracked[sym] = t
+    }
+  }
+
+  return { totalUSD: total, closedTrades, bySymbol }
+}
+
 async function readEquityHistory(): Promise<EquityPoint[]> {
   try {
     const files = (await fs.readdir(LOGS_DIR))
@@ -227,12 +336,13 @@ async function readExecutedTrades(): Promise<ExecutedTrade[]> {
 
 router.get('/trading', async (_req, res) => {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return res.json(cache.data)
-  const [analysis, log, executed, equityHistory] = await Promise.all([
-    readAnalysis(), readLatestLog(), readExecutedTrades(), readEquityHistory(),
+  const [analysis, log, executed, equityHistory, snaps] = await Promise.all([
+    readAnalysis(), readLatestLog(), readExecutedTrades(), readEquityHistory(), readDailySnapshots(),
   ])
   const todayPrefix = new Date().toISOString().slice(0, 10)
   const executedToday = executed.filter((e) => e.timestamp.startsWith(todayPrefix))
   const executedRecent = executed.slice().reverse().slice(0, 20)
+  const realized = computeRealized(snaps)
   const data: TradingStatus = {
     lastUpdated: analysis.lastUpdated,
     marketRegime: analysis.regime,
@@ -244,6 +354,7 @@ router.get('/trading', async (_req, res) => {
     executedToday,
     executedRecent,
     equityHistory,
+    realized,
   }
   cache = { at: Date.now(), data }
   res.json(data)
