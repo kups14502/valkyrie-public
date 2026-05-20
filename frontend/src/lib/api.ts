@@ -180,6 +180,15 @@ export type LightUpdate = {
   color_temp_kelvin?: number
 }
 
+export type Activity = {
+  id: string
+  type: 'commit' | 'trade' | 'backup'
+  timestamp: number
+  title: string
+  subtitle: string | null
+  tone: 'ok' | 'watch' | 'alert' | 'dim'
+}
+
 export type SystemHistory = {
   samples: { t: number; cpu: number; mem: number; disk: number }[]
   intervalMs: number
@@ -250,6 +259,12 @@ export const setLight = async (update: LightUpdate) => {
   const r = await api.post<{ ok: boolean; error?: string; detail?: string }>('/lights/turn', update)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to update light')
   return r.data
+}
+
+export const fetchActivity = async () => {
+  const r = await api.get<Activity[] | { error?: string; detail?: string }>('/activity')
+  if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid activity response')
+  return r.data as Activity[]
 }
 
 export const fetchSystemHistory = async () => {

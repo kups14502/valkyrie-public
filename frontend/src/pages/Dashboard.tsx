@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchActivity } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -185,6 +185,7 @@ export default function Dashboard() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
+  const activity = useQuery({ queryKey: ['activity'], queryFn: fetchActivity, refetchInterval: 60_000 })
 
   const samples = history.data?.samples ?? []
   const cpuSeries = samples.map((s) => s.cpu)
@@ -352,6 +353,38 @@ export default function Dashboard() {
           )}
         </Card>
       </div>
+
+      <Card title="Recent activity">
+        {activity.isLoading && !activity.data ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+        ) : activity.error ? (
+          <div className="text-sm text-[var(--color-danger)]">Activity feed unavailable</div>
+        ) : (activity.data?.length ?? 0) === 0 ? (
+          <div className="text-sm text-[var(--color-text-dim)]">No recent activity</div>
+        ) : (
+          <div className="divide-y divide-[var(--color-border)]">
+            {(activity.data ?? []).map((a) => {
+              const typeColor =
+                a.type === 'commit' ? 'text-[var(--color-success)]' :
+                a.type === 'trade' ? 'text-[var(--color-warning)]' :
+                'text-[var(--color-text-faint)]'
+              const typeLabel = a.type === 'commit' ? 'git' : a.type === 'trade' ? 'trd' : 'bak'
+              return (
+                <div key={a.id} className="flex items-baseline gap-3 py-2 text-sm">
+                  <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${typeColor}`}>[{typeLabel}]</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[var(--color-text)]">{a.title}</div>
+                    {a.subtitle && (
+                      <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">{a.subtitle}</div>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[11px] text-[var(--color-text-dim)]">{fmtAgo(a.timestamp)}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
 
       <Card title="Projects / Feeds">
         {projectsList.length > 0 ? (
