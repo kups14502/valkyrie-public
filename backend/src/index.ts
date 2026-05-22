@@ -12,6 +12,8 @@ import lightsRoute from './routes/lights.js'
 import tradingRoute from './routes/trading.js'
 import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
+import launcherRoute from './routes/launcher.js'
+import { startAlerts } from './alerts.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3001
@@ -65,6 +67,7 @@ app.use('/api', lightsRoute)
 app.use('/api', tradingRoute)
 app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
+app.use('/api', launcherRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
@@ -73,4 +76,5 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(PORT, BIND, () => {
   console.log(`Master Control API listening on ${BIND}:${PORT}`)
+  startAlerts()
 })
