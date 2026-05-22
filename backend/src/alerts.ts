@@ -106,17 +106,19 @@ async function tick(state: AlertState): Promise<AlertState> {
   if (quota?.sessionResetsAt) {
     const resetsAt = quota.sessionResetsAt
     const resetsAtMs = Date.parse(resetsAt)
+    const windowKey = String(Math.floor(resetsAtMs / 60_000))
+    const prevWindowKey = state.sessionResetsAt ? String(Math.floor(Date.parse(state.sessionResetsAt) / 60_000)) : null
 
-    if (state.sessionResetsAt && state.sessionResetsAt !== resetsAt) {
+    if (prevWindowKey && prevWindowKey !== windowKey) {
       await postDiscord(`🟢 **Claude session reset** — fresh 5h window. Next reset at ${fmtClock(resetsAt)} ET.`)
       next.soonAlertedFor = null
     }
     next.sessionResetsAt = resetsAt
 
     const untilReset = resetsAtMs - now
-    if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && state.soonAlertedFor !== resetsAt) {
+    if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && state.soonAlertedFor !== windowKey) {
       await postDiscord(`⏳ **Claude session resets in ~${fmtMins(untilReset)}** — at ${fmtClock(resetsAt)} ET. Usage: ${quota.sessionPct}%.`)
-      next.soonAlertedFor = resetsAt
+      next.soonAlertedFor = windowKey
     }
 
     const over = quota.sessionPct >= CLAUDE_THRESHOLD
