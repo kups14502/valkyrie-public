@@ -198,6 +198,15 @@ export type ServiceUnit = {
   description: string
 }
 
+export type LauncherEntry = {
+  id: string
+  name: string
+  url: string
+  category: 'media' | 'home' | 'tools' | 'self'
+  health: 'alive' | 'down' | 'unknown'
+  latencyMs: number | null
+}
+
 export type ServicesStatus = {
   containers: ServiceContainer[]
   services: ServiceUnit[]
@@ -282,6 +291,12 @@ export const setLight = async (update: LightUpdate) => {
   const r = await api.post<{ ok: boolean; error?: string; detail?: string }>('/lights/turn', update)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to update light')
   return r.data
+}
+
+export const fetchLauncher = async () => {
+  const r = await api.get<LauncherEntry[] | { error?: string; detail?: string }>('/launcher')
+  if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid launcher response')
+  return r.data as LauncherEntry[]
 }
 
 export const fetchServices = async () => {

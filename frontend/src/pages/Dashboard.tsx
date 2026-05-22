@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchActivity } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchActivity, fetchLauncher } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -186,6 +186,7 @@ export default function Dashboard() {
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
   const activity = useQuery({ queryKey: ['activity'], queryFn: fetchActivity, refetchInterval: 60_000 })
+  const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
 
   const samples = history.data?.samples ?? []
   const cpuSeries = samples.map((s) => s.cpu)
@@ -255,6 +256,38 @@ export default function Dashboard() {
         ) : sys.data ? (
           <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
         ) : null}
+      </Card>
+
+      <Card title="Launcher">
+        {launcher.isLoading && !launcher.data ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+        ) : launcher.error ? (
+          <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {(launcher.data ?? []).map((s) => {
+              const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
+              const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
+              return (
+                <a
+                  key={s.id}
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
+                    <span className="truncate text-sm">{s.name}</span>
+                  </span>
+                  {s.latencyMs != null && (
+                    <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
+                  )}
+                </a>
+              )
+            })}
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">

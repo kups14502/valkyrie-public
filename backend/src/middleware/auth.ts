@@ -29,16 +29,16 @@ const getKey = (header: jwt.JwtHeader): Promise<string> =>
   })
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const remoteIP = req.ip || req.socket.remoteAddress || ''
+  const socketIP = req.socket.remoteAddress || ''
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
+  const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
+  const isLoopback = remoteIP === '127.0.0.1' || remoteIP === '::1' || remoteIP === '::ffff:127.0.0.1' || socketIP === '127.0.0.1' || socketIP === '::1' || socketIP === '::ffff:127.0.0.1' || forwardedFor.includes('127.0.0.1') || forwardedFor.includes('::1')
+  if (isLoopback && !fromCloudflare) {
+    return next()
+  }
   if (ALLOW_LOCAL) {
-    const remoteIP = req.ip || req.socket.remoteAddress || ''
-    const socketIP = req.socket.remoteAddress || ''
-    const forwardedFor = String(req.headers['x-forwarded-for'] || '')
-    const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
-    const isLoopback = remoteIP === '127.0.0.1' || remoteIP === '::1' || remoteIP === '::ffff:127.0.0.1' || socketIP === '127.0.0.1' || socketIP === '::1' || socketIP === '::ffff:127.0.0.1' || forwardedFor.includes('127.0.0.1') || forwardedFor.includes('::1')
     console.log('[auth-check]', { remoteIP, socketIP, forwardedFor, hasCfRay: Boolean(req.headers['cf-ray']), hasCfConnectingIp: Boolean(req.headers['cf-connecting-ip']), isLoopback })
-    if (isLoopback && !fromCloudflare) {
-      return next()
-    }
   }
 
   const token = req.headers['cf-access-jwt-assertion'] as string | undefined
