@@ -201,11 +201,48 @@ export default function Lights() {
 
   const all = lights.data ?? []
   const anyOn = all.some((l) => l.on)
+  const availableTargets = all.filter((l) => !l.unavailable).map((l) => l.entity_id)
 
   const bulk = (state: 'on' | 'off') => {
-    const targets = all.filter((l) => !l.unavailable).map((l) => l.entity_id)
-    if (targets.length === 0) return
-    mutate({ entity_id: targets, state })
+    if (availableTargets.length === 0) return
+    mutate({ entity_id: availableTargets, state })
+  }
+
+  const bulkBrightness = (pct: number) => {
+    if (availableTargets.length === 0) return
+    mutate({ entity_id: availableTargets, state: 'on', brightness: brightnessFromPct(pct) })
+  }
+
+  const bulkPreset = (rgb: [number, number, number] | null, kelvin: number | null) => {
+    if (availableTargets.length === 0) return
+    mutate({
+      entity_id: availableTargets,
+      state: 'on',
+      ...(rgb ? { rgb_color: rgb } : {}),
+      ...(kelvin ? { color_temp_kelvin: kelvin } : {}),
+    })
+  }
+
+  const [bulkPct, setBulkPct] = useState<number | null>(null)
+  const bulkLastSentRef = useRef(0)
+  const bulkTrailingRef = useRef<number | null>(null)
+  const bulkSend = (pct: number) => {
+    const now = Date.now()
+    const elapsed = now - bulkLastSentRef.current
+    if (bulkTrailingRef.current !== null) {
+      clearTimeout(bulkTrailingRef.current)
+      bulkTrailingRef.current = null
+    }
+    if (elapsed >= 200) {
+      bulkLastSentRef.current = now
+      bulkBrightness(pct)
+    } else {
+      bulkTrailingRef.current = window.setTimeout(() => {
+        bulkLastSentRef.current = Date.now()
+        bulkTrailingRef.current = null
+        bulkBrightness(pct)
+      }, 200 - elapsed)
+    }
   }
 
   return (
@@ -240,11 +277,67 @@ export default function Lights() {
       ) : lights.error ? (
         <Card><div className="text-sm text-[var(--color-danger)]">Home Assistant unreachable</div></Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {all.map((light) => (
-            <LightCard key={light.entity_id} light={light} onUpdate={updateOne} />
-          ))}
-        </div>
+        <>
+          {availableTargets.length > 0 && (
+            <Card title={`All ${availableTargets.length} lights`}>
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-1.5 flex items-baseline justify-between text-xs">
+                    <span className="text-[var(--color-text-dim)]">Brightness</span>
+                    <span className="font-semibold text-[var(--color-text)]">{bulkPct ?? 100}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={100}
+                    defaultValue={100}
+                    onInput={(e) => {
+                      const pct = Number((e.target as HTMLInputElement).value)
+                      setBulkPct(pct)
+                      bulkSend(pct)
+                    }}
+                    onPointerUp={(e) => {
+                      if (bulkTrailingRef.current !== null) {
+                        clearTimeout(bulkTrailingRef.current)
+                        bulkTrailingRef.current = null
+                      }
+                      bulkLastSentRef.current = Date.now()
+                      bulkBrightness(Number((e.target as HTMLInputElement).value))
+                    }}
+                    onTouchEnd={(e) => {
+                      if (bulkTrailingRef.current !== null) {
+                        clearTimeout(bulkTrailingRef.current)
+                        bulkTrailingRef.current = null
+                      }
+                      bulkLastSentRef.current = Date.now()
+                      bulkBrightness(Number((e.target as HTMLInputElement).value))
+                    }}
+                    className="brightness-slider"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => bulkPreset(p.rgb, p.kelvin)}
+                      className="flex items-center gap-1.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-2.5 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                    >
+                      <span className="h-2.5 w-2.5" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {all.map((light) => (
+              <LightCard key={light.entity_id} light={light} onUpdate={updateOne} />
+            ))}
+          </div>
+        </>
       )}
 
       {mutation.error && (

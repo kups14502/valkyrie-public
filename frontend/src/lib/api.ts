@@ -180,6 +180,29 @@ export type LightUpdate = {
   color_temp_kelvin?: number
 }
 
+export type ServiceContainer = {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+  ports: string[]
+  project: string | null
+}
+
+export type ServiceUnit = {
+  name: string
+  load: string
+  active: string
+  sub: string
+  description: string
+}
+
+export type ServicesStatus = {
+  containers: ServiceContainer[]
+  services: ServiceUnit[]
+}
+
 export type Activity = {
   id: string
   type: 'commit' | 'trade' | 'backup'
@@ -258,6 +281,18 @@ export const fetchLights = async () => {
 export const setLight = async (update: LightUpdate) => {
   const r = await api.post<{ ok: boolean; error?: string; detail?: string }>('/lights/turn', update)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to update light')
+  return r.data
+}
+
+export const fetchServices = async () => {
+  const r = await api.get<ServicesStatus | { error?: string; detail?: string }>('/services')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid services response')
+  return r.data as ServicesStatus
+}
+
+export const restartService = async (kind: 'container' | 'service', name: string) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>('/services/restart', { kind, name })
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'restart failed')
   return r.data
 }
 

@@ -1,12 +1,13 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, KeyRound, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, KeyRound, TrendingUp, Server } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
+const Services = lazy(() => import('./pages/Services'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +30,7 @@ function PageFallback() {
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/lights', label: 'Lights', icon: Lightbulb },
+  { to: '/services', label: 'Services', icon: Server },
   { to: '/vault', label: 'Vault', icon: KeyRound },
   { to: '/trade', label: 'Trade Bot', icon: TrendingUp },
 ]
@@ -80,6 +82,7 @@ function Shell() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/lights" element={<Lights />} />
+            <Route path="/services" element={<Services />} />
             <Route path="/vault" element={<Vault />} />
             <Route path="/trade" element={<TradeBot />} />
           </Routes>
