@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#05070b"/>
+  <rect x="32" y="32" width="448" height="448" rx="80" fill="none" stroke="#48e3ce" stroke-opacity="0.18" stroke-width="2"/>
+  <g fill="#48e3ce" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="700">
+    <text x="256" y="232" font-size="180" text-anchor="middle" letter-spacing="-8">//</text>
+    <text x="256" y="340" font-size="56" text-anchor="middle" letter-spacing="14" fill="#48e3ce" fill-opacity="0.9">MC</text>
+    <text x="256" y="404" font-size="22" text-anchor="middle" letter-spacing="6" fill="#48e3ce" fill-opacity="0.45">BRNDN//SYS</text>
+  </g>
+</svg>
