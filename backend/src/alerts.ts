@@ -4,6 +4,7 @@ import path from 'node:path'
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
 const POLL_MS = 60_000
 const SOON_WINDOW_MS = 60 * 60_000
+const RESETSAT_JITTER_MS = 30 * 60_000
 const DISK_THRESHOLD = 90
 const CLAUDE_THRESHOLD = 90
 const BACKEND = `http://127.0.0.1:${process.env.PORT || 3001}`
@@ -106,19 +107,21 @@ async function tick(state: AlertState): Promise<AlertState> {
   if (quota?.sessionResetsAt) {
     const resetsAt = quota.sessionResetsAt
     const resetsAtMs = Date.parse(resetsAt)
-    const windowKey = String(Math.floor(resetsAtMs / 60_000))
-    const prevWindowKey = state.sessionResetsAt ? String(Math.floor(Date.parse(state.sessionResetsAt) / 60_000)) : null
+    const prevResetsAtMs = state.sessionResetsAt ? Date.parse(state.sessionResetsAt) : NaN
 
-    if (prevWindowKey && prevWindowKey !== windowKey) {
+    const isNewWindow = Number.isFinite(prevResetsAtMs) && resetsAtMs - prevResetsAtMs > RESETSAT_JITTER_MS
+    if (isNewWindow) {
       await postDiscord(`🟢 **Claude session reset** — fresh 5h window. Next reset at ${fmtClock(resetsAt)} ET.`)
       next.soonAlertedFor = null
     }
     next.sessionResetsAt = resetsAt
 
     const untilReset = resetsAtMs - now
-    if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && state.soonAlertedFor !== windowKey) {
+    const soonAlertedMs = state.soonAlertedFor ? Date.parse(state.soonAlertedFor) : NaN
+    const alreadySoonAlerted = Number.isFinite(soonAlertedMs) && Math.abs(resetsAtMs - soonAlertedMs) <= RESETSAT_JITTER_MS
+    if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && !alreadySoonAlerted) {
       await postDiscord(`⏳ **Claude session resets in ~${fmtMins(untilReset)}** — at ${fmtClock(resetsAt)} ET. Usage: ${quota.sessionPct}%.`)
-      next.soonAlertedFor = windowKey
+      next.soonAlertedFor = resetsAt
     }
 
     const over = quota.sessionPct >= CLAUDE_THRESHOLD
