@@ -40,8 +40,10 @@ const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
 const CACHE_TTL_MS = 300_000
+const REFRESH_INTERVAL_MS = 240_000
 const CCUSAGE_BIN = path.join('/home/brendon/master-control/backend', 'node_modules', '.bin', 'ccusage')
 let cache: { at: number; data: any } | null = null
+let refreshing: Promise<void> | null = null
 
 const todayStartMs = () => {
   const d = new Date()
@@ -329,31 +331,44 @@ async function readCodexUsage(): Promise<ProviderUsage> {
   return out
 }
 
+async function refreshAIUsage(): Promise<void> {
+  if (refreshing) return refreshing
+  refreshing = (async () => {
+    try {
+      const [claudeBlocks, claude, claudeQuota, codexRateLimits] = await Promise.all([
+        readClaudeBlocks(),
+        readClaudeUsage(),
+        readClaudeAIQuota(),
+        readCodexRateLimits(),
+      ])
+      const data = {
+        claude: { ...claude, session: claudeBlocks.activeBlock, quota: claudeQuota },
+        codex: { rateLimits: codexRateLimits },
+        updatedAt: new Date().toISOString(),
+      }
+      cache = { at: Date.now(), data }
+    } catch (err) {
+      console.error('[ai-usage] refresh failed', (err as Error).message)
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+void refreshAIUsage()
+setInterval(() => void refreshAIUsage(), REFRESH_INTERVAL_MS).unref()
+
 router.get('/ai-usage', async (_req, res) => {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
+  if (cache) {
+    if (Date.now() - cache.at >= CACHE_TTL_MS) void refreshAIUsage()
     return res.json(cache.data)
   }
   try {
-    const [claudeBlocks, claude, claudeQuota, codexRateLimits] = await Promise.all([
-      readClaudeBlocks(),
-      readClaudeUsage(),
-      readClaudeAIQuota(),
-      readCodexRateLimits(),
-    ])
-
-    const data = {
-      claude: {
-        ...claude,
-        session: claudeBlocks.activeBlock,
-        quota: claudeQuota,
-      },
-      codex: {
-        rateLimits: codexRateLimits,
-      },
-      updatedAt: new Date().toISOString(),
-    }
-    cache = { at: Date.now(), data }
-    res.json(data)
+    await refreshAIUsage()
+    const c = cache as { at: number; data: any } | null
+    if (!c) return res.status(503).json({ error: 'AI usage warming up' })
+    res.json(c.data)
   } catch (err) {
     res.status(500).json({ error: 'failed to read AI usage', detail: (err as Error).message })
   }
