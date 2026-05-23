@@ -3,7 +3,7 @@ import path from 'node:path'
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
 const POLL_MS = 60_000
-const SOON_WINDOW_MS = 30 * 60_000
+const SOON_WINDOW_MS = 60 * 60_000
 const DISK_THRESHOLD = 90
 const CLAUDE_THRESHOLD = 90
 const BACKEND = `http://127.0.0.1:${process.env.PORT || 3001}`
