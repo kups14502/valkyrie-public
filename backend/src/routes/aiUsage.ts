@@ -40,7 +40,6 @@ const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
 const CACHE_TTL_MS = 300_000
-const REFRESH_INTERVAL_MS = 240_000
 const CCUSAGE_BIN = path.join('/home/brendon/master-control/backend', 'node_modules', '.bin', 'ccusage')
 let cache: { at: number; data: any } | null = null
 let refreshing: Promise<void> | null = null
@@ -357,7 +356,6 @@ async function refreshAIUsage(): Promise<void> {
 }
 
 void refreshAIUsage()
-setInterval(() => void refreshAIUsage(), REFRESH_INTERVAL_MS).unref()
 
 router.get('/ai-usage', async (_req, res) => {
   if (cache) {
