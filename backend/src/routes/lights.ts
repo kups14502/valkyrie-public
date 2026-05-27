@@ -67,6 +67,32 @@ router.get('/lights', async (_req, res) => {
   }
 })
 
+async function getStillOn(entities: string[]): Promise<string[]> {
+  const results = await Promise.all(entities.map(async (e) => {
+    try {
+      const s = await haRequest('GET', `/api/states/${e}`) as { state?: string }
+      return s.state === 'on' ? e : null
+    } catch {
+      return null
+    }
+  }))
+  return results.filter((e): e is string => e !== null)
+}
+
+async function turnOffReliably(entities: string[]): Promise<string[]> {
+  await haRequest('POST', '/api/services/light/turn_off', {
+    entity_id: entities.length === 1 ? entities[0] : entities,
+  })
+  await new Promise((r) => setTimeout(r, 800))
+  const stillOn = await getStillOn(entities)
+  if (stillOn.length === 0) return []
+  await Promise.all(stillOn.map((e) =>
+    haRequest('POST', '/api/services/light/turn_off', { entity_id: e }).catch(() => null),
+  ))
+  await new Promise((r) => setTimeout(r, 800))
+  return await getStillOn(stillOn)
+}
+
 router.post('/lights/turn', async (req, res) => {
   const { entity_id, state, brightness, rgb_color, color_temp_kelvin } = req.body ?? {}
   const entities = Array.isArray(entity_id) ? entity_id : [entity_id]
@@ -77,15 +103,21 @@ router.post('/lights/turn', async (req, res) => {
     return res.status(400).json({ error: 'state must be on or off' })
   }
   try {
-    const body: Record<string, unknown> = { entity_id: entities.length === 1 ? entities[0] : entities }
-    if (state === 'on') {
-      if (typeof brightness === 'number') body.brightness = Math.max(1, Math.min(255, Math.round(brightness)))
-      if (Array.isArray(rgb_color) && rgb_color.length === 3) {
-        body.rgb_color = rgb_color.map((n: number) => Math.max(0, Math.min(255, Math.round(Number(n)))))
+    if (state === 'off') {
+      const stillOn = await turnOffReliably(entities)
+      if (stillOn.length > 0) {
+        console.warn('[lights] turn_off failed after retry', { stillOn })
+        return res.status(503).json({ error: 'some lights did not turn off', detail: stillOn.join(', ') })
       }
-      if (typeof color_temp_kelvin === 'number') body.color_temp_kelvin = Math.round(color_temp_kelvin)
+      return res.json({ ok: true })
     }
-    await haRequest('POST', `/api/services/light/turn_${state}`, body)
+    const body: Record<string, unknown> = { entity_id: entities.length === 1 ? entities[0] : entities }
+    if (typeof brightness === 'number') body.brightness = Math.max(1, Math.min(255, Math.round(brightness)))
+    if (Array.isArray(rgb_color) && rgb_color.length === 3) {
+      body.rgb_color = rgb_color.map((n: number) => Math.max(0, Math.min(255, Math.round(Number(n)))))
+    }
+    if (typeof color_temp_kelvin === 'number') body.color_temp_kelvin = Math.round(color_temp_kelvin)
+    await haRequest('POST', '/api/services/light/turn_on', body)
     res.json({ ok: true })
   } catch (err) {
     res.status(503).json({ error: 'HA call failed', detail: (err as Error).message })
