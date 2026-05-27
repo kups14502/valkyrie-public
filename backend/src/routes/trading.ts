@@ -145,7 +145,9 @@ async function readLatestLog(): Promise<{ portfolio: TradingStatus['portfolio'];
     const runs: any[] = Array.isArray(day.runs) ? day.runs : []
     if (runs.length === 0) return { portfolio: null, latestRun: null, runsToday: 0 }
     const last = runs[runs.length - 1]
-    const snap = last.portfolio_snapshot ?? {}
+    // Manual re-execution entries may have incomplete snapshots; find the last run with equity
+    const snapRun = [...runs].reverse().find((r) => r.portfolio_snapshot?.equity != null) ?? last
+    const snap = snapRun.portfolio_snapshot ?? {}
     const portfolio = {
       equity: num(snap.equity),
       buyingPower: num(snap.buying_power),
