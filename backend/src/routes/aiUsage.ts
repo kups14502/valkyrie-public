@@ -59,6 +59,7 @@ const todayStartMs = () => {
 const daysAgoMs = (days: number) => todayStartMs() - days * 86_400_000
 
 const yyyymmdd = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+const clampPct = (value: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(value) ? value : 0)))
 
 const localDateKey = (ms: number) => {
   const d = new Date(ms)
@@ -118,8 +119,8 @@ function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
     return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : null
   }
   return {
-    sessionPct: Math.round(Number(sessionUtil ?? 0) * 100),
-    weeklyPct: Math.round(Number(weeklyUtil ?? 0) * 100),
+    sessionPct: clampPct(Number(sessionUtil ?? 0) * 100),
+    weeklyPct: clampPct(Number(weeklyUtil ?? 0) * 100),
     sessionResetsAt: resetIso(headers.get('anthropic-ratelimit-unified-5h-reset')),
     weeklyResetsAt: resetIso(headers.get('anthropic-ratelimit-unified-7d-reset')),
     status: headers.get('anthropic-ratelimit-unified-status'),
@@ -170,8 +171,8 @@ async function readClaudeAIQuota(): Promise<ClaudeQuota | null> {
       seven_day?: { utilization?: number; resets_at?: string }
     }
     return {
-      sessionPct: Math.round(data.five_hour?.utilization ?? 0),
-      weeklyPct: Math.round(data.seven_day?.utilization ?? 0),
+      sessionPct: clampPct(data.five_hour?.utilization ?? 0),
+      weeklyPct: clampPct(data.seven_day?.utilization ?? 0),
       sessionResetsAt: data.five_hour?.resets_at ?? null,
       weeklyResetsAt: data.seven_day?.resets_at ?? null,
     }
@@ -266,8 +267,8 @@ async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null
           const rl = parsed?.result?.rateLimits
           if (!rl) return resolve({ session5h: null, weekly: null })
           resolve({
-            session5h: rl.primary ? { pct: rl.primary.usedPercent, windowMins: rl.primary.windowDurationMins, resetsAt: rl.primary.resetsAt } : null,
-            weekly: rl.secondary ? { pct: rl.secondary.usedPercent, windowMins: rl.secondary.windowDurationMins, resetsAt: rl.secondary.resetsAt } : null,
+            session5h: rl.primary ? { pct: clampPct(rl.primary.usedPercent), windowMins: rl.primary.windowDurationMins, resetsAt: rl.primary.resetsAt } : null,
+            weekly: rl.secondary ? { pct: clampPct(rl.secondary.usedPercent), windowMins: rl.secondary.windowDurationMins, resetsAt: rl.secondary.resetsAt } : null,
           })
         } catch {
           resolve({ session5h: null, weekly: null })

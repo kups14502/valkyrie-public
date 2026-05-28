@@ -19,18 +19,22 @@ const fmtAgo = (ms: number | null): string | null => {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
+const clampPct = (pct: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(pct) ? pct : 0)))
+const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(n)
+const fmtCost = (n: number) => n > 0 ? `$${n.toFixed(n >= 10 ? 0 : 2)}` : '—'
+
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
-  const clamped = Math.min(pct, 100)
+  const clamped = clampPct(pct)
   const color = claude
-    ? (pct >= 85 ? 'var(--color-danger)' : '#D97757')
+    ? (clamped >= 85 ? 'var(--color-danger)' : '#D97757')
     : codex
-    ? (pct >= 85 ? 'var(--color-danger)' : '#1E40AF')
-    : (warn || pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
+    ? (clamped >= 85 ? 'var(--color-danger)' : '#1E40AF')
+    : (warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between text-sm">
         <span className="text-[var(--color-text-dim)]">{label}</span>
-        <span className="font-semibold text-[var(--color-text)]">{pct}% used</span>
+        <span className="font-semibold text-[var(--color-text)]">{clamped}% used</span>
       </div>
       <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${clamped}%`, backgroundColor: color }} />
@@ -330,7 +334,22 @@ export default function Dashboard() {
                       />
                     </div>
                   ) : client.kind === 'claude' ? (
-                    <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
+                    <div className="space-y-2">
+                      <div className="text-[11px] text-[var(--color-text-faint)]">Subscription quota unavailable</div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          ['Today', client.today],
+                          ['7d', client.last7d],
+                          ['30d', client.last30d],
+                        ] as const).map(([label, bucket]) => (
+                          <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
+                            <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
+                            <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
+                            <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
                   {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
                     <div className="space-y-2">
@@ -352,7 +371,6 @@ export default function Dashboard() {
               {aiUsage.data.dmBot && (aiUsage.data.dmBot.last30d.messages > 0) && (() => {
                 const dm = aiUsage.data.dmBot!
                 const topModel = Object.entries(dm.byModel).sort((a, b) => b[1].tokens - a[1].tokens)[0]?.[0] ?? null
-                const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n)
                 return (
                   <div className="space-y-3">
                     <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">DM Bot</div>
@@ -360,7 +378,7 @@ export default function Dashboard() {
                       {(['today', 'last7d', 'last30d'] as const).map((period) => (
                         <div key={period} className="space-y-0.5">
                           <div className="text-[10px] text-[var(--color-text-faint)]">{period === 'today' ? 'today' : period === 'last7d' ? '7d' : '30d'}</div>
-                          <div className="text-sm font-semibold text-[var(--color-text)]">{fmtK(dm[period].tokens)}</div>
+                          <div className="text-sm font-semibold text-[var(--color-text)]">{fmtTokens(dm[period].tokens)}</div>
                           <div className="text-[10px] text-[var(--color-text-faint)]">{dm[period].messages} turns</div>
                         </div>
                       ))}
