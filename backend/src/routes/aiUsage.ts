@@ -145,8 +145,10 @@ async function readClaudeOAuthQuota(configDir: string): Promise<ClaudeQuota | nu
         messages: [{ role: 'user', content: 'x' }],
       }),
     })
+    const quota = parseClaudeRateLimitHeaders(resp.headers)
+    if (quota) return quota
     if (!resp.ok) return null
-    return parseClaudeRateLimitHeaders(resp.headers)
+    return null
   } catch (err) {
     console.error('[ai-usage] claude oauth quota failed', (err as Error).message)
     return null
