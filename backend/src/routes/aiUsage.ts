@@ -184,11 +184,15 @@ async function syncCodexAuth(): Promise<void> {
   const profile = profiles?.profiles?.['openai-codex:user@example.com']
   if (!profile?.access || !profile?.refresh) throw new Error('no openai-codex profile')
 
+  const fmt = (d: Date) => d.toISOString().replace(/(\.\d{3})Z$/, 'Z')
   const accessExp = JSON.parse(Buffer.from(profile.access.split('.')[1], 'base64url').toString()).exp * 1000
   const needsRefresh = Date.now() > accessExp - 60_000
 
   let accessToken = profile.access
   let refreshToken = profile.refresh
+  let idToken: string | undefined
+  let scope = 'openid profile email offline_access'
+  let expiresAt = new Date(accessExp)
 
   if (needsRefresh) {
     const { stdout } = await exec('curl', [
@@ -200,35 +204,40 @@ async function syncCodexAuth(): Promise<void> {
     if (!tokenData.access_token) throw new Error('refresh failed')
     accessToken = tokenData.access_token
     refreshToken = tokenData.refresh_token ?? refreshToken
+    idToken = tokenData.id_token
+    scope = tokenData.scope ?? scope
+    expiresAt = new Date(Date.now() + tokenData.expires_in * 1000)
 
     profiles.profiles['openai-codex:user@example.com'].access = accessToken
     profiles.profiles['openai-codex:user@example.com'].refresh = refreshToken
-    profiles.profiles['openai-codex:user@example.com'].expires = Date.now() + tokenData.expires_in * 1000
+    profiles.profiles['openai-codex:user@example.com'].expires = expiresAt.getTime()
     writeFileSync(OPENCLAW_AUTH_PROFILES, JSON.stringify(profiles, null, 2))
-
-    const idToken = tokenData.id_token
-    const now = new Date()
-    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000)
-    const fmt = (d: Date) => d.toISOString().replace(/(\.\d{3})Z$/, 'Z')
-    writeFileSync(CODEX_AUTH_JSON, JSON.stringify({
-      tokens: {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        id_token: idToken,
-        token_type: tokenData.token_type ?? 'Bearer',
-        scope: tokenData.scope ?? '',
-        expires_at: fmt(expiresAt),
-      },
-      last_refresh: fmt(now),
-    }, null, 2))
+  } else if (existsSync(CODEX_AUTH_JSON)) {
+    try {
+      const existing = JSON.parse(readFileSync(CODEX_AUTH_JSON, 'utf8'))
+      idToken = existing?.tokens?.id_token
+      scope = existing?.tokens?.scope ?? scope
+    } catch {}
   }
+
+  // Keep Codex CLI auth.json mirrored to OpenClaw's fresher OAuth profile.
+  // The Codex CLI refresh token can go stale independently and then rate-limit reads return 401.
+  writeFileSync(CODEX_AUTH_JSON, JSON.stringify({
+    tokens: {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      id_token: idToken,
+      token_type: 'Bearer',
+      scope,
+      expires_at: fmt(expiresAt),
+    },
+    last_refresh: fmt(new Date()),
+  }, null, 2))
 }
 
 async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }> {
   try {
-    if (!existsSync(CODEX_AUTH_JSON)) {
-      await syncCodexAuth()
-    }
+    await syncCodexAuth()
 
     const { spawn } = await import('node:child_process')
     const initMsg = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'master-control', version: '1.0' } } }) + '\n'
