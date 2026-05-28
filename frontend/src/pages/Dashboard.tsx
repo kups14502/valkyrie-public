@@ -345,6 +345,28 @@ export default function Dashboard() {
                   )}
                 </div>
               ) : null}
+              {aiUsage.data.dmBot && (aiUsage.data.dmBot.last30d.messages > 0) && (() => {
+                const dm = aiUsage.data.dmBot!
+                const topModel = Object.entries(dm.byModel).sort((a, b) => b[1].tokens - a[1].tokens)[0]?.[0] ?? null
+                const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n)
+                return (
+                  <div className="space-y-3">
+                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">DM Bot</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {(['today', 'last7d', 'last30d'] as const).map((period) => (
+                        <div key={period} className="space-y-0.5">
+                          <div className="text-[10px] text-[var(--color-text-faint)]">{period === 'today' ? 'today' : period === 'last7d' ? '7d' : '30d'}</div>
+                          <div className="text-sm font-semibold text-[var(--color-text)]">{fmtK(dm[period].tokens)}</div>
+                          <div className="text-[10px] text-[var(--color-text-faint)]">{dm[period].messages} turns</div>
+                        </div>
+                      ))}
+                    </div>
+                    {topModel && (
+                      <div className="text-[11px] text-[var(--color-text-faint)]">model: {topModel}</div>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           ) : null}
         </Card>

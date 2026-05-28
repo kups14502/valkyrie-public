@@ -330,19 +330,71 @@ async function readCodexUsage(): Promise<ProviderUsage> {
   return out
 }
 
+const DM_BOT_SESSIONS_DIR = '/home/brendon/dm-bot-runtime/.claude/projects/-home-brendon-dm-bot-runtime-workspace'
+
+async function readDMBotUsage(): Promise<ProviderUsage & { byModel: Record<string, Bucket> }> {
+  const result = { ...emptyProvider(), byModel: {} as Record<string, Bucket> }
+  const cutoff = daysAgoMs(30)
+  let files: string[] = []
+  try {
+    files = readdirSync(DM_BOT_SESSIONS_DIR).filter((f) => f.endsWith('.jsonl'))
+  } catch { return result }
+  const todayCutoff = todayStartMs()
+  const sevenCutoff = daysAgoMs(7)
+
+  await Promise.all(files.map(async (f) => {
+    const full = path.join(DM_BOT_SESSIONS_DIR, f)
+    let stat
+    try { stat = statSync(full) } catch { return }
+    if (stat.mtimeMs < cutoff) return
+    await new Promise<void>((resolve) => {
+      const rl = createInterface({ input: createReadStream(full, { encoding: 'utf8' }), crlfDelay: Infinity })
+      rl.on('line', (line) => {
+        if (!line || line.length < 50) return
+        if (!line.includes('"usage"')) return
+        let obj: any
+        try { obj = JSON.parse(line) } catch { return }
+        const usage = obj?.message?.usage
+        if (!usage) return
+        const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
+        if (!Number.isFinite(ts) || ts < cutoff) return
+        const tokens = (
+          Number(usage.input_tokens || 0) +
+          Number(usage.cache_creation_input_tokens || 0) +
+          Number(usage.cache_read_input_tokens || 0) +
+          Number(usage.output_tokens || 0)
+        )
+        if (tokens === 0) return
+        if (ts >= cutoff) { result.last30d.tokens += tokens; result.last30d.messages += 1 }
+        if (ts >= sevenCutoff) { result.last7d.tokens += tokens; result.last7d.messages += 1 }
+        if (ts >= todayCutoff) { result.today.tokens += tokens; result.today.messages += 1 }
+        const model = String(obj?.message?.model ?? 'unknown')
+        if (!result.byModel[model]) result.byModel[model] = emptyBucket()
+        result.byModel[model].tokens += tokens
+        result.byModel[model].messages += 1
+      })
+      rl.on('close', () => resolve())
+      rl.on('error', () => resolve())
+    })
+  }))
+  return result
+}
+
 async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
-      const [claudeBlocks, claude, claudeQuota, codexRateLimits] = await Promise.all([
+      const [claudeBlocks, claude, claudeQuota, codexRateLimits, dmBot] = await Promise.all([
         readClaudeBlocks(),
         readClaudeUsage(),
         readClaudeAIQuota(),
         readCodexRateLimits(),
+        readDMBotUsage(),
       ])
       const data = {
         claude: { ...claude, session: claudeBlocks.activeBlock, quota: claudeQuota },
         codex: { rateLimits: codexRateLimits },
+        dmBot,
         updatedAt: new Date().toISOString(),
       }
       cache = { at: Date.now(), data }

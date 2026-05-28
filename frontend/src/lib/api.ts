@@ -78,6 +78,7 @@ export type AIUsage = {
   codex: {
     rateLimits: { session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }
   }
+  dmBot?: ProviderUsage & { byModel: Record<string, UsageBucket> }
   updatedAt: string
 }
 
