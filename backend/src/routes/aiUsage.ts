@@ -70,6 +70,8 @@ const CODEX_BIN = '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/@openai
 const OPENCLAW_AUTH_PROFILES = path.join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json')
 const CODEX_AUTH_JSON = path.join(homedir(), '.codex', 'auth.json')
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+const ANTHROPIC_OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 
 // Claude.ai org UUID for the claude.ai Pro org (rate_limit_tier: default_claude_ai)
 // Discovered via /api/bootstrap; cached in-memory after first discovery
@@ -127,10 +129,37 @@ function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
   }
 }
 
+async function getClaudeOAuthAccessToken(configDir: string): Promise<string | null> {
+  const credsPath = path.join(configDir, '.credentials.json')
+  const creds = JSON.parse(readFileSync(credsPath, 'utf8'))
+  const oauth = creds?.claudeAiOauth
+  if (!oauth?.accessToken) return null
+
+  if (oauth.refreshToken && (!oauth.expiresAt || Date.now() > Number(oauth.expiresAt) - 60_000)) {
+    const resp = await fetch(ANTHROPIC_OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+        refresh_token: oauth.refreshToken,
+      }),
+    })
+    if (!resp.ok) throw new Error(`refresh failed: ${resp.status}`)
+    const data = await resp.json() as { access_token?: string; refresh_token?: string; expires_in?: number }
+    if (!data.access_token) throw new Error('refresh returned no access token')
+    oauth.accessToken = data.access_token
+    oauth.refreshToken = data.refresh_token ?? oauth.refreshToken
+    oauth.expiresAt = Date.now() + Number(data.expires_in ?? 0) * 1000 - 5 * 60 * 1000
+    writeFileSync(credsPath, JSON.stringify(creds, null, 2))
+  }
+
+  return oauth.accessToken
+}
+
 async function readClaudeOAuthQuota(configDir: string): Promise<ClaudeQuota | null> {
   try {
-    const creds = JSON.parse(readFileSync(path.join(configDir, '.credentials.json'), 'utf8'))
-    const accessToken = creds?.claudeAiOauth?.accessToken
+    const accessToken = await getClaudeOAuthAccessToken(configDir)
     if (!accessToken) return null
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
