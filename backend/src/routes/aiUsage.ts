@@ -224,13 +224,14 @@ async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null
   }
 }
 
-async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; cur7dTokens: number }> {
+async function readClaudeBlocks(env?: NodeJS.ProcessEnv): Promise<{ activeBlock: ClaudeBlock | null; cur7dTokens: number }> {
   try {
     const since = new Date()
     since.setDate(since.getDate() - 35)
     const { stdout } = await exec(CCUSAGE_BIN, ['blocks', '--json', '--since', yyyymmdd(since)], {
       timeout: 30_000,
       maxBuffer: 32 * 1024 * 1024,
+      env: env ? { ...process.env, ...env } : process.env,
     })
     const parsed = JSON.parse(stdout) as { blocks?: any[] }
     const blocks = parsed.blocks ?? []
@@ -257,7 +258,7 @@ async function readClaudeBlocks(): Promise<{ activeBlock: ClaudeBlock | null; cu
   }
 }
 
-async function readClaudeUsage(): Promise<ProviderUsage & { byModel: Record<string, Bucket> }> {
+async function readClaudeUsage(env?: NodeJS.ProcessEnv): Promise<ProviderUsage & { byModel: Record<string, Bucket> }> {
   const since = new Date()
   since.setDate(since.getDate() - 30)
   const result = { ...emptyProvider(), byModel: {} as Record<string, Bucket> }
@@ -265,6 +266,7 @@ async function readClaudeUsage(): Promise<ProviderUsage & { byModel: Record<stri
     const { stdout } = await exec(CCUSAGE_BIN, ['daily', '--json', '--offline', '--since', yyyymmdd(since)], {
       timeout: 20_000,
       maxBuffer: 16 * 1024 * 1024,
+      env: env ? { ...process.env, ...env } : process.env,
     })
     const parsed = JSON.parse(stdout) as { daily?: Array<{ date: string; totalTokens: number; totalCost: number; modelBreakdowns?: Array<{ modelName: string; inputTokens: number; outputTokens: number; cacheCreationTokens: number; cacheReadTokens: number; cost: number }> }> }
     const todayKey = localDateKey(Date.now())
@@ -384,16 +386,28 @@ async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
-      const [claudeBlocks, claude, claudeQuota, codexRateLimits, dmBot] = await Promise.all([
+      const botClaudeEnv = { CLAUDE_CONFIG_DIR: '/home/brendon/dm-bot-runtime/.claude' }
+      const [teamClaudeBlocks, teamClaude, botClaudeBlocks, botClaude, claudeQuota, codexUsage, codexRateLimits, dmBot] = await Promise.all([
         readClaudeBlocks(),
         readClaudeUsage(),
+        readClaudeBlocks(botClaudeEnv),
+        readClaudeUsage(botClaudeEnv),
         readClaudeAIQuota(),
+        readCodexUsage(),
         readCodexRateLimits(),
         readDMBotUsage(),
       ])
+      const claude = { ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: claudeQuota }
       const data = {
-        claude: { ...claude, session: claudeBlocks.activeBlock, quota: claudeQuota },
-        codex: { rateLimits: codexRateLimits },
+        // legacy fields kept so old deployed frontends don't eat drywall
+        claude,
+        codex: { ...codexUsage, rateLimits: codexRateLimits },
+        // explicit client list for the dashboard panel
+        aiClients: [
+          { id: 'claude-work', kind: 'claude', label: 'claude user@example.com', ...claude },
+          { id: 'claude-botacct', kind: 'claude', label: 'claude bot@example.com', ...botClaude, session: botClaudeBlocks.activeBlock, quota: null },
+          { id: 'codex-work', kind: 'codex', label: 'codex user@example.com', ...codexUsage, rateLimits: codexRateLimits },
+        ],
         dmBot,
         updatedAt: new Date().toISOString(),
       }

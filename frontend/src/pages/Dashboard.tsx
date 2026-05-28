@@ -19,6 +19,14 @@ const fmtAgo = (ms: number | null): string | null => {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
+const fmtTokens = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}m`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
+  return String(Math.round(n))
+}
+
+const fmtMoney = (n: number) => n > 0 ? `$${n.toFixed(2)}` : '—'
+
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = claude
@@ -298,53 +306,63 @@ export default function Dashboard() {
             <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
           ) : aiUsage.data ? (
             <div className="space-y-6">
-              <div className="space-y-3">
-                <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Claude</div>
-                {aiUsage.data.claude.quota ? (
-                  <>
-                    <UsageBar
-                      claude
-                      pct={aiUsage.data.claude.quota.sessionPct}
-                      label="Current session"
-                      sub={aiUsage.data.claude.quota.sessionResetsAt
-                        ? `Resets in ${Math.max(0, Math.round((new Date(aiUsage.data.claude.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min`
-                        : undefined}
-                    />
-                    <UsageBar
-                      claude
-                      pct={aiUsage.data.claude.quota.weeklyPct}
-                      label="This week"
-                      sub={aiUsage.data.claude.quota.weeklyResetsAt
-                        ? `Resets ${new Date(aiUsage.data.claude.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-                        : undefined}
-                    />
-                  </>
-                ) : aiUsage.data.claude.session ? (
-                  <div className="text-xs text-[var(--color-text-dim)]">Session active · quota unavailable</div>
-                ) : (
-                  <div className="text-xs text-[var(--color-text-dim)]">No active session</div>
-                )}
-              </div>
-              {aiUsage.data.codex.rateLimits.session5h || aiUsage.data.codex.rateLimits.weekly ? (
-                <div className="space-y-3">
-                  <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Codex</div>
-                  {aiUsage.data.codex.rateLimits.session5h && (
-                    <UsageBar
-                      codex
-                      pct={aiUsage.data.codex.rateLimits.session5h.pct}
-                      label="5h session"
-                      sub={`Resets in ${Math.max(0, Math.round((aiUsage.data.codex.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
-                    />
-                  )}
-                  {aiUsage.data.codex.rateLimits.weekly && (
-                    <UsageBar
-                      codex
-                      pct={aiUsage.data.codex.rateLimits.weekly.pct}
-                      label="Weekly"
-                    />
-                  )}
+              {(aiUsage.data.aiClients ?? [
+                { id: 'claude-work', kind: 'claude' as const, label: 'claude user@example.com', ...aiUsage.data.claude },
+                { id: 'codex-work', kind: 'codex' as const, label: 'codex user@example.com', ...aiUsage.data.codex },
+              ]).map((client) => (
+                <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.label}</div>
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.kind}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(['today', 'last7d', 'last30d'] as const).map((period) => (
+                      <div key={period} className="space-y-0.5">
+                        <div className="text-[10px] text-[var(--color-text-faint)]">{period === 'today' ? 'today' : period === 'last7d' ? '7d' : '30d'}</div>
+                        <div className="text-sm font-semibold text-[var(--color-text)]">{fmtTokens(client[period].tokens)}</div>
+                        <div className="text-[10px] text-[var(--color-text-faint)]">{fmtMoney(client[period].costUSD)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {client.kind === 'claude' && client.quota ? (
+                    <div className="space-y-2">
+                      <UsageBar
+                        claude
+                        pct={client.quota.sessionPct}
+                        label="Current session"
+                        sub={client.quota.sessionResetsAt
+                          ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min`
+                          : undefined}
+                      />
+                      <UsageBar
+                        claude
+                        pct={client.quota.weeklyPct}
+                        label="This week"
+                        sub={client.quota.weeklyResetsAt
+                          ? `Resets ${new Date(client.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                          : undefined}
+                      />
+                    </div>
+                  ) : client.kind === 'claude' && client.session ? (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">
+                      Session active · resets in {Math.max(0, Math.round((new Date(client.session.endTime).getTime() - Date.now()) / 60000))} min · quota cookie stale
+                    </div>
+                  ) : null}
+                  {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
+                    <div className="space-y-2">
+                      {client.rateLimits.session5h && (
+                        <UsageBar
+                          codex
+                          pct={client.rateLimits.session5h.pct}
+                          label="5h session"
+                          sub={`Resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
+                        />
+                      )}
+                      {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Weekly" />}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              ))}
               {aiUsage.data.dmBot && (aiUsage.data.dmBot.last30d.messages > 0) && (() => {
                 const dm = aiUsage.data.dmBot!
                 const topModel = Object.entries(dm.byModel).sort((a, b) => b[1].tokens - a[1].tokens)[0]?.[0] ?? null

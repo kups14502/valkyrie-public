@@ -3,7 +3,7 @@ import path from 'node:path'
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
 const POLL_MS = 60_000
-const SOON_WINDOW_MS = 60 * 60_000
+const SOON_WINDOW_MS = 30 * 60_000
 const RESETSAT_JITTER_MS = 30 * 60_000
 const DISK_THRESHOLD = 90
 const CLAUDE_THRESHOLD = 90
@@ -74,6 +74,7 @@ async function fetchJSON<T>(p: string): Promise<T | null> {
 
 type AIUsageShape = {
   claude: {
+    session: { isActive: boolean; endTime: string } | null
     quota: { sessionPct: number; sessionResetsAt: string | null } | null
   }
 }
@@ -104,8 +105,10 @@ async function tick(state: AlertState): Promise<AlertState> {
   const now = Date.now()
 
   const quota = ai?.claude?.quota
-  if (quota?.sessionResetsAt) {
-    const resetsAt = quota.sessionResetsAt
+  const sessionReset = ai?.claude?.session?.isActive ? ai.claude.session.endTime : null
+  const resetSource = quota?.sessionResetsAt ?? sessionReset
+  if (resetSource) {
+    const resetsAt = resetSource
     const resetsAtMs = Date.parse(resetsAt)
     const prevResetsAtMs = state.sessionResetsAt ? Date.parse(state.sessionResetsAt) : NaN
 
@@ -120,15 +123,18 @@ async function tick(state: AlertState): Promise<AlertState> {
     const soonAlertedMs = state.soonAlertedFor ? Date.parse(state.soonAlertedFor) : NaN
     const alreadySoonAlerted = Number.isFinite(soonAlertedMs) && Math.abs(resetsAtMs - soonAlertedMs) <= RESETSAT_JITTER_MS
     if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && !alreadySoonAlerted) {
-      await postDiscord(`⏳ **Claude session resets in ~${fmtMins(untilReset)}** — at ${fmtClock(resetsAt)} ET. Usage: ${quota.sessionPct}%.`)
+      const usage = quota ? ` Usage: ${quota.sessionPct}%.` : ''
+      await postDiscord(`⏳ **Claude session resets in ~${fmtMins(untilReset)}** — at ${fmtClock(resetsAt)} ET.${usage}`)
       next.soonAlertedFor = resetsAt
     }
 
-    const over = quota.sessionPct >= CLAUDE_THRESHOLD
-    if (over && !state.claudeOver90) {
-      await postDiscord(`🔴 **Claude session at ${quota.sessionPct}%** — resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`)
+    if (quota) {
+      const over = quota.sessionPct >= CLAUDE_THRESHOLD
+      if (over && !state.claudeOver90) {
+        await postDiscord(`🔴 **Claude session at ${quota.sessionPct}%** — resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`)
+      }
+      next.claudeOver90 = over
     }
-    next.claudeOver90 = over
   }
 
   if (sys?.disk) {
