@@ -19,14 +19,6 @@ const fmtAgo = (ms: number | null): string | null => {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-const fmtTokens = (n: number) => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}m`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
-  return String(Math.round(n))
-}
-
-const fmtMoney = (n: number) => n > 0 ? `$${n.toFixed(2)}` : '—'
-
 function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
   const clamped = Math.min(pct, 100)
   const color = claude
@@ -307,22 +299,16 @@ export default function Dashboard() {
           ) : aiUsage.data ? (
             <div className="space-y-6">
               {(aiUsage.data.aiClients ?? [
-                { id: 'claude-work', kind: 'claude' as const, label: 'claude user@example.com', ...aiUsage.data.claude },
-                { id: 'codex-work', kind: 'codex' as const, label: 'codex user@example.com', ...aiUsage.data.codex },
+                { id: 'claude-work', kind: 'claude' as const, label: 'user@example.com', subscription: 'Claude Pro', ...aiUsage.data.claude },
+                { id: 'codex-work', kind: 'codex' as const, label: 'Codex user@example.com', subscription: 'Codex', ...aiUsage.data.codex },
               ]).map((client) => (
                 <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.label}</div>
-                    <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.kind}</div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(['today', 'last7d', 'last30d'] as const).map((period) => (
-                      <div key={period} className="space-y-0.5">
-                        <div className="text-[10px] text-[var(--color-text-faint)]">{period === 'today' ? 'today' : period === 'last7d' ? '7d' : '30d'}</div>
-                        <div className="text-sm font-semibold text-[var(--color-text)]">{fmtTokens(client[period].tokens)}</div>
-                        <div className="text-[10px] text-[var(--color-text-faint)]">{fmtMoney(client[period].costUSD)}</div>
-                      </div>
-                    ))}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
+                      <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
+                    </div>
+                    <div className="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.subscription}</div>
                   </div>
                   {client.kind === 'claude' && client.quota ? (
                     <div className="space-y-2">
@@ -331,22 +317,20 @@ export default function Dashboard() {
                         pct={client.quota.sessionPct}
                         label="Current session"
                         sub={client.quota.sessionResetsAt
-                          ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min`
-                          : undefined}
+                          ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min${client.quota.status ? ` · ${client.quota.status.replace(/_/g, ' ')}` : ''}`
+                          : client.quota.status?.replace(/_/g, ' ')}
                       />
                       <UsageBar
                         claude
                         pct={client.quota.weeklyPct}
-                        label="This week"
+                        label="Subscription week"
                         sub={client.quota.weeklyResetsAt
                           ? `Resets ${new Date(client.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
                           : undefined}
                       />
                     </div>
-                  ) : client.kind === 'claude' && client.session ? (
-                    <div className="text-[11px] text-[var(--color-text-faint)]">
-                      Session active · resets in {Math.max(0, Math.round((new Date(client.session.endTime).getTime() - Date.now()) / 60000))} min · quota cookie stale
-                    </div>
+                  ) : client.kind === 'claude' ? (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
                   ) : null}
                   {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
                     <div className="space-y-2">
@@ -358,8 +342,10 @@ export default function Dashboard() {
                           sub={`Resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
                         />
                       )}
-                      {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Weekly" />}
+                      {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Subscription week" />}
                     </div>
+                  ) : client.kind === 'codex' ? (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
                   ) : null}
                 </div>
               ))}

@@ -28,6 +28,13 @@ type ClaudeQuota = {
   weeklyPct: number
   sessionResetsAt: string | null
   weeklyResetsAt: string | null
+  status?: string | null
+}
+
+type ClaudeAccount = {
+  email: string
+  subscription: string
+  configDir: string
 }
 
 type CodexRateLimit = {
@@ -93,6 +100,55 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
     claudeAIOrgUUID = claudeAIOrg?.organization?.uuid ?? null
     return claudeAIOrgUUID
   } catch {
+    return null
+  }
+}
+
+const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
+  { email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude' },
+  { email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
+]
+
+function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
+  const sessionUtil = headers.get('anthropic-ratelimit-unified-5h-utilization')
+  const weeklyUtil = headers.get('anthropic-ratelimit-unified-7d-utilization')
+  if (!sessionUtil && !weeklyUtil) return null
+  const resetIso = (value: string | null) => {
+    const n = Number(value)
+    return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : null
+  }
+  return {
+    sessionPct: Math.round(Number(sessionUtil ?? 0) * 100),
+    weeklyPct: Math.round(Number(weeklyUtil ?? 0) * 100),
+    sessionResetsAt: resetIso(headers.get('anthropic-ratelimit-unified-5h-reset')),
+    weeklyResetsAt: resetIso(headers.get('anthropic-ratelimit-unified-7d-reset')),
+    status: headers.get('anthropic-ratelimit-unified-status'),
+  }
+}
+
+async function readClaudeOAuthQuota(configDir: string): Promise<ClaudeQuota | null> {
+  try {
+    const creds = JSON.parse(readFileSync(path.join(configDir, '.credentials.json'), 'utf8'))
+    const accessToken = creds?.claudeAiOauth?.accessToken
+    if (!accessToken) return null
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'oauth-2025-04-20',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'x' }],
+      }),
+    })
+    if (!resp.ok) return null
+    return parseClaudeRateLimitHeaders(resp.headers)
+  } catch (err) {
+    console.error('[ai-usage] claude oauth quota failed', (err as Error).message)
     return null
   }
 }
@@ -386,27 +442,28 @@ async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
-      const botClaudeEnv = { CLAUDE_CONFIG_DIR: '/home/brendon/dm-bot-runtime/.claude' }
-      const [teamClaudeBlocks, teamClaude, botClaudeBlocks, botClaude, claudeQuota, codexUsage, codexRateLimits, dmBot] = await Promise.all([
+      const botClaudeEnv = { CLAUDE_CONFIG_DIR: CLAUDE_ACCOUNTS[1].configDir }
+      const [teamClaudeBlocks, teamClaude, botClaudeBlocks, botClaude, teamClaudeQuota, botClaudeQuota, codexUsage, codexRateLimits, dmBot] = await Promise.all([
         readClaudeBlocks(),
         readClaudeUsage(),
         readClaudeBlocks(botClaudeEnv),
         readClaudeUsage(botClaudeEnv),
-        readClaudeAIQuota(),
+        readClaudeOAuthQuota(CLAUDE_ACCOUNTS[0].configDir),
+        readClaudeOAuthQuota(CLAUDE_ACCOUNTS[1].configDir),
         readCodexUsage(),
         readCodexRateLimits(),
         readDMBotUsage(),
       ])
-      const claude = { ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: claudeQuota }
+      const claude = { ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: teamClaudeQuota }
       const data = {
-        // legacy fields kept so old deployed frontends don't eat drywall
+        // legacy fields kept for alerts / older deployed frontends
         claude,
         codex: { ...codexUsage, rateLimits: codexRateLimits },
-        // explicit client list for the dashboard panel
+        // explicit client list for the dashboard panel; display quota/rate-limit percentages, not token totals
         aiClients: [
-          { id: 'claude-work', kind: 'claude', label: 'claude user@example.com', ...claude },
-          { id: 'claude-botacct', kind: 'claude', label: 'claude bot@example.com', ...botClaude, session: botClaudeBlocks.activeBlock, quota: null },
-          { id: 'codex-work', kind: 'codex', label: 'codex user@example.com', ...codexUsage, rateLimits: codexRateLimits },
+          { id: 'claude-work', kind: 'claude', label: 'user@example.com', subscription: CLAUDE_ACCOUNTS[0].subscription, ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: teamClaudeQuota },
+          { id: 'claude-botacct', kind: 'claude', label: 'bot@example.com', subscription: CLAUDE_ACCOUNTS[1].subscription, ...botClaude, session: botClaudeBlocks.activeBlock, quota: botClaudeQuota },
+          { id: 'codex-work', kind: 'codex', label: 'Codex user@example.com', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
         ],
         dmBot,
         updatedAt: new Date().toISOString(),

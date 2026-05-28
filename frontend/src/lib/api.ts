@@ -65,6 +65,7 @@ export type ClaudeQuota = {
   weeklyPct: number
   sessionResetsAt: string | null
   weeklyResetsAt: string | null
+  status?: string | null
 }
 
 export type CodexRateLimit = { pct: number; windowMins: number; resetsAt: number }
@@ -73,6 +74,7 @@ export type ClaudeUsageClient = ProviderUsage & {
   id: string
   kind: 'claude'
   label: string
+  subscription: string
   byModel: Record<string, UsageBucket>
   session: ClaudeSession | null
   quota: ClaudeQuota | null
@@ -81,6 +83,7 @@ export type CodexUsageClient = ProviderUsage & {
   id: string
   kind: 'codex'
   label: string
+  subscription: string
   rateLimits: RateLimits
 }
 export type AIClientUsage = ClaudeUsageClient | CodexUsageClient
