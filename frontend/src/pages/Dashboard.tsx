@@ -155,9 +155,29 @@ function NowBanner() {
 
   const loading = sys.isLoading && sessions.isLoading && aiUsage.isLoading && vault.isLoading
 
+  const alertSegments = segments.filter((s) => s.tone === 'alert' || s.tone === 'watch')
+
   return (
-    <section className="border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <section className="border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
+      {/* mobile: compact single line */}
+      <div className="flex items-center justify-between gap-3 sm:hidden">
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          {alertSegments.map((s) => (
+            <span key={s.label} className={`inline-flex items-center gap-1 text-[10px] ${toneText[s.tone]}`}>
+              <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
+              [{s.label}]
+            </span>
+          ))}
+        </div>
+        {!loading && (
+          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${toneText[verdictTone]}`}>
+            &gt; {verdict}
+          </span>
+        )}
+      </div>
+      {/* desktop: full segments */}
+      <div className="hidden sm:flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
         <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-2">
           {loading ? (

@@ -1,7 +1,7 @@
-import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { lazy, Suspense, useState } from 'react'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail, Menu, X } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import Dashboard from './pages/Dashboard'
 
@@ -40,11 +40,42 @@ const navItems = [
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
 
+function MobileMenu({ onClose }: { onClose: () => void }) {
+  const location = useLocation()
+  return (
+    <div className="sm:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+      <div className="mx-auto max-w-[1600px] px-6 py-3 grid grid-cols-3 gap-2">
+        {navItems.map(({ to, label, icon: Icon }) => {
+          const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              onClick={onClose}
+              className={`flex items-center gap-2 border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
+                isActive
+                  ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
+              }`}
+              style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
+            >
+              <Icon size={12} />
+              {label}
+            </NavLink>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Shell() {
+  const [menuOpen, setMenuOpen] = useState(false)
+
   return (
     <div className="min-h-full bg-[var(--color-bg)] text-[var(--color-text)]">
       <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-6 py-3">
+        <div className="mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-3 sm:px-6">
           <div className="flex-1 min-w-0">
             <div
               className="text-base font-bold tracking-widest"
@@ -56,8 +87,10 @@ function Shell() {
               mc · build:{BUILD_ID.slice(0, 7)}
             </div>
           </div>
-          <ThemePicker />
-          <nav className="flex flex-1 items-center justify-end gap-0.5 font-mono">
+          {/* theme picker: hidden on mobile */}
+          <div className="hidden sm:block"><ThemePicker /></div>
+          {/* desktop nav */}
+          <nav className="hidden sm:flex flex-1 items-center justify-end gap-0.5 font-mono">
             {navItems.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
@@ -76,13 +109,23 @@ function Shell() {
                 {({ isActive }) => (
                   <>
                     <Icon size={13} />
-                    <span className="hidden sm:inline">{isActive ? `[${label}]` : label}</span>
+                    <span>{isActive ? `[${label}]` : label}</span>
                   </>
                 )}
               </NavLink>
             ))}
           </nav>
+          {/* mobile hamburger */}
+          <button
+            type="button"
+            className="sm:hidden border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Menu"
+          >
+            {menuOpen ? <X size={16} /> : <Menu size={16} />}
+          </button>
         </div>
+        {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-8">
