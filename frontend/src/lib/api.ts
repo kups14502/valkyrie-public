@@ -223,7 +223,8 @@ export type LauncherEntry = {
   id: string
   name: string
   url: string
-  category: 'media' | 'home' | 'tools' | 'self'
+  category: 'media' | 'home' | 'tools' | 'self' | 'ai' | 'trading' | 'storage'
+  owner?: string
   health: 'alive' | 'down' | 'unknown'
   latencyMs: number | null
 }

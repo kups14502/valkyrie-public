@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
-import { fetchServices, restartService, type ServiceContainer, type ServiceUnit } from '../lib/api'
+import { fetchLauncher, fetchServices, restartService, type LauncherEntry, type ServiceContainer, type ServiceUnit } from '../lib/api'
 
 function containerToneColor(state: string): string {
   if (state === 'running') return 'text-[var(--color-success)]'
@@ -48,6 +48,31 @@ function ContainerRow({ c, onRestart, pending }: { c: ServiceContainer; onRestar
   )
 }
 
+function AppTile({ app }: { app: LauncherEntry }) {
+  const dot = app.health === 'alive' ? 'bg-[var(--color-success)]' : app.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
+  const tone = app.health === 'alive' ? 'text-[var(--color-text)]' : app.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
+  return (
+    <a
+      href={app.url}
+      target="_blank"
+      rel="noreferrer"
+      className={`block border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-3 transition hover:border-[var(--color-accent)] ${tone}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
+          <span className="truncate text-sm font-semibold">{app.name}</span>
+        </span>
+        {app.latencyMs != null && <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{app.latencyMs}ms</span>}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
+        <span>[{app.category}]</span>
+        {app.owner && <span>[{app.owner}]</span>}
+      </div>
+    </a>
+  )
+}
+
 function ServiceRow({ s, onRestart, pending }: { s: ServiceUnit; onRestart: () => void; pending: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2 text-sm">
@@ -75,6 +100,7 @@ function ServiceRow({ s, onRestart, pending }: { s: ServiceUnit; onRestart: () =
 export default function Services() {
   const qc = useQueryClient()
   const services = useQuery({ queryKey: ['services'], queryFn: fetchServices, refetchInterval: 15_000 })
+  const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
   const [pendingName, setPendingName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -91,6 +117,7 @@ export default function Services() {
 
   const containers = services.data?.containers ?? []
   const units = services.data?.services ?? []
+  const apps = launcher.data ?? []
   const runningContainers = containers.filter((c) => c.state === 'running').length
   const failedServices = units.filter((s) => s.active === 'failed').length
 
@@ -107,7 +134,7 @@ export default function Services() {
           <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Services</h1>
         </div>
         <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          [{runningContainers}/{containers.length} containers · {units.length} units{failedServices > 0 ? ` · ${failedServices} failed` : ''}]
+          [{apps.length} apps · {runningContainers}/{containers.length} containers · {units.length} units{failedServices > 0 ? ` · ${failedServices} failed` : ''}]
         </div>
       </div>
 
@@ -116,6 +143,20 @@ export default function Services() {
           {error}
         </div>
       )}
+
+      <Card title={`Web apps · ${apps.length}`}>
+        {launcher.isLoading && !launcher.data ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+        ) : launcher.error ? (
+          <div className="text-sm text-[var(--color-danger)]">App launcher unavailable</div>
+        ) : apps.length === 0 ? (
+          <div className="text-sm text-[var(--color-text-dim)]">No registered apps</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {apps.map((app) => <AppTile key={app.id} app={app} />)}
+          </div>
+        )}
+      </Card>
 
       {services.isLoading && !services.data ? (
         <Card><div className="text-sm text-[var(--color-text-dim)]">Loading…</div></Card>
