@@ -24,6 +24,7 @@ export function applyAccent(hex: string) {
   const [r, g, b] = rgb
   const root = document.documentElement
   root.style.setProperty('--color-accent', hex)
+  root.style.setProperty('--color-accent-rgb', `${r}, ${g}, ${b}`)
   root.style.setProperty('--color-border', `rgba(${r},${g},${b},0.14)`)
   root.style.setProperty('--color-border-strong', `rgba(${r},${g},${b},0.55)`)
   root.style.setProperty('--color-success', hex)
