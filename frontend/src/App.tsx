@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp } from 'lucide-react'
+import { ThemePicker } from './components/ThemePicker'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -41,8 +42,8 @@ function Shell() {
   return (
     <div className="min-h-full bg-[var(--color-bg)] text-[var(--color-text)]">
       <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-6 py-3">
-          <div className="shrink-0 min-w-0">
+        <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-6 py-3">
+          <div className="flex-1 min-w-0">
             <div
               className="text-base font-bold tracking-widest"
               style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
@@ -53,6 +54,7 @@ function Shell() {
               master-control · build:{BUILD_ID}
             </div>
           </div>
+          <ThemePicker />
           <nav className="flex flex-1 items-center justify-end gap-0.5 font-mono">
             {navItems.map(({ to, label, icon: Icon }) => (
               <NavLink
