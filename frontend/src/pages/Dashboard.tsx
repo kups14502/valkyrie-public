@@ -207,92 +207,6 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <NowBanner />
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
-        </div>
-        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          [live telemetry]
-        </div>
-      </div>
-
-      <Card title="Server">
-        {sys.isLoading ? (
-          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-        ) : sysUnauthorized ? (
-          <div className="space-y-1 text-sm">
-            <div className="text-[var(--color-warning)]">Access handshake required</div>
-            <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
-          </div>
-        ) : sysBackendUnavailable ? (
-          <div className="space-y-1 text-sm">
-            <div className="text-[var(--color-danger)]">API route unavailable</div>
-            <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
-          </div>
-        ) : sys.error ? (
-          <div className="space-y-1 text-sm">
-            <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
-            {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
-          </div>
-        ) : sys.data && sysValid ? (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat
-              label="CPU"
-              value={`${sys.data.cpu.usage.toFixed(1)}%`}
-              sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
-              chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
-            />
-            <Stat
-              label="Memory"
-              value={`${sys.data.memory.percent.toFixed(0)}%`}
-              sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
-              chart={<Sparkline values={memSeries} color="#7a5cff" />}
-            />
-            <Stat
-              label="Disk"
-              value={`${sys.data.disk.percent.toFixed(0)}%`}
-              sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
-              chart={<Sparkline values={diskSeries} color="#48e3ce" />}
-            />
-            <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
-          </div>
-        ) : sys.data ? (
-          <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
-        ) : null}
-      </Card>
-
-      <Card title="Launcher">
-        {launcher.isLoading && !launcher.data ? (
-          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-        ) : launcher.error ? (
-          <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {(launcher.data ?? []).map((s) => {
-              const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
-              const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
-              return (
-                <a
-                  key={s.id}
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
-                    <span className="truncate text-sm">{s.name}</span>
-                  </span>
-                  {s.latencyMs != null && (
-                    <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
-                  )}
-                </a>
-              )
-            })}
-          </div>
-        )}
-      </Card>
 
       <div className="space-y-6">
         <Card title="AI Usage">
@@ -436,6 +350,93 @@ export default function Dashboard() {
           )}
         </Card>
       </div>
+
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
+          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
+        </div>
+        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+          [live telemetry]
+        </div>
+      </div>
+
+      <Card title="Server">
+        {sys.isLoading ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+        ) : sysUnauthorized ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-warning)]">Access handshake required</div>
+            <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
+          </div>
+        ) : sysBackendUnavailable ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-danger)]">API route unavailable</div>
+            <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
+          </div>
+        ) : sys.error ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
+            {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
+          </div>
+        ) : sys.data && sysValid ? (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <Stat
+              label="CPU"
+              value={`${sys.data.cpu.usage.toFixed(1)}%`}
+              sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
+              chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
+            />
+            <Stat
+              label="Memory"
+              value={`${sys.data.memory.percent.toFixed(0)}%`}
+              sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
+              chart={<Sparkline values={memSeries} color="#7a5cff" />}
+            />
+            <Stat
+              label="Disk"
+              value={`${sys.data.disk.percent.toFixed(0)}%`}
+              sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
+              chart={<Sparkline values={diskSeries} color="#48e3ce" />}
+            />
+            <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
+          </div>
+        ) : sys.data ? (
+          <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
+        ) : null}
+      </Card>
+
+      <Card title="Launcher">
+        {launcher.isLoading && !launcher.data ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+        ) : launcher.error ? (
+          <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {(launcher.data ?? []).map((s) => {
+              const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
+              const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
+              return (
+                <a
+                  key={s.id}
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
+                    <span className="truncate text-sm">{s.name}</span>
+                  </span>
+                  {s.latencyMs != null && (
+                    <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
+                  )}
+                </a>
+              )
+            })}
+          </div>
+        )}
+      </Card>
 
       <Card title="Recent activity">
         {activity.isLoading && !activity.data ? (

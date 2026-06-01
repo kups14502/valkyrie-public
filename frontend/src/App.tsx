@@ -52,8 +52,8 @@ function Shell() {
             >
               BRNDN<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
             </div>
-            <div className="text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)] mt-0.5">
-              master-control · build:{BUILD_ID}
+            <div className="hidden sm:block text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)] mt-0.5 truncate max-w-[180px]">
+              mc · build:{BUILD_ID.slice(0, 7)}
             </div>
           </div>
           <ThemePicker />
