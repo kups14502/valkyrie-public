@@ -294,8 +294,8 @@ export default function Dashboard() {
         )}
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
-        <Card title="AI Clients">
+      <div className="space-y-6">
+        <Card title="AI Usage">
           {aiUsage.isLoading && !aiUsage.data ? (
             <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
           ) : aiUsage.error ? (
@@ -393,7 +393,7 @@ export default function Dashboard() {
           ) : null}
         </Card>
 
-        <Card title={`Sessions (${sessionsList.length})`}>
+        <Card title={`Sessions (${sessionsList.length})`} >
           {sessionsList.length > 0 ? (
             <div className="space-y-2">
               {sessionsList.map((s) => (
