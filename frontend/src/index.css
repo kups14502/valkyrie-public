@@ -36,6 +36,39 @@ body {
 
 * { box-sizing: border-box; }
 
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 65, 0.55) #000000;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000000;
+  border-left: 1px solid rgba(0, 255, 65, 0.08);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 255, 65, 0.85),
+    rgba(0, 255, 65, 0.28)
+  );
+  border: 2px solid #000000;
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 65, 0.35), 0 0 8px rgba(0, 255, 65, 0.25);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+::-webkit-scrollbar-corner {
+  background: #000000;
+}
+
 ::selection {
   background: rgba(0, 255, 65, 0.3);
   color: #000;

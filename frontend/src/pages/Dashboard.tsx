@@ -230,6 +230,16 @@ export default function Dashboard() {
     <div className="space-y-8">
       <NowBanner />
 
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
+          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
+        </div>
+        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+          [live telemetry]
+        </div>
+      </div>
+
       <div className="space-y-6">
         <Card title="AI Usage">
           {aiUsage.isLoading && !aiUsage.data ? (
@@ -371,16 +381,6 @@ export default function Dashboard() {
             <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
           )}
         </Card>
-      </div>
-
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
-        </div>
-        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          [live telemetry]
-        </div>
       </div>
 
       <Card title="Server">
