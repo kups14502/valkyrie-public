@@ -385,3 +385,38 @@ export const fetchProjects = async () => {
   if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid projects response')
   return r.data as ProjectStatus[]
 }
+
+export type EmailMessage = {
+  account: string
+  uid: string
+  message_id: string
+  sender: string
+  subject: string
+  date: string
+  classification: string
+  reason: string
+  snippet: string
+  seen_at: string
+}
+
+export type EmailsResponse = {
+  messages: EmailMessage[]
+  total: number
+  accounts: { account: string; count: number }[]
+  byClassification: { classification: string; count: number }[]
+}
+
+export const fetchEmails = async (params: { account?: string; classification?: string; limit?: number; offset?: number } = {}) => {
+  const q = new URLSearchParams()
+  if (params.account) q.set('account', params.account)
+  if (params.classification) q.set('classification', params.classification)
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.offset != null) q.set('offset', String(params.offset))
+  const r = await api.get<EmailsResponse>(`/emails?${q}`)
+  return r.data
+}
+
+export const fetchEmailStatus = async () => {
+  const r = await api.get<{ timer: Record<string, string>; service: Record<string, string>; dbStats: { total: number; lastSeen: string | null } }>('/emails/status')
+  return r.data
+}

@@ -13,6 +13,7 @@ import tradingRoute from './routes/trading.js'
 import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
+import emailsRoute from './routes/emails.js'
 import { startAlerts } from './alerts.js'
 
 const app = express()
@@ -68,6 +69,7 @@ app.use('/api', tradingRoute)
 app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
+app.use('/api', emailsRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
