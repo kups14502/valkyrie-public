@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { fetchLights, setLight, type LightState, type LightUpdate } from '../lib/api'
@@ -224,6 +224,13 @@ export default function Lights() {
   }
 
   const [bulkPct, setBulkPct] = useState<number | null>(null)
+
+  const bulkDisplayPct = useMemo(() => {
+    if (bulkPct !== null) return bulkPct
+    const onLights = all.filter((l) => !l.unavailable && l.on && l.brightness != null)
+    if (!onLights.length) return null
+    return Math.round(onLights.reduce((sum, l) => sum + pctFromBrightness(l.brightness), 0) / onLights.length)
+  }, [bulkPct, all])
   const bulkLastSentRef = useRef(0)
   const bulkTrailingRef = useRef<number | null>(null)
   const bulkSend = (pct: number) => {
@@ -284,7 +291,7 @@ export default function Lights() {
                 <div>
                   <div className="mb-1.5 flex items-baseline justify-between text-xs">
                     <span className="text-[var(--color-text-dim)]">Brightness</span>
-                    <span className="font-semibold text-[var(--color-text)]">{bulkPct ?? 100}%</span>
+                    <span className="font-semibold text-[var(--color-text)]">{bulkDisplayPct != null ? `${bulkDisplayPct}%` : '—'}</span>
                   </div>
                   <input
                     type="range"
