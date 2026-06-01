@@ -209,6 +209,7 @@ export type ServiceContainer = {
   status: string
   ports: string[]
   project: string | null
+  composeFile?: string | null
 }
 
 export type ServiceUnit = {
@@ -217,6 +218,30 @@ export type ServiceUnit = {
   active: string
   sub: string
   description: string
+  scope?: 'user' | 'system'
+}
+
+export type ServiceTimer = {
+  name: string
+  service: string
+  next: string
+  left: string
+  last: string
+  passed: string
+}
+
+export type ListeningPort = {
+  protocol: string
+  local: string
+  port: number | null
+  process: string | null
+  pid: number | null
+  exposure: 'public' | 'tailscale' | 'local' | 'docker' | 'lan' | 'unknown'
+}
+
+export type ComposeFile = {
+  path: string
+  project: string
 }
 
 export type LauncherEntry = {
@@ -232,6 +257,10 @@ export type LauncherEntry = {
 export type ServicesStatus = {
   containers: ServiceContainer[]
   services: ServiceUnit[]
+  systemServices?: ServiceUnit[]
+  timers?: ServiceTimer[]
+  ports?: ListeningPort[]
+  composeFiles?: ComposeFile[]
 }
 
 export type Activity = {
