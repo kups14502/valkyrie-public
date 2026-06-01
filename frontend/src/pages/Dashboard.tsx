@@ -411,11 +411,17 @@ export default function Dashboard() {
                       )}
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                      pid:{s.pid} · {fmtBytes(s.memory)}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                      pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
                     </div>
                   </div>
                   <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
-                    <div>{s.cpu.toFixed(1)}% cpu</div>
+                    <div>{s.cpu.toFixed(2)}% cpu</div>
+                    <div className="mt-0.5">
+                      {fmtBytes(s.memory)}
+                      {sys.data?.memory?.total
+                        ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
+                        : null}
+                    </div>
                     {s.lastActivity != null && (
                       <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
                         {fmtAgo(s.lastActivity)}
