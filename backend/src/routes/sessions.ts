@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { promises as fs, createReadStream, statSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { homedir } from 'node:os'
+import { homedir, cpus } from 'node:os'
 import path from 'node:path'
 
 const exec = promisify(execFile)
@@ -62,6 +62,7 @@ function projectLabel(cwd: string | null): string | null {
 
 router.get('/sessions', async (_req, res) => {
   try {
+    const coreCount = cpus().length || 1
     const { stdout } = await exec('ps', ['-eo', 'pid,pcpu,rss,etime,args'])
     const lines = stdout.trim().split('\n').slice(1)
     const rough = lines
@@ -74,7 +75,7 @@ router.get('/sessions', async (_req, res) => {
         const sessionMatch = args.match(/--resume\s+(\S+)/)
         return {
           pid: Number(pid),
-          cpu: Number(cpu),
+          cpu: Math.round((Number(cpu) / coreCount) * 100) / 100,
           memory: Number(rss) * 1024,
           startedAt: etime,
           model: modelMatch?.[1] ?? 'unknown',
