@@ -420,3 +420,24 @@ export const fetchEmailStatus = async () => {
   const r = await api.get<{ timer: Record<string, string>; service: Record<string, string>; dbStats: { total: number; lastSeen: string | null } }>('/emails/status')
   return r.data
 }
+
+export type EmailSignalItem = {
+  account: string; uid: string; sender: string; subject: string
+  date: string; classification: 'important' | 'routine'; reason: string
+  snippet: string; seen_at: string
+}
+
+export type EmailSignals = {
+  timer: { active: string | null; nextRun: string | null; lastTrigger: string | null }
+  service: { active: string | null; sub: string | null; result: string | null; lastStart: string | null }
+  accounts: { id: string; address: string; provider: string; enabled: boolean }[]
+  counts: { important24h: number; important7d: number; routine24h: number; routine7d: number; ignoredTotal: number; total: number }
+  items: EmailSignalItem[]
+  drafts: { filename: string; mtime: string; preview: string }[]
+  recentErrors: string[]
+}
+
+export const fetchEmailSignals = async () => {
+  const r = await api.get<EmailSignals>('/email/signals')
+  return r.data
+}
