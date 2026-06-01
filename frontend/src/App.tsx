@@ -44,26 +44,32 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   return (
     <div className="sm:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="mx-auto max-w-[1600px] px-6 py-3 grid grid-cols-3 gap-2">
-        {navItems.map(({ to, label, icon: Icon }) => {
-          const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
-          return (
-            <NavLink
-              key={to}
-              to={to}
-              onClick={onClose}
-              className={`flex items-center gap-2 border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
-                isActive
-                  ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
-              }`}
-              style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
-            >
-              <Icon size={12} />
-              {label}
-            </NavLink>
-          )
-        })}
+      <div className="mx-auto max-w-[1600px] px-6 py-3 space-y-3">
+        <div className="grid grid-cols-3 gap-2">
+          {navItems.map(({ to, label, icon: Icon }) => {
+            const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                onClick={onClose}
+                className={`flex items-center gap-2 border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
+                  isActive
+                    ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
+                    : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
+                }`}
+                style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
+              >
+                <Icon size={12} />
+                {label}
+              </NavLink>
+            )
+          })}
+        </div>
+        <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-3">
+          <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">accent color</span>
+          <ThemePicker />
+        </div>
       </div>
     </div>
   )

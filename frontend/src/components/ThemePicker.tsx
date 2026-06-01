@@ -76,7 +76,7 @@ export function ThemePicker() {
       </button>
 
       {open && (
-        <div className="absolute left-1/2 top-full z-50 mt-2 w-56 -translate-x-1/2 border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div className="absolute right-0 top-full z-50 mt-2 w-56 border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="mb-3 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">&gt; accent color</div>
 
           <div className="mb-4 grid grid-cols-4 gap-1.5">
