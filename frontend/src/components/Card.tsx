@@ -2,10 +2,17 @@ import type { ReactNode } from 'react'
 
 export function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+    <section className="panel p-5">
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          {title && <h2 className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-accent)]">// {title}</h2>}
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
+          {title && (
+            <h2
+              className="text-[11px] font-bold uppercase tracking-[0.22em]"
+              style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
+            >
+              &gt; {title}
+            </h2>
+          )}
           {action}
         </div>
       )}

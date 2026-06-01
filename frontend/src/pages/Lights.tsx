@@ -94,7 +94,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
   }
 
   return (
-    <div className={`border p-4 transition ${light.on ? 'border-[var(--color-warning)]/40 bg-[color:rgba(255,184,77,0.04)]' : 'border-[var(--color-border)] bg-[color:rgba(255,255,255,0.015)]'}`}>
+    <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="inline-block h-6 w-6 rounded-full border border-[var(--color-border)] shadow-inner" style={{ backgroundColor: swatchColor }} aria-hidden />
@@ -256,8 +256,8 @@ export default function Lights() {
     <div className="space-y-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">Environment</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Lights</h1>
+          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// env</div>
+          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>lights<span className="cursor-blink">_</span></h1>
         </div>
         <div className="flex gap-2">
           <button
