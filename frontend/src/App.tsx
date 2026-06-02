@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail, Activity as ActivityIcon, Menu, X } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import Dashboard from './pages/Dashboard'
 
@@ -10,6 +10,7 @@ const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
 const Services = lazy(() => import('./pages/Services'))
 const Emails = lazy(() => import('./pages/Emails'))
+const Activity = lazy(() => import('./pages/Activity'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ const navItems = [
   { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/trade', label: 'trade', icon: TrendingUp },
   { to: '/emails', label: 'emails', icon: Mail },
+  { to: '/activity', label: 'activity', icon: ActivityIcon },
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
@@ -144,6 +146,7 @@ function Shell() {
             <Route path="/vault" element={<Vault />} />
             <Route path="/trade" element={<TradeBot />} />
             <Route path="/emails" element={<Emails />} />
+            <Route path="/activity" element={<Activity />} />
           </Routes>
         </Suspense>
       </main>

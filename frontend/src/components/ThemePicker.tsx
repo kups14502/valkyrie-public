@@ -18,6 +18,26 @@ function hexToRgb(hex: string): [number, number, number] | null {
 
 const c = (n: number) => Math.min(255, Math.max(0, Math.round(n)))
 
+function updateScrollbarStyle(r: number, g: number, b: number) {
+  const id = 'mc-scrollbar-style'
+  let el = document.getElementById(id) as HTMLStyleElement | null
+  if (!el) {
+    el = document.createElement('style')
+    el.id = id
+    document.head.appendChild(el)
+  }
+  // Literal colors (not CSS vars) — webkit scrollbars don't repaint on var changes.
+  el.textContent = `
+    html { scrollbar-color: rgb(${r},${g},${b}) #000000; }
+    ::-webkit-scrollbar-track { border-left: 1px solid rgba(${r},${g},${b},0.08); }
+    ::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, rgba(${r},${g},${b},0.85), rgba(${r},${g},${b},0.28));
+      box-shadow: inset 0 0 0 1px rgba(${r},${g},${b},0.35), 0 0 8px rgba(${r},${g},${b},0.25);
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgb(${r},${g},${b}); }
+  `
+}
+
 export function applyAccent(hex: string) {
   const rgb = hexToRgb(hex)
   if (!rgb) return
@@ -31,6 +51,7 @@ export function applyAccent(hex: string) {
   root.style.setProperty('--color-text', `rgb(${c(r * 0.18 + 192)},${c(g * 0.18 + 192)},${c(b * 0.18 + 192)})`)
   root.style.setProperty('--color-text-dim', `rgb(${c(r * 0.45 + 90)},${c(g * 0.45 + 90)},${c(b * 0.45 + 90)})`)
   root.style.setProperty('--color-text-faint', `rgb(${c(r * 0.28 + 40)},${c(g * 0.28 + 40)},${c(b * 0.28 + 40)})`)
+  updateScrollbarStyle(r, g, b)
   localStorage.setItem('mc-accent', hex)
 }
 

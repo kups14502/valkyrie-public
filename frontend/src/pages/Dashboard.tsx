@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchActivity, fetchLauncher, fetchEmailSignals } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals } from '../lib/api'
 import { EmailSignalCard } from './Emails'
 
 const fmtBytes = (b: number) => {
@@ -210,7 +210,6 @@ export default function Dashboard() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
-  const activity = useQuery({ queryKey: ['activity'], queryFn: fetchActivity, refetchInterval: 60_000 })
   const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
   const emailSignals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 120_000 })
 
@@ -314,27 +313,6 @@ export default function Dashboard() {
                   ) : null}
                 </div>
               ))}
-              {aiUsage.data.dmBot && (aiUsage.data.dmBot.last30d.messages > 0) && (() => {
-                const dm = aiUsage.data.dmBot!
-                const topModel = Object.entries(dm.byModel).sort((a, b) => b[1].tokens - a[1].tokens)[0]?.[0] ?? null
-                return (
-                  <div className="space-y-3">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">DM Bot</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      {(['today', 'last7d', 'last30d'] as const).map((period) => (
-                        <div key={period} className="space-y-0.5">
-                          <div className="text-[10px] text-[var(--color-text-faint)]">{period === 'today' ? 'today' : period === 'last7d' ? '7d' : '30d'}</div>
-                          <div className="text-sm font-semibold text-[var(--color-text)]">{fmtTokens(dm[period].tokens)}</div>
-                          <div className="text-[10px] text-[var(--color-text-faint)]">{dm[period].messages} turns</div>
-                        </div>
-                      ))}
-                    </div>
-                    {topModel && (
-                      <div className="text-[11px] text-[var(--color-text-faint)]">model: {topModel}</div>
-                    )}
-                  </div>
-                )
-              })()}
             </div>
           ) : null}
         </Card>
@@ -518,38 +496,6 @@ export default function Dashboard() {
           </Card>
         )
       })()}
-
-      <Card title="Recent activity">
-        {activity.isLoading && !activity.data ? (
-          <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-        ) : activity.error ? (
-          <div className="text-sm text-[var(--color-danger)]">Activity feed unavailable</div>
-        ) : (activity.data?.length ?? 0) === 0 ? (
-          <div className="text-sm text-[var(--color-text-dim)]">No recent activity</div>
-        ) : (
-          <div className="divide-y divide-[var(--color-border)]">
-            {(activity.data ?? []).map((a) => {
-              const typeColor =
-                a.type === 'commit' ? 'text-[var(--color-success)]' :
-                a.type === 'trade' ? 'text-[var(--color-warning)]' :
-                'text-[var(--color-text-faint)]'
-              const typeLabel = a.type === 'commit' ? 'git' : a.type === 'trade' ? 'trd' : 'bak'
-              return (
-                <div key={a.id} className="flex items-baseline gap-3 py-2 text-sm">
-                  <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${typeColor}`}>[{typeLabel}]</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[var(--color-text)]">{a.title}</div>
-                    {a.subtitle && (
-                      <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">{a.subtitle}</div>
-                    )}
-                  </div>
-                  <span className="shrink-0 text-[11px] text-[var(--color-text-dim)]">{fmtAgo(a.timestamp)}</span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Card>
 
       <Card title="Projects / Feeds">
         {projectsList.length > 0 ? (
