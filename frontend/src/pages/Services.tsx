@@ -164,8 +164,8 @@ export default function Services() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">Homelab inventory</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Services</h1>
+          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// inventory</div>
+          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>services<span className="cursor-blink">_</span></h1>
         </div>
         <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
           [{apps.length} apps · {runningContainers}/{containers.length} containers · {allUnits.length} units · {ports.length} ports{publicPorts > 0 ? ` · ${publicPorts} public` : ''}{failedServices > 0 ? ` · ${failedServices} failed` : ''}]

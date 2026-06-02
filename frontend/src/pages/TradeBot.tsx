@@ -146,8 +146,8 @@ export default function TradeBot() {
     <div className="space-y-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">Market Link</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Trade Bot</h1>
+          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// market</div>
+          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>trade bot<span className="cursor-blink">_</span></h1>
         </div>
         <div className="flex items-center gap-2">
           {data?.marketRegime && (

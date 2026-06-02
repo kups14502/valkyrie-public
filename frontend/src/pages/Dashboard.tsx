@@ -231,8 +231,8 @@ export default function Dashboard() {
 
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">System Overview</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[0.08em] text-[var(--color-text)]">Dashboard</h1>
+          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
+          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
         </div>
         <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
           [live telemetry]
