@@ -18,14 +18,14 @@ function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?:
   const tone = warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+      <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text)]">
         <span className="truncate">{label}</span>
         <span style={{ color: tone }}>{Math.round(clamped)}%</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded bg-[rgba(255,255,255,0.06)]">
         <div className="h-full rounded" style={{ width: `${clamped}%`, background: tone, boxShadow: `0 0 8px ${tone}` }} />
       </div>
-      {sub && <div className="text-[10px] text-[var(--color-text-faint)]">{sub}</div>}
+      {sub && <div className="text-[10px] text-[var(--color-text-dim)]">{sub}</div>}
     </div>
   )
 }
@@ -436,10 +436,6 @@ export default function CodeDeck() {
                               <div className="max-w-md text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
                               {usageBars.length > 0 && (
                                 <div className="w-full max-w-sm space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
-                                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
-                                    <span>usage · {selectedProfile?.label}</span>
-                                    <span>{selected.model}</span>
-                                  </div>
                                   {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
                                 </div>
                               )}
