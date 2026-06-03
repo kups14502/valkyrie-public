@@ -30,6 +30,20 @@ function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?:
   )
 }
 
+function CompactUsageBar({ pct, label }: { pct: number; label: string }) {
+  const clamped = Math.max(0, Math.min(100, pct))
+  const tone = clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
+  return (
+    <div className="hidden min-w-[220px] max-w-xl flex-1 items-center gap-3 sm:flex">
+      <div className="shrink-0 text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{label}</div>
+      <div className="h-2 flex-1 overflow-hidden rounded bg-[rgba(255,255,255,0.08)]">
+        <div className="h-full rounded" style={{ width: `${clamped}%`, background: tone, boxShadow: `0 0 10px ${tone}` }} />
+      </div>
+      <div className="shrink-0 text-[10px] font-semibold" style={{ color: tone }}>{Math.round(clamped)}%</div>
+    </div>
+  )
+}
+
 function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void }) {
   return (
     <button type="button" onClick={onSelect} className={`w-full border p-3 text-left transition ${selected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.06)]' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}>
@@ -162,6 +176,7 @@ export default function CodeDeck() {
     if (rl.weekly) bars.push({ label: 'Weekly', pct: rl.weekly.pct })
     return bars
   }, [aiUsage.data, selectedProfile])
+  const sessionUsage = usageBars.find((b) => b.label.toLowerCase().includes('session')) ?? usageBars[0]
 
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
@@ -420,13 +435,16 @@ export default function CodeDeck() {
               <div className="panel flex max-w-full flex-col overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1">
                 {(
                   <div className="flex min-h-0 flex-1 flex-col gap-4">
-                    <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] pb-3">
-                      <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text)] sm:text-xl">
-                        {!sidebarOpen && (
-                          <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-1.5 py-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={15} /></button>
-                        )}
-                        <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
-                        <span className="truncate">{selected.title}</span>
+                    <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3">
+                      <div className="flex min-w-0 flex-1 items-center gap-4">
+                        <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text)] sm:text-xl">
+                          {!sidebarOpen && (
+                            <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-1.5 py-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={15} /></button>
+                          )}
+                          <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
+                          <span className="truncate">{selected.title}</span>
+                        </div>
+                        {metaCollapsed && sessionUsage && <CompactUsageBar pct={sessionUsage.pct} label={sessionUsage.label} />}
                       </div>
                       <button type="button" onClick={() => setMetaCollapsed((v) => !v)} className="shrink-0 inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
                         {metaCollapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {metaCollapsed ? 'details' : 'hide'}
