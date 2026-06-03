@@ -49,6 +49,7 @@ export default function CodeDeck() {
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termDivRef = useRef<HTMLDivElement | null>(null)
+  const linkBufRef = useRef('')
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); void refresh() } })
@@ -99,16 +100,19 @@ export default function CodeDeck() {
 
   const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
 
-  const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '')
+  const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '').replace(/\r/g, '')
   const captureLinks = (text: string) => {
-    const clean = stripAnsi(text)
-    const matches = clean.match(/https?:\/\/[^\s\]\)\}>"']+/g) ?? []
+    // Accumulate stripped text in a rolling buffer (keep last 4KB) so URLs
+    // split across multiple WebSocket packets get joined before the regex runs.
+    linkBufRef.current = (linkBufRef.current + stripAnsi(text)).slice(-4096)
+    const buf = linkBufRef.current.replace(/\n/g, '')
+    const matches = buf.match(/https?:\/\/[^\s\]"'<>]+/g) ?? []
     if (matches.length === 0) return
     setDetectedLinks((prev) => {
       const next = [...prev]
       for (const raw of matches) {
-        const url = raw.replace(/[.,;:]+$/, '')
-        if (!next.includes(url)) next.push(url)
+        const url = raw.replace(/[.,;:)]+$/, '')
+        if (url.length > 20 && !next.includes(url)) next.push(url)
       }
       return next.slice(-8)
     })
@@ -170,6 +174,7 @@ export default function CodeDeck() {
     xtermRef.current?.clear()
     setMetaLines([])
     setDetectedLinks([])
+    linkBufRef.current = ''
     setTerminalState('connecting')
     const term = xtermRef.current
     const cols = term?.cols ?? 220
