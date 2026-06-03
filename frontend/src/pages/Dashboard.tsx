@@ -227,322 +227,322 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
-      <NowBanner />
-
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
-          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
-        </div>
-        <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          [live telemetry]
-        </div>
-      </div>
-
       <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-        <div className="xl:sticky xl:top-24">
-          <Card title="AI Usage">
-            {aiUsage.isLoading && !aiUsage.data ? (
-              <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-            ) : aiUsage.error ? (
-              <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
-            ) : aiUsage.data ? (
-              <div className="space-y-6">
-                {(aiUsage.data.aiClients ?? [
-                  { id: 'claude-work', kind: 'claude' as const, label: 'user@example.com', subscription: 'Claude Pro', ...aiUsage.data.claude },
-                  { id: 'codex-work', kind: 'codex' as const, label: 'Codex user@example.com', subscription: 'Codex', ...aiUsage.data.codex },
-                ]).map((client) => (
-                  <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
-                        <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
-                      </div>
-                      <div className="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.subscription}</div>
-                    </div>
-                    {client.kind === 'claude' && client.quota ? (
-                      <div className="space-y-2">
-                        <UsageBar
-                          claude
-                          pct={client.quota.sessionPct}
-                          label="Current session"
-                          sub={client.quota.sessionResetsAt
-                            ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min${client.quota.status ? ` · ${client.quota.status.replace(/_/g, ' ')}` : ''}`
-                            : client.quota.status?.replace(/_/g, ' ')}
-                        />
-                        <UsageBar
-                          claude
-                          pct={client.quota.weeklyPct}
-                          label="Subscription week"
-                          sub={client.quota.weeklyResetsAt
-                            ? `Resets ${new Date(client.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-                            : undefined}
-                        />
-                      </div>
-                    ) : client.kind === 'claude' ? (
-                      <div className="space-y-2">
-                        <div className="text-[11px] text-[var(--color-text-faint)]">Subscription quota unavailable</div>
-                        <div className="grid grid-cols-3 gap-2">
-                          {([
-                            ['Today', client.today],
-                            ['7d', client.last7d],
-                            ['30d', client.last30d],
-                          ] as const).map(([label, bucket]) => (
-                            <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
-                              <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
-                              <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
-                              <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
-                            </div>
-                          ))}
+        <div className="order-2 xl:sticky xl:top-24 xl:order-1">
+            <Card title="AI Usage">
+              {aiUsage.isLoading && !aiUsage.data ? (
+                <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+              ) : aiUsage.error ? (
+                <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
+              ) : aiUsage.data ? (
+                <div className="space-y-6">
+                  {(aiUsage.data.aiClients ?? [
+                    { id: 'claude-work', kind: 'claude' as const, label: 'user@example.com', subscription: 'Claude Pro', ...aiUsage.data.claude },
+                    { id: 'codex-work', kind: 'codex' as const, label: 'Codex user@example.com', subscription: 'Codex', ...aiUsage.data.codex },
+                  ]).map((client) => (
+                    <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
+                          <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
                         </div>
+                        <div className="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.subscription}</div>
                       </div>
-                    ) : null}
-                    {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
-                      <div className="space-y-2">
-                        {client.rateLimits.session5h && (
+                      {client.kind === 'claude' && client.quota ? (
+                        <div className="space-y-2">
                           <UsageBar
-                            codex
-                            pct={client.rateLimits.session5h.pct}
-                            label="5h session"
-                            sub={`Resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
+                            claude
+                            pct={client.quota.sessionPct}
+                            label="Current session"
+                            sub={client.quota.sessionResetsAt
+                              ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min${client.quota.status ? ` · ${client.quota.status.replace(/_/g, ' ')}` : ''}`
+                              : client.quota.status?.replace(/_/g, ' ')}
                           />
-                        )}
-                        {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Subscription week" />}
-                      </div>
-                    ) : client.kind === 'codex' ? (
-                      <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-            <Card title={`Sessions (${sessionsList.length})`} >
-              {sessionsList.length > 0 ? (
-                <div className="space-y-2">
-                  {sessionsList.map((s) => (
-                    <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="font-semibold">{s.model}</span>
-                          {s.project && (
-                            <span className="text-[var(--color-text-dim)]">· {s.project}</span>
-                          )}
-                          {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
-                            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
-                              [{s.gitBranch}]
-                            </span>
-                          )}
+                          <UsageBar
+                            claude
+                            pct={client.quota.weeklyPct}
+                            label="Subscription week"
+                            sub={client.quota.weeklyResetsAt
+                              ? `Resets ${new Date(client.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                              : undefined}
+                          />
                         </div>
-                        <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                          pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
-                        <div>{s.cpu.toFixed(2)}% cpu</div>
-                        <div className="mt-0.5">
-                          {fmtBytes(s.memory)}
-                          {sys.data?.memory?.total
-                            ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
-                            : null}
-                        </div>
-                        {s.lastActivity != null && (
-                          <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
-                            {fmtAgo(s.lastActivity)}
+                      ) : client.kind === 'claude' ? (
+                        <div className="space-y-2">
+                          <div className="text-[11px] text-[var(--color-text-faint)]">Subscription quota unavailable</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              ['Today', client.today],
+                              ['7d', client.last7d],
+                              ['30d', client.last30d],
+                            ] as const).map(([label, bucket]) => (
+                              <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
+                                <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
+                                <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
+                                <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      ) : null}
+                      {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
+                        <div className="space-y-2">
+                          {client.rateLimits.session5h && (
+                            <UsageBar
+                              codex
+                              pct={client.rateLimits.session5h.pct}
+                              label="5h session"
+                              sub={`Resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
+                            />
+                          )}
+                          {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Subscription week" />}
+                        </div>
+                      ) : client.kind === 'codex' ? (
+                        <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
-              )}
+              ) : null}
             </Card>
-
-        <Card title="Launcher">
-          {launcher.isLoading && !launcher.data ? (
-            <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-          ) : launcher.error ? (
-            <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {(launcher.data ?? []).map((s) => {
-                const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
-                const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
-                return (
-                  <a
-                    key={s.id}
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
-                      <span className="truncate text-sm">{s.name}</span>
-                    </span>
-                    {s.latencyMs != null && (
-                      <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
-                    )}
-                  </a>
-                )
-              })}
-            </div>
-          )}
-        </Card>
-
-        {(() => {
-          const es = emailSignals.data
-          const importantItems = es?.items.filter((i) => i.classification === 'important') ?? []
-          const routineItems = es?.items.filter((i) => i.classification === 'routine') ?? []
-          const draftsCount = es?.drafts.length ?? 0
-          const hasAction = importantItems.length > 0 || draftsCount > 0
-          const timerOk = es?.timer.active === 'active'
-          return (
-            <Card
-              title="Email Signals"
-              action={
-                es && (
-                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em]">
-                    {importantItems.length > 0 && (
-                      <span className="text-[var(--color-danger)]">{importantItems.length} important</span>
-                    )}
-                    {draftsCount > 0 && (
-                      <span className="text-[var(--color-warning)]">{draftsCount} drafts</span>
-                    )}
-                    <span className={timerOk ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-danger)]'}>
-                      {timerOk ? '● timer ok' : '○ timer down'}
-                    </span>
-                  </div>
-                )
-              }
-            >
-              {emailSignals.isLoading && !es ? (
-                <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-              ) : !hasAction ? (
-                <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
-              ) : (
-                <div className="space-y-3">
-                  {importantItems.length > 0 && (
-                    <div className="space-y-1">
-                      {importantItems.slice(0, 5).map((item) => (
-                        <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
-                      ))}
-                      {importantItems.length > 5 && (
-                        <div className="text-[10px] text-[var(--color-text-faint)] pl-1">+{importantItems.length - 5} more — see emails tab</div>
-                      )}
-                    </div>
-                  )}
-                  {routineItems.length > 0 && draftsCount > 0 && (
-                    <div>
-                      <div className="mb-1 text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">drafts waiting</div>
-                      {es!.drafts.slice(0, 3).map((d) => (
-                        <div key={d.filename} className="border border-[var(--color-border)] px-3 py-1.5 text-[11px]">
-                          <span className="text-[var(--color-warning)]">{d.filename}</span>
-                          {d.preview && <span className="ml-2 text-[var(--color-text-faint)] truncate">{d.preview.slice(0, 80)}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          )
-        })()}
-
-        <Card title="Projects / Feeds">
-          {projectsList.length > 0 ? (
-            <div className="divide-y divide-[var(--color-border)]">
-              {projectsList.map((p) => (
-                <div key={p.path} className="flex items-center justify-between gap-3 py-3 text-sm">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2">
-                      <span className="font-semibold">{p.name}</span>
-                      {p.dirty && (
-                        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-warning)]">
-                          [●{p.dirtyCount} uncommitted]
-                        </span>
-                      )}
-                      {p.commitsToday > 0 && (
-                        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-success)]">
-                          [{p.commitsToday} today]
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
-                      {p.lastCommit ? (
-                        <span><span className="text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
-                      ) : (
-                        <span>{p.path}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className={`text-xs ${
-                      p.status === 'active' ? 'text-[var(--color-success)]' :
-                      p.status === 'paused' ? 'text-[var(--color-warning)]' :
-                      'text-[var(--color-text-dim)]'
-                    }`}>[{p.status}]</span>
-                    <span className="text-xs text-[var(--color-text-dim)]">{p.lastTouched}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--color-text-dim)]">{projects.isLoading ? 'Loading…' : projects.data ? 'Project data shape was invalid.' : 'No projects tracked'}</div>
-          )}
-        </Card>
         </div>
 
-        <div className="xl:sticky xl:top-24">
-        <Card title="Server">
-          {sys.isLoading ? (
-            <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-          ) : sysUnauthorized ? (
-            <div className="space-y-1 text-sm">
-              <div className="text-[var(--color-warning)]">Access handshake required</div>
-              <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
-            </div>
-          ) : sysBackendUnavailable ? (
-            <div className="space-y-1 text-sm">
-              <div className="text-[var(--color-danger)]">API route unavailable</div>
-              <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
-            </div>
-          ) : sys.error ? (
-            <div className="space-y-1 text-sm">
-              <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
-              {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
-            </div>
-          ) : sys.data && sysValid ? (
-            <div className="grid grid-cols-2 gap-4">
-              <Stat
-                label="CPU"
-                value={`${sys.data.cpu.usage.toFixed(1)}%`}
-                sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
-                chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
-              />
-              <Stat
-                label="Memory"
-                value={`${sys.data.memory.percent.toFixed(0)}%`}
-                sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
-                chart={<Sparkline values={memSeries} color="#7a5cff" />}
-              />
-              <Stat
-                label="Disk"
-                value={`${sys.data.disk.percent.toFixed(0)}%`}
-                sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
-                chart={<Sparkline values={diskSeries} color="#48e3ce" />}
-              />
-              <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
-            </div>
-          ) : sys.data ? (
-            <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
-          ) : null}
-        </Card>
+        <div className="order-1 space-y-6 xl:order-2">
+        <NowBanner />
+
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
+            <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
+          </div>
+          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            [live telemetry]
+          </div>
+        </div>
+
+          <Card title="Launcher">
+            {launcher.isLoading && !launcher.data ? (
+              <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+            ) : launcher.error ? (
+              <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {(launcher.data ?? []).map((s) => {
+                  const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
+                  const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
+                  return (
+                    <a
+                      key={s.id}
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
+                        <span className="truncate text-sm">{s.name}</span>
+                      </span>
+                      {s.latencyMs != null && (
+                        <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
+                      )}
+                    </a>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
+              <Card title={`Sessions (${sessionsList.length})`} >
+                {sessionsList.length > 0 ? (
+                  <div className="space-y-2">
+                    {sessionsList.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="font-semibold">{s.model}</span>
+                            {s.project && (
+                              <span className="text-[var(--color-text-dim)]">· {s.project}</span>
+                            )}
+                            {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
+                              <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
+                                [{s.gitBranch}]
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+                            pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
+                          <div>{s.cpu.toFixed(2)}% cpu</div>
+                          <div className="mt-0.5">
+                            {fmtBytes(s.memory)}
+                            {sys.data?.memory?.total
+                              ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
+                              : null}
+                          </div>
+                          {s.lastActivity != null && (
+                            <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
+                              {fmtAgo(s.lastActivity)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
+                )}
+              </Card>
+
+          {(() => {
+            const es = emailSignals.data
+            const importantItems = es?.items.filter((i) => i.classification === 'important') ?? []
+            const routineItems = es?.items.filter((i) => i.classification === 'routine') ?? []
+            const draftsCount = es?.drafts.length ?? 0
+            const hasAction = importantItems.length > 0 || draftsCount > 0
+            const timerOk = es?.timer.active === 'active'
+            return (
+              <Card
+                title="Email Signals"
+                action={
+                  es && (
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em]">
+                      {importantItems.length > 0 && (
+                        <span className="text-[var(--color-danger)]">{importantItems.length} important</span>
+                      )}
+                      {draftsCount > 0 && (
+                        <span className="text-[var(--color-warning)]">{draftsCount} drafts</span>
+                      )}
+                      <span className={timerOk ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-danger)]'}>
+                        {timerOk ? '● timer ok' : '○ timer down'}
+                      </span>
+                    </div>
+                  )
+                }
+              >
+                {emailSignals.isLoading && !es ? (
+                  <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+                ) : !hasAction ? (
+                  <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {importantItems.length > 0 && (
+                      <div className="space-y-1">
+                        {importantItems.slice(0, 5).map((item) => (
+                          <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
+                        ))}
+                        {importantItems.length > 5 && (
+                          <div className="text-[10px] text-[var(--color-text-faint)] pl-1">+{importantItems.length - 5} more — see emails tab</div>
+                        )}
+                      </div>
+                    )}
+                    {routineItems.length > 0 && draftsCount > 0 && (
+                      <div>
+                        <div className="mb-1 text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">drafts waiting</div>
+                        {es!.drafts.slice(0, 3).map((d) => (
+                          <div key={d.filename} className="border border-[var(--color-border)] px-3 py-1.5 text-[11px]">
+                            <span className="text-[var(--color-warning)]">{d.filename}</span>
+                            {d.preview && <span className="ml-2 text-[var(--color-text-faint)] truncate">{d.preview.slice(0, 80)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )
+          })()}
+
+          <Card title="Projects / Feeds">
+            {projectsList.length > 0 ? (
+              <div className="divide-y divide-[var(--color-border)]">
+                {projectsList.map((p) => (
+                  <div key={p.path} className="flex items-center justify-between gap-3 py-3 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2">
+                        <span className="font-semibold">{p.name}</span>
+                        {p.dirty && (
+                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-warning)]">
+                            [●{p.dirtyCount} uncommitted]
+                          </span>
+                        )}
+                        {p.commitsToday > 0 && (
+                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-success)]">
+                            [{p.commitsToday} today]
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
+                        {p.lastCommit ? (
+                          <span><span className="text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
+                        ) : (
+                          <span>{p.path}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className={`text-xs ${
+                        p.status === 'active' ? 'text-[var(--color-success)]' :
+                        p.status === 'paused' ? 'text-[var(--color-warning)]' :
+                        'text-[var(--color-text-dim)]'
+                      }`}>[{p.status}]</span>
+                      <span className="text-xs text-[var(--color-text-dim)]">{p.lastTouched}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--color-text-dim)]">{projects.isLoading ? 'Loading…' : projects.data ? 'Project data shape was invalid.' : 'No projects tracked'}</div>
+            )}
+          </Card>
+        </div>
+
+        <div className="order-3 xl:sticky xl:top-24">
+          <Card title="Server">
+            {sys.isLoading ? (
+              <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+            ) : sysUnauthorized ? (
+              <div className="space-y-1 text-sm">
+                <div className="text-[var(--color-warning)]">Access handshake required</div>
+                <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
+              </div>
+            ) : sysBackendUnavailable ? (
+              <div className="space-y-1 text-sm">
+                <div className="text-[var(--color-danger)]">API route unavailable</div>
+                <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
+              </div>
+            ) : sys.error ? (
+              <div className="space-y-1 text-sm">
+                <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
+                {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
+              </div>
+            ) : sys.data && sysValid ? (
+              <div className="grid grid-cols-1 gap-4">
+                <Stat
+                  label="CPU"
+                  value={`${sys.data.cpu.usage.toFixed(1)}%`}
+                  sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
+                  chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
+                />
+                <Stat
+                  label="Memory"
+                  value={`${sys.data.memory.percent.toFixed(0)}%`}
+                  sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
+                  chart={<Sparkline values={memSeries} color="#7a5cff" />}
+                />
+                <Stat
+                  label="Disk"
+                  value={`${sys.data.disk.percent.toFixed(0)}%`}
+                  sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
+                  chart={<Sparkline values={diskSeries} color="#48e3ce" />}
+                />
+                <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
+              </div>
+            ) : sys.data ? (
+              <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
+            ) : null}
+          </Card>
         </div>
       </div>
     </div>
