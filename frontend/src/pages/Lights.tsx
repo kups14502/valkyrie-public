@@ -33,6 +33,34 @@ function presetSwatchStyle(p: { rgb: [number, number, number] | null; kelvin: nu
   return '#888'
 }
 
+function rgbToHex(rgb: [number, number, number] | null): string {
+  if (!rgb) return '#ffb87a'
+  return `#${rgb.map((n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0')).join('')}`
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim())
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null
+}
+
+function ColorWheel({ value, onPick }: { value: string; onPick: (rgb: [number, number, number]) => void }) {
+  return (
+    <label className="group flex cursor-pointer items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]">
+      <span className="h-3.5 w-3.5 border border-[var(--color-border-strong)] shadow-[0_0_8px_var(--color-accent)]" style={{ backgroundColor: value }} aria-hidden />
+      custom
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => {
+          const rgb = hexToRgb(e.target.value)
+          if (rgb) onPick(rgb)
+        }}
+        className="sr-only"
+      />
+    </label>
+  )
+}
+
 type Update = Omit<LightUpdate, 'entity_id'>
 
 const DRAG_THROTTLE_MS = 150
@@ -42,6 +70,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
   const lastExternalPct = pctFromBrightness(light.brightness)
   const displayPct = pendingPct ?? lastExternalPct
   const swatchColor = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : light.on ? '#ffd9a0' : '#1a1f2b'
+  const customHex = rgbToHex(light.rgb_color)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const lastSentRef = useRef(0)
@@ -97,10 +126,10 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
     <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="inline-block h-6 w-6 rounded-full border border-[var(--color-border)] shadow-inner" style={{ backgroundColor: swatchColor }} aria-hidden />
+          <span className="inline-block h-7 w-7 border border-[var(--color-border-strong)] shadow-[0_0_12px_rgba(255,255,255,0.12)]" style={{ backgroundColor: swatchColor }} aria-hidden />
           <div>
-            <div className="text-sm font-medium text-[var(--color-text)]">{light.name}</div>
-            <div className="text-[11px] text-[var(--color-text-faint)]">{light.unavailable ? 'unavailable' : light.on ? 'on' : 'off'}</div>
+            <div className="text-base font-semibold text-[var(--color-text)]">{light.name}</div>
+            <div className="text-xs text-[var(--color-text-faint)]">{light.unavailable ? 'unavailable' : light.on ? 'on' : 'off'}</div>
           </div>
         </div>
         <button
@@ -120,7 +149,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
       {light.on && !light.unavailable && (
         <div className="mt-4 space-y-3">
           <div>
-            <div className="mb-1.5 flex items-baseline justify-between text-xs">
+            <div className="mb-1.5 flex items-baseline justify-between text-sm">
               <span className="text-[var(--color-text-dim)]">Brightness</span>
               <span className="font-semibold text-[var(--color-text)]">{displayPct}%</span>
             </div>
@@ -150,12 +179,13 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
                   ...(p.rgb ? { rgb_color: p.rgb } : {}),
                   ...(p.kelvin ? { color_temp_kelvin: p.kelvin } : {}),
                 })}
-                className="flex items-center gap-1.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-2.5 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
               >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
+                <span className="h-3 w-3 border border-[var(--color-border)]" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
                 {p.label}
               </button>
             ))}
+            <ColorWheel value={customHex} onPick={(rgb) => onUpdate(light.entity_id, { state: 'on', rgb_color: rgb })} />
           </div>
         </div>
       )}
@@ -224,6 +254,7 @@ export default function Lights() {
   }
 
   const [bulkPct, setBulkPct] = useState<number | null>(null)
+  const [bulkCustomHex, setBulkCustomHex] = useState('#ffb87a')
 
   const bulkDisplayPct = useMemo(() => {
     if (bulkPct !== null) return bulkPct
@@ -289,7 +320,7 @@ export default function Lights() {
             <Card title={`All ${availableTargets.length} lights`}>
               <div className="space-y-4">
                 <div>
-                  <div className="mb-1.5 flex items-baseline justify-between text-xs">
+                  <div className="mb-1.5 flex items-baseline justify-between text-sm">
                     <span className="text-[var(--color-text-dim)]">Brightness</span>
                     <span className="font-semibold text-[var(--color-text)]">{bulkDisplayPct != null ? `${bulkDisplayPct}%` : '—'}</span>
                   </div>
@@ -328,12 +359,19 @@ export default function Lights() {
                       key={p.label}
                       type="button"
                       onClick={() => bulkPreset(p.rgb, p.kelvin)}
-                      className="flex items-center gap-1.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-2.5 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                      className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
                     >
-                      <span className="h-2.5 w-2.5" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
+                      <span className="h-3 w-3 border border-[var(--color-border)]" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
                       {p.label}
                     </button>
                   ))}
+                  <ColorWheel
+                    value={bulkCustomHex}
+                    onPick={(rgb) => {
+                      setBulkCustomHex(rgbToHex(rgb))
+                      bulkPreset(rgb, null)
+                    }}
+                  />
                 </div>
               </div>
             </Card>
