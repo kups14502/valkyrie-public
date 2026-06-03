@@ -496,7 +496,7 @@ export const fetchCodeDeckMessages = async (sessionId: string) => {
 }
 
 export const sendCodeDeckMessage = async (sessionId: string, content: string) => {
-  const r = await api.post<{ user: CodeDeckMessage; assistant: CodeDeckMessage }>(`/code-deck/sessions/${sessionId}/chat`, { content })
+  const r = await api.post<{ user: CodeDeckMessage; assistant?: CodeDeckMessage; pending?: boolean }>(`/code-deck/sessions/${sessionId}/chat`, { content })
   return r.data
 }
 

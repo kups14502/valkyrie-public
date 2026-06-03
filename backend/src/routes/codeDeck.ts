@@ -323,7 +323,7 @@ router.get('/code-deck/sessions/:id/messages', (req, res) => {
   }
 })
 
-router.post('/code-deck/sessions/:id/chat', async (req, res) => {
+router.post('/code-deck/sessions/:id/chat', (req, res) => {
   try {
     const row = getSession(req.params.id)
     if (!row) return res.status(404).json({ error: 'not found' })
@@ -333,9 +333,13 @@ router.post('/code-deck/sessions/:id/chat', async (req, res) => {
     const previous = d.prepare('SELECT * FROM code_deck_messages WHERE sessionId=? ORDER BY createdAt ASC').all(req.params.id) as MessageRow[]
     d.close()
     const user = saveMessage(row.id, 'user', content)
-    const output = await runAgent(row, chatPrompt(row, previous, content))
-    const assistant = saveMessage(row.id, 'assistant', output)
-    res.json({ user, assistant })
+    res.json({ user, pending: true })
+    void runAgent(row, chatPrompt(row, previous, content))
+      .then((output) => { saveMessage(row.id, 'assistant', output) })
+      .catch((err) => {
+        const detail = (err as Error).message
+        try { saveMessage(row.id, 'system', `Agent error: ${detail}`) } catch { /* noop */ }
+      })
   } catch (err) {
     const detail = (err as Error).message
     try { saveMessage(req.params.id, 'system', `Agent error: ${detail}`) } catch { /* noop */ }
