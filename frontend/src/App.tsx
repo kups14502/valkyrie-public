@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail, Activity as ActivityIcon, Menu, X, Code2 } from 'lucide-react'
@@ -79,6 +79,14 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   )
 }
 
+function CenterPage({ children }: { children: ReactNode }) {
+  return (
+    <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
+      <div className="xl:col-start-2">{children}</div>
+    </div>
+  )
+}
+
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -142,18 +150,18 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="mx-auto max-w-[1600px] px-6 py-8">
+      <main className="mx-auto px-6 py-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/lights" element={<Lights />} />
-            <Route path="/services" element={<Services />} />
-            <Route path="/vault" element={<Vault />} />
-            <Route path="/trade" element={<TradeBot />} />
-            <Route path="/emails" element={<Emails />} />
+            <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
+            <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
+            <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
+            <Route path="/trade" element={<CenterPage><TradeBot /></CenterPage>} />
+            <Route path="/emails" element={<CenterPage><Emails /></CenterPage>} />
             <Route path="/code-deck" element={<CodeDeck />} />
-            <Route path="/activity" element={<Activity />} />
+            <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
           </Routes>
         </Suspense>
       </main>

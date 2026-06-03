@@ -226,7 +226,7 @@ export default function Dashboard() {
   const projectsList = Array.isArray(projects.data) ? projects.data : []
 
   return (
-    <div className="space-y-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
+    <div className="space-y-8">
       <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-2 xl:sticky xl:top-24 xl:order-1">
             <Card title="AI Usage">
