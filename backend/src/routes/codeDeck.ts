@@ -281,14 +281,18 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
     const row = d.prepare('SELECT * FROM code_deck_sessions WHERE id=?').get(req.params.id) as SessionRow | undefined
     if (!row) { d.close(); return res.status(404).json({ error: 'not found' }) }
     const body = req.body ?? {}
+    // Only accept a profileId that maps to a known profile; otherwise keep the current one.
+    const nextProfileId = body.profileId != null && PROFILES.some((p) => p.id === String(body.profileId))
+      ? String(body.profileId)
+      : row.profileId
     const next: SessionRow = {
       ...row,
       title: body.title != null ? String(body.title).slice(0, 120) : row.title,
       folder: body.folder != null ? String(body.folder).slice(0, 80) : row.folder,
       projectRootId: body.projectRootId != null ? String(body.projectRootId) : row.projectRootId,
       cwd: body.cwd != null ? (safePath(String(body.cwd)) ?? row.cwd) : row.cwd,
-      profileId: body.profileId != null ? String(body.profileId) : row.profileId,
-      model: normalizeModel(body.profileId != null ? String(body.profileId) : row.profileId, body.model != null ? String(body.model) : row.model).slice(0, 80),
+      profileId: nextProfileId,
+      model: normalizeModel(nextProfileId, body.model != null ? String(body.model) : row.model).slice(0, 80),
       pinned: body.pinned != null ? (body.pinned ? 1 : 0) : row.pinned,
       status: body.status != null ? String(body.status).slice(0, 40) : row.status,
       notes: body.notes != null ? String(body.notes).slice(0, 4000) : row.notes,
