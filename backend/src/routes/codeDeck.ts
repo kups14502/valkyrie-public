@@ -59,7 +59,7 @@ const PROFILES = [
     label: 'user@example.com Claude',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
-    command: 'claude',
+    command: '/home/brendon/.local/bin/claude',
     env: {},
   },
   {
@@ -75,7 +75,7 @@ const PROFILES = [
     label: 'bot@example.com Claude',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
-    command: 'CLAUDE_CONFIG_DIR=/home/brendon/.claude-botacct claude',
+    command: '/home/brendon/.local/bin/claude',
     env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-botacct' },
   },
 ]
