@@ -248,9 +248,9 @@ export default function CodeDeck() {
   )
 
   return (
-    <div className="flex min-w-0 max-w-full gap-4">
+    <div className="flex min-w-0 max-w-full gap-4 lg:h-[calc(100dvh-150px)]">
       {sidebarOpen && (
-      <aside className="w-full shrink-0 space-y-4 xl:sticky xl:top-24 xl:w-[320px] xl:self-start">
+      <aside className="w-full shrink-0 space-y-4 lg:w-[320px] lg:self-stretch lg:overflow-auto lg:pr-1">
             <div className="flex gap-2">
               <button type="button" onClick={() => { setShowNew(true); setSelectedId(null) }} className="inline-flex flex-1 items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Plus size={14} /> new</button>
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
@@ -329,7 +329,7 @@ export default function CodeDeck() {
       </aside>
       )}
 
-      <div className="min-w-0 flex-1 space-y-6">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 lg:min-h-0">
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-3">
             {!sidebarOpen && (
@@ -344,17 +344,16 @@ export default function CodeDeck() {
         </div>
 
               {(showNew || !selected) ? (
-                <div className="space-y-3">
+                <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-auto">
                   {selected && (
                     <button type="button" onClick={() => setShowNew(false)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><X size={14} /> back to chat</button>
                   )}
                   {newSessionForm}
                 </div>
               ) : (
-              <Card title="Workspace">
+              <div className="panel flex max-w-full flex-col overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1">
                 {(
-                  <>
-                  <div className="space-y-4">
+                  <div className="flex min-h-0 flex-1 flex-col gap-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 text-xl font-semibold text-[var(--color-text)]"><Terminal size={18} className="text-[var(--color-accent)]" />{selected.title}</div>
@@ -368,8 +367,8 @@ export default function CodeDeck() {
                     </div>
 
                     {mode === 'chat' ? (
-                      <div className="space-y-4">
-                        <div className="h-[calc(100vh-470px)] min-h-[180px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                      <div className="flex min-h-0 flex-1 flex-col gap-4">
+                        <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
                             <div className="text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
                           ) : (messages.data ?? []).map((m) => (
@@ -381,8 +380,8 @@ export default function CodeDeck() {
                           {chat.isPending && <div className="text-sm text-[var(--color-accent)]">Thinking/running…</div>}
                           {chat.error && <div className="text-sm text-[var(--color-danger)]">{(chat.error as Error).message}</div>}
                         </div>
-                        <div className="space-y-2">
-                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} className="min-h-24 w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
+                        <div className="shrink-0 space-y-2">
+                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Enter to send · Shift+Enter for newline</div>
                             <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
@@ -390,7 +389,7 @@ export default function CodeDeck() {
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="flex flex-wrap gap-2">
                           {terminalState !== 'connected' && terminalState !== 'connecting' && (
                             <button type="button" onClick={() => startTerminal()} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Terminal size={14} /> start terminal</button>
@@ -413,19 +412,18 @@ export default function CodeDeck() {
                             ))}
                           </div>
                         )}
-                        <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
-                          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
+                          <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
                             <span>// browser pty</span>
                             <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
                           </div>
-                          <div ref={termDivRef} className="h-[calc(100vh-470px)] min-h-[260px] w-full" />
+                          <div ref={termDivRef} className="min-h-[200px] w-full flex-1" />
                         </div>
                       </div>
                     )}
                   </div>
-                  </>
                 )}
-              </Card>
+              </div>
               )}
       </div>
     </div>
