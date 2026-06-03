@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 
 const router = Router()
 const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
@@ -67,7 +68,7 @@ const PROFILES = [
     label: 'user@example.com Codex',
     provider: 'codex',
     defaultModel: 'gpt-5.5',
-    command: 'codex',
+    command: '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex',
     env: {},
   },
   {
@@ -113,6 +114,15 @@ function db() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS code_deck_messages (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(sessionId) REFERENCES code_deck_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_deck_messages_session_created ON code_deck_messages(sessionId, createdAt);
   `)
   return d
 }
@@ -151,6 +161,55 @@ function launchCommand(row: SessionRow) {
 
 function terminalCommand(row: SessionRow) {
   return commandWithModel(row)
+}
+
+type MessageRow = {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: string
+}
+
+function saveMessage(sessionId: string, role: MessageRow['role'], content: string): MessageRow {
+  const msg = { id: randomUUID(), sessionId, role, content, createdAt: now() }
+  const d = db()
+  d.prepare('INSERT INTO code_deck_messages VALUES (@id,@sessionId,@role,@content,@createdAt)').run(msg)
+  d.prepare('UPDATE code_deck_sessions SET updatedAt=?, status=? WHERE id=?').run(now(), role === 'assistant' ? 'chat' : 'thinking', sessionId)
+  d.close()
+  return msg
+}
+
+function chatPrompt(row: SessionRow, messages: MessageRow[], userText: string) {
+  const history = messages.slice(-12).map((m) => `${m.role.toUpperCase()}:\n${m.content}`).join('\n\n')
+  return `You are Code Deck, a direct Claude/Codex coding assistant running inside Master Control.\n\nProject folder: ${row.cwd}\nSession: ${row.title}\n\nWork in this folder. Be concise. If you edit files, say exactly what changed. If you need a command run, run it yourself when your tool/CLI supports it. Do not mention OpenClaw.\n\nRecent session history:\n${history || '(none)'}\n\nUSER:\n${userText}`
+}
+
+function runAgent(row: SessionRow, prompt: string): Promise<string> {
+  const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
+  const env = { ...process.env, ...profile.env, TERM: 'xterm-256color' }
+  const isClaude = profile.provider === 'claude'
+  const cmd = profile.command
+  const args = isClaude
+    ? ['-p', prompt, '--model', row.model, '--output-format', 'text', '--permission-mode', 'acceptEdits']
+    : ['exec', '-m', row.model, '-C', row.cwd, '--skip-git-repo-check', '--sandbox', 'workspace-write', prompt]
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: row.cwd, env })
+    let stdout = ''
+    let stderr = ''
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(new Error('agent timed out after 10 minutes'))
+    }, 10 * 60 * 1000)
+    child.stdout.on('data', (b) => { stdout += String(b) })
+    child.stderr.on('data', (b) => { stderr += String(b) })
+    child.on('error', (err) => { clearTimeout(timer); reject(err) })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve(stdout.trim() || '(no output)')
+      else reject(new Error((stderr || stdout || `agent exited ${code}`).trim()))
+    })
+  })
 }
 
 function getSession(id: string): SessionRow | undefined {
@@ -240,6 +299,39 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
     res.json({ session: serialize(next) })
   } catch (err) {
     res.status(500).json({ error: 'failed to update session', detail: (err as Error).message })
+  }
+})
+
+router.get('/code-deck/sessions/:id/messages', (req, res) => {
+  try {
+    const row = getSession(req.params.id)
+    if (!row) return res.status(404).json({ error: 'not found' })
+    const d = db()
+    const messages = d.prepare('SELECT * FROM code_deck_messages WHERE sessionId=? ORDER BY createdAt ASC').all(req.params.id) as MessageRow[]
+    d.close()
+    res.json({ messages })
+  } catch (err) {
+    res.status(500).json({ error: 'failed to read messages', detail: (err as Error).message })
+  }
+})
+
+router.post('/code-deck/sessions/:id/chat', async (req, res) => {
+  try {
+    const row = getSession(req.params.id)
+    if (!row) return res.status(404).json({ error: 'not found' })
+    const content = String(req.body?.content ?? '').trim()
+    if (!content) return res.status(400).json({ error: 'missing content' })
+    const d = db()
+    const previous = d.prepare('SELECT * FROM code_deck_messages WHERE sessionId=? ORDER BY createdAt ASC').all(req.params.id) as MessageRow[]
+    d.close()
+    const user = saveMessage(row.id, 'user', content)
+    const output = await runAgent(row, chatPrompt(row, previous, content))
+    const assistant = saveMessage(row.id, 'assistant', output)
+    res.json({ user, assistant })
+  } catch (err) {
+    const detail = (err as Error).message
+    try { saveMessage(req.params.id, 'system', `Agent error: ${detail}`) } catch { /* noop */ }
+    res.status(500).json({ error: 'chat failed', detail })
   }
 })
 

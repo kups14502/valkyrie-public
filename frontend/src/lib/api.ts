@@ -482,6 +482,24 @@ export const updateCodeDeckSession = async (id: string, body: Partial<CodeDeckSe
   return r.data.session
 }
 
+export type CodeDeckMessage = {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: string
+}
+
+export const fetchCodeDeckMessages = async (sessionId: string) => {
+  const r = await api.get<{ messages: CodeDeckMessage[] }>(`/code-deck/sessions/${sessionId}/messages`)
+  return r.data.messages
+}
+
+export const sendCodeDeckMessage = async (sessionId: string, content: string) => {
+  const r = await api.post<{ user: CodeDeckMessage; assistant: CodeDeckMessage }>(`/code-deck/sessions/${sessionId}/chat`, { content })
+  return r.data
+}
+
 export const deleteCodeDeckSession = async (id: string) => {
   const r = await api.delete<{ ok: boolean }>(`/code-deck/sessions/${id}`)
   return r.data

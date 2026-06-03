@@ -5,7 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
-import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, updateCodeDeckSession, type CodeDeckSession } from '../lib/api'
+import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
@@ -40,6 +40,8 @@ export default function CodeDeck() {
   const [profileId, setProfileId] = useState('main-claude')
   const [model, setModel] = useState('claude-sonnet-4-6')
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
+  const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
+  const [chatInput, setChatInput] = useState('')
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -49,12 +51,17 @@ export default function CodeDeck() {
   const termDivRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
-  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); void refresh(); startTerminal(s.id) } })
+  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); void refresh() } })
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<CodeDeckSession> }) => updateCodeDeckSession(id, body), onSuccess: () => { void refresh() } })
   const del = useMutation({ mutationFn: deleteCodeDeckSession, onSuccess: () => { setSelectedId(null); void refresh() } })
 
   const sessions = deck.data?.sessions ?? []
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null
+  const messages = useQuery({ queryKey: ['code-deck-messages', selected?.id], queryFn: () => fetchCodeDeckMessages(selected!.id), enabled: Boolean(selected?.id), refetchInterval: 5000 })
+  const chat = useMutation({
+    mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) => sendCodeDeckMessage(sessionId, content),
+    onSuccess: () => { setChatInput(''); void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
+  })
   const grouped = useMemo(() => {
     const out = new Map<string, CodeDeckSession[]>()
     for (const s of sessions) {
@@ -147,7 +154,7 @@ export default function CodeDeck() {
       xtermRef.current = null
       fitRef.current = null
     }
-  }, [termDivRef.current])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { wsRef.current?.close() }, [])
 
@@ -193,6 +200,13 @@ export default function CodeDeck() {
     wsRef.current = null
     setTerminalState('closed')
   }
+
+  const sendChat = () => {
+    if (!selected || !chatInput.trim() || chat.isPending) return
+    chat.mutate({ sessionId: selected.id, content: chatInput.trim() })
+  }
+
+  const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
 
   return (
     <div className="grid min-w-0 max-w-full gap-6 overflow-hidden xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
@@ -309,7 +323,7 @@ export default function CodeDeck() {
                 </div>
               </Card>
 
-              <Card title="Session console">
+              <Card title="Workspace">
                 {!selected ? (
                   <div className="text-sm text-[var(--color-text-dim)]">Create or select a session.</div>
                 ) : (
@@ -321,35 +335,66 @@ export default function CodeDeck() {
                       </div>
                       <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {terminalState !== 'connected' && terminalState !== 'connecting' && (
-                        <button type="button" onClick={() => startTerminal()} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Terminal size={14} /> start terminal</button>
-                      )}
-                      <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
+                    <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] pb-3">
+                      <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
+                      <button type="button" onClick={() => setMode('terminal')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'terminal' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>terminal</button>
                     </div>
-                    {metaLines.length > 0 && (
-                      <div className="space-y-0.5 font-mono text-[10px] text-[var(--color-text-faint)]">
-                        {metaLines.map((l, i) => <div key={i}>// {l}</div>)}
-                      </div>
-                    )}
-                    {detectedLinks.length > 0 && (
-                      <div className="space-y-2 rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.04)] p-3">
-                        <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">detected links</div>
-                        {detectedLinks.map((url) => (
-                          <div key={url} className="flex min-w-0 items-center gap-2">
-                            <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--color-text)] underline decoration-[var(--color-accent)]/50 underline-offset-4">{url}</a>
-                            <button type="button" onClick={() => copyText(url)} className="shrink-0 border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Copy link"><Copy size={13} /></button>
+
+                    {mode === 'chat' ? (
+                      <div className="space-y-4">
+                        <div className="max-h-[560px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                          {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
+                            <div className="text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
+                          ) : (messages.data ?? []).map((m) => (
+                            <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
+                              <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>
+                              <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{m.content}</div>
+                            </div>
+                          ))}
+                          {chat.isPending && <div className="text-sm text-[var(--color-accent)]">Thinking/running…</div>}
+                          {chat.error && <div className="text-sm text-[var(--color-danger)]">{(chat.error as Error).message}</div>}
+                        </div>
+                        <div className="space-y-2">
+                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendChat() }} className="min-h-28 w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Tell Code Deck what to do…" />
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Ctrl/⌘+Enter to send</div>
+                            <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
                           </div>
-                        ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap gap-2">
+                          {terminalState !== 'connected' && terminalState !== 'connecting' && (
+                            <button type="button" onClick={() => startTerminal()} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Terminal size={14} /> start terminal</button>
+                          )}
+                          <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
+                        </div>
+                        {metaLines.length > 0 && (
+                          <div className="space-y-0.5 font-mono text-[10px] text-[var(--color-text-faint)]">
+                            {metaLines.map((l, i) => <div key={i}>// {l}</div>)}
+                          </div>
+                        )}
+                        {detectedLinks.length > 0 && (
+                          <div className="space-y-2 rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.04)] p-3">
+                            <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">detected links</div>
+                            {detectedLinks.map((url) => (
+                              <div key={url} className="flex min-w-0 items-center gap-2">
+                                <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--color-text)] underline decoration-[var(--color-accent)]/50 underline-offset-4">{url}</a>
+                                <button type="button" onClick={() => copyText(url)} className="shrink-0 border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Copy link"><Copy size={13} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
+                          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                            <span>// browser pty</span>
+                            <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
+                          </div>
+                          <div ref={termDivRef} className="h-[520px] w-full" />
+                        </div>
                       </div>
                     )}
-                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
-                      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
-                        <span>// browser pty</span>
-                        <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
-                      </div>
-                      <div ref={termDivRef} className="h-[520px] w-full" />
-                    </div>
                   </div>
                 )}
               </Card>
