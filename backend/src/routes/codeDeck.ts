@@ -171,6 +171,10 @@ type MessageRow = {
   createdAt: string
 }
 
+function stripAnsi(text: string) {
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '').replace(/\r/g, '')
+}
+
 function saveMessage(sessionId: string, role: MessageRow['role'], content: string): MessageRow {
   const msg = { id: randomUUID(), sessionId, role, content, createdAt: now() }
   const d = db()
@@ -375,26 +379,40 @@ export function attachCodeDeckWs(server: Server) {
     d.prepare('UPDATE code_deck_sessions SET status=?, updatedAt=? WHERE id=?').run('running', now(), row.id)
     d.close()
     ws.send(JSON.stringify({ type: 'meta', data: `connected: ${command} (${row.cwd})` }))
+    let transcript = `TERMINAL START: ${command}\nCWD: ${row.cwd}\n\n`
+    let savedTranscript = false
+    const persistTranscript = (footer: string) => {
+      if (savedTranscript) return
+      savedTranscript = true
+      const clean = stripAnsi(`${transcript}\n${footer}`).trim()
+      if (clean.length > 0) saveMessage(row.id, 'system', clean.slice(-50000))
+    }
     shell.onData((data) => {
+      transcript = (transcript + data).slice(-50000)
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'data', data }))
     })
     shell.onExit(({ exitCode, signal }) => {
       const d2 = db()
       d2.prepare('UPDATE code_deck_sessions SET status=?, updatedAt=? WHERE id=?').run(exitCode === 0 ? 'exited' : 'failed', now(), row.id)
       d2.close()
+      persistTranscript(`TERMINAL END: code=${exitCode} signal=${signal ?? ''}`)
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'exit', data: `process exited code=${exitCode} signal=${signal ?? ''}` }))
       if (ws.readyState === ws.OPEN) ws.close()
     })
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(String(raw)) as { type?: string; data?: string; cols?: number; rows?: number }
-        if (msg.type === 'input') shell.write(String(msg.data ?? ''))
+        if (msg.type === 'input') {
+          transcript = (transcript + String(msg.data ?? '')).slice(-50000)
+          shell.write(String(msg.data ?? ''))
+        }
         if (msg.type === 'resize') shell.resize(Number(msg.cols ?? 120), Number(msg.rows ?? 36))
       } catch {
         shell.write(String(raw))
       }
     })
     ws.on('close', () => {
+      persistTranscript('TERMINAL CLOSED')
       try { shell.kill() } catch { /* noop */ }
     })
   })

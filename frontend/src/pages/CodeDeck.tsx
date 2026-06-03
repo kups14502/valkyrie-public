@@ -104,6 +104,11 @@ export default function CodeDeck() {
   }, [deck.data])
   const pinned = sessions.filter((s) => s.pinned)
 
+  const openSession = (id: string) => {
+    setSelectedId(id)
+    setShowNew(false)
+  }
+
   const toggleFolder = (key: string) => {
     setExpandedFolders((prev) => {
       const next = new Set(prev)
@@ -315,7 +320,7 @@ export default function CodeDeck() {
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
             </div>
             <Card title="Pinned">
-              {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => setSelectedId(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
+              {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
             </Card>
             <Card title="Folders">
               {deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
@@ -380,7 +385,7 @@ export default function CodeDeck() {
                 {grouped.map(([name, items]) => (
                   <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
                     <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)]">{name}</div>
-                    <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => setSelectedId(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>
+                    <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>
                   </div>
                 ))}
               </div>}
@@ -429,15 +434,24 @@ export default function CodeDeck() {
                     </div>
                     {!metaCollapsed && (
                     <div className="space-y-3 border-b border-[var(--color-border)] pb-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
-                        <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
-                        <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
-                      </div>
-                      <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
-                        <button type="button" onClick={() => setMode('terminal')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'terminal' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>terminal</button>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
+                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
+                            <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
+                          </div>
+                          <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
+                            <button type="button" onClick={() => setMode('terminal')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'terminal' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>terminal</button>
+                          </div>
+                        </div>
+                        {usageBars.length > 0 && (
+                          <div className="w-full max-w-sm shrink-0 space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-3 text-left lg:w-[340px]">
+                            {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
+                          </div>
+                        )}
                       </div>
                     </div>
                     )}
@@ -446,13 +460,7 @@ export default function CodeDeck() {
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
-                            <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
-                              {!metaCollapsed && usageBars.length > 0 && (
-                                <div className="w-full max-w-sm space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
-                                  {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
-                                </div>
-                              )}
-                            </div>
+                            <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : (messages.data ?? []).map((m) => (
                             <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
                               <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>

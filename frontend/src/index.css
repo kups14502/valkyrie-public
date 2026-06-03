@@ -51,6 +51,7 @@ button, input, select, textarea {
 html {
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--color-accent-rgb), 0.55) #000000;
+  scrollbar-gutter: stable;
 }
 
 ::-webkit-scrollbar {
