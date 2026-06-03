@@ -67,6 +67,7 @@ export default function CodeDeck() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [metaCollapsed, setMetaCollapsed] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -412,28 +413,35 @@ export default function CodeDeck() {
               <div className="panel flex max-w-full flex-col overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1">
                 {(
                   <div className="flex min-h-0 flex-1 flex-col gap-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-xl font-semibold text-[var(--color-text)]"><Terminal size={18} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.title}</span></div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
-                          <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
-                          <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{selected.folder}</span>
-                        </div>
+                    <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] pb-3">
+                      <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text)] sm:text-xl">
+                        <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
+                        <span className="truncate">{selected.title}</span>
                       </div>
-                      <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
+                      <button type="button" onClick={() => setMetaCollapsed((v) => !v)} className="shrink-0 inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
+                        {metaCollapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {metaCollapsed ? 'details' : 'hide'}
+                      </button>
                     </div>
-                    <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] pb-3">
-                      <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
-                      <button type="button" onClick={() => setMode('terminal')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'terminal' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>terminal</button>
+                    {!metaCollapsed && (
+                    <div className="space-y-3 border-b border-[var(--color-border)] pb-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
+                        <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
+                        <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
+                        <button type="button" onClick={() => setMode('terminal')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'terminal' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>terminal</button>
+                      </div>
                     </div>
+                    )}
 
                     {mode === 'chat' ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
                             <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
-                              <div className="max-w-md text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
                               {usageBars.length > 0 && (
                                 <div className="w-full max-w-sm space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
                                   {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
