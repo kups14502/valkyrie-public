@@ -32,7 +32,6 @@ export default function CodeDeck() {
   const qc = useQueryClient()
   const deck = useQuery({ queryKey: ['code-deck'], queryFn: fetchCodeDeck })
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [folder, setFolder] = useState('work')
   const [title, setTitle] = useState('New Code Session')
   const [rootId, setRootId] = useState('work')
   const [profileId, setProfileId] = useState('main-claude')
@@ -68,7 +67,7 @@ export default function CodeDeck() {
     if (!availableModels.includes(model)) setModel(availableModels[0])
   }, [availableModels, model])
 
-  const makeSession = () => create.mutate({ title, folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
+  const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
   const copy = async (text: string) => navigator.clipboard?.writeText(text)
 
   useEffect(() => {
@@ -152,14 +151,10 @@ export default function CodeDeck() {
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">session name</span>
                     <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
                   </label>
-                  <label className="space-y-1">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">folder / client</span>
-                    <input value={folder} onChange={(e) => setFolder(e.target.value)} className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="client or project folder" />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">project path</span>
+                  <label className="space-y-1 xl:col-span-2">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">server folder / project</span>
                     <select value={rootId} onChange={(e) => setRootId(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                      {(deck.data?.projectRoots ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}{r.exists ? '' : ' (missing)'}</option>)}
+                      {(deck.data?.projectRoots ?? []).map((r) => <option key={r.id} value={r.id}>[{r.folder}] {r.label}{r.exists ? '' : ' (missing)'}</option>)}
                     </select>
                   </label>
                   <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
@@ -179,7 +174,7 @@ export default function CodeDeck() {
                   </label>
                 </div>
                 <div className="mt-2 text-[10px] text-[var(--color-text-faint)]">
-                  GPT-5.5 is only available on the Codex profile. Claude profiles only show Claude models.
+                  Folder/client comes from the actual server folder tree. GPT-5.5 is only available on the Codex profile; Claude profiles only show Claude models.
                 </div>
               </Card>
 

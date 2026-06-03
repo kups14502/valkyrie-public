@@ -12,14 +12,46 @@ const router = Router()
 const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
 const DB_PATH = path.join(DATA_DIR, 'code-deck.sqlite')
 
-const PROJECT_ROOTS = [
-  { id: 'work', label: 'Work / OneDrive', path: path.join(homedir(), 'work'), folder: 'work' },
-  { id: 'master-control', label: 'Master Control', path: path.join(homedir(), 'master-control'), folder: 'personal' },
-  { id: 'openclaw-home', label: 'OpenClaw Home', path: homedir(), folder: 'openclaw' },
-  { id: 'dnd-bot', label: 'Bot Workspace', path: path.join(homedir(), 'dm-bot-runtime', 'workspace'), folder: 'openclaw' },
-  { id: 'msp-platform', label: 'MSP Platform', path: path.join(homedir(), 'msp-platform'), folder: 'work' },
-  { id: 'trading', label: 'Trading', path: path.join(homedir(), 'trading'), folder: 'personal' },
+const BASE_PROJECT_ROOTS = [
+  { id: 'work', label: 'Work / OneDrive', path: path.join(homedir(), 'work'), folder: 'Work' },
+  { id: 'master-control', label: 'Master Control', path: path.join(homedir(), 'master-control'), folder: 'Personal' },
+  { id: 'openclaw-home', label: 'OpenClaw Home', path: homedir(), folder: 'OpenClaw' },
+  { id: 'dnd-bot', label: 'Bot Workspace', path: path.join(homedir(), 'dm-bot-runtime', 'workspace'), folder: 'OpenClaw' },
+  { id: 'msp-platform', label: 'MSP Platform', path: path.join(homedir(), 'msp-platform'), folder: 'Work' },
+  { id: 'trading', label: 'Trading', path: path.join(homedir(), 'trading'), folder: 'Personal' },
 ]
+
+type ProjectRoot = { id: string; label: string; path: string; folder: string }
+
+function slug(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'folder'
+}
+
+function discoverProjectRoots(): ProjectRoot[] {
+  const roots: ProjectRoot[] = [...BASE_PROJECT_ROOTS]
+  const addDir = (base: string, folder: string, prefix: string, maxDepth: number) => {
+    if (!fs.existsSync(base)) return
+    const walk = (dir: string, depth: number) => {
+      if (depth > maxDepth) return
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!ent.isDirectory() || ent.name.startsWith('.') || ['node_modules', '__pycache__', '.venv'].includes(ent.name)) continue
+        const full = path.join(dir, ent.name)
+        const rel = path.relative(base, full)
+        roots.push({ id: `${prefix}-${slug(rel)}`, label: rel.replaceAll(path.sep, ' / '), path: full, folder })
+        walk(full, depth + 1)
+      }
+    }
+    walk(base, 1)
+  }
+  addDir(path.join(homedir(), 'work'), 'Work', 'work', 2)
+  addDir(path.join(homedir(), 'Projects'), 'Projects', 'projects', 2)
+  const seen = new Set<string>()
+  return roots.filter((r) => {
+    if (seen.has(r.path)) return false
+    seen.add(r.path)
+    return true
+  }).sort((a, b) => a.folder.localeCompare(b.folder) || a.label.localeCompare(b.label))
+}
 
 const PROFILES = [
   {
@@ -143,8 +175,8 @@ router.get('/code-deck', (_req, res) => {
     d.close()
     res.json({
       sessions: rows.map(serialize),
-      folders: Array.from(new Set([...PROJECT_ROOTS.map((p) => p.folder), ...rows.map((r) => r.folder)])).sort(),
-      projectRoots: PROJECT_ROOTS.map((p) => ({ ...p, exists: fs.existsSync(p.path) })),
+      folders: Array.from(new Set([...discoverProjectRoots().map((p) => p.folder), ...rows.map((r) => r.folder)])).sort(),
+      projectRoots: discoverProjectRoots().map((p) => ({ ...p, exists: fs.existsSync(p.path) })),
       profiles: PROFILES,
     })
   } catch (err) {
@@ -155,7 +187,8 @@ router.get('/code-deck', (_req, res) => {
 router.post('/code-deck/sessions', (req, res) => {
   try {
     const body = req.body ?? {}
-    const root = PROJECT_ROOTS.find((p) => p.id === body.projectRootId) ?? PROJECT_ROOTS[0]
+    const projectRoots = discoverProjectRoots()
+    const root = projectRoots.find((p) => p.id === body.projectRootId) ?? projectRoots[0]
     const profile = PROFILES.find((p) => p.id === body.profileId) ?? PROFILES[0]
     const cwd = safePath(String(body.cwd || root.path))
     if (!cwd) return res.status(400).json({ error: 'invalid cwd' })
@@ -163,7 +196,7 @@ router.post('/code-deck/sessions', (req, res) => {
     const row: SessionRow = {
       id: randomUUID(),
       title: String(body.title || 'New Code Session').slice(0, 120),
-      folder: String(body.folder || root.folder || 'inbox').slice(0, 80),
+      folder: String(root.folder || 'Inbox').slice(0, 80),
       projectRootId: root.id,
       cwd,
       profileId: profile.id,
