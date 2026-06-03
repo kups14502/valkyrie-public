@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -41,6 +41,7 @@ export default function CodeDeck() {
   const [model, setModel] = useState('claude-sonnet-4-6')
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
   const [metaLines, setMetaLines] = useState<string[]>([])
+  const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -90,6 +91,22 @@ export default function CodeDeck() {
   }, [availableModels, model])
 
   const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
+
+  const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '')
+  const captureLinks = (text: string) => {
+    const clean = stripAnsi(text)
+    const matches = clean.match(/https?:\/\/[^\s\]\)\}>"']+/g) ?? []
+    if (matches.length === 0) return
+    setDetectedLinks((prev) => {
+      const next = [...prev]
+      for (const raw of matches) {
+        const url = raw.replace(/[.,;:]+$/, '')
+        if (!next.includes(url)) next.push(url)
+      }
+      return next.slice(-8)
+    })
+  }
+  const copyText = async (text: string) => navigator.clipboard?.writeText(text)
 
   // Mount xterm.js when the terminal div is visible
   useEffect(() => {
@@ -145,6 +162,7 @@ export default function CodeDeck() {
     wsRef.current?.close()
     xtermRef.current?.clear()
     setMetaLines([])
+    setDetectedLinks([])
     setTerminalState('connecting')
     const term = xtermRef.current
     const cols = term?.cols ?? 220
@@ -156,8 +174,10 @@ export default function CodeDeck() {
       try {
         const msg = JSON.parse(String(event.data)) as { type: string; data: string }
         if (msg.type === 'data') {
+          captureLinks(msg.data)
           xtermRef.current?.write(msg.data)
         } else {
+          captureLinks(msg.data)
           setMetaLines((v) => [...v, msg.data])
         }
       } catch {
@@ -310,6 +330,17 @@ export default function CodeDeck() {
                     {metaLines.length > 0 && (
                       <div className="space-y-0.5 font-mono text-[10px] text-[var(--color-text-faint)]">
                         {metaLines.map((l, i) => <div key={i}>// {l}</div>)}
+                      </div>
+                    )}
+                    {detectedLinks.length > 0 && (
+                      <div className="space-y-2 rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.04)] p-3">
+                        <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">detected links</div>
+                        {detectedLinks.map((url) => (
+                          <div key={url} className="flex min-w-0 items-center gap-2">
+                            <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--color-text)] underline decoration-[var(--color-accent)]/50 underline-offset-4">{url}</a>
+                            <button type="button" onClick={() => copyText(url)} className="shrink-0 border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Copy link"><Copy size={13} /></button>
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
