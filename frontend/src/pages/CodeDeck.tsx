@@ -389,6 +389,7 @@ export default function CodeDeck() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-4 lg:min-h-0">
+        {!(selected && !showNew && metaCollapsed) && (
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-3">
             {!sidebarOpen && (
@@ -401,6 +402,7 @@ export default function CodeDeck() {
           </div>
           <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">[{sessions.length} sessions · {pinned.length} pinned ]</div>
         </div>
+        )}
 
               {(showNew || !selected) ? (
                 <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-auto">
@@ -415,6 +417,9 @@ export default function CodeDeck() {
                   <div className="flex min-h-0 flex-1 flex-col gap-4">
                     <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] pb-3">
                       <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text)] sm:text-xl">
+                        {!sidebarOpen && (
+                          <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-1.5 py-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={15} /></button>
+                        )}
                         <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
                         <span className="truncate">{selected.title}</span>
                       </div>
@@ -442,7 +447,7 @@ export default function CodeDeck() {
                         <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
                             <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
-                              {usageBars.length > 0 && (
+                              {!metaCollapsed && usageBars.length > 0 && (
                                 <div className="w-full max-w-sm space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
                                   {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
                                 </div>
