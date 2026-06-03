@@ -56,14 +56,14 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 key={to}
                 to={to}
                 onClick={onClose}
-                className={`flex items-center gap-2 border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
+                className={`flex items-center gap-2 whitespace-nowrap border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
                   isActive
                     ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
                     : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
                 }`}
                 style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
               >
-                <Icon size={12} />
+                <Icon size={12} className="shrink-0" />
                 <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
               </NavLink>
             )
@@ -117,7 +117,7 @@ function Shell() {
                     aria-label={label}
                     title={label}
                     className={({ isActive }) =>
-                      `flex items-center gap-1.5 px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] transition border ${
+                      `flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] transition border ${
                         isActive
                           ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
                           : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border)] hover:text-[var(--color-text)]'
@@ -127,7 +127,7 @@ function Shell() {
                   >
                     {({ isActive }) => (
                       <>
-                        <Icon size={13} />
+                        <Icon size={13} className="shrink-0" />
                         <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
                       </>
                     )}
