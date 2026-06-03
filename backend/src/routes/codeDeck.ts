@@ -1,4 +1,7 @@
 import { Router } from 'express'
+import type { Server } from 'node:http'
+import { WebSocketServer } from 'ws'
+import * as pty from 'node-pty'
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -98,6 +101,19 @@ function launchCommand(row: SessionRow) {
   return `${cd} && ${profile.command}`
 }
 
+function terminalCommand(row: SessionRow) {
+  const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
+  if (profile.provider === 'claude') return `${profile.command} --model ${row.model}`
+  return profile.command
+}
+
+function getSession(id: string): SessionRow | undefined {
+  const d = db()
+  const row = d.prepare('SELECT * FROM code_deck_sessions WHERE id=?').get(id) as SessionRow | undefined
+  d.close()
+  return row
+}
+
 function serialize(row: SessionRow) {
   return {
     ...row,
@@ -190,5 +206,55 @@ router.delete('/code-deck/sessions/:id', (req, res) => {
     res.status(500).json({ error: 'failed to delete session', detail: (err as Error).message })
   }
 })
+
+export function attachCodeDeckWs(server: Server) {
+  const wss = new WebSocketServer({ server, path: '/api/code-deck/ws' })
+  wss.on('connection', (ws, req) => {
+    const url = new URL(req.url ?? '', 'http://localhost')
+    const sessionId = url.searchParams.get('sessionId') ?? ''
+    const row = getSession(sessionId)
+    if (!row) {
+      ws.send(JSON.stringify({ type: 'error', data: 'Code Deck session not found' }))
+      ws.close()
+      return
+    }
+    const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
+    const env = { ...process.env, ...profile.env, TERM: 'xterm-256color' }
+    const command = terminalCommand(row)
+    const shell = pty.spawn('/bin/bash', ['-lc', command], {
+      name: 'xterm-256color',
+      cols: Number(url.searchParams.get('cols') ?? 120),
+      rows: Number(url.searchParams.get('rows') ?? 36),
+      cwd: row.cwd,
+      env,
+    })
+    const d = db()
+    d.prepare('UPDATE code_deck_sessions SET status=?, updatedAt=? WHERE id=?').run('running', now(), row.id)
+    d.close()
+    ws.send(JSON.stringify({ type: 'meta', data: `connected: ${command} (${row.cwd})` }))
+    shell.onData((data) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'data', data }))
+    })
+    shell.onExit(({ exitCode, signal }) => {
+      const d2 = db()
+      d2.prepare('UPDATE code_deck_sessions SET status=?, updatedAt=? WHERE id=?').run(exitCode === 0 ? 'exited' : 'failed', now(), row.id)
+      d2.close()
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'exit', data: `process exited code=${exitCode} signal=${signal ?? ''}` }))
+      if (ws.readyState === ws.OPEN) ws.close()
+    })
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(String(raw)) as { type?: string; data?: string; cols?: number; rows?: number }
+        if (msg.type === 'input') shell.write(String(msg.data ?? ''))
+        if (msg.type === 'resize') shell.resize(Number(msg.cols ?? 120), Number(msg.rows ?? 36))
+      } catch {
+        shell.write(String(raw))
+      }
+    })
+    ws.on('close', () => {
+      try { shell.kill() } catch { /* noop */ }
+    })
+  })
+}
 
 export default router

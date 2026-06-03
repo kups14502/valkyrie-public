@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import { createServer } from 'node:http'
 import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
@@ -15,10 +16,11 @@ import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
 import emailsRoute from './routes/emails.js'
 import emailSignalsRoute from './routes/emailSignals.js'
-import codeDeckRoute from './routes/codeDeck.js'
+import codeDeckRoute, { attachCodeDeckWs } from './routes/codeDeck.js'
 import { startAlerts } from './alerts.js'
 
 const app = express()
+const server = createServer(app)
 const PORT = Number(process.env.PORT) || 3001
 const BIND = process.env.BIND || '127.0.0.1'
 
@@ -80,7 +82,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: 'internal error' })
 })
 
-app.listen(PORT, BIND, () => {
+attachCodeDeckWs(server)
+
+server.listen(PORT, BIND, () => {
   console.log(`Master Control API listening on ${BIND}:${PORT}`)
   startAlerts()
 })

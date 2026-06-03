@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
 import { Card } from '../components/Card'
@@ -36,6 +36,11 @@ export default function CodeDeck() {
   const [rootId, setRootId] = useState('work')
   const [profileId, setProfileId] = useState('main-claude')
   const [model, setModel] = useState('claude-sonnet-4-6')
+  const [terminalOutput, setTerminalOutput] = useState('')
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
+  const wsRef = useRef<WebSocket | null>(null)
+  const terminalRef = useRef<HTMLPreElement | null>(null)
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); void refresh() } })
@@ -58,6 +63,53 @@ export default function CodeDeck() {
 
   const makeSession = () => create.mutate({ title, folder, projectRootId: rootId, cwd: root?.path, profileId, model })
   const copy = async (text: string) => navigator.clipboard?.writeText(text)
+
+  useEffect(() => {
+    terminalRef.current?.scrollTo({ top: terminalRef.current.scrollHeight })
+  }, [terminalOutput])
+
+  useEffect(() => () => {
+    wsRef.current?.close()
+  }, [])
+
+  const wsBase = () => {
+    const configured = import.meta.env.VITE_API_URL as string | undefined
+    const base = configured || window.location.origin
+    return base.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+  }
+
+  const startTerminal = () => {
+    if (!selected) return
+    wsRef.current?.close()
+    setTerminalOutput('')
+    setTerminalState('connecting')
+    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(selected.id)}&cols=120&rows=36`)
+    wsRef.current = ws
+    ws.onopen = () => setTerminalState('connected')
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(String(event.data)) as { type: string; data: string }
+        if (msg.type === 'data') setTerminalOutput((v) => v + msg.data)
+        else setTerminalOutput((v) => v + `\n// ${msg.data}\n`)
+      } catch {
+        setTerminalOutput((v) => v + String(event.data))
+      }
+    }
+    ws.onerror = () => setTerminalOutput((v) => v + '\n// websocket error\n')
+    ws.onclose = () => { setTerminalState('closed'); void refresh() }
+  }
+
+  const stopTerminal = () => {
+    wsRef.current?.close()
+    wsRef.current = null
+    setTerminalState('closed')
+  }
+
+  const sendTerminalInput = () => {
+    if (!terminalInput || terminalState !== 'connected') return
+    wsRef.current?.send(JSON.stringify({ type: 'input', data: terminalInput + '\n' }))
+    setTerminalInput('')
+  }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
@@ -122,9 +174,26 @@ export default function CodeDeck() {
                       <div className="text-[var(--color-text-faint)]">// launch command</div>
                       <pre className="mt-2 whitespace-pre-wrap break-all">{selected.launchCommand}</pre>
                     </div>
-                    <button type="button" onClick={() => copy(selected.launchCommand)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><Copy size={14} /> copy command</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={startTerminal} disabled={terminalState === 'connecting' || terminalState === 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Terminal size={14} /> start terminal</button>
+                      <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
+                      <button type="button" onClick={() => copy(selected.launchCommand)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><Copy size={14} /> copy command</button>
+                    </div>
+                    <div className="rounded border border-[var(--color-border)] bg-black/70 shadow-[0_0_35px_rgba(0,255,65,0.10)]">
+                      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                        <span>// browser pty</span>
+                        <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
+                      </div>
+                      <pre ref={terminalRef} className="h-[520px] overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
+                        {terminalOutput || 'terminal output will appear here…'}
+                      </pre>
+                      <div className="flex border-t border-[var(--color-border)]">
+                        <input value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendTerminalInput() }} disabled={terminalState !== 'connected'} className="min-w-0 flex-1 bg-transparent px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] disabled:opacity-50" placeholder="type command/input and press Enter…" />
+                        <button type="button" onClick={sendTerminalInput} disabled={terminalState !== 'connected'} className="border-l border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] disabled:opacity-50">send</button>
+                      </div>
+                    </div>
                     <div className="text-xs leading-relaxed text-[var(--color-text-dim)]">
-                      v0 is the organized session deck: folders, pins, profiles, project roots, and launch commands. Next step is wiring an interactive PTY/WebSocket terminal so this runs fully in-browser without OpenClaw.
+                      This runs the selected Claude/Codex CLI through a server-side PTY over WebSocket. It bypasses OpenClaw; Master Control only organizes and hosts the terminal.
                     </div>
                   </div>
                 )}
