@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2 } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
+import { TitleBar } from './components/TitleBar'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -93,6 +94,7 @@ function Shell() {
 
   return (
     <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+      <TitleBar />
       <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="mx-auto max-w-full px-4 py-3 sm:px-6 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
           <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
