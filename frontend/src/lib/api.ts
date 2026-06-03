@@ -441,3 +441,48 @@ export const fetchEmailSignals = async () => {
   const r = await api.get<EmailSignals>('/email/signals')
   return r.data
 }
+
+export type CodeDeckSession = {
+  id: string
+  title: string
+  folder: string
+  projectRootId: string
+  cwd: string
+  profileId: string
+  model: string
+  pinned: boolean
+  status: string
+  notes: string
+  createdAt: string
+  updatedAt: string
+  launchCommand: string
+}
+
+export type CodeDeckRoot = { id: string; label: string; path: string; folder: string; exists: boolean }
+export type CodeDeckProfile = { id: string; label: string; provider: string; defaultModel: string; command: string; env: Record<string, string> }
+export type CodeDeckState = {
+  sessions: CodeDeckSession[]
+  folders: string[]
+  projectRoots: CodeDeckRoot[]
+  profiles: CodeDeckProfile[]
+}
+
+export const fetchCodeDeck = async () => {
+  const r = await api.get<CodeDeckState>('/code-deck')
+  return r.data
+}
+
+export const createCodeDeckSession = async (body: Partial<CodeDeckSession>) => {
+  const r = await api.post<{ session: CodeDeckSession }>('/code-deck/sessions', body)
+  return r.data.session
+}
+
+export const updateCodeDeckSession = async (id: string, body: Partial<CodeDeckSession>) => {
+  const r = await api.patch<{ session: CodeDeckSession }>(`/code-deck/sessions/${id}`, body)
+  return r.data.session
+}
+
+export const deleteCodeDeckSession = async (id: string) => {
+  const r = await api.delete<{ ok: boolean }>(`/code-deck/sessions/${id}`)
+  return r.data
+}
