@@ -20,6 +20,9 @@
 
 html, body, #root {
   height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   background: #000000;
   color: var(--color-text);
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
@@ -36,6 +39,14 @@ body {
 }
 
 * { box-sizing: border-box; }
+
+img, svg, canvas, video {
+  max-width: 100%;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
 
 html {
   scrollbar-width: thin;

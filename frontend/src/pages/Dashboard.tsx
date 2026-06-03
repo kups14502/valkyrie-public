@@ -227,7 +227,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
+      <div className="grid max-w-full gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 xl:sticky xl:top-24 xl:order-1">
             <Card title="AI Usage">
               {aiUsage.isLoading && !aiUsage.data ? (
@@ -242,11 +242,11 @@ export default function Dashboard() {
                   ]).map((client) => (
                     <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
+                          <div className="mt-1 break-all text-sm font-semibold text-[var(--color-text)] sm:break-normal">{client.label}</div>
                         </div>
-                        <div className="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{client.subscription}</div>
+                        <div className="max-w-[42%] shrink-0 text-right text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:text-[10px] sm:tracking-[0.16em]">{client.subscription}</div>
                       </div>
                       {client.kind === 'claude' && client.quota ? (
                         <div className="space-y-2">

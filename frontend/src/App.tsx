@@ -90,9 +90,9 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
 
   return (
-    <div className="min-h-full bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="mx-auto px-4 py-3 sm:px-6 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
+        <div className="mx-auto max-w-full px-4 py-3 sm:px-6 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
           <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
             <div className="flex items-center gap-3 xl:col-start-2">
               <div className="flex-1 min-w-0">
@@ -149,7 +149,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
+      <main className="mx-auto max-w-full overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

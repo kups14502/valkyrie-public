@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 export function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="panel p-5">
+    <section className="panel max-w-full overflow-hidden p-4 sm:p-5">
       {(title || action) && (
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
           {title && (
