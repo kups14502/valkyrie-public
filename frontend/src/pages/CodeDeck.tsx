@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
+import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, updateCodeDeckSession, type CodeDeckSession } from '../lib/api'
 
@@ -36,12 +39,13 @@ export default function CodeDeck() {
   const [rootId, setRootId] = useState('work')
   const [profileId, setProfileId] = useState('main-claude')
   const [model, setModel] = useState('claude-sonnet-4-6')
-  const [terminalOutput, setTerminalOutput] = useState('')
-  const [terminalInput, setTerminalInput] = useState('')
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
+  const [metaLines, setMetaLines] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const wsRef = useRef<WebSocket | null>(null)
-  const terminalRef = useRef<HTMLPreElement | null>(null)
+  const xtermRef = useRef<XTerm | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+  const termDivRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); void refresh(); startTerminal(s.id) } })
@@ -86,13 +90,49 @@ export default function CodeDeck() {
   }, [availableModels, model])
 
   const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
-  useEffect(() => {
-    terminalRef.current?.scrollTo({ top: terminalRef.current.scrollHeight })
-  }, [terminalOutput])
 
-  useEffect(() => () => {
-    wsRef.current?.close()
-  }, [])
+  // Mount xterm.js when the terminal div is visible
+  useEffect(() => {
+    if (!termDivRef.current) return
+    if (xtermRef.current) return
+
+    const term = new XTerm({
+      theme: {
+        background: '#000000',
+        foreground: '#00ff41',
+        cursor: '#00ff41',
+        selectionBackground: 'rgba(0,255,65,0.3)',
+      },
+      fontFamily: '"Fira Mono", "JetBrains Mono", monospace',
+      fontSize: 13,
+      cursorBlink: true,
+      allowProposedApi: true,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(termDivRef.current)
+    fit.fit()
+    xtermRef.current = term
+    fitRef.current = fit
+
+    term.onData((data) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data }))
+      }
+    })
+
+    const ro = new ResizeObserver(() => { fit.fit() })
+    ro.observe(termDivRef.current)
+
+    return () => {
+      ro.disconnect()
+      term.dispose()
+      xtermRef.current = null
+      fitRef.current = null
+    }
+  }, [termDivRef.current])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => { wsRef.current?.close() }, [])
 
   const wsBase = () => {
     const configured = import.meta.env.VITE_API_URL as string | undefined
@@ -103,21 +143,28 @@ export default function CodeDeck() {
   const startTerminal = (sessionId = selected?.id) => {
     if (!sessionId) return
     wsRef.current?.close()
-    setTerminalOutput('')
+    xtermRef.current?.clear()
+    setMetaLines([])
     setTerminalState('connecting')
-    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(sessionId)}&cols=120&rows=36`)
+    const term = xtermRef.current
+    const cols = term?.cols ?? 220
+    const rows = term?.rows ?? 50
+    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(sessionId)}&cols=${cols}&rows=${rows}`)
     wsRef.current = ws
     ws.onopen = () => setTerminalState('connected')
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(String(event.data)) as { type: string; data: string }
-        if (msg.type === 'data') setTerminalOutput((v) => v + msg.data)
-        else setTerminalOutput((v) => v + `\n// ${msg.data}\n`)
+        if (msg.type === 'data') {
+          xtermRef.current?.write(msg.data)
+        } else {
+          setMetaLines((v) => [...v, msg.data])
+        }
       } catch {
-        setTerminalOutput((v) => v + String(event.data))
+        xtermRef.current?.write(String(event.data))
       }
     }
-    ws.onerror = () => setTerminalOutput((v) => v + '\n// websocket error\n')
+    ws.onerror = () => setMetaLines((v) => [...v, 'websocket error'])
     ws.onclose = () => { setTerminalState('closed'); void refresh() }
   }
 
@@ -125,12 +172,6 @@ export default function CodeDeck() {
     wsRef.current?.close()
     wsRef.current = null
     setTerminalState('closed')
-  }
-
-  const sendTerminalInput = () => {
-    if (!terminalInput || terminalState !== 'connected') return
-    wsRef.current?.send(JSON.stringify({ type: 'input', data: terminalInput + '\n' }))
-    setTerminalInput('')
   }
 
   return (
@@ -215,7 +256,7 @@ export default function CodeDeck() {
             <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// remote claude/codex workbench</div>
             <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>code deck<span className="cursor-blink">_</span></h1>
           </div>
-          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">[{sessions.length} sessions · {pinned.length} pinned]</div>
+          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">[{sessions.length} sessions · {pinned.length} pinned ]</div>
         </div>
 
               <Card title="New session">
@@ -266,18 +307,17 @@ export default function CodeDeck() {
                       )}
                       <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
                     </div>
-                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black/70 shadow-[0_0_35px_rgba(0,255,65,0.10)]">
+                    {metaLines.length > 0 && (
+                      <div className="space-y-0.5 font-mono text-[10px] text-[var(--color-text-faint)]">
+                        {metaLines.map((l, i) => <div key={i}>// {l}</div>)}
+                      </div>
+                    )}
+                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black shadow-[0_0_35px_rgba(0,255,65,0.10)]">
                       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
                         <span>// browser pty</span>
                         <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
                       </div>
-                      <pre ref={terminalRef} className="h-[520px] max-w-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
-                        {terminalOutput || 'terminal output will appear here…'}
-                      </pre>
-                      <div className="flex border-t border-[var(--color-border)]">
-                        <input value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendTerminalInput() }} disabled={terminalState !== 'connected'} className="min-w-0 flex-1 bg-transparent px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] disabled:opacity-50" placeholder="type command/input and press Enter…" />
-                        <button type="button" onClick={sendTerminalInput} disabled={terminalState !== 'connected'} className="border-l border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] disabled:opacity-50">send</button>
-                      </div>
+                      <div ref={termDivRef} className="h-[520px] w-full" />
                     </div>
                   </div>
                 )}
