@@ -47,8 +47,8 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   return (
     <div className="sm:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="mx-auto max-w-[1600px] px-6 py-3 space-y-3">
-        <div className="grid grid-cols-3 gap-2">
+      <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
+        <div className="grid grid-cols-2 gap-2">
           {navItems.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
             return (
@@ -149,7 +149,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="mx-auto px-6 py-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
+      <main className="mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -228,7 +228,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-        <div className="order-2 xl:sticky xl:top-24 xl:order-1">
+        <div className="order-1 xl:sticky xl:top-24 xl:order-1">
             <Card title="AI Usage">
               {aiUsage.isLoading && !aiUsage.data ? (
                 <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
@@ -307,7 +307,7 @@ export default function Dashboard() {
             </Card>
         </div>
 
-        <div className="order-1 space-y-6 xl:order-2">
+        <div className="order-3 space-y-6 xl:order-2">
         <NowBanner />
 
         <div className="flex items-end justify-between gap-4">
@@ -498,7 +498,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        <div className="order-3 xl:sticky xl:top-24">
+        <div className="order-2 xl:sticky xl:top-24 xl:order-3">
           <Card title="Server">
             {sys.isLoading ? (
               <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
