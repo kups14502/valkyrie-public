@@ -369,7 +369,7 @@ export default function CodeDeck() {
 
                     {mode === 'chat' ? (
                       <div className="space-y-4">
-                        <div className="h-[calc(100vh-380px)] min-h-[360px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                        <div className="h-[calc(100vh-470px)] min-h-[180px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
                             <div className="text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
                           ) : (messages.data ?? []).map((m) => (
@@ -418,7 +418,7 @@ export default function CodeDeck() {
                             <span>// browser pty</span>
                             <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
                           </div>
-                          <div ref={termDivRef} className="h-[520px] w-full" />
+                          <div ref={termDivRef} className="h-[calc(100vh-470px)] min-h-[260px] w-full" />
                         </div>
                       </div>
                     )}
