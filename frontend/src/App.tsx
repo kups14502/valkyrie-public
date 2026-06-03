@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, TrendingUp, Mail, Activity as ActivityIcon, Menu, X, Code2 } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2 } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import Dashboard from './pages/Dashboard'
 
@@ -33,12 +33,11 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/lights', label: 'lights', icon: Lightbulb },
-  { to: '/services', label: 'services', icon: Server },
-  { to: '/vault', label: 'vault', icon: KeyRound },
-  { to: '/trade', label: 'trade', icon: TrendingUp },
-  { to: '/emails', label: 'emails', icon: Mail },
   { to: '/code-deck', label: 'code deck', icon: Code2 },
+  { to: '/emails', label: 'emails', icon: Mail },
+  { to: '/lights', label: 'lights', icon: Lightbulb },
+  { to: '/vault', label: 'vault', icon: KeyRound },
+  { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
 ]
 
