@@ -226,7 +226,7 @@ export default function Dashboard() {
   const projectsList = Array.isArray(projects.data) ? projects.data : []
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 lg:relative lg:left-1/2 lg:w-[calc(100vw-3rem)] lg:-translate-x-1/2 xl:w-[calc(100vw-4rem)]">
       <NowBanner />
 
       <div className="flex items-end justify-between gap-4">
