@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
 import { Card } from '../components/Card'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, updateCodeDeckSession, type CodeDeckSession } from '../lib/api'
 
@@ -39,6 +39,7 @@ export default function CodeDeck() {
   const [terminalOutput, setTerminalOutput] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const wsRef = useRef<WebSocket | null>(null)
   const terminalRef = useRef<HTMLPreElement | null>(null)
 
@@ -66,6 +67,15 @@ export default function CodeDeck() {
     return Array.from(out.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [deck.data])
   const pinned = sessions.filter((s) => s.pinned)
+
+  const toggleFolder = (key: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const root = deck.data?.projectRoots.find((r) => r.id === rootId) ?? deck.data?.projectRoots[0]
   const profile = deck.data?.profiles.find((p) => p.id === profileId)
@@ -133,24 +143,63 @@ export default function CodeDeck() {
             </Card>
             <Card title="Folders">
               {deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
-                {projectGroups.map(([name, roots]) => (
-                  <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
-                    <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)]"><Folder size={14} /> {name}</div>
-                    <div className="space-y-1.5">
-                      {roots.map((r) => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => setRootId(r.id)}
-                          className={`w-full border px-3 py-2 text-left text-xs transition ${rootId === r.id ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}
-                        >
-                          <div className="truncate font-semibold">{r.label}</div>
-                          <div className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">{r.path}</div>
-                        </button>
-                      ))}
+                {projectGroups.map(([name, roots]) => {
+                  const parents = roots.filter((r) => !r.label.includes(' / '))
+                  const childrenByParent = new Map<string, typeof roots>()
+                  for (const r of roots.filter((x) => x.label.includes(' / '))) {
+                    const parent = r.label.split(' / ')[0]
+                    if (!childrenByParent.has(parent)) childrenByParent.set(parent, [])
+                    childrenByParent.get(parent)!.push(r)
+                  }
+                  const parentNames = new Set([...parents.map((r) => r.label), ...childrenByParent.keys()])
+                  return (
+                    <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
+                      <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)]"><Folder size={14} /> {name}</div>
+                      <div className="space-y-1.5">
+                        {[...parentNames].sort().map((parentName) => {
+                          const parentRoot = parents.find((r) => r.label === parentName)
+                          const kids = childrenByParent.get(parentName) ?? []
+                          const key = `${name}:${parentName}`
+                          const open = expandedFolders.has(key)
+                          return (
+                            <div key={key} className="space-y-1.5">
+                              <div className="flex gap-1">
+                                {kids.length > 0 ? (
+                                  <button type="button" onClick={() => toggleFolder(key)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={open ? 'Collapse folder' : 'Expand folder'}>
+                                    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => parentRoot && setRootId(parentRoot.id)}
+                                  className={`min-w-0 flex-1 border px-3 py-2 text-left text-xs transition ${parentRoot && rootId === parentRoot.id ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}
+                                >
+                                  <div className="truncate font-semibold">{parentName}</div>
+                                  {parentRoot && <div className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">{parentRoot.path}</div>}
+                                </button>
+                              </div>
+                              {open && kids.length > 0 && (
+                                <div className="ml-7 space-y-1.5 border-l border-[var(--color-border)] pl-2">
+                                  {kids.map((r) => (
+                                    <button
+                                      key={r.id}
+                                      type="button"
+                                      onClick={() => setRootId(r.id)}
+                                      className={`w-full border px-3 py-2 text-left text-xs transition ${rootId === r.id ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}
+                                    >
+                                      <div className="truncate font-semibold">{r.label.replace(`${parentName} / `, '')}</div>
+                                      <div className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">{r.path}</div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
                 {grouped.length > 0 && <div className="border-t border-[var(--color-border)] pt-4 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">sessions</div>}
                 {grouped.map(([name, items]) => (
                   <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
