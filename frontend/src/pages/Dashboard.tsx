@@ -239,7 +239,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <Card title="AI Usage">
           {aiUsage.isLoading && !aiUsage.data ? (
             <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
@@ -317,50 +317,6 @@ export default function Dashboard() {
           ) : null}
         </Card>
 
-        <Card title={`Sessions (${sessionsList.length})`} >
-          {sessionsList.length > 0 ? (
-            <div className="space-y-2">
-              {sessionsList.map((s) => (
-                <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-semibold">{s.model}</span>
-                      {s.project && (
-                        <span className="text-[var(--color-text-dim)]">· {s.project}</span>
-                      )}
-                      {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
-                        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
-                          [{s.gitBranch}]
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                      pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
-                    <div>{s.cpu.toFixed(2)}% cpu</div>
-                    <div className="mt-0.5">
-                      {fmtBytes(s.memory)}
-                      {sys.data?.memory?.total
-                        ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
-                        : null}
-                    </div>
-                    {s.lastActivity != null && (
-                      <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
-                        {fmtAgo(s.lastActivity)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
-          )}
-        </Card>
-      </div>
-
       <Card title="Server">
         {sys.isLoading ? (
           <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
@@ -380,7 +336,7 @@ export default function Dashboard() {
             {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
           </div>
         ) : sys.data && sysValid ? (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <Stat
               label="CPU"
               value={`${sys.data.cpu.usage.toFixed(1)}%`}
@@ -405,6 +361,52 @@ export default function Dashboard() {
           <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
         ) : null}
       </Card>
+
+        <div className="lg:col-span-2">
+          <Card title={`Sessions (${sessionsList.length})`} >
+            {sessionsList.length > 0 ? (
+              <div className="space-y-2">
+                {sessionsList.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-semibold">{s.model}</span>
+                        {s.project && (
+                          <span className="text-[var(--color-text-dim)]">· {s.project}</span>
+                        )}
+                        {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
+                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
+                            [{s.gitBranch}]
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+                        pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
+                      <div>{s.cpu.toFixed(2)}% cpu</div>
+                      <div className="mt-0.5">
+                        {fmtBytes(s.memory)}
+                        {sys.data?.memory?.total
+                          ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
+                          : null}
+                      </div>
+                      {s.lastActivity != null && (
+                        <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
+                          {fmtAgo(s.lastActivity)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
+            )}
+          </Card>
+        </div>
+      </div>
 
       <Card title="Launcher">
         {launcher.isLoading && !launcher.data ? (
