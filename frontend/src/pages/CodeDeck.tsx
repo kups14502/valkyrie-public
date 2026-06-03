@@ -63,7 +63,7 @@ export default function CodeDeck() {
   const messages = useQuery({ queryKey: ['code-deck-messages', selected?.id], queryFn: () => fetchCodeDeckMessages(selected!.id), enabled: Boolean(selected?.id), refetchInterval: 5000 })
   const chat = useMutation({
     mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) => sendCodeDeckMessage(sessionId, content),
-    onSuccess: () => { setChatInput(''); void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
   })
   const grouped = useMemo(() => {
     const out = new Map<string, CodeDeckSession[]>()
@@ -211,6 +211,7 @@ export default function CodeDeck() {
   const sendChat = () => {
     if (!selected || !chatInput.trim() || chat.isPending) return
     chat.mutate({ sessionId: selected.id, content: chatInput.trim() })
+    setChatInput('')
   }
 
   const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
