@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2 } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
 import Dashboard from './pages/Dashboard'
@@ -40,6 +40,7 @@ const navItems = [
   { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
+  { to: '/trade', label: 'trades', icon: TrendingUp },
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
