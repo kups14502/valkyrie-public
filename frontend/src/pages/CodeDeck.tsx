@@ -434,8 +434,8 @@ export default function CodeDeck() {
                     </div>
                     {!metaCollapsed && (
                     <div className="space-y-3 border-b border-[var(--color-border)] pb-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-3">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
+                        <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-2">
                             <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
                             <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
@@ -448,7 +448,7 @@ export default function CodeDeck() {
                           </div>
                         </div>
                         {usageBars.length > 0 && (
-                          <div className="w-full max-w-md shrink-0 space-y-4 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left lg:w-[420px]">
+                          <div className="w-full min-w-0 space-y-4 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
                             {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
                           </div>
                         )}
