@@ -227,6 +227,22 @@ export default function Dashboard() {
 
   return (
     <div className="min-w-0 space-y-8 overflow-hidden">
+      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)]">
+        <div className="min-w-0 space-y-4 xl:col-start-2">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
+              <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
+            </div>
+            <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+              [live telemetry]
+            </div>
+          </div>
+
+          <NowBanner />
+        </div>
+      </div>
+
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 xl:sticky xl:top-24 xl:order-1">
             <Card title="AI Usage">
@@ -308,18 +324,6 @@ export default function Dashboard() {
         </div>
 
         <div className="order-3 min-w-0 space-y-6 xl:order-2">
-        <NowBanner />
-
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
-            <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
-          </div>
-          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-            [live telemetry]
-          </div>
-        </div>
-
           <Card title="Launcher">
             {launcher.isLoading && !launcher.data ? (
               <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
