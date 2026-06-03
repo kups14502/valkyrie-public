@@ -199,6 +199,7 @@ function runAgent(row: SessionRow, prompt: string): Promise<string> {
     : ['exec', '-m', row.model, '-C', row.cwd, '--skip-git-repo-check', '--sandbox', 'workspace-write', prompt]
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: row.cwd, env })
+    child.stdin?.end()
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {
