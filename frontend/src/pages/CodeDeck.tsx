@@ -126,8 +126,8 @@ export default function CodeDeck() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-      <aside className="order-2 space-y-4 xl:sticky xl:top-24 xl:order-1 xl:self-start">
+    <div className="grid min-w-0 max-w-full gap-6 overflow-hidden xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
+      <aside className="order-2 min-w-0 space-y-4 xl:sticky xl:top-24 xl:order-1 xl:self-start">
             <Card title="Pinned">
               {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => setSelectedId(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
             </Card>
@@ -162,8 +162,8 @@ export default function CodeDeck() {
             </Card>
       </aside>
 
-      <div className="order-1 space-y-6 xl:order-2 xl:col-span-2">
-        <div className="flex items-end justify-between gap-4">
+      <div className="order-1 min-w-0 space-y-6 xl:order-2 xl:col-span-2">
+        <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <div>
             <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// remote claude/codex workbench</div>
             <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>code deck<span className="cursor-blink">_</span></h1>
@@ -172,15 +172,15 @@ export default function CodeDeck() {
         </div>
 
               <Card title="New session">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  <label className="space-y-1 xl:col-span-2">
+                <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <label className="min-w-0 space-y-1 xl:col-span-2">
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">session name</span>
-                    <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
+                    <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
                   </label>
-                  <div className="space-y-1 xl:col-span-2">
+                  <div className="min-w-0 space-y-1 xl:col-span-2">
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">selected server folder</span>
-                    <div className="border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-sm text-[var(--color-text)]">
-                      {root ? <span>[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder below</span>}
+                    <div className="min-w-0 overflow-hidden border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-sm text-[var(--color-text)]">
+                      {root ? <span className="block truncate">[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder below</span>}
                     </div>
                   </div>
                   <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
@@ -188,18 +188,18 @@ export default function CodeDeck() {
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <label className="space-y-1">
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
-                    <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+                    <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
                       {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                     </select>
                   </label>
                   <label className="space-y-1">
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
-                    <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+                    <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
                       {availableModels.map((m) => <option key={m}>{m}</option>)}
                     </select>
                   </label>
                 </div>
-                <div className="mt-2 text-[10px] text-[var(--color-text-faint)]">
+                <div className="mt-2 break-words text-[10px] text-[var(--color-text-faint)]">
                   Folder/client comes from the actual server folder tree. GPT-5.5 is only available on the Codex profile; Claude profiles only show Claude models.
                 </div>
               </Card>
@@ -216,7 +216,7 @@ export default function CodeDeck() {
                       </div>
                       <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                     </div>
-                    <div className="rounded border border-[var(--color-border)] bg-black/40 p-4 font-mono text-xs text-[var(--color-accent)] shadow-[0_0_30px_rgba(0,255,65,0.08)]">
+                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black/40 p-4 font-mono text-xs text-[var(--color-accent)] shadow-[0_0_30px_rgba(0,255,65,0.08)]">
                       <div className="text-[var(--color-text-faint)]">// launch command</div>
                       <pre className="mt-2 whitespace-pre-wrap break-all">{selected.launchCommand}</pre>
                     </div>
@@ -225,12 +225,12 @@ export default function CodeDeck() {
                       <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
                       <button type="button" onClick={() => copy(selected.launchCommand)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><Copy size={14} /> copy command</button>
                     </div>
-                    <div className="rounded border border-[var(--color-border)] bg-black/70 shadow-[0_0_35px_rgba(0,255,65,0.10)]">
+                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black/70 shadow-[0_0_35px_rgba(0,255,65,0.10)]">
                       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
                         <span>// browser pty</span>
                         <span className={terminalState === 'connected' ? 'text-[var(--color-success)]' : terminalState === 'connecting' ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-faint)]'}>[{terminalState}]</span>
                       </div>
-                      <pre ref={terminalRef} className="h-[520px] overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
+                      <pre ref={terminalRef} className="h-[520px] max-w-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
                         {terminalOutput || 'terminal output will appear here…'}
                       </pre>
                       <div className="flex border-t border-[var(--color-border)]">
