@@ -37,10 +37,10 @@ const navItems = [
   { to: '/code-deck', label: 'code deck', icon: Code2 },
   { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
+  { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
-  { to: '/trade', label: 'trades', icon: TrendingUp },
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
