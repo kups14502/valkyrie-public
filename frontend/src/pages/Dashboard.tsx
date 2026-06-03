@@ -33,9 +33,9 @@ function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label
     : (warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="text-[var(--color-text-dim)]">{label}</span>
-        <span className="font-semibold text-[var(--color-text)]">{clamped}% used</span>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate text-[var(--color-text-dim)]">{label}</span>
+        <span className="shrink-0 font-semibold text-[var(--color-text)]">{clamped}% used</span>
       </div>
       <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${clamped}%`, backgroundColor: color }} />
@@ -226,9 +226,9 @@ export default function Dashboard() {
   const projectsList = Array.isArray(projects.data) ? projects.data : []
 
   return (
-    <div className="space-y-8">
-      <div className="grid max-w-full gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-        <div className="order-1 xl:sticky xl:top-24 xl:order-1">
+    <div className="min-w-0 space-y-8 overflow-hidden">
+      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
+        <div className="order-1 min-w-0 xl:sticky xl:top-24 xl:order-1">
             <Card title="AI Usage">
               {aiUsage.isLoading && !aiUsage.data ? (
                 <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
@@ -240,13 +240,13 @@ export default function Dashboard() {
                     { id: 'claude-work', kind: 'claude' as const, label: 'user@example.com', subscription: 'Claude Pro', ...aiUsage.data.claude },
                     { id: 'codex-work', kind: 'codex' as const, label: 'Codex user@example.com', subscription: 'Codex', ...aiUsage.data.codex },
                   ]).map((client) => (
-                    <div key={client.id} className="space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                    <div key={client.id} className="min-w-0 space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
                           <div className="mt-1 break-all text-sm font-semibold text-[var(--color-text)] sm:break-normal">{client.label}</div>
                         </div>
-                        <div className="max-w-[42%] shrink-0 text-right text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:text-[10px] sm:tracking-[0.16em]">{client.subscription}</div>
+                        <div className="max-w-[34%] shrink-0 break-words text-right text-[8px] uppercase tracking-[0.08em] text-[var(--color-text-faint)] sm:max-w-[42%] sm:text-[10px] sm:tracking-[0.16em]">{client.subscription}</div>
                       </div>
                       {client.kind === 'claude' && client.quota ? (
                         <div className="space-y-2">
@@ -307,7 +307,7 @@ export default function Dashboard() {
             </Card>
         </div>
 
-        <div className="order-3 space-y-6 xl:order-2">
+        <div className="order-3 min-w-0 space-y-6 xl:order-2">
         <NowBanner />
 
         <div className="flex items-end justify-between gap-4">
@@ -326,7 +326,7 @@ export default function Dashboard() {
             ) : launcher.error ? (
               <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                 {(launcher.data ?? []).map((s) => {
                   const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
                   const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
@@ -498,7 +498,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        <div className="order-2 xl:sticky xl:top-24 xl:order-3">
+        <div className="order-2 min-w-0 xl:sticky xl:top-24 xl:order-3">
           <Card title="Server">
             {sys.isLoading ? (
               <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>

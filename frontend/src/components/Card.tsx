@@ -4,10 +4,10 @@ export function Card({ title, children, action }: { title?: string; children: Re
   return (
     <section className="panel max-w-full overflow-hidden p-4 sm:p-5">
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
+        <div className="mb-4 flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
           {title && (
             <h2
-              className="text-[11px] font-bold uppercase tracking-[0.22em]"
+              className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[0.22em]"
               style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
             >
               &gt; {title}
