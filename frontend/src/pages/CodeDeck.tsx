@@ -5,6 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
+import { Dropdown } from '../components/Dropdown'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, type AIClientUsage, type AIUsage, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
@@ -294,15 +295,11 @@ export default function CodeDeck() {
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
-          <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-            {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
+          <Dropdown value={profileId} onChange={setProfileId} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} />
         </label>
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
-          <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-            {availableModels.map((m) => <option key={m}>{m}</option>)}
-          </select>
+          <Dropdown value={availableModels.includes(model) ? model : availableModels[0]} onChange={setModel} options={availableModels.map((m) => ({ value: m, label: m }))} />
         </label>
       </div>
     </Card>
@@ -419,12 +416,8 @@ export default function CodeDeck() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 text-xl font-semibold text-[var(--color-text)]"><Terminal size={18} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.title}</span></div>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <select value={selected.profileId} onChange={(e) => changeProfile(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text-dim)] outline-none hover:border-[var(--color-accent)] focus:border-[var(--color-accent)]">
-                            {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                          </select>
-                          <select value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={(e) => changeModel(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text-dim)] outline-none hover:border-[var(--color-accent)] focus:border-[var(--color-accent)]">
-                            {selectedModels.map((m) => <option key={m}>{m}</option>)}
-                          </select>
+                          <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
+                          <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
                           <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{selected.folder}</span>
                         </div>
                       </div>
