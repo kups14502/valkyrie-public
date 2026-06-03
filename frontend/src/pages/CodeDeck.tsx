@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Folder, PanelLeft, PanelLeftClose, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -45,6 +45,8 @@ export default function CodeDeck() {
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showNew, setShowNew] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -52,7 +54,7 @@ export default function CodeDeck() {
   const linkBufRef = useRef('')
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
-  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); void refresh() } })
+  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); setShowNew(false); void refresh() } })
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<CodeDeckSession> }) => updateCodeDeckSession(id, body), onSuccess: () => { void refresh() } })
   const del = useMutation({ mutationFn: deleteCodeDeckSession, onSuccess: () => { setSelectedId(null); void refresh() } })
 
@@ -213,9 +215,46 @@ export default function CodeDeck() {
 
   const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
 
+  const newSessionForm = (
+    <Card title="New session">
+      <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <label className="min-w-0 space-y-1 xl:col-span-2">
+          <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">session name</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
+        </label>
+        <div className="min-w-0 space-y-1 xl:col-span-2">
+          <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">selected server folder</span>
+          <div className="min-w-0 overflow-hidden border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-sm text-[var(--color-text)]">
+            {root ? <span className="block truncate">[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder in the sidebar</span>}
+          </div>
+        </div>
+        <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
+          <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+            {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
+          <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+            {availableModels.map((m) => <option key={m}>{m}</option>)}
+          </select>
+        </label>
+      </div>
+    </Card>
+  )
+
   return (
-    <div className="grid min-w-0 max-w-full gap-6 overflow-hidden xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-      <aside className="order-2 min-w-0 space-y-4 xl:sticky xl:top-24 xl:order-1 xl:self-start">
+    <div className="flex min-w-0 max-w-full gap-4">
+      {sidebarOpen && (
+      <aside className="w-full shrink-0 space-y-4 xl:sticky xl:top-24 xl:w-[320px] xl:self-start">
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setShowNew(true); setSelectedId(null) }} className="inline-flex flex-1 items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Plus size={14} /> new</button>
+              <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
+            </div>
             <Card title="Pinned">
               {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => setSelectedId(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
             </Card>
@@ -288,50 +327,33 @@ export default function CodeDeck() {
               </div>}
             </Card>
       </aside>
+      )}
 
-      <div className="order-1 min-w-0 space-y-6 xl:order-2 xl:col-span-2">
+      <div className="min-w-0 flex-1 space-y-6">
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// remote claude/codex workbench</div>
-            <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>code deck<span className="cursor-blink">_</span></h1>
+          <div className="flex items-center gap-3">
+            {!sidebarOpen && (
+              <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-2 py-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={16} /></button>
+            )}
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// remote claude/codex workbench</div>
+              <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>code deck<span className="cursor-blink">_</span></h1>
+            </div>
           </div>
           <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">[{sessions.length} sessions · {pinned.length} pinned ]</div>
         </div>
 
-              <Card title="New session">
-                <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  <label className="min-w-0 space-y-1 xl:col-span-2">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">session name</span>
-                    <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
-                  </label>
-                  <div className="min-w-0 space-y-1 xl:col-span-2">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">selected server folder</span>
-                    <div className="min-w-0 overflow-hidden border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-sm text-[var(--color-text)]">
-                      {root ? <span className="block truncate">[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder below</span>}
-                    </div>
-                  </div>
-                  <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
+              {(showNew || !selected) ? (
+                <div className="space-y-3">
+                  {selected && (
+                    <button type="button" onClick={() => setShowNew(false)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><X size={14} /> back to chat</button>
+                  )}
+                  {newSessionForm}
                 </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
-                    <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                      {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
-                    <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                      {availableModels.map((m) => <option key={m}>{m}</option>)}
-                    </select>
-                  </label>
-                </div>
-              </Card>
-
+              ) : (
               <Card title="Workspace">
-                {!selected ? (
-                  <div className="text-sm text-[var(--color-text-dim)]">Create or select a session.</div>
-                ) : (
+                {(
+                  <>
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -347,7 +369,7 @@ export default function CodeDeck() {
 
                     {mode === 'chat' ? (
                       <div className="space-y-4">
-                        <div className="max-h-[560px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                        <div className="h-[calc(100vh-380px)] min-h-[360px] space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
                             <div className="text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
                           ) : (messages.data ?? []).map((m) => (
@@ -360,9 +382,9 @@ export default function CodeDeck() {
                           {chat.error && <div className="text-sm text-[var(--color-danger)]">{(chat.error as Error).message}</div>}
                         </div>
                         <div className="space-y-2">
-                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendChat() }} className="min-h-28 w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Tell Code Deck what to do…" />
+                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} className="min-h-24 w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Ctrl/⌘+Enter to send</div>
+                            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Enter to send · Shift+Enter for newline</div>
                             <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
                           </div>
                         </div>
@@ -401,8 +423,10 @@ export default function CodeDeck() {
                       </div>
                     )}
                   </div>
+                  </>
                 )}
               </Card>
+              )}
       </div>
     </div>
   )
