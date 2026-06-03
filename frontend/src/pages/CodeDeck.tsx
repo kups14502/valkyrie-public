@@ -4,7 +4,8 @@ import { Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
 import { Card } from '../components/Card'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, updateCodeDeckSession, type CodeDeckSession } from '../lib/api'
 
-const models = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'gpt-5.5']
+const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
+const codexModels = ['gpt-5.5']
 
 function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void }) {
   return (
@@ -60,8 +61,14 @@ export default function CodeDeck() {
   const pinned = sessions.filter((s) => s.pinned)
 
   const root = deck.data?.projectRoots.find((r) => r.id === rootId)
+  const profile = deck.data?.profiles.find((p) => p.id === profileId)
+  const availableModels = profile?.provider === 'codex' ? codexModels : claudeModels
 
-  const makeSession = () => create.mutate({ title, folder, projectRootId: rootId, cwd: root?.path, profileId, model })
+  useEffect(() => {
+    if (!availableModels.includes(model)) setModel(availableModels[0])
+  }, [availableModels, model])
+
+  const makeSession = () => create.mutate({ title, folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
   const copy = async (text: string) => navigator.clipboard?.writeText(text)
 
   useEffect(() => {
@@ -141,20 +148,38 @@ export default function CodeDeck() {
 
               <Card title="New session">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} className="border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] xl:col-span-2" />
-                  <input value={folder} onChange={(e) => setFolder(e.target.value)} className="border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="folder/client" />
-                  <select value={rootId} onChange={(e) => setRootId(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                    {(deck.data?.projectRoots ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}{r.exists ? '' : ' (missing)'}</option>)}
-                  </select>
-                  <button type="button" onClick={makeSession} disabled={create.isPending} className="inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
+                  <label className="space-y-1 xl:col-span-2">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">session name</span>
+                    <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="New code session" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">folder / client</span>
+                    <input value={folder} onChange={(e) => setFolder(e.target.value)} className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="client or project folder" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">project path</span>
+                    <select value={rootId} onChange={(e) => setRootId(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+                      {(deck.data?.projectRoots ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}{r.exists ? '' : ' (missing)'}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                    {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                  </select>
-                  <select value={model} onChange={(e) => setModel(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
-                    {models.map((m) => <option key={m}>{m}</option>)}
-                  </select>
+                  <label className="space-y-1">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
+                    <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+                      {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
+                    <select value={availableModels.includes(model) ? model : availableModels[0]} onChange={(e) => setModel(e.target.value)} className="w-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+                      {availableModels.map((m) => <option key={m}>{m}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-2 text-[10px] text-[var(--color-text-faint)]">
+                  GPT-5.5 is only available on the Codex profile. Claude profiles only show Claude models.
                 </div>
               </Card>
 

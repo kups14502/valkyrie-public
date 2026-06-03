@@ -94,17 +94,31 @@ function safePath(input: string): string | null {
   return resolved
 }
 
-function launchCommand(row: SessionRow) {
+function allowedModels(profileId: string) {
+  const profile = PROFILES.find((p) => p.id === profileId) ?? PROFILES[0]
+  return profile.provider === 'codex'
+    ? ['gpt-5.5']
+    : ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
+}
+
+function normalizeModel(profileId: string, requested: string) {
+  const allowed = allowedModels(profileId)
+  return allowed.includes(requested) ? requested : allowed[0]
+}
+
+function commandWithModel(row: SessionRow) {
   const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
+  if (profile.provider === 'claude') return `${profile.command} --model ${row.model}`
+  return `${profile.command} --model ${row.model}`
+}
+
+function launchCommand(row: SessionRow) {
   const cd = `cd ${JSON.stringify(row.cwd)}`
-  if (profile.provider === 'claude') return `${cd} && ${profile.command} --model ${row.model}`
-  return `${cd} && ${profile.command}`
+  return `${cd} && ${commandWithModel(row)}`
 }
 
 function terminalCommand(row: SessionRow) {
-  const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
-  if (profile.provider === 'claude') return `${profile.command} --model ${row.model}`
-  return profile.command
+  return commandWithModel(row)
 }
 
 function getSession(id: string): SessionRow | undefined {
@@ -153,7 +167,7 @@ router.post('/code-deck/sessions', (req, res) => {
       projectRootId: root.id,
       cwd,
       profileId: profile.id,
-      model: String(body.model || profile.defaultModel).slice(0, 80),
+      model: normalizeModel(profile.id, String(body.model || profile.defaultModel)).slice(0, 80),
       pinned: body.pinned ? 1 : 0,
       status: 'planned',
       notes: String(body.notes || '').slice(0, 4000),
@@ -182,7 +196,7 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
       projectRootId: body.projectRootId != null ? String(body.projectRootId) : row.projectRootId,
       cwd: body.cwd != null ? (safePath(String(body.cwd)) ?? row.cwd) : row.cwd,
       profileId: body.profileId != null ? String(body.profileId) : row.profileId,
-      model: body.model != null ? String(body.model).slice(0, 80) : row.model,
+      model: normalizeModel(body.profileId != null ? String(body.profileId) : row.profileId, body.model != null ? String(body.model) : row.model).slice(0, 80),
       pinned: body.pinned != null ? (body.pinned ? 1 : 0) : row.pinned,
       status: body.status != null ? String(body.status).slice(0, 40) : row.status,
       notes: body.notes != null ? String(body.notes).slice(0, 4000) : row.notes,
