@@ -64,7 +64,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
               >
                 <Icon size={12} />
-                {label}
+                <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
               </NavLink>
             )
           })}
@@ -128,7 +128,7 @@ function Shell() {
                     {({ isActive }) => (
                       <>
                         <Icon size={13} />
-                        <span>{isActive ? `[${label}]` : label}</span>
+                        <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
                       </>
                     )}
                   </NavLink>
