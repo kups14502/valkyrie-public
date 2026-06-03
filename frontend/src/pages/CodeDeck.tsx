@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Copy, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, Pin, PinOff, Plus, Terminal, Trash2 } from 'lucide-react'
 import { Card } from '../components/Card'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, updateCodeDeckSession, type CodeDeckSession } from '../lib/api'
 
@@ -44,7 +44,7 @@ export default function CodeDeck() {
   const terminalRef = useRef<HTMLPreElement | null>(null)
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
-  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); void refresh() } })
+  const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); void refresh(); startTerminal(s.id) } })
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<CodeDeckSession> }) => updateCodeDeckSession(id, body), onSuccess: () => { void refresh() } })
   const del = useMutation({ mutationFn: deleteCodeDeckSession, onSuccess: () => { setSelectedId(null); void refresh() } })
 
@@ -86,8 +86,6 @@ export default function CodeDeck() {
   }, [availableModels, model])
 
   const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
-  const copy = async (text: string) => navigator.clipboard?.writeText(text)
-
   useEffect(() => {
     terminalRef.current?.scrollTo({ top: terminalRef.current.scrollHeight })
   }, [terminalOutput])
@@ -102,12 +100,12 @@ export default function CodeDeck() {
     return base.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
   }
 
-  const startTerminal = () => {
-    if (!selected) return
+  const startTerminal = (sessionId = selected?.id) => {
+    if (!sessionId) return
     wsRef.current?.close()
     setTerminalOutput('')
     setTerminalState('connecting')
-    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(selected.id)}&cols=120&rows=36`)
+    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(sessionId)}&cols=120&rows=36`)
     wsRef.current = ws
     ws.onopen = () => setTerminalState('connected')
     ws.onmessage = (event) => {
@@ -248,9 +246,6 @@ export default function CodeDeck() {
                     </select>
                   </label>
                 </div>
-                <div className="mt-2 break-words text-[10px] text-[var(--color-text-faint)]">
-                  Folder/client comes from the actual server folder tree. GPT-5.5 is only available on the Codex profile; Claude profiles only show Claude models.
-                </div>
               </Card>
 
               <Card title="Session console">
@@ -265,14 +260,11 @@ export default function CodeDeck() {
                       </div>
                       <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                     </div>
-                    <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black/40 p-4 font-mono text-xs text-[var(--color-accent)] shadow-[0_0_30px_rgba(0,255,65,0.08)]">
-                      <div className="text-[var(--color-text-faint)]">// launch command</div>
-                      <pre className="mt-2 whitespace-pre-wrap break-all">{selected.launchCommand}</pre>
-                    </div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={startTerminal} disabled={terminalState === 'connecting' || terminalState === 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Terminal size={14} /> start terminal</button>
+                      {terminalState !== 'connected' && terminalState !== 'connecting' && (
+                        <button type="button" onClick={() => startTerminal()} className="inline-flex items-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Terminal size={14} /> start terminal</button>
+                      )}
                       <button type="button" onClick={stopTerminal} disabled={terminalState !== 'connected'} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-50">stop</button>
-                      <button type="button" onClick={() => copy(selected.launchCommand)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><Copy size={14} /> copy command</button>
                     </div>
                     <div className="min-w-0 overflow-hidden rounded border border-[var(--color-border)] bg-black/70 shadow-[0_0_35px_rgba(0,255,65,0.10)]">
                       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
@@ -286,9 +278,6 @@ export default function CodeDeck() {
                         <input value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendTerminalInput() }} disabled={terminalState !== 'connected'} className="min-w-0 flex-1 bg-transparent px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] disabled:opacity-50" placeholder="type command/input and press Enter…" />
                         <button type="button" onClick={sendTerminalInput} disabled={terminalState !== 'connected'} className="border-l border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] disabled:opacity-50">send</button>
                       </div>
-                    </div>
-                    <div className="text-xs leading-relaxed text-[var(--color-text-dim)]">
-                      This runs the selected Claude/Codex CLI through a server-side PTY over WebSocket. It bypasses OpenClaw; Master Control only organizes and hosts the terminal.
                     </div>
                   </div>
                 )}
