@@ -5,10 +5,29 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
-import { createCodeDeckSession, deleteCodeDeckSession, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
+import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, type AIClientUsage, type AIUsage, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
+
+const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
+
+function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
+  const clamped = Math.max(0, Math.min(100, pct))
+  const tone = warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+        <span className="truncate">{label}</span>
+        <span style={{ color: tone }}>{Math.round(clamped)}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded bg-[rgba(255,255,255,0.06)]">
+        <div className="h-full rounded" style={{ width: `${clamped}%`, background: tone, boxShadow: `0 0 8px ${tone}` }} />
+      </div>
+      {sub && <div className="text-[10px] text-[var(--color-text-faint)]">{sub}</div>}
+    </div>
+  )
+}
 
 function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void }) {
   return (
@@ -92,9 +111,50 @@ export default function CodeDeck() {
     })
   }
 
+  const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
+
   const root = deck.data?.projectRoots.find((r) => r.id === rootId) ?? deck.data?.projectRoots[0]
   const profile = deck.data?.profiles.find((p) => p.id === profileId)
   const availableModels = profile?.provider === 'codex' ? codexModels : claudeModels
+
+  const selectedProfile = deck.data?.profiles.find((p) => p.id === selected?.profileId)
+  const selectedModels = selectedProfile?.provider === 'codex' ? codexModels : claudeModels
+
+  const changeProfile = (newProfileId: string) => {
+    if (!selected) return
+    const np = deck.data?.profiles.find((p) => p.id === newProfileId)
+    const models = np?.provider === 'codex' ? codexModels : claudeModels
+    const newModel = models.includes(selected.model) ? selected.model : models[0]
+    update.mutate({ id: selected.id, body: { profileId: newProfileId, model: newModel } })
+  }
+  const changeModel = (newModel: string) => {
+    if (!selected) return
+    update.mutate({ id: selected.id, body: { model: newModel } })
+  }
+
+  // Match the selected session's account/provider to a usage client from the dashboard feed.
+  const usageBars = useMemo(() => {
+    const data = aiUsage.data as AIUsage | undefined
+    if (!data || !selectedProfile) return [] as { label: string; pct: number; sub?: string; warn?: boolean }[]
+    const provider = selectedProfile.provider
+    const wantEmail = emailOf(selectedProfile.label)
+    const clients = data.aiClients ?? []
+    if (provider === 'claude') {
+      const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && (!wantEmail || emailOf(c.label) === wantEmail))
+      const quota = match?.quota ?? (wantEmail && emailOf('user@example.com') === wantEmail ? data.claude.quota : null)
+      if (!quota) return []
+      const bars: { label: string; pct: number; sub?: string; warn?: boolean }[] = []
+      bars.push({ label: 'Session (5h)', pct: quota.sessionPct, sub: quota.sessionResetsAt ? `Resets in ${Math.max(0, Math.round((new Date(quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min` : quota.status?.replace(/_/g, ' ') ?? undefined })
+      bars.push({ label: 'Weekly', pct: quota.weeklyPct, sub: quota.weeklyResetsAt ? `Resets ${new Date(quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : undefined })
+      return bars
+    }
+    const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'codex' }> => c.kind === 'codex')
+    const rl = match?.rateLimits ?? data.codex.rateLimits
+    const bars: { label: string; pct: number; sub?: string; warn?: boolean }[] = []
+    if (rl.session5h) bars.push({ label: 'Session (5h)', pct: rl.session5h.pct, sub: `Resets in ${Math.max(0, Math.round((rl.session5h.resetsAt - Date.now() / 1000) / 60))} min` })
+    if (rl.weekly) bars.push({ label: 'Weekly', pct: rl.weekly.pct })
+    return bars
+  }, [aiUsage.data, selectedProfile])
 
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
@@ -356,11 +416,19 @@ export default function CodeDeck() {
                 {(
                   <div className="flex min-h-0 flex-1 flex-col gap-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2 text-xl font-semibold text-[var(--color-text)]"><Terminal size={18} className="text-[var(--color-accent)]" />{selected.title}</div>
-                        <div className="mt-1 text-xs text-[var(--color-text-dim)]">{selected.folder} · {selected.profileId} · {selected.model}</div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xl font-semibold text-[var(--color-text)]"><Terminal size={18} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.title}</span></div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <select value={selected.profileId} onChange={(e) => changeProfile(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text-dim)] outline-none hover:border-[var(--color-accent)] focus:border-[var(--color-accent)]">
+                            {(deck.data?.profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                          </select>
+                          <select value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={(e) => changeModel(e.target.value)} className="border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text-dim)] outline-none hover:border-[var(--color-accent)] focus:border-[var(--color-accent)]">
+                            {selectedModels.map((m) => <option key={m}>{m}</option>)}
+                          </select>
+                          <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{selected.folder}</span>
+                        </div>
                       </div>
-                      <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
+                      <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                     </div>
                     <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] pb-3">
                       <button type="button" onClick={() => setMode('chat')} className={`border px-3 py-2 text-xs uppercase tracking-[0.14em] ${mode === 'chat' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}>chat</button>
@@ -371,7 +439,18 @@ export default function CodeDeck() {
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
-                            <div className="text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
+                            <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
+                              <div className="max-w-md text-sm text-[var(--color-text-dim)]">Ask what you want done in this project folder. Code Deck will run the selected account/model directly in that folder.</div>
+                              {usageBars.length > 0 && (
+                                <div className="w-full max-w-sm space-y-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4 text-left">
+                                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                                    <span>usage · {selectedProfile?.label}</span>
+                                    <span>{selected.model}</span>
+                                  </div>
+                                  {usageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}
+                                </div>
+                              )}
+                            </div>
                           ) : (messages.data ?? []).map((m) => (
                             <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
                               <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>

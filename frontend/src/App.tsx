@@ -63,8 +63,10 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 }`}
                 style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
               >
+                <span className={isActive ? undefined : 'opacity-0'}>[</span>
                 <Icon size={12} className="shrink-0" />
-                <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
+                <span>{label}</span>
+                <span className={isActive ? undefined : 'opacity-0'}>]</span>
               </NavLink>
             )
           })}
@@ -127,8 +129,10 @@ function Shell() {
                   >
                     {({ isActive }) => (
                       <>
+                        <span className={isActive ? undefined : 'opacity-0'}>[</span>
                         <Icon size={13} className="shrink-0" />
-                        <span><span className={isActive ? undefined : 'opacity-0'}>[</span>{label}<span className={isActive ? undefined : 'opacity-0'}>]</span></span>
+                        <span>{label}</span>
+                        <span className={isActive ? undefined : 'opacity-0'}>]</span>
                       </>
                     )}
                   </NavLink>
