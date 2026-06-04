@@ -119,6 +119,8 @@ export default function CodeDeck() {
   const [chatInput, setChatInput] = useState('')
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
   const [attached, setAttached] = useState<{ id: string; name: string; isImage: boolean; url?: string }[]>([])
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+  const prevItemsRef = useRef<import('../lib/useCodeDeckAgent').AgentItem[]>([])
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -391,7 +393,31 @@ export default function CodeDeck() {
       for (const a of prev) if (a.url) URL.revokeObjectURL(a.url)
       return []
     })
+    setCollapsedKeys(new Set())
+    prevItemsRef.current = []
   }, [selected?.id])
+
+  // Auto-collapse new user/tool/system items, and collapse permissions once resolved.
+  useEffect(() => {
+    const prev = prevItemsRef.current
+    const prevMap = new Map(prev.map((i) => [i.key, i]))
+    const toCollapse: string[] = []
+    for (const it of agent.items) {
+      if (!prevMap.has(it.key)) {
+        // Brand-new item — auto-collapse certain kinds.
+        if (it.kind === 'user' || it.kind === 'tool_use' || it.kind === 'system') toCollapse.push(it.key)
+        // Pending permissions stay expanded so the user can act on them.
+      } else {
+        // Existing item — collapse a permission the moment it gets resolved.
+        const p = prevMap.get(it.key)!
+        if (it.kind === 'permission' && p.kind === 'permission' && p.status === 'pending' && it.status !== 'pending') toCollapse.push(it.key)
+      }
+    }
+    prevItemsRef.current = agent.items
+    if (toCollapse.length > 0) setCollapsedKeys((prev) => { const next = new Set(prev); for (const k of toCollapse) next.add(k); return next })
+  }, [agent.items])
+
+  const toggleCollapsed = (key: string) => setCollapsedKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
 
   const newSessionForm = (
     <Card title="New session">
@@ -624,35 +650,95 @@ export default function CodeDeck() {
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : agent.items.map((it) => {
-                            if (it.kind === 'tool_use') return (
-                              <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.03)] p-3">
-                                <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">🔧 tool · {it.name}</div>
-                                <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
-                                {it.result !== undefined && <div className={`mt-2 whitespace-pre-wrap break-words border-t border-[var(--color-border)] pt-2 font-mono text-[11px] ${it.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{it.result}</div>}
-                              </div>
-                            )
-                            if (it.kind === 'permission') {
-                              const pending = it.status === 'pending'
+                            const collapsed = collapsedKeys.has(it.key)
+
+                            if (it.kind === 'tool_use') {
+                              const statusDot = it.result === undefined ? '' : it.isError ? ' · ✗' : ' · ✓'
                               return (
-                                <div key={it.key} className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)] p-3">
-                                  <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]">permission · {it.tool}{!pending && ` · ${it.status === 'allow' ? 'approved' : 'denied'}`}</div>
-                                  {it.reason && <div className="mb-2 text-xs text-[var(--color-text-dim)]">{it.reason}</div>}
-                                  <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
-                                  {pending && (
-                                    <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
-                                      <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow')} className="h-9 min-w-20 border border-[var(--color-accent)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]">approve</button>
-                                      {it.canAlways && <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow', true)} className="h-9 border border-[var(--color-accent)]/60 px-3 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]/80 hover:bg-[rgba(0,255,65,0.06)]">always allow</button>}
-                                      <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'deny')} className="h-9 min-w-20 border border-[var(--color-danger)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">deny</button>
+                                <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.03)]">
+                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]" />}
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">🔧 {it.name}{statusDot}</span>
+                                    {collapsed && <span className="ml-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{prettyInput(it.input).split('\n')[0].slice(0, 80)}</span>}
+                                  </button>
+                                  {!collapsed && (
+                                    <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2">
+                                      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
+                                      {it.result !== undefined && <div className={`mt-2 whitespace-pre-wrap break-words border-t border-[var(--color-border)] pt-2 font-mono text-[11px] ${it.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{it.result}</div>}
                                     </div>
                                   )}
                                 </div>
                               )
                             }
-                            const tone = it.kind === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : it.kind === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
+
+                            if (it.kind === 'permission') {
+                              const pending = it.status === 'pending'
+                              const statusLabel = pending ? '' : ` · ${it.status === 'allow' ? 'approved' : 'denied'}`
+                              // Pending permissions are never collapsed — the user must be able to act.
+                              if (!pending && collapsed) return (
+                                <div key={it.key} className="rounded border border-[var(--color-warning)]/30 bg-[rgba(245,158,11,0.03)]">
+                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                    <ChevronRight size={12} className="shrink-0 text-[var(--color-warning)]/60" />
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]/70">permission · {it.tool}{statusLabel}</span>
+                                  </button>
+                                </div>
+                              )
+                              return (
+                                <div key={it.key} className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)]">
+                                  <div className="flex items-center gap-2 px-3 py-2">
+                                    {!pending && <button type="button" onClick={() => toggleCollapsed(it.key)} className="shrink-0"><ChevronDown size={12} className="text-[var(--color-warning)]/60" /></button>}
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]">permission · {it.tool}{statusLabel}</span>
+                                  </div>
+                                  <div className="border-t border-[var(--color-warning)]/20 px-3 pb-3 pt-2">
+                                    {it.reason && <div className="mb-2 text-xs text-[var(--color-text-dim)]">{it.reason}</div>}
+                                    <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
+                                    {pending && (
+                                      <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
+                                        <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow')} className="h-9 min-w-20 border border-[var(--color-accent)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]">approve</button>
+                                        {it.canAlways && <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow', true)} className="h-9 border border-[var(--color-accent)]/60 px-3 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]/80 hover:bg-[rgba(0,255,65,0.06)]">always allow</button>}
+                                        <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'deny')} className="h-9 min-w-20 border border-[var(--color-danger)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">deny</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            }
+
+                            if (it.kind === 'user') {
+                              return (
+                                <div key={it.key} className="rounded border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]">
+                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]/60" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]/60" />}
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
+                                    {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                  </button>
+                                  {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                                </div>
+                              )
+                            }
+
+                            if (it.kind === 'assistant') {
+                              return (
+                                <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]">
+                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
+                                    {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                  </button>
+                                  {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                                </div>
+                              )
+                            }
+
+                            // system
                             return (
-                              <div key={it.key} className={`rounded border p-3 ${tone}`}>
-                                <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{it.kind}</div>
-                                <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>
+                              <div key={it.key} className="rounded border border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]">
+                                <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                  {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
+                                  <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">system</span>
+                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{(it as { text: string }).text?.split('\n')[0].slice(0, 100)}</span>}
+                                </button>
+                                {!collapsed && <div className="border-t border-[var(--color-warning)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{(it as { text: string }).text}</div>}
                               </div>
                             )
                           })}
