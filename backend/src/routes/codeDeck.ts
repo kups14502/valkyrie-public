@@ -64,20 +64,20 @@ const PROFILES = [
     env: {},
   },
   {
-    id: 'main-codex',
-    label: 'codex',
-    provider: 'codex',
-    defaultModel: 'gpt-5.5',
-    command: '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex',
-    env: {},
-  },
-  {
     id: 'botacct-claude',
     label: 'bot claude',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
     command: '/home/brendon/.local/bin/claude',
     env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-botacct' },
+  },
+  {
+    id: 'main-codex',
+    label: 'codex',
+    provider: 'codex',
+    defaultModel: 'gpt-5.5',
+    command: '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex',
+    env: {},
   },
 ]
 
