@@ -638,26 +638,10 @@ export default function CodeDeck() {
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : agent.items.map((it) => {
-                            const collapsed = isCollapsed(it)
+                            // Only show user messages, assistant responses, and permissions.
+                            if (it.kind === 'tool_use' || it.kind === 'system') return null
 
-                            if (it.kind === 'tool_use') {
-                              const statusDot = it.result === undefined ? '' : it.isError ? ' · ✗' : ' · ✓'
-                              return (
-                                <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.03)]">
-                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]" />}
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">🔧 {it.name}{statusDot}</span>
-                                    {collapsed && <span className="ml-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{prettyInput(it.input).split('\n')[0].slice(0, 80)}</span>}
-                                  </button>
-                                  {!collapsed && (
-                                    <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2">
-                                      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
-                                      {it.result !== undefined && <div className={`mt-2 whitespace-pre-wrap break-words border-t border-[var(--color-border)] pt-2 font-mono text-[11px] ${it.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{it.result}</div>}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            }
+                            const collapsed = isCollapsed(it)
 
                             if (it.kind === 'permission') {
                               const pending = it.status === 'pending'
@@ -718,17 +702,7 @@ export default function CodeDeck() {
                               )
                             }
 
-                            // system
-                            return (
-                              <div key={it.key} className="rounded border border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]">
-                                <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                                  {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
-                                  <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">system</span>
-                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{(it as { text: string }).text?.split('\n')[0].slice(0, 100)}</span>}
-                                </button>
-                                {!collapsed && <div className="border-t border-[var(--color-warning)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{(it as { text: string }).text}</div>}
-                              </div>
-                            )
+                            return null
                           })}
                           {agent.streaming && (
                             <div className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-3">
