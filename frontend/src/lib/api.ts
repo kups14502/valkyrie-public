@@ -488,6 +488,7 @@ export type CodeDeckMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: string
+  meta?: string
 }
 
 export const fetchCodeDeckMessages = async (sessionId: string) => {

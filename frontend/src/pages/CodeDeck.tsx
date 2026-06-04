@@ -6,10 +6,17 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
-import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
+import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckSession } from '../lib/api'
+import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
+
+function prettyInput(input: unknown): string {
+  if (input == null) return ''
+  if (typeof input === 'string') return input.slice(0, 2000)
+  try { return JSON.stringify(input, null, 2).slice(0, 2000) } catch { return String(input) }
+}
 
 const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
 const profileOrder = ['main-claude', 'botacct-claude', 'main-codex']
@@ -136,11 +143,8 @@ export default function CodeDeck() {
 
   const sessions = deck.data?.sessions ?? []
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null
-  const messages = useQuery({ queryKey: ['code-deck-messages', selected?.id], queryFn: () => fetchCodeDeckMessages(selected!.id), enabled: Boolean(selected?.id), refetchInterval: 5000 })
-  const chat = useMutation({
-    mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) => sendCodeDeckMessage(sessionId, content),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
-  })
+  // History is loaded once per session for backlog; live updates arrive over the agent WebSocket.
+  const messages = useQuery({ queryKey: ['code-deck-messages', selected?.id], queryFn: () => fetchCodeDeckMessages(selected!.id), enabled: Boolean(selected?.id) })
   const uploadAttachment = useMutation({
     mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) => uploadCodeDeckAttachment(sessionId, file),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
@@ -194,6 +198,8 @@ export default function CodeDeck() {
 
   const selectedProfile = deck.data?.profiles.find((p) => p.id === selected?.profileId)
   const selectedModels = selectedProfile?.provider === 'codex' ? codexModels : claudeModels
+  const isClaudeProfile = selectedProfile ? selectedProfile.provider !== 'codex' : true
+  const agent = useCodeDeckAgent(selected?.id ?? null, mode === 'chat' && Boolean(selected) && isClaudeProfile, messages.data ?? [])
 
   const changeProfile = (newProfileId: string) => {
     if (!selected) return
@@ -325,8 +331,8 @@ export default function CodeDeck() {
   }
 
   const sendChat = () => {
-    if (!selected || !chatInput.trim() || chat.isPending) return
-    chat.mutate({ sessionId: selected.id, content: chatInput.trim() })
+    if (!selected || !chatInput.trim() || !agent.connected || agent.busy) return
+    agent.send(chatInput.trim())
     setChatInput('')
   }
 
@@ -353,13 +359,10 @@ export default function CodeDeck() {
     }
   }
 
-  const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
-  const messageList = messages.data ?? []
-
   useEffect(() => {
     const el = chatScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messageList.length, chat.isPending])
+  }, [agent.items.length, agent.streaming, agent.busy])
 
   const newSessionForm = (
     <Card title="New session">
@@ -585,28 +588,72 @@ export default function CodeDeck() {
 
                     {mode === 'chat' ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
+                        {!isClaudeProfile && (
+                          <div className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)] p-3 text-xs text-[var(--color-warning)]">Live chat is Claude-only. Switch this session to a Claude profile, or use terminal mode for codex.</div>
+                        )}
                         <div ref={chatScrollRef} className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
-                          {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : messageList.length === 0 ? (
+                          {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
-                          ) : messageList.map((m) => (
-                            <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
-                              <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>
-                              <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{m.content}</div>
+                          ) : agent.items.map((it) => {
+                            if (it.kind === 'tool_use') return (
+                              <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(0,255,65,0.03)] p-3">
+                                <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">🔧 tool · {it.name}</div>
+                                <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
+                                {it.result !== undefined && <div className={`mt-2 whitespace-pre-wrap break-words border-t border-[var(--color-border)] pt-2 font-mono text-[11px] ${it.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{it.result}</div>}
+                              </div>
+                            )
+                            if (it.kind === 'permission') {
+                              const pending = it.status === 'pending'
+                              return (
+                                <div key={it.key} className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)] p-3">
+                                  <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]">permission · {it.tool}{!pending && ` · ${it.status === 'allow' ? 'approved' : 'denied'}`}</div>
+                                  {it.reason && <div className="mb-2 text-xs text-[var(--color-text-dim)]">{it.reason}</div>}
+                                  <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
+                                  {pending && (
+                                    <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
+                                      <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow')} className="h-9 min-w-20 border border-[var(--color-accent)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]">approve</button>
+                                      {it.canAlways && <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow', true)} className="h-9 border border-[var(--color-accent)]/60 px-3 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]/80 hover:bg-[rgba(0,255,65,0.06)]">always allow</button>}
+                                      <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'deny')} className="h-9 min-w-20 border border-[var(--color-danger)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">deny</button>
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            }
+                            const tone = it.kind === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : it.kind === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
+                            return (
+                              <div key={it.key} className={`rounded border p-3 ${tone}`}>
+                                <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{it.kind}</div>
+                                <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>
+                              </div>
+                            )
+                          })}
+                          {agent.streaming && (
+                            <div className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-3">
+                              <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">assistant</div>
+                              <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{agent.streaming}<span className="cursor-blink">_</span></div>
                             </div>
-                          ))}
-                          {chat.isPending && <div className="text-sm text-[var(--color-accent)]">Thinking/running…</div>}
-                          {chat.error && <div className="text-sm text-[var(--color-danger)]">{(chat.error as Error).message}</div>}
+                          )}
+                          {agent.busy && !agent.streaming && <div className="text-sm text-[var(--color-accent)]">{agent.thinking ? 'Thinking…' : 'Working…'}</div>}
+                          {agent.error && <div className="text-sm text-[var(--color-danger)]">{agent.error}</div>}
                         </div>
                         <div className="shrink-0 space-y-2">
                           <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
                           {uploadingFiles.length > 0 && <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">Uploading: {uploadingFiles.join(', ')}</div>}
                           {uploadAttachment.error && <div className="text-xs text-[var(--color-danger)]">{(uploadAttachment.error as Error).message}</div>}
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Enter to send · Shift+Enter for newline</div>
+                            <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+                              <span>Enter to send · Shift+Enter for newline</span>
+                              <span className={agent.connected ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}>[{agent.connected ? 'live' : 'offline'}]</span>
+                              {typeof agent.lastCostUsd === 'number' && <span>${agent.lastCostUsd.toFixed(4)}</span>}
+                            </div>
                             <div className="flex items-center gap-2">
                               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { void uploadFiles(e.target.files) }} />
                               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadAttachment.isPending} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"><Paperclip size={14} /> attach</button>
-                              <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
+                              {agent.busy ? (
+                                <button type="button" onClick={() => agent.interrupt()} className="border border-[var(--color-danger)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">stop</button>
+                              ) : (
+                                <button type="button" onClick={sendChat} disabled={!chatInput.trim() || !agent.connected} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
+                              )}
                             </div>
                           </div>
                         </div>

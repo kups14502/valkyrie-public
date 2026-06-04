@@ -54,7 +54,7 @@ function discoverProjectRoots(): ProjectRoot[] {
   }).sort((a, b) => a.folder.localeCompare(b.folder) || a.label.localeCompare(b.label))
 }
 
-const PROFILES = [
+export const PROFILES = [
   {
     id: 'main-claude',
     label: 'acct-e claude',
@@ -81,7 +81,7 @@ const PROFILES = [
   },
 ]
 
-type SessionRow = {
+export type SessionRow = {
   id: string
   title: string
   folder: string
@@ -94,9 +94,10 @@ type SessionRow = {
   notes: string
   createdAt: string
   updatedAt: string
+  agentSessionId: string
 }
 
-function db() {
+export function db() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
   const d = new Database(DB_PATH)
   d.exec(`
@@ -124,10 +125,17 @@ function db() {
     );
     CREATE INDEX IF NOT EXISTS idx_code_deck_messages_session_created ON code_deck_messages(sessionId, createdAt);
   `)
+  // Migrations: additive columns guarded against re-runs (SQLite throws if the column exists).
+  for (const stmt of [
+    `ALTER TABLE code_deck_sessions ADD COLUMN agentSessionId TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE code_deck_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''`,
+  ]) {
+    try { d.exec(stmt) } catch { /* column already exists */ }
+  }
   return d
 }
 
-function now() { return new Date().toISOString() }
+export function now() { return new Date().toISOString() }
 
 function safePath(input: string): string | null {
   const resolved = path.resolve(input.replace(/^~(?=$|\/)/, homedir()))
@@ -163,26 +171,44 @@ function terminalCommand(row: SessionRow) {
   return commandWithModel(row)
 }
 
-type MessageRow = {
+export type MessageRow = {
   id: string
   sessionId: string
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: string
+  meta: string
 }
 
 function stripAnsi(text: string) {
   return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '').replace(/\r/g, '')
 }
 
-function saveMessage(sessionId: string, role: MessageRow['role'], content: string): MessageRow {
-  const msg = { id: randomUUID(), sessionId, role, content, createdAt: now() }
+export function saveMessage(sessionId: string, role: MessageRow['role'], content: string, meta: Record<string, unknown> | string = ''): MessageRow {
+  const metaStr = typeof meta === 'string' ? meta : JSON.stringify(meta)
+  const msg: MessageRow = { id: randomUUID(), sessionId, role, content, createdAt: now(), meta: metaStr }
   const d = db()
-  d.prepare('INSERT INTO code_deck_messages VALUES (@id,@sessionId,@role,@content,@createdAt)').run(msg)
+  d.prepare('INSERT INTO code_deck_messages (id,sessionId,role,content,createdAt,meta) VALUES (@id,@sessionId,@role,@content,@createdAt,@meta)').run(msg)
   const status = role === 'assistant' ? 'chat' : role === 'user' ? 'thinking' : 'note'
   d.prepare('UPDATE code_deck_sessions SET updatedAt=?, status=? WHERE id=?').run(now(), status, sessionId)
   d.close()
   return msg
+}
+
+export function setAgentSessionId(sessionId: string, agentSessionId: string) {
+  const d = db()
+  d.prepare('UPDATE code_deck_sessions SET agentSessionId=?, updatedAt=? WHERE id=?').run(agentSessionId, now(), sessionId)
+  d.close()
+}
+
+export function setSessionStatus(sessionId: string, status: string) {
+  const d = db()
+  d.prepare('UPDATE code_deck_sessions SET status=?, updatedAt=? WHERE id=?').run(status, now(), sessionId)
+  d.close()
+}
+
+export function profileFor(profileId: string) {
+  return PROFILES.find((p) => p.id === profileId) ?? PROFILES[0]
 }
 
 function safeFilename(input: string) {
@@ -223,7 +249,7 @@ function runAgent(row: SessionRow, prompt: string): Promise<string> {
   })
 }
 
-function getSession(id: string): SessionRow | undefined {
+export function getSession(id: string): SessionRow | undefined {
   const d = db()
   const row = d.prepare('SELECT * FROM code_deck_sessions WHERE id=?').get(id) as SessionRow | undefined
   d.close()
@@ -276,9 +302,11 @@ router.post('/code-deck/sessions', (req, res) => {
       notes: String(body.notes || '').slice(0, 4000),
       createdAt: t,
       updatedAt: t,
+      agentSessionId: '',
     }
     const d = db()
-    d.prepare(`INSERT INTO code_deck_sessions VALUES (@id,@title,@folder,@projectRootId,@cwd,@profileId,@model,@pinned,@status,@notes,@createdAt,@updatedAt)`).run(row)
+    d.prepare(`INSERT INTO code_deck_sessions (id,title,folder,projectRootId,cwd,profileId,model,pinned,status,notes,createdAt,updatedAt,agentSessionId)
+      VALUES (@id,@title,@folder,@projectRootId,@cwd,@profileId,@model,@pinned,@status,@notes,@createdAt,@updatedAt,@agentSessionId)`).run(row)
     d.close()
     res.json({ session: serialize(row) })
   } catch (err) {

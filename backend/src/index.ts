@@ -17,6 +17,7 @@ import launcherRoute from './routes/launcher.js'
 import emailsRoute from './routes/emails.js'
 import emailSignalsRoute from './routes/emailSignals.js'
 import codeDeckRoute, { attachCodeDeckWs } from './routes/codeDeck.js'
+import { attachCodeDeckAgentWs } from './routes/codeDeckAgent.js'
 import { startAlerts } from './alerts.js'
 
 const app = express()
@@ -83,6 +84,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 })
 
 attachCodeDeckWs(server)
+attachCodeDeckAgentWs(server)
 
 server.listen(PORT, BIND, () => {
   console.log(`Master Control API listening on ${BIND}:${PORT}`)
