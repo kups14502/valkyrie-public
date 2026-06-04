@@ -29,6 +29,15 @@ function summarizeToolResult(block: Block): string {
   return ''
 }
 
+// One-line description of a tool call for the logs (the most useful field per tool).
+function toolSummary(name: string | undefined, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>
+  const pick = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
+  const main = pick('command') || pick('file_path') || pick('path') || pick('pattern') || pick('url') || pick('description') || ''
+  const s = main || JSON.stringify(i)
+  return `${name ?? 'tool'}(${s.replace(/\s+/g, ' ').slice(0, 120)})`
+}
+
 class AgentRunner {
   readonly sessionId: string
   private q: Query | null = null
@@ -46,6 +55,9 @@ class AgentRunner {
   private runSeq = 0
   private stderrBuf = ''
   private sawResult = false
+  private runStartedAt = 0
+  private toolCount = 0
+  private readonly toolTimers = new Map<string, { name: string; at: number }>()
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -66,6 +78,7 @@ class AgentRunner {
   // ---- socket management -------------------------------------------------
   attach(ws: WebSocket) {
     this.sockets.add(ws)
+    this.log('socket attached', `(${this.sockets.size} open, busy=${this.busy})`)
     if (this.disposeTimer) { clearTimeout(this.disposeTimer); this.disposeTimer = null }
     this.send(ws, { t: 'ready', agentSessionId: this.agentSessionId, busy: this.busy })
     // Re-surface any permission requests still waiting on a human.
@@ -76,6 +89,7 @@ class AgentRunner {
 
   detach(ws: WebSocket) {
     this.sockets.delete(ws)
+    this.log('socket detached', `(${this.sockets.size} open)`)
     if (this.sockets.size === 0) this.scheduleDispose()
   }
 
@@ -108,6 +122,7 @@ class AgentRunner {
     const nowMs = Date.now()
     if (this.lastSubmit && this.lastSubmit.text === content && nowMs - this.lastSubmit.at < 1500) return
     this.lastSubmit = { text: content, at: nowMs }
+    this.log('user turn', `${trimmed.slice(0, 80).replace(/\s+/g, ' ')}${paths.length ? ` (+${paths.length} attachment)` : ''}`)
     const saved = saveMessage(this.sessionId, 'user', content)
     this.broadcast({ t: 'user', id: saved.id, text: content, at: saved.createdAt })
     this.inputQueue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null })
@@ -126,6 +141,9 @@ class AgentRunner {
     this.started = true
     this.sawResult = false
     this.stderrBuf = ''
+    this.runStartedAt = Date.now()
+    this.toolCount = 0
+    this.toolTimers.clear()
     this.agentSessionId = row.agentSessionId || ''
     this.usedResume = Boolean(this.agentSessionId)
     setSessionStatus(this.sessionId, 'running')
@@ -237,6 +255,9 @@ class AgentRunner {
           if (b.type === 'tool_use') {
             this.busy = true
             this.broadcast({ t: 'busy', value: true })
+            this.toolCount++
+            if (b.id) this.toolTimers.set(b.id, { name: b.name ?? 'tool', at: Date.now() })
+            this.log('tool →', toolSummary(b.name, b.input))
             const saved = saveMessage(this.sessionId, 'system', `🔧 ${b.name ?? 'tool'}`, { kind: 'tool_use', toolUseId: b.id, name: b.name, input: b.input })
             this.broadcast({ t: 'tool_use', id: saved.id, toolUseId: b.id, name: b.name, input: b.input, at: saved.createdAt })
           }
@@ -249,6 +270,10 @@ class AgentRunner {
           for (const b of content as Block[]) {
             if (b.type === 'tool_result') {
               const summary = summarizeToolResult(b)
+              const timer = b.tool_use_id ? this.toolTimers.get(b.tool_use_id) : undefined
+              if (b.tool_use_id) this.toolTimers.delete(b.tool_use_id)
+              const ms = timer ? Date.now() - timer.at : null
+              this.log('tool ✓', `${timer?.name ?? 'tool'}${b.is_error ? ' ERROR' : ''}${ms != null ? ` ${ms}ms` : ''}`)
               saveMessage(this.sessionId, 'system', `↳ tool result: ${b.tool_use_id ?? ''}`, { kind: 'tool_result', toolUseId: b.tool_use_id, isError: Boolean(b.is_error), summary })
               this.broadcast({ t: 'tool_result', toolUseId: b.tool_use_id, isError: Boolean(b.is_error), summary })
             }
@@ -260,6 +285,8 @@ class AgentRunner {
         this.sawResult = true
         this.busy = false
         const r = msg as { subtype?: string; total_cost_usd?: number; duration_ms?: number; is_error?: boolean }
+        const wall = Date.now() - this.runStartedAt
+        this.log('run summary', `subtype=${r.subtype ?? '?'} tools=${this.toolCount} cost=$${(r.total_cost_usd ?? 0).toFixed(4)} wall=${wall}ms`)
         // The SDK reports turn-level failures (max turns, model error, etc.) via
         // result.subtype — surface those as honest error chats too.
         if (r.is_error || (r.subtype && r.subtype !== 'success')) {
@@ -305,6 +332,7 @@ class AgentRunner {
   }
 
   async interrupt() {
+    this.log('interrupt by operator')
     const old = this.q
     this.runSeq++
     this.q = null
@@ -325,6 +353,7 @@ class AgentRunner {
   }
 
   private dispose() {
+    this.log('dispose (idle, no sockets)')
     this.closed = true
     for (const requestId of [...this.pending.keys()]) this.resolvePermission(requestId, 'deny')
     this.inputResolve?.()
