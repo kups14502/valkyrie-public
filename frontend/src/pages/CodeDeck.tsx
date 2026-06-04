@@ -119,8 +119,10 @@ export default function CodeDeck() {
   const [chatInput, setChatInput] = useState('')
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
   const [attached, setAttached] = useState<{ id: string; name: string; isImage: boolean; url?: string }[]>([])
-  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
-  const prevItemsRef = useRef<import('../lib/useCodeDeckAgent').AgentItem[]>([])
+  // toggledKeys flips an item's default collapsed state.
+  // Default: user, tool_use, system, and resolved permissions are collapsed.
+  //          assistant and pending permissions are expanded.
+  const [toggledKeys, setToggledKeys] = useState<Set<string>>(new Set())
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -130,7 +132,7 @@ export default function CodeDeck() {
   const [collapsedSessionFolders, setCollapsedSessionFolders] = useState<Set<string>>(new Set())
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showNew, setShowNew] = useState(false)
-  const [metaCollapsed, setMetaCollapsed] = useState(false)
+  const [metaCollapsed, setMetaCollapsed] = useState(true)
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -393,31 +395,17 @@ export default function CodeDeck() {
       for (const a of prev) if (a.url) URL.revokeObjectURL(a.url)
       return []
     })
-    setCollapsedKeys(new Set())
-    prevItemsRef.current = []
+    setToggledKeys(new Set())
   }, [selected?.id])
 
-  // Auto-collapse new user/tool/system items, and collapse permissions once resolved.
-  useEffect(() => {
-    const prev = prevItemsRef.current
-    const prevMap = new Map(prev.map((i) => [i.key, i]))
-    const toCollapse: string[] = []
-    for (const it of agent.items) {
-      if (!prevMap.has(it.key)) {
-        // Brand-new item — auto-collapse certain kinds.
-        if (it.kind === 'user' || it.kind === 'system') toCollapse.push(it.key)
-        // Pending permissions stay expanded so the user can act on them.
-      } else {
-        // Existing item — collapse a permission the moment it gets resolved.
-        const p = prevMap.get(it.key)!
-        if (it.kind === 'permission' && p.kind === 'permission' && p.status === 'pending' && it.status !== 'pending') toCollapse.push(it.key)
-      }
-    }
-    prevItemsRef.current = agent.items
-    if (toCollapse.length > 0) setCollapsedKeys((prev) => { const next = new Set(prev); for (const k of toCollapse) next.add(k); return next })
-  }, [agent.items])
-
-  const toggleCollapsed = (key: string) => setCollapsedKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
+  // Compute collapsed state directly from item kind/status — no effect needed.
+  // Toggling flips the default.
+  const isCollapsed = (it: import('../lib/useCodeDeckAgent').AgentItem): boolean => {
+    const defaultCollapsed = it.kind === 'user' || it.kind === 'tool_use' || it.kind === 'system' ||
+      (it.kind === 'permission' && it.status !== 'pending')
+    return toggledKeys.has(it.key) ? !defaultCollapsed : defaultCollapsed
+  }
+  const toggleCollapsed = (key: string) => setToggledKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
 
   const newSessionForm = (
     <Card title="New session">
@@ -650,7 +638,7 @@ export default function CodeDeck() {
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : agent.items.map((it) => {
-                            const collapsed = collapsedKeys.has(it.key)
+                            const collapsed = isCollapsed(it)
 
                             if (it.kind === 'tool_use') {
                               const statusDot = it.result === undefined ? '' : it.isError ? ' · ✗' : ' · ✓'
