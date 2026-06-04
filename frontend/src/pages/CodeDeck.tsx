@@ -12,6 +12,13 @@ const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'
 const codexModels = ['gpt-5.5']
 
 const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
+const profileOrder = ['main-claude', 'botacct-claude', 'main-codex']
+const orderedProfiles = (profiles: { id: string; label: string }[] = []) =>
+  [...profiles].sort((a, b) => {
+    const ai = profileOrder.indexOf(a.id)
+    const bi = profileOrder.indexOf(b.id)
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.label.localeCompare(b.label)
+  })
 
 function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
   const clamped = Math.max(0, Math.min(100, pct))
@@ -351,7 +358,7 @@ export default function CodeDeck() {
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
-          <Dropdown value={profileId} onChange={setProfileId} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} />
+          <Dropdown value={profileId} onChange={setProfileId} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} />
         </label>
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
@@ -526,7 +533,7 @@ export default function CodeDeck() {
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={(deck.data?.profiles ?? []).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
+                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
                             <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
                             <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                           </div>
