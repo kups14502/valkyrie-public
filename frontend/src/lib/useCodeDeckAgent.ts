@@ -160,6 +160,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
           case 'busy':
             setBusy(Boolean(m.value))
             if (m.value) setError(undefined)
+            else setThinking(false)
             break
           case 'user':
             setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'user', key: m.id ?? crypto.randomUUID(), text: m.text ?? '' }])
@@ -191,6 +192,9 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
             setLive((prev) => prev.map((i) => i.kind === 'permission' && i.requestId === m.requestId ? { ...i, status: m.decision ?? 'allow' } : i))
             break
           case 'result':
+            setBusy(false)
+            setThinking(false)
+            flushStreaming()
             if (typeof m.costUsd === 'number') setLastCostUsd(m.costUsd)
             break
           case 'error':

@@ -43,6 +43,7 @@ class AgentRunner {
   private readonly pending = new Map<string, { resolve: (r: PermissionResult) => void; input: Record<string, unknown>; suggestions: PermissionUpdate[] }>()
   private disposeTimer: NodeJS.Timeout | null = null
   private lastSubmit: { text: string; at: number } | null = null
+  private runSeq = 0
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -109,6 +110,7 @@ class AgentRunner {
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v
     Object.assign(env, profile.env)
+    const runSeq = ++this.runSeq
     this.q = query({
       prompt: this.inputStream(),
       options: {
@@ -121,7 +123,7 @@ class AgentRunner {
         stderr: () => { /* swallow CLI noise */ },
       },
     })
-    void this.consume()
+    void this.consume(runSeq)
   }
 
   private restart() {
@@ -130,10 +132,14 @@ class AgentRunner {
     this.start()
   }
 
-  private async consume() {
+  private async consume(runSeq: number) {
     try {
-      for await (const msg of this.q!) this.handleMessage(msg)
+      for await (const msg of this.q!) {
+        if (runSeq !== this.runSeq) return
+        this.handleMessage(msg)
+      }
     } catch (err) {
+      if (runSeq !== this.runSeq) return
       const m = (err as Error)?.message || String(err)
       // A stale resume id (pruned session file) fails the whole query — retry fresh once.
       if (this.usedResume && /resume|session|not found|no conversation|enoent/i.test(m)) {
@@ -145,10 +151,12 @@ class AgentRunner {
       }
       this.broadcast({ t: 'error', message: m })
     }
-    this.busy = false
-    this.started = false
-    this.q = null
-    this.broadcast({ t: 'busy', value: false })
+    if (runSeq === this.runSeq) {
+      this.busy = false
+      this.started = false
+      this.q = null
+      this.broadcast({ t: 'busy', value: false })
+    }
   }
 
   private handleMessage(msg: SDKMessage) {
@@ -167,6 +175,7 @@ class AgentRunner {
       case 'stream_event': {
         const ev = (msg as { event: StreamEvent }).event
         if (ev.type === 'message_start') { this.busy = true; this.broadcast({ t: 'busy', value: true }) }
+        else if (ev.type === 'message_stop' && this.pending.size === 0) { this.busy = false; this.broadcast({ t: 'busy', value: false }) }
         else if (ev.type === 'content_block_delta' && ev.delta) {
           if (ev.delta.type === 'text_delta' && ev.delta.text) this.broadcast({ t: 'delta', text: ev.delta.text })
           else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) this.broadcast({ t: 'thinking', text: ev.delta.thinking })
@@ -182,6 +191,8 @@ class AgentRunner {
         }
         for (const b of blocks) {
           if (b.type === 'tool_use') {
+            this.busy = true
+            this.broadcast({ t: 'busy', value: true })
             const saved = saveMessage(this.sessionId, 'system', `🔧 ${b.name ?? 'tool'}`, { kind: 'tool_use', toolUseId: b.id, name: b.name, input: b.input })
             this.broadcast({ t: 'tool_use', id: saved.id, toolUseId: b.id, name: b.name, input: b.input, at: saved.createdAt })
           }
@@ -244,13 +255,18 @@ class AgentRunner {
   }
 
   async interrupt() {
-    try { await this.q?.interrupt() } catch { /* not streaming / already idle */ }
+    const old = this.q
+    this.runSeq++
+    this.q = null
+    this.started = false
+    this.inputQueue = []
     // Deny any outstanding prompts so the run can unwind.
     for (const requestId of [...this.pending.keys()]) this.resolvePermission(requestId, 'deny')
     this.busy = false
     saveMessage(this.sessionId, 'system', 'Stopped by operator.')
     setSessionStatus(this.sessionId, 'idle')
     this.broadcast({ t: 'busy', value: false })
+    try { await old?.interrupt() } catch { /* not streaming / already idle */ }
   }
 
   private scheduleDispose() {
