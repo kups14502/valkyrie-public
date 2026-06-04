@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import type { Server } from 'node:http'
 import { WebSocketServer } from 'ws'
 import * as pty from 'node-pty'
@@ -179,9 +179,15 @@ function saveMessage(sessionId: string, role: MessageRow['role'], content: strin
   const msg = { id: randomUUID(), sessionId, role, content, createdAt: now() }
   const d = db()
   d.prepare('INSERT INTO code_deck_messages VALUES (@id,@sessionId,@role,@content,@createdAt)').run(msg)
-  d.prepare('UPDATE code_deck_sessions SET updatedAt=?, status=? WHERE id=?').run(now(), role === 'assistant' ? 'chat' : 'thinking', sessionId)
+  const status = role === 'assistant' ? 'chat' : role === 'user' ? 'thinking' : 'note'
+  d.prepare('UPDATE code_deck_sessions SET updatedAt=?, status=? WHERE id=?').run(now(), status, sessionId)
   d.close()
   return msg
+}
+
+function safeFilename(input: string) {
+  const base = path.basename(input || 'attachment')
+  return base.replace(/[^a-zA-Z0-9._ -]+/g, '_').replace(/^\.+/, '').slice(0, 120) || 'attachment'
 }
 
 function chatPrompt(row: SessionRow, messages: MessageRow[], userText: string) {
@@ -321,6 +327,27 @@ router.get('/code-deck/sessions/:id/messages', (req, res) => {
     res.json({ messages })
   } catch (err) {
     res.status(500).json({ error: 'failed to read messages', detail: (err as Error).message })
+  }
+})
+
+router.post('/code-deck/sessions/:id/attachments', express.raw({ type: '*/*', limit: '25mb' }), (req, res) => {
+  try {
+    const row = getSession(req.params.id)
+    if (!row) return res.status(404).json({ error: 'not found' })
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from([])
+    if (body.length === 0) return res.status(400).json({ error: 'missing file body' })
+    const encodedName = String(req.header('x-filename') || 'attachment')
+    const originalName = safeFilename(decodeURIComponent(encodedName))
+    const contentType = String(req.header('x-file-type') || req.header('content-type') || 'application/octet-stream').slice(0, 120)
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const dir = path.join(row.cwd, '.code-deck', 'attachments', row.id)
+    fs.mkdirSync(dir, { recursive: true })
+    const filePath = path.join(dir, `${stamp}-${originalName}`)
+    fs.writeFileSync(filePath, body)
+    const msg = saveMessage(row.id, 'system', `Attachment uploaded: ${originalName}\nPath: ${filePath}\nType: ${contentType}\nSize: ${body.length} bytes\n\nReference this path in your next message when you want Code Deck to inspect it.`)
+    res.json({ attachment: { name: originalName, path: filePath, contentType, size: body.length }, message: msg })
+  } catch (err) {
+    res.status(500).json({ error: 'attachment upload failed', detail: (err as Error).message })
   }
 })
 

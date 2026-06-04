@@ -500,6 +500,17 @@ export const sendCodeDeckMessage = async (sessionId: string, content: string) =>
   return r.data
 }
 
+export const uploadCodeDeckAttachment = async (sessionId: string, file: File) => {
+  const r = await api.post<{ attachment: { name: string; path: string; contentType: string; size: number }; message: CodeDeckMessage }>(`/code-deck/sessions/${sessionId}/attachments`, file, {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Filename': encodeURIComponent(file.name),
+      'X-File-Type': file.type || 'application/octet-stream',
+    },
+  })
+  return r.data
+}
+
 export const deleteCodeDeckSession = async (id: string) => {
   const r = await api.delete<{ ok: boolean }>(`/code-deck/sessions/${id}`)
   return r.data

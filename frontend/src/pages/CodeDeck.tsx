@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Copy, Folder, PanelLeft, PanelLeftClose, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Folder, PanelLeft, PanelLeftClose, Paperclip, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
-import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, type AIClientUsage, type AIUsage, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
+import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, sendCodeDeckMessage, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckMessage, type CodeDeckSession } from '../lib/api'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
@@ -76,6 +76,7 @@ export default function CodeDeck() {
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
   const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
   const [chatInput, setChatInput] = useState('')
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -90,6 +91,7 @@ export default function CodeDeck() {
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termDivRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const linkBufRef = useRef('')
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
@@ -102,6 +104,10 @@ export default function CodeDeck() {
   const messages = useQuery({ queryKey: ['code-deck-messages', selected?.id], queryFn: () => fetchCodeDeckMessages(selected!.id), enabled: Boolean(selected?.id), refetchInterval: 5000 })
   const chat = useMutation({
     mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) => sendCodeDeckMessage(sessionId, content),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
+  })
+  const uploadAttachment = useMutation({
+    mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) => uploadCodeDeckAttachment(sessionId, file),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
   })
   const grouped = useMemo(() => {
@@ -311,6 +317,18 @@ export default function CodeDeck() {
     if (!selected || !chatInput.trim() || chat.isPending) return
     chat.mutate({ sessionId: selected.id, content: chatInput.trim() })
     setChatInput('')
+  }
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!selected || !files?.length) return
+    const list = Array.from(files)
+    setUploadingFiles(list.map((f) => f.name))
+    try {
+      for (const file of list) await uploadAttachment.mutateAsync({ sessionId: selected.id, file })
+    } finally {
+      setUploadingFiles([])
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
@@ -543,9 +561,15 @@ export default function CodeDeck() {
                         </div>
                         <div className="shrink-0 space-y-2">
                           <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
+                          {uploadingFiles.length > 0 && <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">Uploading: {uploadingFiles.join(', ')}</div>}
+                          {uploadAttachment.error && <div className="text-xs text-[var(--color-danger)]">{(uploadAttachment.error as Error).message}</div>}
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">Enter to send · Shift+Enter for newline</div>
-                            <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
+                            <div className="flex items-center gap-2">
+                              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { void uploadFiles(e.target.files) }} />
+                              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadAttachment.isPending} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"><Paperclip size={14} /> attach</button>
+                              <button type="button" onClick={sendChat} disabled={!chatInput.trim() || chat.isPending} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
+                            </div>
                           </div>
                         </div>
                       </div>
