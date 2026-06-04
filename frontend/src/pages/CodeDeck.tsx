@@ -329,6 +329,11 @@ export default function CodeDeck() {
     setChatInput('')
   }
 
+  const sendApproval = (content: 'approved' | 'cancel') => {
+    if (!selected || chat.isPending) return
+    chat.mutate({ sessionId: selected.id, content })
+  }
+
   const uploadFiles = async (files: FileList | null) => {
     if (!selected || !files?.length) return
     const list = Array.from(files)
@@ -342,6 +347,10 @@ export default function CodeDeck() {
   }
 
   const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
+  const isApprovalPrompt = (m: CodeDeckMessage) => m.role !== 'user' && /\b(approval|approve|permission|prompted|proceed)\b/i.test(m.content) && /\b(approve|approval|permission|prompted)\b/i.test(m.content)
+  const messageList = messages.data ?? []
+  const latestActionableMessage = [...messageList].reverse().find((m) => m.role === 'user' || isApprovalPrompt(m))
+  const latestApprovalMessageId = latestActionableMessage && isApprovalPrompt(latestActionableMessage) ? latestActionableMessage.id : null
 
   const newSessionForm = (
     <Card title="New session">
@@ -568,12 +577,18 @@ export default function CodeDeck() {
                     {mode === 'chat' ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
-                          {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : (messages.data ?? []).length === 0 ? (
+                          {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : messageList.length === 0 ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
-                          ) : (messages.data ?? []).map((m) => (
+                          ) : messageList.map((m) => (
                             <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
                               <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>
                               <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{m.content}</div>
+                              {m.id === latestApprovalMessageId && (
+                                <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
+                                  <button type="button" onClick={() => sendApproval('approved')} disabled={chat.isPending} className="h-10 min-w-24 border border-[var(--color-accent)] px-4 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">approve</button>
+                                  <button type="button" onClick={() => sendApproval('cancel')} disabled={chat.isPending} className="h-10 min-w-24 border border-[var(--color-danger)] px-4 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)] disabled:opacity-50">cancel</button>
+                                </div>
+                              )}
                             </div>
                           ))}
                           {chat.isPending && <div className="text-sm text-[var(--color-accent)]">Thinking/running…</div>}
