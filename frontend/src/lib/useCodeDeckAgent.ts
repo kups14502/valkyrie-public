@@ -76,6 +76,7 @@ export type CodeDeckAgent = {
   busy: boolean
   connected: boolean
   lastCostUsd?: number
+  lastEventAt?: number
   error?: string
   send: (text: string) => void
   resolvePermission: (requestId: string, decision: 'allow' | 'deny', always?: boolean) => void
@@ -94,6 +95,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
   const [busy, setBusy] = useState(false)
   const [connected, setConnected] = useState(false)
   const [lastCostUsd, setLastCostUsd] = useState<number | undefined>(undefined)
+  const [lastEventAt, setLastEventAt] = useState<number | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const wsRef = useRef<WebSocket | null>(null)
   const streamRef = useRef('')
@@ -104,7 +106,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     if (!sessionId || !enabled) { setConnected(false); return }
     const sid: string = sessionId  // narrow type for use inside connect() closure
     // Reset live state once per session (not per reconnect).
-    setLive([]); flushStreaming(); setThinking(false); setBusy(false); setLastCostUsd(undefined); setError(undefined)
+    setLive([]); flushStreaming(); setThinking(false); setBusy(false); setLastCostUsd(undefined); setLastEventAt(undefined); setError(undefined)
 
     let stopped = false
     let reconnectDelay = RECONNECT_INITIAL_MS
@@ -151,6 +153,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
       ws.onmessage = (event) => {
         let m: ServerEvent
         try { m = JSON.parse(String(event.data)) as ServerEvent } catch { return }
+        if (m.t !== 'pong') setLastEventAt(Date.now())
         switch (m.t) {
           case 'pong':
             break
@@ -236,9 +239,10 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     setBusy(false)
     setThinking(false)
+    setLastEventAt(Date.now())
     ws.send(JSON.stringify({ t: 'interrupt' }))
   }, [])
 
   const items = useMemo(() => [...historyItems, ...live], [historyItems, live])
-  return { items, streaming, thinking, busy, connected, lastCostUsd, error, send, resolvePermission, interrupt }
+  return { items, streaming, thinking, busy, connected, lastCostUsd, lastEventAt, error, send, resolvePermission, interrupt }
 }

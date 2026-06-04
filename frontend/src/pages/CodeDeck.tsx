@@ -128,6 +128,7 @@ export default function CodeDeck() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [metaCollapsed, setMetaCollapsed] = useState(true)
+  const [nowMs, setNowMs] = useState(Date.now())
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -249,7 +250,15 @@ export default function CodeDeck() {
     if (!availableModels.includes(model)) setModel(availableModels[0])
   }, [availableModels, model])
 
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
+  const activeAgeSeconds = agent.lastEventAt ? Math.max(0, Math.floor((nowMs - agent.lastEventAt) / 1000)) : null
+  const activeAgeLabel = activeAgeSeconds == null ? '' : activeAgeSeconds < 60 ? `${activeAgeSeconds}s` : `${Math.floor(activeAgeSeconds / 60)}m ${activeAgeSeconds % 60}s`
+  const maybeStuck = Boolean(agent.busy && activeAgeSeconds != null && activeAgeSeconds >= 90)
 
   const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[()][A-Za-z0-9]/g, '').replace(/\r/g, '')
   const captureLinks = (text: string) => {
@@ -672,7 +681,7 @@ export default function CodeDeck() {
                                   <button type="button" onClick={() => toggleCollapsed(di.key)} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left">
                                     {collapsed ? <ChevronRight size={11} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={11} className="shrink-0 text-[var(--color-text-faint)]" />}
                                     <span className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">↳ {label}</span>
-                                    {!di.done && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent)]">running</span>}
+                                    {!di.done && <span className={`ml-auto shrink-0 text-[9px] uppercase tracking-[0.14em] ${maybeStuck ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`}>{maybeStuck ? `no update ${activeAgeLabel}` : `running ${activeAgeLabel}`}</span>}
                                   </button>
                                   {!collapsed && (
                                     <div className="border-t border-[var(--color-border)]/40 px-3 pb-2 pt-1 space-y-1">
@@ -719,7 +728,7 @@ export default function CodeDeck() {
                               <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{agent.streaming}<span className="cursor-blink">_</span></div>
                             </div>
                           )}
-                          {agent.busy && !agent.streaming && <div className="text-sm text-[var(--color-accent)]">{agent.thinking ? 'Thinking…' : 'Working…'}</div>}
+                          {agent.busy && !agent.streaming && <div className={`text-sm ${maybeStuck ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`}>{maybeStuck ? `No update for ${activeAgeLabel} — likely stuck; Stop is safe to use.` : `${agent.thinking ? 'Thinking' : 'Working'}${activeAgeLabel ? ` · last update ${activeAgeLabel} ago` : '…'}`}</div>}
                           {agent.error && <div className="text-sm text-[var(--color-danger)]">{agent.error}</div>}
                         </div>
                         <div className="shrink-0 space-y-2">
@@ -744,6 +753,7 @@ export default function CodeDeck() {
                             <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
                               <span>Enter to send · Shift+Enter for newline</span>
                               <span className={agent.connected ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}>[{agent.connected ? 'live' : 'offline'}]</span>
+                              {agent.busy && activeAgeLabel && <span className={maybeStuck ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}>{maybeStuck ? `possibly stuck ${activeAgeLabel}` : `active ${activeAgeLabel}`}</span>}
                               {typeof agent.lastCostUsd === 'number' && <span>${agent.lastCostUsd.toFixed(4)}</span>}
                             </div>
                             <div className="flex items-center gap-2">
