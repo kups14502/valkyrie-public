@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
+import { Markdown } from '../components/Markdown'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckSession } from '../lib/api'
 import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
@@ -727,7 +728,7 @@ export default function CodeDeck() {
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
                                   {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
                                 </button>
-                                {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                                {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)] whitespace-pre-wrap break-words">{it.text}</div>}
                               </div>
                             )
 
@@ -738,7 +739,7 @@ export default function CodeDeck() {
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
                                   {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
                                 </button>
-                                {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                                {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2"><Markdown>{it.text}</Markdown></div>}
                               </div>
                             )
 
@@ -751,7 +752,7 @@ export default function CodeDeck() {
                           {agent.streaming && (
                             <div className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-3">
                               <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">assistant</div>
-                              <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{agent.streaming}<span className="cursor-blink">_</span></div>
+                              <div><Markdown>{agent.streaming}</Markdown><span className="cursor-blink">_</span></div>
                             </div>
                           )}
                           {agent.busy && !agent.streaming && (

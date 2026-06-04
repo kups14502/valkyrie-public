@@ -47,6 +47,11 @@ class AgentRunner {
   private started = false
   private usedResume = false
   private agentSessionId = ''
+  // The model/account the live stream was actually started with. The stream is a
+  // single long-lived query(), so these are locked until we tear it down and
+  // restart — see applyConfigChange().
+  private activeModel = ''
+  private activeProfileId = ''
   private busy = false
   private readonly sockets = new Set<WebSocket>()
   private readonly pending = new Map<string, { resolve: (r: PermissionResult) => void; input: Record<string, unknown>; suggestions: PermissionUpdate[] }>()
@@ -126,6 +131,15 @@ class AgentRunner {
     const saved = saveMessage(this.sessionId, 'user', content)
     this.broadcast({ t: 'user', id: saved.id, text: content, at: saved.createdAt })
     this.inputQueue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null })
+    // If the operator switched model/account since this stream started, restart it
+    // so this turn actually runs on the selected model. Don't wake the old input
+    // generator (no inputResolve here) — the fresh stream picks up the queued turn.
+    const row = getSession(this.sessionId)
+    if (this.started && this.q && row && (row.model !== this.activeModel || row.profileId !== this.activeProfileId)) {
+      this.log('config change', `${this.activeModel}/${this.activeProfileId} → ${row.model}/${row.profileId} — restarting stream`)
+      void this.applyConfigChange()
+      return
+    }
     this.inputResolve?.()
     this.inputResolve = null
     this.start()
@@ -146,6 +160,8 @@ class AgentRunner {
     this.toolTimers.clear()
     this.agentSessionId = row.agentSessionId || ''
     this.usedResume = Boolean(this.agentSessionId)
+    this.activeModel = row.model
+    this.activeProfileId = row.profileId
     setSessionStatus(this.sessionId, 'running')
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v
@@ -176,6 +192,24 @@ class AgentRunner {
     this.q = null
     this.started = false
     this.start()
+  }
+
+  // The live query() is a single long-lived stream, so the model/account chosen
+  // at start() is locked for the session's whole lifetime. When the operator
+  // switches model (or account) in the UI mid-session, we must tear the stream
+  // down and start a fresh one. `resume` carries the conversation context across,
+  // so only the model changes — the history is preserved. The already-queued user
+  // turn is picked up by the new stream's input generator.
+  private async applyConfigChange() {
+    const old = this.q
+    this.runSeq++          // make the in-flight consume() loop exit quietly
+    this.q = null
+    this.started = false
+    this.busy = false
+    this.broadcast({ t: 'busy', value: false })
+    try { await old?.interrupt() } catch { /* already idle / not streaming */ }
+    if (this.closed) return
+    this.start()           // re-reads model/profile from the row; resumes context
   }
 
   private async consume(runSeq: number) {
