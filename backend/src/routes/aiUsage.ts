@@ -532,6 +532,7 @@ router.get('/ai-usage', async (_req, res) => {
     if (!c) return res.status(503).json({ error: 'AI usage warming up' })
     res.json(c.data)
   } catch (err) {
+    console.error('[500] failed to read AI usage:', err)
     res.status(500).json({ error: 'failed to read AI usage', detail: (err as Error).message })
   }
 })

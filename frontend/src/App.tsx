@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -92,6 +93,7 @@ function CenterPage({ children }: { children: ReactNode }) {
 
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
 
   return (
     <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -158,6 +160,9 @@ function Shell() {
 
       <main className="w-[calc(100vw-8px)] max-w-none overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
         <Suspense fallback={<PageFallback />}>
+          {/* Per-route boundary: a crash in one page shows an inline error and
+              keeps the nav usable; the key resets it when you navigate away. */}
+          <ErrorBoundary compact key={location.pathname}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
@@ -169,6 +174,7 @@ function Shell() {
             <Route path="/code-deck" element={<CodeDeck />} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
           </Routes>
+          </ErrorBoundary>
         </Suspense>
       </main>
     </div>

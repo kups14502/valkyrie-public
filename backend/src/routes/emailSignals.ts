@@ -145,6 +145,7 @@ router.get('/email/signals', async (_req, res) => {
       recentErrors: errors.slice(-5),
     })
   } catch (err) {
+    console.error('[500] signals unavailable:', err)
     res.status(500).json({ error: 'signals unavailable', detail: (err as Error).message })
   }
 })

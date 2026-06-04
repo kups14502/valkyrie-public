@@ -281,6 +281,7 @@ router.get('/code-deck', (_req, res) => {
       profiles: PROFILES,
     })
   } catch (err) {
+    console.error('[500] failed to read code deck:', err)
     res.status(500).json({ error: 'failed to read code deck', detail: (err as Error).message })
   }
 })
@@ -315,6 +316,7 @@ router.post('/code-deck/sessions', (req, res) => {
     d.close()
     res.json({ session: serialize(row) })
   } catch (err) {
+    console.error('[500] failed to create session:', err)
     res.status(500).json({ error: 'failed to create session', detail: (err as Error).message })
   }
 })
@@ -346,6 +348,7 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
     d.close()
     res.json({ session: serialize(next) })
   } catch (err) {
+    console.error('[500] failed to update session:', err)
     res.status(500).json({ error: 'failed to update session', detail: (err as Error).message })
   }
 })
@@ -359,6 +362,7 @@ router.get('/code-deck/sessions/:id/messages', (req, res) => {
     d.close()
     res.json({ messages })
   } catch (err) {
+    console.error('[500] failed to read messages:', err)
     res.status(500).json({ error: 'failed to read messages', detail: (err as Error).message })
   }
 })
@@ -380,6 +384,7 @@ router.post('/code-deck/sessions/:id/attachments', express.raw({ type: '*/*', li
     const msg = saveMessage(row.id, 'system', `Attachment uploaded: ${originalName}\nPath: ${filePath}\nType: ${contentType}\nSize: ${body.length} bytes\n\nReference this path in your next message when you want Code Deck to inspect it.`)
     res.json({ attachment: { name: originalName, path: filePath, contentType, size: body.length }, message: msg })
   } catch (err) {
+    console.error('[500] attachment upload failed:', err)
     res.status(500).json({ error: 'attachment upload failed', detail: (err as Error).message })
   }
 })
@@ -403,6 +408,7 @@ router.post('/code-deck/sessions/:id/chat', (req, res) => {
       })
   } catch (err) {
     const detail = (err as Error).message
+    console.error('[500] chat failed:', err)
     try { saveMessage(req.params.id, 'system', `Agent error: ${detail}`) } catch { /* noop */ }
     res.status(500).json({ error: 'chat failed', detail })
   }
@@ -415,6 +421,7 @@ router.delete('/code-deck/sessions/:id', (req, res) => {
     d.close()
     res.json({ ok: true })
   } catch (err) {
+    console.error('[500] failed to delete session:', err)
     res.status(500).json({ error: 'failed to delete session', detail: (err as Error).message })
   }
 })

@@ -105,6 +105,7 @@ router.get('/sessions', async (_req, res) => {
 
     res.json(enriched)
   } catch (err) {
+    console.error('[500] failed to read processes:', err)
     res.status(500).json({ error: 'failed to read processes', detail: (err as Error).message })
   }
 })

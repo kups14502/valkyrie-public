@@ -133,6 +133,7 @@ router.get('/activity', async (_req, res) => {
     cache = { at: Date.now(), data: all }
     res.json(all)
   } catch (err) {
+    console.error('[500] failed to read activity:', err)
     res.status(500).json({ error: 'failed to read activity', detail: (err as Error).message })
   }
 })

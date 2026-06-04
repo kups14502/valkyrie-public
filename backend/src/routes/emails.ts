@@ -50,6 +50,7 @@ router.get('/emails', (_req, res) => {
     db.close()
     res.json({ messages: rows, total, accounts, byClassification: byClass })
   } catch (err) {
+    console.error('[500] failed to read email database:', err)
     res.status(500).json({ error: 'failed to read email database', detail: (err as Error).message })
   }
 })
@@ -79,6 +80,7 @@ router.get('/emails/status', async (_req, res) => {
 
     res.json({ timer, service, dbStats })
   } catch (err) {
+    console.error('[500] failed to read service status:', err)
     res.status(500).json({ error: 'failed to read service status', detail: (err as Error).message })
   }
 })

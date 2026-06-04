@@ -264,6 +264,7 @@ router.post('/services/restart', async (req, res) => {
     cache = null
     res.json({ ok: true })
   } catch (err) {
+    console.error('[500] restart failed:', err)
     res.status(500).json({ error: 'restart failed', detail: (err as Error).message })
   }
 })
