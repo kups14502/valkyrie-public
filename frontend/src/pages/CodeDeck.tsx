@@ -125,7 +125,9 @@ export default function CodeDeck() {
   const [foldersCollapsed, setFoldersCollapsed] = useState(false)
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
   const [collapsedSessionFolders, setCollapsedSessionFolders] = useState<Set<string>>(new Set())
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Start with the sidebar closed on phones so the chat is immediately visible;
+  // open by default on desktop. (There's a toggle button either way.)
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1024)
   const [showNew, setShowNew] = useState(false)
   const [metaCollapsed, setMetaCollapsed] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
@@ -486,7 +488,7 @@ export default function CodeDeck() {
   )
 
   return (
-    <div className="flex min-w-0 max-w-full gap-4 lg:h-[calc(100dvh-150px)]">
+    <div className="flex min-w-0 max-w-full flex-col gap-4 lg:h-[calc(100dvh-150px)] lg:flex-row">
       {sidebarOpen && (
       <aside className="w-full shrink-0 space-y-4 lg:w-[320px] lg:self-stretch lg:overflow-auto lg:pr-1">
             <div className="flex gap-2">
@@ -650,8 +652,8 @@ export default function CodeDeck() {
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} className="w-56" />
-                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-44" />
+                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
+                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-full sm:w-44" />
                             <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                           </div>
                           <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
