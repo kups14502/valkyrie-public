@@ -158,7 +158,11 @@ export default function CodeDeck() {
     const data = aiUsage.data as AIUsage | undefined
     if (!data || !selectedProfile) return [] as { label: string; pct: number; sub?: string; warn?: boolean }[]
     const provider = selectedProfile.provider
-    const wantEmail = emailOf(selectedProfile.label)
+    const wantEmail = selectedProfile.id === 'botacct-claude'
+      ? 'bot@example.com'
+      : selectedProfile.id === 'main-claude' || selectedProfile.id === 'main-codex'
+      ? 'user@example.com'
+      : emailOf(selectedProfile.label)
     const clients = data.aiClients ?? []
     if (provider === 'claude') {
       const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && (!wantEmail || emailOf(c.label) === wantEmail))

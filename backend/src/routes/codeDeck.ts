@@ -57,7 +57,7 @@ function discoverProjectRoots(): ProjectRoot[] {
 const PROFILES = [
   {
     id: 'main-claude',
-    label: 'user@example.com Claude',
+    label: 'acct-e claude',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
     command: '/home/brendon/.local/bin/claude',
@@ -65,7 +65,7 @@ const PROFILES = [
   },
   {
     id: 'main-codex',
-    label: 'user@example.com Codex',
+    label: 'codex',
     provider: 'codex',
     defaultModel: 'gpt-5.5',
     command: '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex',
@@ -73,7 +73,7 @@ const PROFILES = [
   },
   {
     id: 'botacct-claude',
-    label: 'bot@example.com Claude',
+    label: 'bot claude',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
     command: '/home/brendon/.local/bin/claude',
