@@ -220,6 +220,8 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
   const interrupt = useCallback(() => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
+    setBusy(false)
+    setThinking(false)
     ws.send(JSON.stringify({ t: 'interrupt' }))
   }, [])
 

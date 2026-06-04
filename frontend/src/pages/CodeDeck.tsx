@@ -218,6 +218,28 @@ export default function CodeDeck() {
   const newSessionUsageBars = useMemo(() => usageBarsForProfile(aiUsage.data as AIUsage | undefined, profile), [aiUsage.data, profile])
   const sessionUsage = usageBars.find((b) => b.label.toLowerCase().includes('session')) ?? usageBars[0]
 
+  // Group consecutive non-user/non-assistant items into a single activity block
+  // so the chat reads as: prompt → ↳ activity (collapsed) → response.
+  type ActivityBlock = { kind: 'activity'; key: string; toolNames: string[]; items: import('../lib/useCodeDeckAgent').AgentItem[]; done: boolean }
+  type DisplayItem = { kind: 'message'; item: import('../lib/useCodeDeckAgent').AgentItem } | ActivityBlock
+  const displayItems = useMemo((): DisplayItem[] => {
+    const result: DisplayItem[] = []
+    let group: import('../lib/useCodeDeckAgent').AgentItem[] = []
+    const flush = () => {
+      if (!group.length) return
+      const tools = group.filter((i) => i.kind === 'tool_use').map((i) => (i as { name: string }).name)
+      const done = group.every((i) => i.kind !== 'tool_use' || (i as { result?: string }).result !== undefined)
+      result.push({ kind: 'activity', key: `act-${group[0].key}`, toolNames: tools, items: group, done })
+      group = []
+    }
+    for (const it of agent.items) {
+      if (it.kind === 'user' || it.kind === 'assistant') { flush(); result.push({ kind: 'message', item: it }) }
+      else group.push(it)
+    }
+    flush()
+    return result
+  }, [agent.items])
+
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
   }, [availableModels, model])
@@ -331,7 +353,7 @@ export default function CodeDeck() {
   }
 
   const sendChat = () => {
-    if (!selected || !chatInput.trim() || !agent.connected || agent.busy) return
+    if (!selected || !chatInput.trim() || !agent.connected) return
     agent.send(chatInput.trim())
     setChatInput('')
     clearAttached()
@@ -632,37 +654,53 @@ export default function CodeDeck() {
                         <div ref={chatScrollRef} className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
-                          ) : agent.items.map((it) => {
-                            // Only show user prompts and assistant responses.
-                            if (it.kind !== 'user' && it.kind !== 'assistant') return null
+                          ) : displayItems.map((di) => {
+                            if (di.kind === 'activity') {
+                              const collapsed = !toggledKeys.has(di.key)
+                              const label = di.toolNames.length ? di.toolNames.slice(0, 6).join(' · ') : 'thinking'
+                              return (
+                                <div key={di.key} className="rounded border border-[var(--color-border)]/50 bg-[rgba(255,255,255,0.01)]">
+                                  <button type="button" onClick={() => toggleCollapsed(di.key)} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left">
+                                    {collapsed ? <ChevronRight size={11} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={11} className="shrink-0 text-[var(--color-text-faint)]" />}
+                                    <span className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">↳ {label}</span>
+                                    {!di.done && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent)]">running</span>}
+                                  </button>
+                                  {!collapsed && (
+                                    <div className="border-t border-[var(--color-border)]/40 px-3 pb-2 pt-1 space-y-1">
+                                      {di.items.filter((i) => i.kind === 'tool_use').map((i) => {
+                                        const t = i as { key: string; name: string; result?: string; isError?: boolean }
+                                        return <div key={t.key} className={`font-mono text-[11px] ${t.result === undefined ? 'text-[var(--color-text-faint)]' : t.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>🔧 {t.name}{t.result !== undefined ? (t.isError ? ' ✗' : ' ✓') : ' …'}</div>
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            }
 
+                            const it = di.item
                             const collapsed = isCollapsed(it)
 
-                            if (it.kind === 'user') {
-                              return (
-                                <div key={it.key} className="rounded border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]">
-                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]/60" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]/60" />}
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
-                                    {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
-                                  </button>
-                                  {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
-                                </div>
-                              )
-                            }
+                            if (it.kind === 'user') return (
+                              <div key={it.key} className="rounded border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]">
+                                <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                  {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]/60" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]/60" />}
+                                  <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
+                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                </button>
+                                {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                              </div>
+                            )
 
-                            if (it.kind === 'assistant') {
-                              return (
-                                <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]">
-                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                                    {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
-                                    {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
-                                  </button>
-                                  {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
-                                </div>
-                              )
-                            }
+                            if (it.kind === 'assistant') return (
+                              <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]">
+                                <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                                  {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
+                                  <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
+                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                </button>
+                                {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)]">{it.text}</div>}
+                              </div>
+                            )
 
                             return null
                           })}
@@ -702,11 +740,10 @@ export default function CodeDeck() {
                             <div className="flex items-center gap-2">
                               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { void uploadFiles(e.target.files) }} />
                               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadAttachment.isPending} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"><Paperclip size={14} /> attach</button>
-                              {agent.busy ? (
+                              {agent.busy && (
                                 <button type="button" onClick={() => agent.interrupt()} className="border border-[var(--color-danger)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">stop</button>
-                              ) : (
-                                <button type="button" onClick={sendChat} disabled={!chatInput.trim() || !agent.connected} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
                               )}
+                              <button type="button" onClick={sendChat} disabled={!chatInput.trim() || !agent.connected} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
                             </div>
                           </div>
                         </div>

@@ -239,6 +239,10 @@ class AgentRunner {
     try { await this.q?.interrupt() } catch { /* not streaming / already idle */ }
     // Deny any outstanding prompts so the run can unwind.
     for (const requestId of [...this.pending.keys()]) this.resolvePermission(requestId, 'deny')
+    this.busy = false
+    saveMessage(this.sessionId, 'system', 'Stopped by operator.')
+    setSessionStatus(this.sessionId, 'idle')
+    this.broadcast({ t: 'busy', value: false })
   }
 
   private scheduleDispose() {

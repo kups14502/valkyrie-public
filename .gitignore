@@ -9,3 +9,5 @@ build/
 .vite/
 .tsbuildinfo
 backend/data/
+
+.code-deck/
