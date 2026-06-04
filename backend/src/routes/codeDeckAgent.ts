@@ -197,9 +197,15 @@ class AgentRunner {
   // The live query() is a single long-lived stream, so the model/account chosen
   // at start() is locked for the session's whole lifetime. When the operator
   // switches model (or account) in the UI mid-session, we must tear the stream
-  // down and start a fresh one. `resume` carries the conversation context across,
-  // so only the model changes — the history is preserved. The already-queued user
-  // turn is picked up by the new stream's input generator.
+  // down and start a fresh one. The already-queued user turn is picked up by the
+  // new stream's input generator.
+  //
+  // For a same-account model switch, `resume` (read from the row in start())
+  // carries the in-CLI conversation context across, so only the model changes.
+  // For an account switch the PATCH handler has already cleared the row's
+  // agentSessionId — the new account can't resume the old account's per-account
+  // session file — so start() begins a fresh CLI session. Either way the visible
+  // chat history (code_deck_messages) is preserved.
   private async applyConfigChange() {
     const old = this.q
     this.runSeq++          // make the in-flight consume() loop exit quietly

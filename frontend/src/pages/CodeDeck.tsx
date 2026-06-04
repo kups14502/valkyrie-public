@@ -12,6 +12,7 @@ import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
+const modelLabel = (m: string) => m.replace(/^claude-/, '')
 
 
 const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
@@ -90,7 +91,7 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSe
             {s.pinned && <Pin size={12} className="shrink-0 text-[var(--color-accent)]" />}
             <div className="truncate text-sm font-semibold text-[var(--color-text)]">{s.title}</div>
           </div>
-          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{s.profileId} · {s.model}</div>
+          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{s.profileId} · {modelLabel(s.model)}</div>
           <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{s.cwd}</div>
         </div>
         <div className="flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
@@ -220,7 +221,14 @@ export default function CodeDeck() {
   const changeProfile = (newProfileId: string) => {
     if (!selected) return
     const np = deck.data?.profiles.find((p) => p.id === newProfileId)
-    const models = np?.provider === 'codex' ? codexModels : claudeModels
+    if (!np) return
+    // Provider is locked per session: Claude and codex are different engines with
+    // incompatible session formats and cannot share a conversation, so switching
+    // across providers mid-session is disallowed. Account/model changes within the
+    // same provider are fine. (The dropdown only offers same-provider profiles;
+    // this is the guard for any other code path.)
+    if (selectedProfile && np.provider !== selectedProfile.provider) return
+    const models = np.provider === 'codex' ? codexModels : claudeModels
     const newModel = models.includes(selected.model) ? selected.model : models[0]
     update.mutate({ id: selected.id, body: { profileId: newProfileId, model: newModel } })
   }
@@ -482,7 +490,7 @@ export default function CodeDeck() {
         </label>
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
-          <Dropdown value={availableModels.includes(model) ? model : availableModels[0]} onChange={setModel} options={availableModels.map((m) => ({ value: m, label: m }))} />
+          <Dropdown value={availableModels.includes(model) ? model : availableModels[0]} onChange={setModel} options={availableModels.map((m) => ({ value: m, label: modelLabel(m) }))} />
         </label>
       </div>
       <div className="mt-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4">
@@ -668,8 +676,8 @@ export default function CodeDeck() {
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
-                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: m }))} className="w-full sm:w-44" />
+                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
+                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full sm:w-44" />
                             <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                           </div>
                           <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
@@ -726,7 +734,7 @@ export default function CodeDeck() {
                                 <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
                                   {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]/60" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]/60" />}
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
-                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                  {collapsed && <span className="ml-1 min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0]}</span>}
                                 </button>
                                 {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)] whitespace-pre-wrap break-words">{it.text}</div>}
                               </div>
@@ -737,7 +745,7 @@ export default function CodeDeck() {
                                 <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
                                   {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
-                                  {collapsed && <span className="ml-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0].slice(0, 100)}</span>}
+                                  {collapsed && <span className="ml-1 min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0]}</span>}
                                 </button>
                                 {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2"><Markdown>{it.text}</Markdown></div>}
                               </div>

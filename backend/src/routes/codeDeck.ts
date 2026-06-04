@@ -327,10 +327,36 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
     const row = d.prepare('SELECT * FROM code_deck_sessions WHERE id=?').get(req.params.id) as SessionRow | undefined
     if (!row) { d.close(); return res.status(404).json({ error: 'not found' }) }
     const body = req.body ?? {}
+    // Provider is immutable for a session: Claude and codex are different engines
+    // with incompatible session formats and cannot share a live conversation, so
+    // crossing the provider boundary mid-session is rejected. Account/model
+    // switches within the same provider are allowed. (The UI hides cross-provider
+    // options; this is the server-side backstop.)
+    if (body.profileId != null) {
+      const requested = PROFILES.find((p) => p.id === String(body.profileId))
+      const current = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
+      if (requested && requested.provider !== current.provider) {
+        d.close()
+        return res.status(400).json({
+          error: 'cannot switch provider mid-session',
+          detail: `This is a ${current.provider} session. Create a new session to use ${requested.provider}.`,
+        })
+      }
+    }
     // Only accept a profileId that maps to a known profile; otherwise keep the current one.
     const nextProfileId = body.profileId != null && PROFILES.some((p) => p.id === String(body.profileId))
       ? String(body.profileId)
       : row.profileId
+    // The Claude CLI stores conversation/session files per-account, under each
+    // account's CLAUDE_CONFIG_DIR. A resume id created under one account does not
+    // exist under another, so resuming across an account switch dies with
+    // "No conversation found with session ID …" (surfaced as a result
+    // subtype=error_during_execution). Invalidate the stored resume id whenever the
+    // account changes so the next run starts a fresh CLI session on the new account.
+    // The visible chat history lives in code_deck_messages and is unaffected — only
+    // the live agent's in-CLI context is reset, which is unavoidable across accounts.
+    // A pure model switch keeps the same account, so the resume id is preserved.
+    const accountChanged = nextProfileId !== row.profileId
     const next: SessionRow = {
       ...row,
       title: body.title != null ? String(body.title).slice(0, 120) : row.title,
@@ -342,9 +368,10 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
       pinned: body.pinned != null ? (body.pinned ? 1 : 0) : row.pinned,
       status: body.status != null ? String(body.status).slice(0, 40) : row.status,
       notes: body.notes != null ? String(body.notes).slice(0, 4000) : row.notes,
+      agentSessionId: accountChanged ? '' : row.agentSessionId,
       updatedAt: now(),
     }
-    d.prepare(`UPDATE code_deck_sessions SET title=@title, folder=@folder, projectRootId=@projectRootId, cwd=@cwd, profileId=@profileId, model=@model, pinned=@pinned, status=@status, notes=@notes, updatedAt=@updatedAt WHERE id=@id`).run(next)
+    d.prepare(`UPDATE code_deck_sessions SET title=@title, folder=@folder, projectRootId=@projectRootId, cwd=@cwd, profileId=@profileId, model=@model, pinned=@pinned, status=@status, notes=@notes, agentSessionId=@agentSessionId, updatedAt=@updatedAt WHERE id=@id`).run(next)
     d.close()
     res.json({ session: serialize(next) })
   } catch (err) {
