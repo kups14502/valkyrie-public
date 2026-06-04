@@ -180,7 +180,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
             break
           case 'assistant':
             flushStreaming(); setThinking(false)
-            setLive((prev) => [...prev, { kind: 'assistant', key: m.id ?? crypto.randomUUID(), text: m.text ?? '' }])
+            setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'assistant', key: m.id ?? crypto.randomUUID(), text: m.text ?? '' }])
             break
           case 'tool_use':
             flushStreaming()
@@ -249,6 +249,16 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     ws.send(JSON.stringify({ t: 'interrupt' }))
   }, [])
 
-  const items = useMemo(() => [...historyItems, ...live], [historyItems, live])
+  const items = useMemo(() => {
+    const seen = new Set<string>()
+    const result: AgentItem[] = []
+    for (const item of [...historyItems, ...live]) {
+      if (!seen.has(item.key)) {
+        seen.add(item.key)
+        result.push(item)
+      }
+    }
+    return result
+  }, [historyItems, live])
   return { items, streaming, thinking, busy, connected, lastCostUsd, lastEventAt, error, send, resolvePermission, interrupt }
 }
