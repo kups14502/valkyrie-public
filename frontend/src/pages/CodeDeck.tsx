@@ -353,14 +353,11 @@ export default function CodeDeck() {
             <Card title="Pinned">
               {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
             </Card>
-            <Card
-              title="Folders"
-              action={(
-                <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
-                  {foldersCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />} {foldersCollapsed ? 'show' : 'hide'}
-                </button>
-              )}
-            >
+            <Card>
+              <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
+                <span className="truncate">&gt; Folders</span>
+                {foldersCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+              </button>
               {foldersCollapsed ? (
                 <div className="text-sm text-[var(--color-text-dim)]">Folders hidden.</div>
               ) : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
@@ -423,14 +420,11 @@ export default function CodeDeck() {
                 })}
               </div>}
             </Card>
-            <Card
-              title="Sessions"
-              action={(
-                <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
-                  {sessionsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />} {sessionsCollapsed ? 'show' : 'hide'}
-                </button>
-              )}
-            >
+            <Card>
+              <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
+                <span className="truncate">&gt; Sessions <span className="text-[var(--color-text-faint)]">({sessions.length})</span></span>
+                {sessionsCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+              </button>
               {sessionsCollapsed ? (
                 <div className="text-sm text-[var(--color-text-dim)]">{sessions.length} sessions hidden.</div>
               ) : grouped.length === 0 ? (
@@ -493,8 +487,9 @@ export default function CodeDeck() {
                         </div>
                         {metaCollapsed && sessionUsage && <CompactUsageBar pct={sessionUsage.pct} label={sessionUsage.label} />}
                       </div>
-                      <button type="button" onClick={() => setMetaCollapsed((v) => !v)} className="shrink-0 inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
-                        {metaCollapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {metaCollapsed ? 'details' : 'hide'}
+                      <button type="button" onClick={() => setMetaCollapsed((v) => !v)} className="shrink-0 inline-flex items-center gap-2 text-left text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label={metaCollapsed ? 'Expand session account settings' : 'Collapse session account settings'}>
+                        <span className="hidden sm:inline">account / model</span>
+                        {metaCollapsed ? <ChevronRight size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
                       </button>
                     </div>
                     {!metaCollapsed && (
