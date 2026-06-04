@@ -92,6 +92,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
 
   useEffect(() => {
     if (!sessionId || !enabled) { setConnected(false); return }
+    const sid: string = sessionId  // narrow type for use inside connect() closure
     // Reset live state once per session (not per reconnect).
     setLive([]); flushStreaming(); setThinking(false); setBusy(false); setLastCostUsd(undefined); setError(undefined)
 
@@ -107,7 +108,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
 
     function connect() {
       if (stopped) return
-      const ws = new WebSocket(`${wsBase()}/api/code-deck/agent-ws?sessionId=${encodeURIComponent(sessionId)}`)
+      const ws = new WebSocket(`${wsBase()}/api/code-deck/agent-ws?sessionId=${encodeURIComponent(sid)}`)
       wsRef.current = ws
 
       ws.onopen = () => {
