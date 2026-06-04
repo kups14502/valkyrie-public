@@ -415,7 +415,15 @@ router.delete('/code-deck/sessions/:id', (req, res) => {
 })
 
 export function attachCodeDeckWs(server: Server) {
-  const wss = new WebSocketServer({ server, path: '/api/code-deck/ws' })
+  // noServer + a path-scoped upgrade listener so this WSS composes with the
+  // agent WSS on the same HTTP server. (A `{ server, path }` WSS aborts the
+  // handshake with 400 on any non-matching path, which would kill the other.)
+  const wss = new WebSocketServer({ noServer: true })
+  server.on('upgrade', (req, socket, head) => {
+    const { pathname } = new URL(req.url ?? '', 'http://localhost')
+    if (pathname !== '/api/code-deck/ws') return
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  })
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '', 'http://localhost')
     const sessionId = url.searchParams.get('sessionId') ?? ''

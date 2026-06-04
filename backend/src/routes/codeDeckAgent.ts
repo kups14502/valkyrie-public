@@ -267,7 +267,14 @@ function getRunner(sessionId: string): AgentRunner {
 }
 
 export function attachCodeDeckAgentWs(server: Server) {
-  const wss = new WebSocketServer({ server, path: '/api/code-deck/agent-ws' })
+  // noServer + path-scoped upgrade routing so this composes with the terminal
+  // WSS on the same server (see attachCodeDeckWs for why).
+  const wss = new WebSocketServer({ noServer: true })
+  server.on('upgrade', (req, socket, head) => {
+    const { pathname } = new URL(req.url ?? '', 'http://localhost')
+    if (pathname !== '/api/code-deck/agent-ws') return
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  })
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '', 'http://localhost')
     const sessionId = url.searchParams.get('sessionId') ?? ''
