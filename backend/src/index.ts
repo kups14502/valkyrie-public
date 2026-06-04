@@ -20,6 +20,16 @@ import codeDeckRoute, { attachCodeDeckWs } from './routes/codeDeck.js'
 import { attachCodeDeckAgentWs } from './routes/codeDeckAgent.js'
 import { startAlerts } from './alerts.js'
 
+// Keep the process alive on stray errors. A single unhandled rejection or
+// exception (e.g. a transient DB error inside an agent run) would otherwise
+// kill the whole backend and drop every live Code Deck session at once.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason)
+})
+
 const app = express()
 const server = createServer(app)
 const PORT = Number(process.env.PORT) || 3001

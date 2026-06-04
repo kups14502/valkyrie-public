@@ -100,6 +100,11 @@ export type SessionRow = {
 export function db() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
   const d = new Database(DB_PATH)
+  // WAL + a busy timeout so concurrent writers (heavy agent runs writing many
+  // tool_use/tool_result rows) wait briefly instead of throwing SQLITE_BUSY,
+  // which used to surface as a run dying mid-edit.
+  d.pragma('journal_mode = WAL')
+  d.pragma('busy_timeout = 5000')
   d.exec(`
     CREATE TABLE IF NOT EXISTS code_deck_sessions (
       id TEXT PRIMARY KEY,

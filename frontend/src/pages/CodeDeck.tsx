@@ -113,7 +113,7 @@ export default function CodeDeck() {
   const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
   const [chatInput, setChatInput] = useState('')
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
-  const [attached, setAttached] = useState<{ id: string; name: string; isImage: boolean; url?: string }[]>([])
+  const [attached, setAttached] = useState<{ id: string; name: string; path: string; isImage: boolean; url?: string }[]>([])
   // toggledKeys flips an item's default collapsed state.
   // Default: user, tool_use, system, and resolved permissions are collapsed.
   //          assistant and pending permissions are expanded.
@@ -235,7 +235,7 @@ export default function CodeDeck() {
       group = []
     }
     for (const it of agent.items) {
-      if (it.kind === 'user' || it.kind === 'assistant') { flush(); result.push({ kind: 'message', item: it }) }
+      if (it.kind === 'user' || it.kind === 'assistant' || it.kind === 'error') { flush(); result.push({ kind: 'message', item: it }) }
       else group.push(it)
     }
     flush()
@@ -375,7 +375,7 @@ export default function CodeDeck() {
     const now = Date.now()
     if (lastSendRef.current?.text === text && now - lastSendRef.current.at < 1500) return
     lastSendRef.current = { text, at: now }
-    agent.send(text)
+    agent.send(text, attached.map((a) => a.path))
     setChatInput('')
     clearAttached()
   }
@@ -397,9 +397,9 @@ export default function CodeDeck() {
     setUploadingFiles(list.map((f) => f.name))
     try {
       for (const file of list) {
-        await uploadAttachment.mutateAsync({ sessionId: selected.id, file })
+        const { attachment } = await uploadAttachment.mutateAsync({ sessionId: selected.id, file })
         const isImage = file.type.startsWith('image/')
-        setAttached((prev) => [...prev, { id: `${file.name}-${file.size}-${prev.length}`, name: file.name, isImage, url: isImage ? URL.createObjectURL(file) : undefined }])
+        setAttached((prev) => [...prev, { id: `${file.name}-${file.size}-${prev.length}`, name: file.name, path: attachment.path, isImage, url: isImage ? URL.createObjectURL(file) : undefined }])
       }
     } finally {
       setUploadingFiles([])

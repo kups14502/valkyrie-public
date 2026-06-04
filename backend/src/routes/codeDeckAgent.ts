@@ -44,9 +44,23 @@ class AgentRunner {
   private disposeTimer: NodeJS.Timeout | null = null
   private lastSubmit: { text: string; at: number } | null = null
   private runSeq = 0
+  private stderrBuf = ''
+  private sawResult = false
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
+  }
+
+  private log(...args: unknown[]) {
+    console.log(`[codeDeck ${this.sessionId.slice(0, 8)}]`, ...args)
+  }
+
+  // Persist + broadcast an error so it shows as a permanent chat item (not a
+  // transient banner) — the user asked for honest "something went wrong" chats.
+  private pushError(message: string) {
+    let saved
+    try { saved = saveMessage(this.sessionId, 'system', `⚠️ ${message}`, { kind: 'error' }) } catch { /* best effort */ }
+    this.broadcast({ t: 'error', id: saved?.id, message })
   }
 
   // ---- socket management -------------------------------------------------
@@ -82,7 +96,7 @@ class AgentRunner {
     }
   }
 
-  submitUser(text: string) {
+  submitUser(text: string, attachments: string[] = []) {
     const trimmed = text.trim()
     if (!trimmed) return
     const nowMs = Date.now()
@@ -90,7 +104,13 @@ class AgentRunner {
     this.lastSubmit = { text: trimmed, at: nowMs }
     const saved = saveMessage(this.sessionId, 'user', trimmed)
     this.broadcast({ t: 'user', id: saved.id, text: trimmed, at: saved.createdAt })
-    this.inputQueue.push({ type: 'user', message: { role: 'user', content: trimmed }, parent_tool_use_id: null })
+    // Append uploaded attachment paths so the SDK agent can read them — the
+    // displayed/saved user text stays clean; only the model prompt carries them.
+    const paths = attachments.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim())
+    const content = paths.length
+      ? `${trimmed}\n\nAttached files (read them from these paths):\n${paths.map((p) => `- ${p}`).join('\n')}`
+      : trimmed
+    this.inputQueue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null })
     this.inputResolve?.()
     this.inputResolve = null
     this.start()
@@ -104,6 +124,8 @@ class AgentRunner {
     const profile = profileFor(row.profileId)
     if (profile.provider !== 'claude') { this.broadcast({ t: 'error', message: 'live chat supports Claude profiles only — use terminal mode for codex' }); return }
     this.started = true
+    this.sawResult = false
+    this.stderrBuf = ''
     this.agentSessionId = row.agentSessionId || ''
     this.usedResume = Boolean(this.agentSessionId)
     setSessionStatus(this.sessionId, 'running')
@@ -111,6 +133,7 @@ class AgentRunner {
     for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v
     Object.assign(env, profile.env)
     const runSeq = ++this.runSeq
+    this.log('start run', runSeq, 'model', row.model, this.usedResume ? '(resume)' : '(fresh)')
     this.q = query({
       prompt: this.inputStream(),
       options: {
@@ -120,7 +143,12 @@ class AgentRunner {
         includePartialMessages: true,
         env,
         ...(this.agentSessionId ? { resume: this.agentSessionId } : {}),
-        stderr: () => { /* swallow CLI noise */ },
+        stderr: (data: string) => {
+          // Keep a rolling tail so we can show the real reason a run died.
+          this.stderrBuf = (this.stderrBuf + data).slice(-4000)
+          const trimmed = data.trim()
+          if (trimmed) this.log('cli stderr:', trimmed.slice(0, 400))
+        },
       },
     })
     void this.consume(runSeq)
@@ -136,22 +164,36 @@ class AgentRunner {
     try {
       for await (const msg of this.q!) {
         if (runSeq !== this.runSeq) return
-        this.handleMessage(msg)
+        // A single bad message (e.g. a transient DB write) must not end the run.
+        try { this.handleMessage(msg) } catch (e) { this.log('handleMessage error', (e as Error)?.message) }
       }
     } catch (err) {
       if (runSeq !== this.runSeq) return
       const m = (err as Error)?.message || String(err)
       // A stale resume id (pruned session file) fails the whole query — retry fresh once.
       if (this.usedResume && /resume|session|not found|no conversation|enoent/i.test(m)) {
+        this.log('resume failed, retrying fresh:', m)
         this.usedResume = false
         this.agentSessionId = ''
         setAgentSessionId(this.sessionId, '')
         this.restart()
         return
       }
-      this.broadcast({ t: 'error', message: m })
+      this.log('run error', m)
+      const tail = this.stderrBuf.trim().split('\n').slice(-3).join(' ').slice(-300)
+      this.pushError(`Run error: ${m}${tail ? ` — ${tail}` : ''}`)
     }
     if (runSeq === this.runSeq) {
+      // If the iterator ended while we were mid-turn (no result seen), the CLI
+      // subprocess exited early — tell the user the honest truth instead of
+      // silently going idle.
+      if (this.busy && !this.sawResult) {
+        const tail = this.stderrBuf.trim().split('\n').slice(-3).join(' ').slice(-300)
+        this.log('run ended before completion')
+        this.pushError(`Agent stopped before finishing${tail ? ` — ${tail}` : ' (process exited). Send another message to continue.'}`)
+      } else {
+        this.log('run complete', runSeq)
+      }
       this.busy = false
       this.started = false
       this.q = null
@@ -174,8 +216,10 @@ class AgentRunner {
       }
       case 'stream_event': {
         const ev = (msg as { event: StreamEvent }).event
+        // Stay busy for the whole turn. message_stop fires between every tool
+        // step, so toggling busy off here made the status flash; busy only
+        // clears on `result`, interrupt, or the run loop ending.
         if (ev.type === 'message_start') { this.busy = true; this.broadcast({ t: 'busy', value: true }) }
-        else if (ev.type === 'message_stop' && this.pending.size === 0) { this.busy = false; this.broadcast({ t: 'busy', value: false }) }
         else if (ev.type === 'content_block_delta' && ev.delta) {
           if (ev.delta.type === 'text_delta' && ev.delta.text) this.broadcast({ t: 'delta', text: ev.delta.text })
           else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) this.broadcast({ t: 'thinking', text: ev.delta.thinking })
@@ -213,8 +257,14 @@ class AgentRunner {
         break
       }
       case 'result': {
+        this.sawResult = true
         this.busy = false
-        const r = msg as { subtype?: string; total_cost_usd?: number; duration_ms?: number }
+        const r = msg as { subtype?: string; total_cost_usd?: number; duration_ms?: number; is_error?: boolean }
+        // The SDK reports turn-level failures (max turns, model error, etc.) via
+        // result.subtype — surface those as honest error chats too.
+        if (r.is_error || (r.subtype && r.subtype !== 'success')) {
+          this.pushError(`Run ended: ${r.subtype ?? 'error'}`)
+        }
         this.broadcast({ t: 'result', subtype: r.subtype, costUsd: r.total_cost_usd, durationMs: r.duration_ms })
         this.broadcast({ t: 'busy', value: false })
         break
@@ -311,10 +361,10 @@ export function attachCodeDeckAgentWs(server: Server) {
     runner.attach(ws)
     runner.start()
     ws.on('message', (raw) => {
-      let msg: { t?: string; text?: string; requestId?: string; decision?: 'allow' | 'deny'; always?: boolean }
+      let msg: { t?: string; text?: string; attachments?: unknown; requestId?: string; decision?: 'allow' | 'deny'; always?: boolean }
       try { msg = JSON.parse(String(raw)) } catch { return }
       if (msg.t === 'ping') { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' })) }
-      else if (msg.t === 'user' && typeof msg.text === 'string') runner.submitUser(msg.text)
+      else if (msg.t === 'user' && typeof msg.text === 'string') runner.submitUser(msg.text, Array.isArray(msg.attachments) ? msg.attachments.filter((p): p is string => typeof p === 'string') : [])
       else if (msg.t === 'permission' && msg.requestId && (msg.decision === 'allow' || msg.decision === 'deny')) runner.resolvePermission(msg.requestId, msg.decision, Boolean(msg.always))
       else if (msg.t === 'interrupt') void runner.interrupt()
     })

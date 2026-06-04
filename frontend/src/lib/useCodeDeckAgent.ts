@@ -17,6 +17,7 @@ export type AgentItem =
   | { kind: 'tool_use'; key: string; toolUseId?: string; name: string; input: unknown; result?: string; isError?: boolean }
   | { kind: 'permission'; key: string; requestId: string; tool: string; input: unknown; reason?: string; canAlways?: boolean; status: 'pending' | 'allow' | 'deny' }
   | { kind: 'system'; key: string; text: string }
+  | { kind: 'error'; key: string; text: string }
 
 type ServerEvent = {
   t: string
@@ -64,7 +65,8 @@ function seedFromHistory(rows: CodeDeckMessage[]): AgentItem[] {
       const toolUseId = meta.toolUseId as string | undefined
       const result = toolUseId ? toolResults.get(toolUseId) : undefined
       items.push({ kind: 'tool_use', key: r.id, toolUseId, name: (meta.name as string) ?? 'tool', input: meta.input, result: result?.summary, isError: result?.isError })
-    } else if (meta.kind !== 'tool_result') items.push({ kind: 'system', key: r.id, text: r.content })
+    } else if (meta.kind === 'error') items.push({ kind: 'error', key: r.id, text: r.content })
+    else if (meta.kind !== 'tool_result') items.push({ kind: 'system', key: r.id, text: r.content })
   }
   return items
 }
@@ -78,7 +80,7 @@ export type CodeDeckAgent = {
   lastCostUsd?: number
   lastEventAt?: number
   error?: string
-  send: (text: string) => void
+  send: (text: string, attachments?: string[]) => void
   resolvePermission: (requestId: string, decision: 'allow' | 'deny', always?: boolean) => void
   interrupt: () => void
 }
@@ -203,6 +205,9 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
           case 'error':
             setError(m.message)
             setBusy(false)
+            setThinking(false)
+            // Persist as a chat item so the failure stays visible in the transcript.
+            if (m.message) setLive((prev) => (m.id && prev.some((i) => i.key === m.id)) ? prev : [...prev, { kind: 'error', key: m.id ?? crypto.randomUUID(), text: m.message ?? 'error' }])
             break
           default:
             break
@@ -221,10 +226,11 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     }
   }, [sessionId, enabled, flushStreaming])
 
-  const send = useCallback((text: string) => {
+  const send = useCallback((text: string, attachments: string[] = []) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN || !text.trim()) return
-    ws.send(JSON.stringify({ t: 'user', text: text.trim() }))
+    const paths = attachments.filter((p) => typeof p === 'string' && p.trim())
+    ws.send(JSON.stringify({ t: 'user', text: text.trim(), attachments: paths }))
   }, [])
 
   const resolvePermission = useCallback((requestId: string, decision: 'allow' | 'deny', always = false) => {
