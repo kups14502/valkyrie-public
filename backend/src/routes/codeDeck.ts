@@ -201,7 +201,7 @@ function runAgent(row: SessionRow, prompt: string): Promise<string> {
   const isClaude = profile.provider === 'claude'
   const cmd = profile.command
   const args = isClaude
-    ? ['-p', prompt, '--model', row.model, '--output-format', 'text', '--permission-mode', 'acceptEdits']
+    ? ['-p', prompt, '--model', row.model, '--output-format', 'text', '--permission-mode', 'bypassPermissions']
     : ['exec', '-m', row.model, '-C', row.cwd, '--skip-git-repo-check', '--sandbox', 'workspace-write', prompt]
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: row.cwd, env })
