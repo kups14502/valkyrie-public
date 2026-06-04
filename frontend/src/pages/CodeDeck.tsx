@@ -12,11 +12,6 @@ import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
 
-function prettyInput(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input === 'string') return input.slice(0, 2000)
-  try { return JSON.stringify(input, null, 2).slice(0, 2000) } catch { return String(input) }
-}
 
 const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
 const profileOrder = ['main-claude', 'botacct-claude', 'main-codex']
@@ -638,43 +633,10 @@ export default function CodeDeck() {
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : agent.items.map((it) => {
-                            // Only show user messages, assistant responses, and permissions.
-                            if (it.kind === 'tool_use' || it.kind === 'system') return null
+                            // Only show user prompts and assistant responses.
+                            if (it.kind !== 'user' && it.kind !== 'assistant') return null
 
                             const collapsed = isCollapsed(it)
-
-                            if (it.kind === 'permission') {
-                              const pending = it.status === 'pending'
-                              const statusLabel = pending ? '' : ` · ${it.status === 'allow' ? 'approved' : 'denied'}`
-                              // Pending permissions are never collapsed — the user must be able to act.
-                              if (!pending && collapsed) return (
-                                <div key={it.key} className="rounded border border-[var(--color-warning)]/30 bg-[rgba(245,158,11,0.03)]">
-                                  <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                                    <ChevronRight size={12} className="shrink-0 text-[var(--color-warning)]/60" />
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]/70">permission · {it.tool}{statusLabel}</span>
-                                  </button>
-                                </div>
-                              )
-                              return (
-                                <div key={it.key} className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)]">
-                                  <div className="flex items-center gap-2 px-3 py-2">
-                                    {!pending && <button type="button" onClick={() => toggleCollapsed(it.key)} className="shrink-0"><ChevronDown size={12} className="text-[var(--color-warning)]/60" /></button>}
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]">permission · {it.tool}{statusLabel}</span>
-                                  </div>
-                                  <div className="border-t border-[var(--color-warning)]/20 px-3 pb-3 pt-2">
-                                    {it.reason && <div className="mb-2 text-xs text-[var(--color-text-dim)]">{it.reason}</div>}
-                                    <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-text-dim)]">{prettyInput(it.input)}</pre>
-                                    {pending && (
-                                      <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
-                                        <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow')} className="h-9 min-w-20 border border-[var(--color-accent)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]">approve</button>
-                                        {it.canAlways && <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'allow', true)} className="h-9 border border-[var(--color-accent)]/60 px-3 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]/80 hover:bg-[rgba(0,255,65,0.06)]">always allow</button>}
-                                        <button type="button" onClick={() => agent.resolvePermission(it.requestId, 'deny')} className="h-9 min-w-20 border border-[var(--color-danger)] px-3 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">deny</button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )
-                            }
 
                             if (it.kind === 'user') {
                               return (

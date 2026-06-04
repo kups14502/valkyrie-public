@@ -110,11 +110,10 @@ class AgentRunner {
       options: {
         cwd: row.cwd,
         model: row.model,
-        permissionMode: 'default',
+        permissionMode: 'bypassPermissions',
         includePartialMessages: true,
         env,
         ...(this.agentSessionId ? { resume: this.agentSessionId } : {}),
-        canUseTool: (name, input, opts) => this.handlePermission(name, input as Record<string, unknown>, opts),
         stderr: () => { /* swallow CLI noise */ },
       },
     })
