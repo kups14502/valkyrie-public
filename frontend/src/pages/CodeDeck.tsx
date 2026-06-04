@@ -79,6 +79,7 @@ export default function CodeDeck() {
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
   const [foldersCollapsed, setFoldersCollapsed] = useState(false)
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
   const [collapsedSessionFolders, setCollapsedSessionFolders] = useState<Set<string>>(new Set())
@@ -350,8 +351,44 @@ export default function CodeDeck() {
               <button type="button" onClick={() => { setShowNew(true); setSelectedId(null) }} className="inline-flex flex-1 items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Plus size={14} /> new</button>
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
             </div>
-            <Card title="Pinned">
-              {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
+            <Card>
+              <button type="button" onClick={() => setPinnedCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={pinnedCollapsed ? 'Expand pinned section' : 'Collapse pinned section'}>
+                <span className="truncate">&gt; Pinned <span className="text-[var(--color-text-faint)]">({pinned.length})</span></span>
+                {pinnedCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+              </button>
+              {pinnedCollapsed ? (
+                <div className="text-sm text-[var(--color-text-dim)]">{pinned.length} pinned hidden.</div>
+              ) : pinned.length === 0 ? (
+                <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
+              ) : (
+                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>
+              )}
+            </Card>
+            <Card>
+              <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
+                <span className="truncate">&gt; Sessions <span className="text-[var(--color-text-faint)]">({sessions.length})</span></span>
+                {sessionsCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+              </button>
+              {sessionsCollapsed ? (
+                <div className="text-sm text-[var(--color-text-dim)]">{sessions.length} sessions hidden.</div>
+              ) : grouped.length === 0 ? (
+                <div className="text-sm text-[var(--color-text-dim)]">No sessions yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {grouped.map(([name, items]) => {
+                    const collapsed = collapsedSessionFolders.has(name)
+                    return (
+                      <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
+                        <button type="button" onClick={() => toggleSessionFolder(name)} className="mb-2 flex w-full items-center justify-between gap-2 text-left text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label={collapsed ? `Expand ${name} sessions` : `Collapse ${name} sessions`}>
+                          <span className="truncate">{name} <span className="text-[var(--color-text-faint)]">({items.length})</span></span>
+                          {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+                        </button>
+                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </Card>
             <Card>
               <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
@@ -419,32 +456,6 @@ export default function CodeDeck() {
                   )
                 })}
               </div>}
-            </Card>
-            <Card>
-              <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
-                <span className="truncate">&gt; Sessions <span className="text-[var(--color-text-faint)]">({sessions.length})</span></span>
-                {sessionsCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
-              </button>
-              {sessionsCollapsed ? (
-                <div className="text-sm text-[var(--color-text-dim)]">{sessions.length} sessions hidden.</div>
-              ) : grouped.length === 0 ? (
-                <div className="text-sm text-[var(--color-text-dim)]">No sessions yet.</div>
-              ) : (
-                <div className="space-y-4">
-                  {grouped.map(([name, items]) => {
-                    const collapsed = collapsedSessionFolders.has(name)
-                    return (
-                      <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
-                        <button type="button" onClick={() => toggleSessionFolder(name)} className="mb-2 flex w-full items-center justify-between gap-2 text-left text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label={collapsed ? `Expand ${name} sessions` : `Collapse ${name} sessions`}>
-                          <span className="truncate">{name} <span className="text-[var(--color-text-faint)]">({items.length})</span></span>
-                          {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
-                        </button>
-                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
             </Card>
       </aside>
       )}
