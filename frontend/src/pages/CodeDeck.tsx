@@ -135,6 +135,7 @@ export default function CodeDeck() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const linkBufRef = useRef('')
+  const lastSendRef = useRef<{ text: string; at: number } | null>(null)
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); setShowNew(false); void refresh() } })
@@ -237,8 +238,12 @@ export default function CodeDeck() {
       else group.push(it)
     }
     flush()
-    return result
-  }, [agent.items])
+    return result.map((item, idx) => {
+      if (item.kind !== 'activity') return item
+      const isLatest = idx === result.length - 1
+      return { ...item, done: item.done || !agent.busy || !isLatest }
+    })
+  }, [agent.items, agent.busy])
 
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
@@ -354,7 +359,11 @@ export default function CodeDeck() {
 
   const sendChat = () => {
     if (!selected || !chatInput.trim() || !agent.connected) return
-    agent.send(chatInput.trim())
+    const text = chatInput.trim()
+    const now = Date.now()
+    if (lastSendRef.current?.text === text && now - lastSendRef.current.at < 1500) return
+    lastSendRef.current = { text, at: now }
+    agent.send(text)
     setChatInput('')
     clearAttached()
   }

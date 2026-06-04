@@ -42,6 +42,7 @@ class AgentRunner {
   private readonly sockets = new Set<WebSocket>()
   private readonly pending = new Map<string, { resolve: (r: PermissionResult) => void; input: Record<string, unknown>; suggestions: PermissionUpdate[] }>()
   private disposeTimer: NodeJS.Timeout | null = null
+  private lastSubmit: { text: string; at: number } | null = null
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -83,6 +84,9 @@ class AgentRunner {
   submitUser(text: string) {
     const trimmed = text.trim()
     if (!trimmed) return
+    const nowMs = Date.now()
+    if (this.lastSubmit && this.lastSubmit.text === trimmed && nowMs - this.lastSubmit.at < 1500) return
+    this.lastSubmit = { text: trimmed, at: nowMs }
     const saved = saveMessage(this.sessionId, 'user', trimmed)
     this.broadcast({ t: 'user', id: saved.id, text: trimmed, at: saved.createdAt })
     this.inputQueue.push({ type: 'user', message: { role: 'user', content: trimmed }, parent_tool_use_id: null })
@@ -142,6 +146,8 @@ class AgentRunner {
       this.broadcast({ t: 'error', message: m })
     }
     this.busy = false
+    this.started = false
+    this.q = null
     this.broadcast({ t: 'busy', value: false })
   }
 
@@ -187,7 +193,9 @@ class AgentRunner {
         if (Array.isArray(content)) {
           for (const b of content as Block[]) {
             if (b.type === 'tool_result') {
-              this.broadcast({ t: 'tool_result', toolUseId: b.tool_use_id, isError: Boolean(b.is_error), summary: summarizeToolResult(b) })
+              const summary = summarizeToolResult(b)
+              saveMessage(this.sessionId, 'system', `↳ tool result: ${b.tool_use_id ?? ''}`, { kind: 'tool_result', toolUseId: b.tool_use_id, isError: Boolean(b.is_error), summary })
+              this.broadcast({ t: 'tool_result', toolUseId: b.tool_use_id, isError: Boolean(b.is_error), summary })
             }
           }
         }

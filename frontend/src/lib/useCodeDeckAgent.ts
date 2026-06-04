@@ -48,13 +48,23 @@ function wsBase() {
 
 function seedFromHistory(rows: CodeDeckMessage[]): AgentItem[] {
   const items: AgentItem[] = []
+  const toolResults = new Map<string, { summary?: string; isError?: boolean }>()
+  for (const r of rows) {
+    try {
+      const meta = r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : {}
+      if (meta.kind === 'tool_result' && meta.toolUseId) toolResults.set(String(meta.toolUseId), { summary: meta.summary as string | undefined, isError: Boolean(meta.isError) })
+    } catch { /* ignore */ }
+  }
   for (const r of rows) {
     let meta: Record<string, unknown> = {}
     try { meta = r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : {} } catch { /* ignore */ }
     if (r.role === 'user') items.push({ kind: 'user', key: r.id, text: r.content })
     else if (r.role === 'assistant') items.push({ kind: 'assistant', key: r.id, text: r.content })
-    else if (meta.kind === 'tool_use') items.push({ kind: 'tool_use', key: r.id, toolUseId: meta.toolUseId as string, name: (meta.name as string) ?? 'tool', input: meta.input })
-    else items.push({ kind: 'system', key: r.id, text: r.content })
+    else if (meta.kind === 'tool_use') {
+      const toolUseId = meta.toolUseId as string | undefined
+      const result = toolUseId ? toolResults.get(toolUseId) : undefined
+      items.push({ kind: 'tool_use', key: r.id, toolUseId, name: (meta.name as string) ?? 'tool', input: meta.input, result: result?.summary, isError: result?.isError })
+    } else if (meta.kind !== 'tool_result') items.push({ kind: 'system', key: r.id, text: r.content })
   }
   return items
 }
