@@ -126,6 +126,7 @@ export default function CodeDeck() {
   const fitRef = useRef<FitAddon | null>(null)
   const termDivRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const linkBufRef = useRef('')
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
@@ -329,12 +330,18 @@ export default function CodeDeck() {
     setChatInput('')
   }
 
-  const sendApproval = (content: 'approved' | 'cancel') => {
-    if (!selected || chat.isPending) return
-    chat.mutate({ sessionId: selected.id, content })
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(e.clipboardData.items)
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null)
+    if (images.length > 0) {
+      e.preventDefault()
+      void uploadFiles(images)
+    }
   }
 
-  const uploadFiles = async (files: FileList | null) => {
+  const uploadFiles = async (files: FileList | File[] | null) => {
     if (!selected || !files?.length) return
     const list = Array.from(files)
     setUploadingFiles(list.map((f) => f.name))
@@ -347,10 +354,12 @@ export default function CodeDeck() {
   }
 
   const messageTone = (role: CodeDeckMessage['role']) => role === 'user' ? 'border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.05)]' : role === 'assistant' ? 'border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]' : 'border-[var(--color-warning)]/40 bg-[rgba(245,158,11,0.05)]'
-  const isApprovalPrompt = (m: CodeDeckMessage) => m.role !== 'user' && /\b(approval|approve|permission|prompted|proceed)\b/i.test(m.content) && /\b(approve|approval|permission|prompted)\b/i.test(m.content)
   const messageList = messages.data ?? []
-  const latestActionableMessage = [...messageList].reverse().find((m) => m.role === 'user' || isApprovalPrompt(m))
-  const latestApprovalMessageId = latestActionableMessage && isApprovalPrompt(latestActionableMessage) ? latestActionableMessage.id : null
+
+  useEffect(() => {
+    const el = chatScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messageList.length, chat.isPending])
 
   const newSessionForm = (
     <Card title="New session">
@@ -576,26 +585,20 @@ export default function CodeDeck() {
 
                     {mode === 'chat' ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-4">
-                        <div className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                        <div ref={chatScrollRef} className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : messageList.length === 0 ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : messageList.map((m) => (
                             <div key={m.id} className={`rounded border p-3 ${messageTone(m.role)}`}>
                               <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">{m.role} · {new Date(m.createdAt).toLocaleString()}</div>
                               <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{m.content}</div>
-                              {m.id === latestApprovalMessageId && (
-                                <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
-                                  <button type="button" onClick={() => sendApproval('approved')} disabled={chat.isPending} className="h-10 min-w-24 border border-[var(--color-accent)] px-4 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">approve</button>
-                                  <button type="button" onClick={() => sendApproval('cancel')} disabled={chat.isPending} className="h-10 min-w-24 border border-[var(--color-danger)] px-4 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)] disabled:opacity-50">cancel</button>
-                                </div>
-                              )}
                             </div>
                           ))}
                           {chat.isPending && <div className="text-sm text-[var(--color-accent)]">Thinking/running…</div>}
                           {chat.error && <div className="text-sm text-[var(--color-danger)]">{(chat.error as Error).message}</div>}
                         </div>
                         <div className="shrink-0 space-y-2">
-                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
+                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
                           {uploadingFiles.length > 0 && <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">Uploading: {uploadingFiles.join(', ')}</div>}
                           {uploadAttachment.error && <div className="text-xs text-[var(--color-danger)]">{(uploadAttachment.error as Error).message}</div>}
                           <div className="flex flex-wrap items-center justify-between gap-2">
