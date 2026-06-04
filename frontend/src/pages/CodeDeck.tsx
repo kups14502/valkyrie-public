@@ -129,6 +129,7 @@ export default function CodeDeck() {
   const [showNew, setShowNew] = useState(false)
   const [metaCollapsed, setMetaCollapsed] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -370,11 +371,12 @@ export default function CodeDeck() {
   }
 
   const sendChat = () => {
-    if (!selected || !chatInput.trim() || !agent.connected) return
+    if (!selected || !agent.connected || (!chatInput.trim() && attached.length === 0)) return
     const text = chatInput.trim()
     const now = Date.now()
-    if (lastSendRef.current?.text === text && now - lastSendRef.current.at < 1500) return
-    lastSendRef.current = { text, at: now }
+    const dedupeKey = `${text}|${attached.map((a) => a.path).join(',')}`
+    if (lastSendRef.current?.text === dedupeKey && now - lastSendRef.current.at < 1500) return
+    lastSendRef.current = { text: dedupeKey, at: now }
     agent.send(text, attached.map((a) => a.path))
     setChatInput('')
     clearAttached()
@@ -501,7 +503,7 @@ export default function CodeDeck() {
               ) : pinned.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
               ) : (
-                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>
+                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} />)}</div>
               )}
             </Card>
             <Card>
@@ -523,7 +525,7 @@ export default function CodeDeck() {
                           <span className="truncate">{name} <span className="text-[var(--color-text-faint)]">({items.length})</span></span>
                           {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
                         </button>
-                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
+                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} />)}</div>}
                       </div>
                     )
                   })}
@@ -723,6 +725,10 @@ export default function CodeDeck() {
                               </div>
                             )
 
+                            if (it.kind === 'error') return (
+                              <div key={it.key} className="rounded border border-[var(--color-danger)]/60 bg-[rgba(239,68,68,0.08)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)] whitespace-pre-wrap break-words">⚠️ {it.text.replace(/^⚠️\s*/, '')}</div>
+                            )
+
                             return null
                           })}
                           {agent.streaming && (
@@ -731,8 +737,12 @@ export default function CodeDeck() {
                               <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--color-text)]">{agent.streaming}<span className="cursor-blink">_</span></div>
                             </div>
                           )}
-                          {agent.busy && !agent.streaming && <div className={`text-sm ${longQuiet ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`}><span className="cursor-blink">{activeStatus}…</span>{activeAgeLabel ? ` · ${activeAgeLabel}` : ''}{longQuiet ? ' · no new events; still waiting for the tool/agent result' : ''}</div>}
-                          {agent.error && <div className="text-sm text-[var(--color-danger)]">{agent.error}</div>}
+                          {agent.busy && !agent.streaming && (
+                            <div className={`flex items-center gap-2 text-sm ${longQuiet ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`}>
+                              <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+                              <span>{activeStatus}{activeAgeLabel ? ` · ${activeAgeLabel}` : ''}{longQuiet ? ' · no new events; still waiting on the tool/agent result' : ''}</span>
+                            </div>
+                          )}
                         </div>
                         <div className="shrink-0 space-y-2">
                           <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
@@ -765,7 +775,7 @@ export default function CodeDeck() {
                               {agent.busy && (
                                 <button type="button" onClick={() => agent.interrupt()} className="border border-[var(--color-danger)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.08)]">stop</button>
                               )}
-                              <button type="button" onClick={sendChat} disabled={!chatInput.trim() || !agent.connected} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
+                              <button type="button" onClick={sendChat} disabled={(!chatInput.trim() && attached.length === 0) || !agent.connected} className="border border-[var(--color-accent)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50">send</button>
                             </div>
                           </div>
                         </div>
@@ -808,6 +818,20 @@ export default function CodeDeck() {
               </div>
               )}
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setConfirmDelete(null)}>
+          <div className="w-full max-w-sm border border-[var(--color-danger)]/60 bg-black p-5 shadow-[0_0_40px_rgba(239,68,68,0.25)]" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-danger)]">delete session</div>
+            <div className="mb-1 break-words text-sm text-[var(--color-text)]">Delete “{confirmDelete.title}”?</div>
+            <div className="mb-4 text-xs text-[var(--color-text-dim)]">This removes the session and its chat history. This can’t be undone.</div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirmDelete(null)} className="border border-[var(--color-border)] px-4 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">cancel</button>
+              <button type="button" onClick={() => { del.mutate(confirmDelete.id); setConfirmDelete(null) }} className="border border-[var(--color-danger)] px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-danger)] hover:bg-[rgba(239,68,68,0.1)]">delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

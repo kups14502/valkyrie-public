@@ -228,8 +228,8 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
 
   const send = useCallback((text: string, attachments: string[] = []) => {
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN || !text.trim()) return
     const paths = attachments.filter((p) => typeof p === 'string' && p.trim())
+    if (!ws || ws.readyState !== WebSocket.OPEN || (!text.trim() && paths.length === 0)) return
     ws.send(JSON.stringify({ t: 'user', text: text.trim(), attachments: paths }))
   }, [])
 

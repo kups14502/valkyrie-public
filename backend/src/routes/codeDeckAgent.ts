@@ -98,18 +98,18 @@ class AgentRunner {
 
   submitUser(text: string, attachments: string[] = []) {
     const trimmed = text.trim()
-    if (!trimmed) return
-    const nowMs = Date.now()
-    if (this.lastSubmit && this.lastSubmit.text === trimmed && nowMs - this.lastSubmit.at < 1500) return
-    this.lastSubmit = { text: trimmed, at: nowMs }
-    const saved = saveMessage(this.sessionId, 'user', trimmed)
-    this.broadcast({ t: 'user', id: saved.id, text: trimmed, at: saved.createdAt })
-    // Append uploaded attachment paths so the SDK agent can read them — the
-    // displayed/saved user text stays clean; only the model prompt carries them.
     const paths = attachments.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim())
+    if (!trimmed && paths.length === 0) return
+    // Attachment paths are part of the message: visible in the chat AND read by
+    // the agent. One source of truth so the user can see what was sent.
     const content = paths.length
-      ? `${trimmed}\n\nAttached files (read them from these paths):\n${paths.map((p) => `- ${p}`).join('\n')}`
+      ? `${trimmed}${trimmed ? '\n\n' : ''}📎 Attached files (read them from these paths):\n${paths.map((p) => `- ${p}`).join('\n')}`
       : trimmed
+    const nowMs = Date.now()
+    if (this.lastSubmit && this.lastSubmit.text === content && nowMs - this.lastSubmit.at < 1500) return
+    this.lastSubmit = { text: content, at: nowMs }
+    const saved = saveMessage(this.sessionId, 'user', content)
+    this.broadcast({ t: 'user', id: saved.id, text: content, at: saved.createdAt })
     this.inputQueue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null })
     this.inputResolve?.()
     this.inputResolve = null
