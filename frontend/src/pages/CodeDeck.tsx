@@ -20,6 +20,33 @@ const orderedProfiles = (profiles: { id: string; label: string }[] = []) =>
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.label.localeCompare(b.label)
   })
 
+type UsageBarData = { label: string; pct: number; sub?: string; warn?: boolean }
+
+function usageBarsForProfile(data: AIUsage | undefined, profile: { id: string; provider: string; label: string } | undefined): UsageBarData[] {
+  if (!data || !profile) return []
+  const wantEmail = profile.id === 'botacct-claude'
+    ? 'bot@example.com'
+    : profile.id === 'main-claude' || profile.id === 'main-codex'
+    ? 'user@example.com'
+    : emailOf(profile.label)
+  const clients = data.aiClients ?? []
+  if (profile.provider === 'claude') {
+    const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && (!wantEmail || emailOf(c.label) === wantEmail))
+    const quota = match?.quota ?? (wantEmail && emailOf('user@example.com') === wantEmail ? data.claude.quota : null)
+    if (!quota) return []
+    return [
+      { label: 'Session (5h)', pct: quota.sessionPct, sub: quota.sessionResetsAt ? `Resets in ${Math.max(0, Math.round((new Date(quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min` : quota.status?.replace(/_/g, ' ') ?? undefined },
+      { label: 'Weekly', pct: quota.weeklyPct, sub: quota.weeklyResetsAt ? `Resets ${new Date(quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : undefined },
+    ]
+  }
+  const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'codex' }> => c.kind === 'codex')
+  const rl = match?.rateLimits ?? data.codex.rateLimits
+  const bars: UsageBarData[] = []
+  if (rl.session5h) bars.push({ label: 'Session (5h)', pct: rl.session5h.pct, sub: `Resets in ${Math.max(0, Math.round((rl.session5h.resetsAt - Date.now() / 1000) / 60))} min` })
+  if (rl.weekly) bars.push({ label: 'Weekly', pct: rl.weekly.pct })
+  return bars
+}
+
 function UsageBar({ pct, label, sub, warn }: { pct: number; label: string; sub?: string; warn?: boolean }) {
   const clamped = Math.max(0, Math.min(100, pct))
   const tone = warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)'
@@ -179,33 +206,9 @@ export default function CodeDeck() {
     update.mutate({ id: selected.id, body: { model: newModel } })
   }
 
-  // Match the selected session's account/provider to a usage client from the dashboard feed.
-  const usageBars = useMemo(() => {
-    const data = aiUsage.data as AIUsage | undefined
-    if (!data || !selectedProfile) return [] as { label: string; pct: number; sub?: string; warn?: boolean }[]
-    const provider = selectedProfile.provider
-    const wantEmail = selectedProfile.id === 'botacct-claude'
-      ? 'bot@example.com'
-      : selectedProfile.id === 'main-claude' || selectedProfile.id === 'main-codex'
-      ? 'user@example.com'
-      : emailOf(selectedProfile.label)
-    const clients = data.aiClients ?? []
-    if (provider === 'claude') {
-      const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && (!wantEmail || emailOf(c.label) === wantEmail))
-      const quota = match?.quota ?? (wantEmail && emailOf('user@example.com') === wantEmail ? data.claude.quota : null)
-      if (!quota) return []
-      const bars: { label: string; pct: number; sub?: string; warn?: boolean }[] = []
-      bars.push({ label: 'Session (5h)', pct: quota.sessionPct, sub: quota.sessionResetsAt ? `Resets in ${Math.max(0, Math.round((new Date(quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min` : quota.status?.replace(/_/g, ' ') ?? undefined })
-      bars.push({ label: 'Weekly', pct: quota.weeklyPct, sub: quota.weeklyResetsAt ? `Resets ${new Date(quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : undefined })
-      return bars
-    }
-    const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'codex' }> => c.kind === 'codex')
-    const rl = match?.rateLimits ?? data.codex.rateLimits
-    const bars: { label: string; pct: number; sub?: string; warn?: boolean }[] = []
-    if (rl.session5h) bars.push({ label: 'Session (5h)', pct: rl.session5h.pct, sub: `Resets in ${Math.max(0, Math.round((rl.session5h.resetsAt - Date.now() / 1000) / 60))} min` })
-    if (rl.weekly) bars.push({ label: 'Weekly', pct: rl.weekly.pct })
-    return bars
-  }, [aiUsage.data, selectedProfile])
+  // Match accounts/providers to usage clients from the dashboard feed.
+  const usageBars = useMemo(() => usageBarsForProfile(aiUsage.data as AIUsage | undefined, selectedProfile), [aiUsage.data, selectedProfile])
+  const newSessionUsageBars = useMemo(() => usageBarsForProfile(aiUsage.data as AIUsage | undefined, profile), [aiUsage.data, profile])
   const sessionUsage = usageBars.find((b) => b.label.toLowerCase().includes('session')) ?? usageBars[0]
 
   useEffect(() => {
@@ -364,6 +367,16 @@ export default function CodeDeck() {
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
           <Dropdown value={availableModels.includes(model) ? model : availableModels[0]} onChange={setModel} options={availableModels.map((m) => ({ value: m, label: m }))} />
         </label>
+      </div>
+      <div className="mt-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4">
+        <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">usage for {profile?.label ?? 'selected account'}</div>
+        {aiUsage.isLoading ? (
+          <div className="text-sm text-[var(--color-text-dim)]">Loading usage…</div>
+        ) : newSessionUsageBars.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2">{newSessionUsageBars.map((b) => <UsageBar key={b.label} pct={b.pct} label={b.label} sub={b.sub} warn={b.warn} />)}</div>
+        ) : (
+          <div className="text-sm text-[var(--color-text-dim)]">No usage data for this account yet.</div>
+        )}
       </div>
     </Card>
   )
