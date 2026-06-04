@@ -118,6 +118,7 @@ export default function CodeDeck() {
   const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
   const [chatInput, setChatInput] = useState('')
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
+  const [attached, setAttached] = useState<{ id: string; name: string; isImage: boolean; url?: string }[]>([])
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -334,6 +335,7 @@ export default function CodeDeck() {
     if (!selected || !chatInput.trim() || !agent.connected || agent.busy) return
     agent.send(chatInput.trim())
     setChatInput('')
+    clearAttached()
   }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -352,17 +354,44 @@ export default function CodeDeck() {
     const list = Array.from(files)
     setUploadingFiles(list.map((f) => f.name))
     try {
-      for (const file of list) await uploadAttachment.mutateAsync({ sessionId: selected.id, file })
+      for (const file of list) {
+        await uploadAttachment.mutateAsync({ sessionId: selected.id, file })
+        const isImage = file.type.startsWith('image/')
+        setAttached((prev) => [...prev, { id: `${file.name}-${file.size}-${prev.length}`, name: file.name, isImage, url: isImage ? URL.createObjectURL(file) : undefined }])
+      }
     } finally {
       setUploadingFiles([])
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
+  const removeAttached = (id: string) => {
+    setAttached((prev) => {
+      const hit = prev.find((a) => a.id === id)
+      if (hit?.url) URL.revokeObjectURL(hit.url)
+      return prev.filter((a) => a.id !== id)
+    })
+  }
+
+  const clearAttached = () => {
+    setAttached((prev) => {
+      for (const a of prev) if (a.url) URL.revokeObjectURL(a.url)
+      return []
+    })
+  }
+
   useEffect(() => {
     const el = chatScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [agent.items.length, agent.streaming, agent.busy])
+
+  // Clear the attachment tray (and free object URLs) when switching sessions.
+  useEffect(() => {
+    setAttached((prev) => {
+      for (const a of prev) if (a.url) URL.revokeObjectURL(a.url)
+      return []
+    })
+  }, [selected?.id])
 
   const newSessionForm = (
     <Card title="New session">
@@ -638,6 +667,20 @@ export default function CodeDeck() {
                         </div>
                         <div className="shrink-0 space-y-2">
                           <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
+                          {attached.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-success)]">{attached.length} attached</span>
+                              {attached.map((a) => (
+                                <div key={a.id} className="flex items-center gap-2 border border-[var(--color-success)]/40 bg-[rgba(0,255,65,0.05)] py-1 pl-1 pr-2">
+                                  {a.isImage && a.url
+                                    ? <img src={a.url} alt={a.name} className="h-8 w-8 rounded object-cover" />
+                                    : <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-dim)]"><Paperclip size={14} /></span>}
+                                  <span className="max-w-[10rem] truncate text-[11px] text-[var(--color-text-dim)]">{a.name}</span>
+                                  <button type="button" onClick={() => removeAttached(a.id)} className="text-[var(--color-text-faint)] hover:text-[var(--color-danger)]" aria-label={`remove ${a.name}`}><X size={12} /></button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {uploadingFiles.length > 0 && <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">Uploading: {uploadingFiles.join(', ')}</div>}
                           {uploadAttachment.error && <div className="text-xs text-[var(--color-danger)]">{(uploadAttachment.error as Error).message}</div>}
                           <div className="flex flex-wrap items-center justify-between gap-2">
