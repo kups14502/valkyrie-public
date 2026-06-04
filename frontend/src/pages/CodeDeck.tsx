@@ -405,7 +405,7 @@ export default function CodeDeck() {
     for (const it of agent.items) {
       if (!prevMap.has(it.key)) {
         // Brand-new item — auto-collapse certain kinds.
-        if (it.kind === 'user' || it.kind === 'tool_use' || it.kind === 'system') toCollapse.push(it.key)
+        if (it.kind === 'user' || it.kind === 'system') toCollapse.push(it.key)
         // Pending permissions stay expanded so the user can act on them.
       } else {
         // Existing item — collapse a permission the moment it gets resolved.
