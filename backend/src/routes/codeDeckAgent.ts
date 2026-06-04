@@ -286,7 +286,8 @@ export function attachCodeDeckAgentWs(server: Server) {
     ws.on('message', (raw) => {
       let msg: { t?: string; text?: string; requestId?: string; decision?: 'allow' | 'deny'; always?: boolean }
       try { msg = JSON.parse(String(raw)) } catch { return }
-      if (msg.t === 'user' && typeof msg.text === 'string') runner.submitUser(msg.text)
+      if (msg.t === 'ping') { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' })) }
+      else if (msg.t === 'user' && typeof msg.text === 'string') runner.submitUser(msg.text)
       else if (msg.t === 'permission' && msg.requestId && (msg.decision === 'allow' || msg.decision === 'deny')) runner.resolvePermission(msg.requestId, msg.decision, Boolean(msg.always))
       else if (msg.t === 'interrupt') void runner.interrupt()
     })
