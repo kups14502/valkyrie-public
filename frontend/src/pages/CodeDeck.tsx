@@ -125,6 +125,7 @@ export default function CodeDeck() {
   const [foldersCollapsed, setFoldersCollapsed] = useState(false)
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
   const [collapsedSessionFolders, setCollapsedSessionFolders] = useState<Set<string>>(new Set())
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   // Start with the sidebar closed on phones so the chat is immediately visible;
   // open by default on desktop. (There's a toggle button either way.)
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1024)
@@ -191,6 +192,15 @@ export default function CodeDeck() {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      return next
+    })
+  }
+
+  const toggleGroup = (name: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
       return next
     })
   }
@@ -551,10 +561,15 @@ export default function CodeDeck() {
                     childrenByParent.get(parent)!.push(r)
                   }
                   const parentNames = new Set([...parents.map((r) => r.label), ...childrenByParent.keys()])
+                  const groupCollapsed = collapsedGroups.has(name)
                   return (
                     <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)]"><Folder size={14} /> {name}</div>
-                      <div className="space-y-1.5">
+                      <button type="button" onClick={() => toggleGroup(name)} className="mb-2 flex w-full items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)] hover:opacity-80" aria-label={groupCollapsed ? `Expand ${name}` : `Collapse ${name}`}>
+                        <Folder size={14} className="shrink-0" />
+                        <span className="flex-1 text-left">{name}</span>
+                        {groupCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
+                      </button>
+                      {!groupCollapsed && <div className="space-y-1.5">
                         {[...parentNames].sort().map((parentName) => {
                           const parentRoot = parents.find((r) => r.label === parentName)
                           const kids = childrenByParent.get(parentName) ?? []
@@ -595,7 +610,7 @@ export default function CodeDeck() {
                             </div>
                           )
                         })}
-                      </div>
+                      </div>}
                     </div>
                   )
                 })}
