@@ -79,6 +79,9 @@ export default function CodeDeck() {
   const [metaLines, setMetaLines] = useState<string[]>([])
   const [detectedLinks, setDetectedLinks] = useState<string[]>([])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [foldersCollapsed, setFoldersCollapsed] = useState(false)
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
+  const [collapsedSessionFolders, setCollapsedSessionFolders] = useState<Set<string>>(new Set())
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [metaCollapsed, setMetaCollapsed] = useState(false)
@@ -125,6 +128,15 @@ export default function CodeDeck() {
 
   const toggleFolder = (key: string) => {
     setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleSessionFolder = (key: string) => {
+    setCollapsedSessionFolders((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -341,8 +353,17 @@ export default function CodeDeck() {
             <Card title="Pinned">
               {pinned.length === 0 ? <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div> : <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
             </Card>
-            <Card title="Folders">
-              {deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
+            <Card
+              title="Folders"
+              action={(
+                <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
+                  {foldersCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />} {foldersCollapsed ? 'show' : 'hide'}
+                </button>
+              )}
+            >
+              {foldersCollapsed ? (
+                <div className="text-sm text-[var(--color-text-dim)]">Folders hidden.</div>
+              ) : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
                 {projectGroups.map(([name, roots]) => {
                   const parents = roots.filter((r) => !r.label.includes(' / '))
                   const childrenByParent = new Map<string, typeof roots>()
@@ -400,14 +421,36 @@ export default function CodeDeck() {
                     </div>
                   )
                 })}
-                {grouped.length > 0 && <div className="border-t border-[var(--color-border)] pt-4 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">sessions</div>}
-                {grouped.map(([name, items]) => (
-                  <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
-                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)]">{name}</div>
-                    <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>
-                  </div>
-                ))}
               </div>}
+            </Card>
+            <Card
+              title="Sessions"
+              action={(
+                <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
+                  {sessionsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />} {sessionsCollapsed ? 'show' : 'hide'}
+                </button>
+              )}
+            >
+              {sessionsCollapsed ? (
+                <div className="text-sm text-[var(--color-text-dim)]">{sessions.length} sessions hidden.</div>
+              ) : grouped.length === 0 ? (
+                <div className="text-sm text-[var(--color-text-dim)]">No sessions yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {grouped.map(([name, items]) => {
+                    const collapsed = collapsedSessionFolders.has(name)
+                    return (
+                      <div key={`sessions-${name}`} className="border-l border-[var(--color-border)] pl-3">
+                        <button type="button" onClick={() => toggleSessionFolder(name)} className="mb-2 flex w-full items-center justify-between gap-2 text-left text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label={collapsed ? `Expand ${name} sessions` : `Collapse ${name} sessions`}>
+                          <span className="truncate">{name} <span className="text-[var(--color-text-faint)]">({items.length})</span></span>
+                          {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+                        </button>
+                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => confirm('Delete session?') && del.mutate(s.id)} />)}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </Card>
       </aside>
       )}
