@@ -700,7 +700,7 @@ export default function CodeDeck() {
                         {!isClaudeProfile && (
                           <div className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)] p-3 text-xs text-[var(--color-warning)]">Live chat is Claude-only. Switch this session to a Claude profile, or use terminal mode for codex.</div>
                         )}
-                        <div ref={chatScrollRef} className="min-h-[140px] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
+                        <div ref={chatScrollRef} className="min-h-[55vh] max-h-[62vh] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3 lg:min-h-[140px] lg:max-h-none">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : displayItems.map((di) => {
