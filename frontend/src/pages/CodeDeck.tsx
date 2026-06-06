@@ -15,7 +15,7 @@ const codexModels = ['gpt-5.5']
 const modelLabel = (m: string) => m.replace(/^claude-/, '')
 // Reasoning effort levels. '' = default (let the model decide).
 const effortLevels = ['', 'low', 'medium', 'high', 'xhigh', 'max']
-const effortLabel = (e: string) => (e ? `effort: ${e}` : 'effort: default')
+const effortLabel = (e: string) => e || 'default'
 
 // Sort `items` by the user-defined `order` (list of keys); unknown/new items fall
 // back to alphabetical so they append in a stable, sensible position.
@@ -828,11 +828,14 @@ export default function CodeDeck() {
                     <div className="space-y-3 border-b border-[var(--color-border)] pb-3">
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex flex-wrap items-end gap-2">
                             <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
                             <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full sm:w-44" />
                             {isClaudeProfile && (
-                              <Dropdown size="sm" value={selected.effort ?? ''} onChange={changeEffort} options={effortLevels.map((e) => ({ value: e, label: effortLabel(e) }))} className="w-full sm:w-40" />
+                              <label className="flex flex-col gap-1 sm:w-44">
+                                <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">effort</span>
+                                <Dropdown size="sm" value={selected.effort ?? ''} onChange={changeEffort} options={effortLevels.map((e) => ({ value: e, label: effortLabel(e) }))} className="w-full" />
+                              </label>
                             )}
                             <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                           </div>
