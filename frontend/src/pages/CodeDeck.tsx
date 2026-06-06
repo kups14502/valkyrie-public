@@ -8,6 +8,7 @@ import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
 import { Markdown } from '../components/Markdown'
 import { QuestionCard } from '../components/QuestionCard'
+import { getToken } from '../lib/auth'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckPrefs, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckPrefs, type CodeDeckSession } from '../lib/api'
 import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
@@ -490,7 +491,9 @@ export default function CodeDeck() {
     const term = xtermRef.current
     const cols = term?.cols ?? 220
     const rows = term?.rows ?? 50
-    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(sessionId)}&cols=${cols}&rows=${rows}`)
+    const authToken = getToken()
+    const tokenParam = authToken ? `&token=${encodeURIComponent(authToken)}` : ''
+    const ws = new WebSocket(`${wsBase()}/api/code-deck/ws?sessionId=${encodeURIComponent(sessionId)}&cols=${cols}&rows=${rows}${tokenParam}`)
     wsRef.current = ws
     ws.onopen = () => setTerminalState('connected')
     ws.onmessage = (event) => {

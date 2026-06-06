@@ -11,10 +11,12 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.9",
+    "@types/qrcode": "^1.5.6",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "axios": "^1.16.0",
     "lucide-react": "^1.14.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",

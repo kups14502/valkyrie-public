@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodeDeckMessage } from './api'
+import { getToken } from './auth'
 
 // Live Code Deck session client. Connects to the persistent agent WebSocket,
 // streams assistant text/tool-use/permission events, and exposes actions to
@@ -140,7 +141,9 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
 
     function connect() {
       if (stopped) return
-      const ws = new WebSocket(`${wsBase()}/api/code-deck/agent-ws?sessionId=${encodeURIComponent(sid)}`)
+      const token = getToken()
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
+      const ws = new WebSocket(`${wsBase()}/api/code-deck/agent-ws?sessionId=${encodeURIComponent(sid)}${tokenParam}`)
       wsRef.current = ws
 
       ws.onopen = () => {

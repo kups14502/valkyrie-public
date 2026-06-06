@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getToken, clearToken } from './auth'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL
 
@@ -11,11 +12,23 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+// Attach the self-hosted app token (if present) to every request.
+api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status as number | undefined
     const detail = error?.response?.data?.detail as string | undefined
+    // A 401 means our token is missing/expired/invalid — drop it so the auth
+    // gate re-prompts. The login/status/setup calls are exempt (they 401/409
+    // legitimately during normal auth flows).
+    const url = String(error?.config?.url || '')
+    if (status === 401 && !url.includes('/auth/')) clearToken()
     return Promise.reject({
       ...error,
       isUnauthorized: status === 401,
@@ -24,6 +37,13 @@ api.interceptors.response.use(
     })
   },
 )
+
+export type AuthStatus = { configured: boolean; strict: boolean }
+export const fetchAuthStatus = async () => (await api.get<AuthStatus>('/auth/status')).data
+export const setupAuth = async (password: string) =>
+  (await api.post<{ ok: boolean; otpauthUri: string; secret: string }>('/auth/setup', { password })).data
+export const loginAuth = async (password: string, totp: string) =>
+  (await api.post<{ token: string; expiresAt: number }>('/auth/login', { password, totp })).data
 
 export type SystemStatus = {
   cpu: { cores: number; loadAvg: [number, number, number]; usage: number }

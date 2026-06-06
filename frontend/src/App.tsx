@@ -2,9 +2,12 @@ import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { AuthGate } from './components/AuthGate'
+import { clearToken, setAuthSkipped } from './lib/auth'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -78,6 +81,13 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
           <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">accent color</span>
           <ThemePicker />
         </div>
+        <button
+          type="button"
+          onClick={() => { onClose(); logout() }}
+          className="flex w-full items-center justify-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+        >
+          <LogOut size={12} /> sign out
+        </button>
       </div>
     </div>
   )
@@ -115,6 +125,15 @@ function Shell() {
               </div>
               {/* theme picker: hidden on mobile */}
               <div className="hidden sm:block"><ThemePicker /></div>
+              <button
+                type="button"
+                onClick={logout}
+                title="Sign out"
+                aria-label="Sign out"
+                className="hidden sm:flex items-center border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+              >
+                <LogOut size={13} />
+              </button>
               {/* desktop nav */}
               <nav className="hidden sm:flex flex-1 items-center justify-end gap-0.5 font-mono">
                 {navItems.map(({ to, label, icon: Icon }) => (
@@ -181,12 +200,19 @@ function Shell() {
   )
 }
 
+function logout() {
+  setAuthSkipped(false)
+  clearToken()
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Shell />
-      </BrowserRouter>
+      <AuthGate>
+        <BrowserRouter>
+          <Shell />
+        </BrowserRouter>
+      </AuthGate>
     </QueryClientProvider>
   )
 }

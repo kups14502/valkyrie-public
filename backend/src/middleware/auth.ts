@@ -23,6 +23,7 @@ const ALLOW_LOCAL = process.env.NODE_ENV !== 'production'
 // When true, only real credentials (app token / cf-access / loopback) are
 // accepted — the legacy no-token bypass is disabled. Flip on at cutover.
 const AUTH_STRICT = /^(1|true|yes)$/i.test(process.env.AUTH_STRICT || '')
+export function isAuthStrict(): boolean { return AUTH_STRICT }
 
 // The legacy trusted frontend↔api origin pairing (no token). Kept only as the
 // non-strict fallback during migration.
