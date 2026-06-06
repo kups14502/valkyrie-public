@@ -289,6 +289,10 @@ export default function CodeDeck() {
     if (!selected) return
     update.mutate({ id: selected.id, body: { effort: newEffort } })
   }
+  // Picking a folder is inherently "where should work happen" — so selecting one
+  // (even while inside a session) opens the New Session form pre-targeted at it,
+  // rather than silently doing nothing or disrupting the current session's cwd.
+  const selectRoot = (id: string) => { setRootId(id); setCustomPath(''); setShowNew(true) }
   const startRename = () => { if (selected) { setRenameText(selected.title); setRenaming(true) } }
   const commitRename = () => {
     if (!selected) { setRenaming(false); return }
@@ -693,7 +697,7 @@ export default function CodeDeck() {
                         <GripVertical size={13} className="shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" />
                         <button
                           type="button"
-                          onClick={() => (groupRoot ? setRootId(groupRoot.id) : toggleGroup(name))}
+                          onClick={() => (groupRoot ? selectRoot(groupRoot.id) : toggleGroup(name))}
                           className={`flex flex-1 items-center gap-2 border px-2 py-1.5 text-xs font-bold uppercase tracking-[0.18em] transition ${groupSelected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-transparent text-[var(--color-accent)] hover:border-[var(--color-border-strong)]'}`}
                           title={groupRoot ? `Run at ${groupRoot.path}` : undefined}
                         >
@@ -729,7 +733,7 @@ export default function CodeDeck() {
                                 ) : null}
                                 <button
                                   type="button"
-                                  onClick={() => parentRoot && setRootId(parentRoot.id)}
+                                  onClick={() => parentRoot && selectRoot(parentRoot.id)}
                                   className={`min-w-0 flex-1 border px-3 py-2 text-left text-xs transition ${parentRoot && rootId === parentRoot.id ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}
                                 >
                                   <div className="truncate font-semibold">{parentName}</div>
@@ -742,7 +746,7 @@ export default function CodeDeck() {
                                     <button
                                       key={r.id}
                                       type="button"
-                                      onClick={() => setRootId(r.id)}
+                                      onClick={() => selectRoot(r.id)}
                                       className={`w-full border px-3 py-2 text-left text-xs transition ${rootId === r.id ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}
                                     >
                                       <div className="truncate font-semibold">{r.label.replace(`${parentName} / `, '')}</div>
