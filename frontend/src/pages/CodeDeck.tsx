@@ -397,6 +397,14 @@ export default function CodeDeck() {
     ? (() => { const last = displayItems[displayItems.length - 1]; return last.kind === 'activity' ? last.key : last.item.key })()
     : null
 
+  // Key of the most recent prompt. Only this one is expanded by default; every
+  // earlier prompt collapses (and the previous one collapses when a new prompt
+  // is sent, since the default is keyed to whichever prompt is now newest).
+  const lastUserKey = useMemo(() => {
+    for (let i = agent.items.length - 1; i >= 0; i--) if (agent.items[i].kind === 'user') return agent.items[i].key
+    return null
+  }, [agent.items])
+
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
   }, [availableModels, model])
@@ -601,7 +609,7 @@ export default function CodeDeck() {
   // Compute collapsed state directly from item kind/status — no effect needed.
   // Toggling flips the default.
   const isCollapsed = (it: import('../lib/useCodeDeckAgent').AgentItem): boolean => {
-    const defaultCollapsed = it.kind === 'user' || it.kind === 'tool_use' || it.kind === 'system' ||
+    const defaultCollapsed = (it.kind === 'user' && it.key !== lastUserKey) || it.kind === 'tool_use' || it.kind === 'system' ||
       (it.kind === 'permission' && it.status !== 'pending')
     return toggledKeys.has(it.key) ? !defaultCollapsed : defaultCollapsed
   }
