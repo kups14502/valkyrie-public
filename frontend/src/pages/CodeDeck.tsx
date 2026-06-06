@@ -225,9 +225,14 @@ export default function CodeDeck() {
   const dropProject = (group: string, ordered: string[], target: string) => { if (drag?.type === 'project' && drag.group === group) { prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: reorder(ordered, drag.key, target) } }); setDrag(null) } }
   const dropPinned = (target: string) => { if (drag?.type === 'pinned') { prefsMut.mutate({ pinnedOrder: reorder(pinned.map((s) => s.id), drag.key, target) }); setDrag(null) } }
 
+  // Close the mobile drawer after a navigation action. No-op on desktop, where
+  // the sidebar is a persistent inline column rather than an overlay.
+  const closeSidebarOnMobile = () => { if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false) }
+
   const openSession = (id: string) => {
     setSelectedId(id)
     setShowNew(false)
+    closeSidebarOnMobile()
   }
 
   const toggleFolder = (key: string) => {
@@ -293,7 +298,7 @@ export default function CodeDeck() {
   // Picking a folder is inherently "where should work happen" — so selecting one
   // (even while inside a session) opens the New Session form pre-targeted at it,
   // rather than silently doing nothing or disrupting the current session's cwd.
-  const selectRoot = (id: string) => { setRootId(id); setCustomPath(''); setShowNew(true) }
+  const selectRoot = (id: string) => { setRootId(id); setCustomPath(''); setShowNew(true); closeSidebarOnMobile() }
   const startRename = () => { if (selected) { setRenameText(selected.title); setRenaming(true) } }
   const commitRename = () => {
     if (!selected) { setRenaming(false); return }
@@ -619,7 +624,10 @@ export default function CodeDeck() {
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-4 lg:h-[calc(100dvh-150px)] lg:flex-row">
       {sidebarOpen && (
-      <aside className="w-full shrink-0 space-y-4 lg:w-[320px] lg:self-stretch lg:overflow-auto lg:pr-1">
+      <>
+      {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
+      <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      <aside className="fixed inset-y-0 left-0 z-50 w-[88%] max-w-[340px] space-y-4 overflow-auto border-r border-[var(--color-border)] bg-[var(--color-bg)] p-4 lg:static lg:z-auto lg:w-[320px] lg:max-w-none lg:shrink-0 lg:self-stretch lg:overflow-auto lg:border-r-0 lg:bg-transparent lg:p-0 lg:pr-1">
             <div className="flex gap-2">
               <button type="button" onClick={() => { setShowNew(true); setSelectedId(null) }} className="inline-flex flex-1 items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Plus size={14} /> new</button>
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
@@ -767,6 +775,7 @@ export default function CodeDeck() {
               </div>}
             </Card>
       </aside>
+      </>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-4 lg:min-h-0">
