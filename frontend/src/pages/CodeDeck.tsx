@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, ChevronUp, Copy, Folder, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Folder, GripVertical, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -28,15 +28,14 @@ function applyOrder<T>(items: T[], order: string[] | undefined, keyOf: (t: T) =>
   })
 }
 
-// Move the item with `key` one slot up (dir -1) or down (dir +1) within `keys`,
-// returning the new full ordering. Used to persist reorder arrow clicks.
-function moveInOrder(keys: string[], key: string, dir: -1 | 1): string[] {
-  const arr = [...keys]
-  const i = arr.indexOf(key)
-  if (i === -1) return arr
-  const j = i + dir
-  if (j < 0 || j >= arr.length) return arr
-  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+// Drag reorder: move `from` so it sits where `to` is (inserted before `to`),
+// returning the new full ordering. Used by drag-and-drop reordering.
+function reorder(keys: string[], from: string, to: string): string[] {
+  if (from === to) return keys
+  const arr = keys.filter((k) => k !== from)
+  const idx = arr.indexOf(to)
+  if (idx === -1) return keys
+  arr.splice(idx, 0, from)
   return arr
 }
 
@@ -108,11 +107,19 @@ function CompactUsageBar({ pct, label }: { pct: number; label: string }) {
   )
 }
 
-function SessionCard({ s, selected, onSelect, onPin, onDelete, onMove }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; onMove?: (dir: -1 | 1) => void }) {
+function SessionCard({ s, selected, onSelect, onPin, onDelete, drag }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; drag?: { onDragStart: () => void; onDragEnd: () => void; onDrop: () => void; dragging: boolean } }) {
   return (
-    <button type="button" onClick={onSelect} className={`w-full border p-3 text-left transition ${selected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.06)]' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+    <div
+      draggable={Boolean(drag)}
+      onDragStart={drag?.onDragStart}
+      onDragEnd={drag?.onDragEnd}
+      onDragOver={drag ? (e) => e.preventDefault() : undefined}
+      onDrop={drag?.onDrop}
+      className={drag?.dragging ? 'opacity-40' : ''}
+    >
+      <button type="button" onClick={onSelect} className={`flex w-full items-start gap-2 border p-3 text-left transition ${selected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.06)]' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}>
+        {drag && <GripVertical size={14} className="mt-0.5 shrink-0 cursor-grab text-[var(--color-text-faint)]" />}
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {s.pinned && <Pin size={12} className="shrink-0 text-[var(--color-accent)]" />}
             <div className="truncate text-sm font-semibold text-[var(--color-text)]">{s.title}</div>
@@ -121,17 +128,11 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete, onMove }: { s: Co
           <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{s.cwd}</div>
         </div>
         <div className="flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
-          {onMove && (
-            <div className="flex flex-col">
-              <button type="button" onClick={() => onMove(-1)} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Move up"><ChevronUp size={11} /></button>
-              <button type="button" onClick={() => onMove(1)} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Move down"><ChevronDown size={11} /></button>
-            </div>
-          )}
           <button type="button" onClick={onPin} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]">{s.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
           <button type="button" onClick={onDelete} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-danger)]"><Trash2 size={12} /></button>
         </div>
-      </div>
-    </button>
+      </button>
+    </div>
   )
 }
 
@@ -212,14 +213,16 @@ export default function CodeDeck() {
     return applyOrder(Array.from(out.entries()), prefs.groupOrder, ([name]) => name)
   }, [deck.data, prefs.groupOrder])
   const pinned = applyOrder(sessions.filter((s) => s.pinned), prefs.pinnedOrder, (s) => s.id)
-  // Ordered list of folder-group names, used to drive group reorder arrows.
+  // Ordered list of folder-group names, used to drive group reordering.
   const groupNames = useMemo(() => applyOrder(Array.from(new Set(projectGroups.map(([n]) => n))), prefs.groupOrder, (n) => n), [projectGroups, prefs.groupOrder])
 
-  // ----- reorder persistence helpers -----
-  const moveGroup = (name: string, dir: -1 | 1) => prefsMut.mutate({ groupOrder: moveInOrder(groupNames, name, dir) })
-  const moveProject = (groupName: string, orderedIds: string[], id: string, dir: -1 | 1) =>
-    prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [groupName]: moveInOrder(orderedIds, id, dir) } })
-  const movePinned = (id: string, dir: -1 | 1) => prefsMut.mutate({ pinnedOrder: moveInOrder(pinned.map((s) => s.id), id, dir) })
+  // ----- drag-and-drop reorder -----
+  // `drag` holds the item currently being dragged; drop handlers persist the new
+  // order only when dropping onto a sibling of the same type/group.
+  const [drag, setDrag] = useState<{ type: 'group' | 'project' | 'pinned'; group?: string; key: string } | null>(null)
+  const dropGroup = (target: string) => { if (drag?.type === 'group') { prefsMut.mutate({ groupOrder: reorder(groupNames, drag.key, target) }); setDrag(null) } }
+  const dropProject = (group: string, ordered: string[], target: string) => { if (drag?.type === 'project' && drag.group === group) { prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: reorder(ordered, drag.key, target) } }); setDrag(null) } }
+  const dropPinned = (target: string) => { if (drag?.type === 'pinned') { prefsMut.mutate({ pinnedOrder: reorder(pinned.map((s) => s.id), drag.key, target) }); setDrag(null) } }
 
   const openSession = (id: string) => {
     setSelectedId(id)
@@ -600,7 +603,7 @@ export default function CodeDeck() {
               ) : pinned.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
               ) : (
-                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} onMove={(dir) => movePinned(s.id, dir)} />)}</div>
+                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} drag={{ onDragStart: () => setDrag({ type: 'pinned', key: s.id }), onDragEnd: () => setDrag(null), onDrop: () => dropPinned(s.id), dragging: drag?.type === 'pinned' && drag.key === s.id }} />)}</div>
               )}
             </Card>
             <Card>
@@ -638,7 +641,10 @@ export default function CodeDeck() {
                 <div className="text-sm text-[var(--color-text-dim)]">Folders hidden.</div>
               ) : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
                 {projectGroups.map(([name, roots]) => {
-                  const parents = roots.filter((r) => !r.label.includes(' / '))
+                  // The synthetic group-root entry (id `group:<name>`) drives the
+                  // group header itself; it is not shown as a separate row.
+                  const groupRoot = roots.find((r) => r.id === `group:${name}`)
+                  const parents = roots.filter((r) => !r.label.includes(' / ') && !r.id.startsWith('group:'))
                   const childrenByParent = new Map<string, typeof roots>()
                   for (const r of roots.filter((x) => x.label.includes(' / '))) {
                     const parent = r.label.split(' / ')[0]
@@ -648,17 +654,29 @@ export default function CodeDeck() {
                   const parentNames = new Set([...parents.map((r) => r.label), ...childrenByParent.keys()])
                   const groupCollapsed = collapsedGroups.has(name)
                   const orderedParentNames = applyOrder([...parentNames], prefs.projectOrder[name], (pn) => pn)
+                  const groupSelected = Boolean(groupRoot && rootId === groupRoot.id)
                   return (
                     <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
-                      <div className="mb-2 flex w-full items-center gap-1">
-                        <div className="flex flex-col">
-                          <button type="button" onClick={() => moveGroup(name, -1)} className="text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label={`Move ${name} up`}><ChevronUp size={11} /></button>
-                          <button type="button" onClick={() => moveGroup(name, 1)} className="text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label={`Move ${name} down`}><ChevronDown size={11} /></button>
-                        </div>
-                        <button type="button" onClick={() => toggleGroup(name)} className="flex flex-1 items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)] hover:opacity-80" aria-label={groupCollapsed ? `Expand ${name}` : `Collapse ${name}`}>
+                      <div
+                        draggable
+                        onDragStart={() => setDrag({ type: 'group', key: name })}
+                        onDragEnd={() => setDrag(null)}
+                        onDragOver={drag?.type === 'group' ? (e) => e.preventDefault() : undefined}
+                        onDrop={() => dropGroup(name)}
+                        className={`mb-2 flex w-full items-center gap-1.5 ${drag?.type === 'group' && drag.key === name ? 'opacity-40' : ''}`}
+                      >
+                        <GripVertical size={13} className="shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" />
+                        <button
+                          type="button"
+                          onClick={() => (groupRoot ? setRootId(groupRoot.id) : toggleGroup(name))}
+                          className={`flex flex-1 items-center gap-2 border px-2 py-1.5 text-xs font-bold uppercase tracking-[0.18em] transition ${groupSelected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-transparent text-[var(--color-accent)] hover:border-[var(--color-border-strong)]'}`}
+                          title={groupRoot ? `Run at ${groupRoot.path}` : undefined}
+                        >
                           <Folder size={14} className="shrink-0" />
                           <span className="flex-1 text-left">{name}</span>
-                          {groupCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
+                        </button>
+                        <button type="button" onClick={() => toggleGroup(name)} className="shrink-0 text-[var(--color-accent)] hover:opacity-80" aria-label={groupCollapsed ? `Expand ${name}` : `Collapse ${name}`}>
+                          {groupCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                         </button>
                       </div>
                       {!groupCollapsed && <div className="space-y-1.5">
@@ -668,12 +686,17 @@ export default function CodeDeck() {
                           const key = `${name}:${parentName}`
                           const open = expandedFolders.has(key)
                           return (
-                            <div key={key} className="space-y-1.5">
-                              <div className="flex gap-1">
-                                <div className="flex flex-col shrink-0">
-                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, -1)} className="border border-[var(--color-border)] px-1 text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label="Move up"><ChevronUp size={10} /></button>
-                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, 1)} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label="Move down"><ChevronDown size={10} /></button>
-                                </div>
+                            <div
+                              key={key}
+                              draggable
+                              onDragStart={() => setDrag({ type: 'project', group: name, key: parentName })}
+                              onDragEnd={() => setDrag(null)}
+                              onDragOver={drag?.type === 'project' && drag.group === name ? (e) => e.preventDefault() : undefined}
+                              onDrop={() => dropProject(name, orderedParentNames, parentName)}
+                              className={`space-y-1.5 ${drag?.type === 'project' && drag.group === name && drag.key === parentName ? 'opacity-40' : ''}`}
+                            >
+                              <div className="flex items-stretch gap-1">
+                                <GripVertical size={14} className="mt-2 shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" />
                                 {kids.length > 0 ? (
                                   <button type="button" onClick={() => toggleFolder(key)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={open ? 'Collapse folder' : 'Expand folder'}>
                                     {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}

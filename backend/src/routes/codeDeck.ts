@@ -33,9 +33,9 @@ function slug(s: string) {
 // keyed by id (not path) so Personal/OpenClaw can both point at the home dir
 // without the path-dedup below dropping one.
 const GROUP_ROOTS: ProjectRoot[] = [
-  { id: 'group:Personal', label: '● Personal (root)', path: homedir(), folder: 'Personal' },
-  { id: 'group:Work', label: '● Work (root)', path: path.join(homedir(), 'work'), folder: 'Work' },
-  { id: 'group:OpenClaw', label: '● OpenClaw (root)', path: homedir(), folder: 'OpenClaw' },
+  { id: 'group:Personal', label: 'Personal (group root)', path: homedir(), folder: 'Personal' },
+  { id: 'group:Work', label: 'Work (group root)', path: path.join(homedir(), 'work'), folder: 'Work' },
+  { id: 'group:OpenClaw', label: 'OpenClaw (group root)', path: homedir(), folder: 'OpenClaw' },
 ]
 
 function discoverProjectRoots(): ProjectRoot[] {
