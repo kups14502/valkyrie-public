@@ -8,6 +8,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { authorizeUpgrade } from '../middleware/auth.js'
 
 const router = Router()
 const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
@@ -534,7 +535,10 @@ export function attachCodeDeckWs(server: Server) {
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url ?? '', 'http://localhost')
     if (pathname !== '/api/code-deck/ws') return
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    void authorizeUpgrade(req).then((ok) => {
+      if (!ok) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    }).catch(() => { socket.destroy() })
   })
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '', 'http://localhost')

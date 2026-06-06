@@ -3,6 +3,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { randomUUID } from 'node:crypto'
 import { query, type Query, type PermissionResult, type PermissionUpdate, type SDKMessage, type SDKUserMessage, type UserDialogRequest, type UserDialogResult } from '@anthropic-ai/claude-agent-sdk'
 import { getSession, saveMessage, setAgentSessionId, setSessionStatus, profileFor, EFFORT_LEVELS } from './codeDeck.js'
+import { authorizeUpgrade } from '../middleware/auth.js'
 
 // Live, persistent Code Deck sessions backed by the Claude Agent SDK.
 //
@@ -543,7 +544,12 @@ export function attachCodeDeckAgentWs(server: Server) {
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url ?? '', 'http://localhost')
     if (pathname !== '/api/code-deck/agent-ws') return
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    // Authenticate the upgrade (app token via ?token=, cf-access, or loopback)
+    // before completing the handshake.
+    void authorizeUpgrade(req).then((ok) => {
+      if (!ok) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    }).catch(() => { socket.destroy() })
   })
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '', 'http://localhost')

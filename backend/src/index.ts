@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
+import authRoute from './routes/auth.js'
 import systemRoute from './routes/system.js'
 import sessionsRoute from './routes/sessions.js'
 import aiUsageRoute from './routes/aiUsage.js'
@@ -72,6 +73,9 @@ app.use((req, _res, next) => {
 })
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
+
+// Public auth endpoints (login/setup/status) — must be reachable without a token.
+app.use('/api', authRoute)
 
 app.use('/api', requireAuth)
 app.use('/api', systemRoute)
