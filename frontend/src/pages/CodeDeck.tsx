@@ -328,6 +328,27 @@ export default function CodeDeck() {
     })
   }, [agent.items, agent.busy])
 
+  // An assistant turn can emit several text blocks (running commentary between
+  // tool calls) plus the final answer — all rendered with a "claude" header.
+  // Mark the last assistant block of each response (the one not followed by
+  // another assistant block before the next user turn) so it reads as the end
+  // of the response, not mid-thought.
+  const finalAssistantKeys = useMemo(() => {
+    const set = new Set<string>()
+    const msgs = agent.items.filter((i) => i.kind === 'user' || i.kind === 'assistant' || i.kind === 'error')
+    for (let i = 0; i < msgs.length; i++) {
+      if (msgs[i].kind !== 'assistant') continue
+      const next = msgs[i + 1]
+      if (!next || next.kind !== 'assistant') set.add(msgs[i].key)
+    }
+    // While a response is still streaming, the latest assistant block isn't final yet.
+    if (agent.streaming || agent.busy) {
+      const lastAssistant = [...msgs].reverse().find((m) => m.kind === 'assistant')
+      if (lastAssistant) set.delete(lastAssistant.key)
+    }
+    return set
+  }, [agent.items, agent.streaming, agent.busy])
+
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
   }, [availableModels, model])
@@ -870,16 +891,22 @@ export default function CodeDeck() {
                               </div>
                             )
 
-                            if (it.kind === 'assistant') return (
-                              <div key={it.key} className="rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)]">
+                            if (it.kind === 'assistant') {
+                              const isFinal = finalAssistantKeys.has(it.key)
+                              return (
+                              <div key={it.key} className={`rounded border bg-[rgba(255,255,255,0.02)] ${isFinal ? 'border-[var(--color-accent)]/60' : 'border-[var(--color-border)]'}`}>
                                 <button type="button" onClick={() => toggleCollapsed(it.key)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
                                   {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">claude</span>
+                                  {isFinal
+                                    ? <span className="shrink-0 rounded-sm bg-[rgba(0,255,65,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent)]">✓ response</span>
+                                    : <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">· thinking</span>}
                                   {collapsed && <span className="ml-1 min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0]}</span>}
                                 </button>
                                 {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2"><Markdown>{it.text}</Markdown></div>}
                               </div>
-                            )
+                              )
+                            }
 
                             if (it.kind === 'error') return (
                               <div key={it.key} className="rounded border border-[var(--color-danger)]/60 bg-[rgba(239,68,68,0.08)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)] whitespace-pre-wrap break-words">⚠️ {it.text.replace(/^⚠️\s*/, '')}</div>
