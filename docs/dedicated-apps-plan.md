@@ -1,8 +1,20 @@
 # Dedicated Desktop + Mobile Apps — Plan
 
-> Status: **NEXT TASK** (Code Deck AskUserQuestion fix is done as of commit d1a56df).
+> Status: **IN PROGRESS.** Parts 1, 2, 3a DONE and validated end-to-end —
+> the Windows app runs, signs in with self-hosted password+TOTP, and Code Deck
+> works through it. Remaining: 3b (Android + biometric/secure-storage),
+> Part 4 cutover (AUTH_STRICT=1 + retire Cloudflare Access), iOS (needs a Mac).
 > This file is the durable home for this plan — an earlier copy lived in a
 > reused `~/.claude/plans/` file and was overwritten. Do not let it evaporate again.
+
+## Progress log
+- Code Deck AskUserQuestion picker — commit d1a56df.
+- Part 1 (backend auth + WS token) — commit 6e79d01. AUTH_STRICT gates the
+  legacy no-token bypass; still OFF (default) for migration.
+- Part 2 (frontend login/setup UI + token wiring) — commit 9b94b0e.
+- Part 3a (Tauri 2 desktop scaffold + GitHub Actions CI) — commit 46fae23;
+  skip-hatch hidden in-app — d31a5f0. CI builds Windows/macOS/Linux installers
+  on every push (Actions artifacts). Windows app installed + working.
 
 ## Goal (user's words)
 
