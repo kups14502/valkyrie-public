@@ -46,6 +46,14 @@ export function hasToken(): boolean {
   return Boolean(getToken())
 }
 
+// True when running inside the Tauri desktop/mobile app (vs. a web browser).
+// The migration "skip" hatch must not be offered here: the legacy no-token
+// bypass is keyed to the web origin, so the app can only authenticate with a
+// real token — skipping would just 401 every API call.
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
+}
+
 // Migration-only escape hatch: when the backend isn't strict yet, the user can
 // proceed without a token (the legacy bypass still authorizes them). Scoped to
 // the tab so it never persists past a real cutover.

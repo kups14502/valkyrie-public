@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { fetchAuthStatus, setupAuth, loginAuth, type AuthStatus } from '../lib/api'
-import { hasToken, setToken, isAuthSkipped, setAuthSkipped, onAuthChange } from '../lib/auth'
+import { hasToken, setToken, isAuthSkipped, setAuthSkipped, onAuthChange, isTauri } from '../lib/auth'
 
 // Gates the app behind self-hosted auth. Shows first-run setup (password →
 // scannable TOTP QR) when no credential exists, otherwise a password + 6-digit
@@ -55,7 +55,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         {phase === 'enroll' && <EnrollNote onContinue={() => setPhase('login')} />}
         {phase === 'login' && <LoginForm onAuthed={() => setAuthed(true)} />}
 
-        {status && !status.strict && (
+        {status && !status.strict && !isTauri() && (
           <button
             type="button"
             onClick={() => { setAuthSkipped(true); setAuthed(true) }}
