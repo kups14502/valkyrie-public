@@ -41,8 +41,12 @@ app.set('trust proxy', true)
 app.use(helmet())
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []
+// The dedicated Tauri apps run the web UI from a tauri:// (or tauri.localhost)
+// origin — allow those so their API calls aren't CORS-blocked.
+const TAURI_ORIGINS = new Set(['tauri://localhost', 'https://tauri.localhost', 'http://tauri.localhost'])
 const isAllowedOrigin = (origin: string) => {
   if (allowedOrigins.includes(origin)) return true
+  if (TAURI_ORIGINS.has(origin)) return true
   if (/^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)) return true
   return false
 }
