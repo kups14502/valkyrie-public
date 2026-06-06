@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
 import { Markdown } from '../components/Markdown'
+import { QuestionCard } from '../components/QuestionCard'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckPrefs, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckPrefs, type CodeDeckSession } from '../lib/api'
 import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
@@ -346,7 +347,8 @@ export default function CodeDeck() {
     }
     for (const it of agent.items) {
       const isFinalAssistant = it.kind === 'assistant' && finalAssistantKeys.has(it.key)
-      if (it.kind === 'user' || it.kind === 'error' || isFinalAssistant) { flush(); result.push({ kind: 'message', item: it }) }
+      // Questions stand alone too — a blocked picker must never hide inside a collapsed activity block.
+      if (it.kind === 'user' || it.kind === 'error' || it.kind === 'question' || isFinalAssistant) { flush(); result.push({ kind: 'message', item: it }) }
       else group.push(it) // tools, system notices, AND intermediate "thinking" assistant text
     }
     flush()
@@ -940,6 +942,15 @@ export default function CodeDeck() {
 
                             if (it.kind === 'error') return (
                               <div key={it.key} className="rounded border border-[var(--color-danger)]/60 bg-[rgba(239,68,68,0.08)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)] whitespace-pre-wrap break-words">⚠️ {it.text.replace(/^⚠️\s*/, '')}</div>
+                            )
+
+                            if (it.kind === 'question') return (
+                              <QuestionCard
+                                key={it.key}
+                                item={it}
+                                onAnswer={(picks) => agent.answerQuestion(it.requestId, picks)}
+                                onCancel={() => agent.cancelQuestion(it.requestId)}
+                              />
                             )
 
                             return null

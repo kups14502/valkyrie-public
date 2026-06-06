@@ -11,11 +11,16 @@ import type { CodeDeckMessage } from './api'
 // The backend re-surfaces pending permissions on every fresh attach(), so
 // approve/deny buttons stay functional after a reconnect.
 
+export type QuestionOption = { label: string; description: string }
+export type QuestionSpec = { question: string; header: string; multiSelect: boolean; options: QuestionOption[] }
+export type QuestionPick = { question: string; selected: string[]; other?: string }
+
 export type AgentItem =
   | { kind: 'user'; key: string; text: string }
   | { kind: 'assistant'; key: string; text: string }
   | { kind: 'tool_use'; key: string; toolUseId?: string; name: string; input: unknown; result?: string; isError?: boolean }
   | { kind: 'permission'; key: string; requestId: string; tool: string; input: unknown; reason?: string; canAlways?: boolean; status: 'pending' | 'allow' | 'deny' }
+  | { kind: 'question'; key: string; requestId: string; questions: QuestionSpec[]; toolUseId?: string; status: 'pending' | 'answered' | 'cancelled'; answers?: Record<string, string> }
   | { kind: 'system'; key: string; text: string }
   | { kind: 'error'; key: string; text: string }
 
@@ -39,6 +44,9 @@ type ServerEvent = {
   message?: string
   costUsd?: number
   busy?: boolean
+  questions?: QuestionSpec[]
+  answers?: Record<string, string>
+  cancelled?: boolean
 }
 
 function wsBase() {
@@ -50,10 +58,13 @@ function wsBase() {
 function seedFromHistory(rows: CodeDeckMessage[]): AgentItem[] {
   const items: AgentItem[] = []
   const toolResults = new Map<string, { summary?: string; isError?: boolean }>()
+  // requestId -> resolution, so a reloaded question card shows its final answer.
+  const questionAnswers = new Map<string, { answers?: Record<string, string>; cancelled?: boolean }>()
   for (const r of rows) {
     try {
       const meta = r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : {}
       if (meta.kind === 'tool_result' && meta.toolUseId) toolResults.set(String(meta.toolUseId), { summary: meta.summary as string | undefined, isError: Boolean(meta.isError) })
+      else if (meta.kind === 'question_answer' && meta.requestId) questionAnswers.set(String(meta.requestId), { answers: meta.answers as Record<string, string> | undefined, cancelled: Boolean(meta.cancelled) })
     } catch { /* ignore */ }
   }
   for (const r of rows) {
@@ -65,8 +76,13 @@ function seedFromHistory(rows: CodeDeckMessage[]): AgentItem[] {
       const toolUseId = meta.toolUseId as string | undefined
       const result = toolUseId ? toolResults.get(toolUseId) : undefined
       items.push({ kind: 'tool_use', key: r.id, toolUseId, name: (meta.name as string) ?? 'tool', input: meta.input, result: result?.summary, isError: result?.isError })
+    } else if (meta.kind === 'question') {
+      const requestId = String(meta.requestId ?? '')
+      const resolution = questionAnswers.get(requestId)
+      const status: 'pending' | 'answered' | 'cancelled' = resolution ? (resolution.cancelled ? 'cancelled' : 'answered') : 'pending'
+      items.push({ kind: 'question', key: r.id, requestId, questions: (meta.questions as QuestionSpec[]) ?? [], toolUseId: meta.toolUseId as string | undefined, status, answers: resolution?.answers })
     } else if (meta.kind === 'error') items.push({ kind: 'error', key: r.id, text: r.content })
-    else if (meta.kind !== 'tool_result') items.push({ kind: 'system', key: r.id, text: r.content })
+    else if (meta.kind !== 'tool_result' && meta.kind !== 'question_answer') items.push({ kind: 'system', key: r.id, text: r.content })
   }
   return items
 }
@@ -82,6 +98,8 @@ export type CodeDeckAgent = {
   error?: string
   send: (text: string, attachments?: string[]) => void
   resolvePermission: (requestId: string, decision: 'allow' | 'deny', always?: boolean) => void
+  answerQuestion: (requestId: string, picks: QuestionPick[]) => void
+  cancelQuestion: (requestId: string) => void
   interrupt: () => void
 }
 
@@ -196,6 +214,13 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
           case 'permission_resolved':
             setLive((prev) => prev.map((i) => i.kind === 'permission' && i.requestId === m.requestId ? { ...i, status: m.decision ?? 'allow' } : i))
             break
+          case 'question':
+            // Backend re-broadcasts pending questions on reconnect — skip if already present.
+            setLive((prev) => prev.some((i) => i.kind === 'question' && i.requestId === m.requestId) ? prev : [...prev, { kind: 'question', key: m.id ?? m.requestId ?? crypto.randomUUID(), requestId: m.requestId ?? '', questions: m.questions ?? [], toolUseId: m.toolUseId, status: 'pending' }])
+            break
+          case 'question_resolved':
+            setLive((prev) => prev.map((i) => i.kind === 'question' && i.requestId === m.requestId ? { ...i, status: m.cancelled ? 'cancelled' : 'answered', answers: m.answers } : i))
+            break
           case 'result':
             setBusy(false)
             setThinking(false)
@@ -240,6 +265,27 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     setLive((prev) => prev.map((i) => i.kind === 'permission' && i.requestId === requestId ? { ...i, status: decision } : i))
   }, [])
 
+  const answerQuestion = useCallback((requestId: string, picks: QuestionPick[]) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ t: 'question', requestId, answers: picks }))
+    // Optimistically mark answered so the picker locks immediately.
+    const answers: Record<string, string> = {}
+    for (const p of picks) {
+      const parts = [...p.selected]
+      if (p.other?.trim()) parts.push(p.other.trim())
+      answers[p.question] = parts.join(', ')
+    }
+    setLive((prev) => prev.map((i) => i.kind === 'question' && i.requestId === requestId ? { ...i, status: 'answered', answers } : i))
+  }, [])
+
+  const cancelQuestion = useCallback((requestId: string) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ t: 'question', requestId, cancel: true }))
+    setLive((prev) => prev.map((i) => i.kind === 'question' && i.requestId === requestId ? { ...i, status: 'cancelled' } : i))
+  }, [])
+
   const interrupt = useCallback(() => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -260,5 +306,5 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
     }
     return result
   }, [historyItems, live])
-  return { items, streaming, thinking, busy, connected, lastCostUsd, lastEventAt, error, send, resolvePermission, interrupt }
+  return { items, streaming, thinking, busy, connected, lastCostUsd, lastEventAt, error, send, resolvePermission, answerQuestion, cancelQuestion, interrupt }
 }

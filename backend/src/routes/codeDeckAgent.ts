@@ -1,7 +1,7 @@
 import type { Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { randomUUID } from 'node:crypto'
-import { query, type Query, type PermissionResult, type PermissionUpdate, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type Query, type PermissionResult, type PermissionUpdate, type SDKMessage, type SDKUserMessage, type UserDialogRequest, type UserDialogResult } from '@anthropic-ai/claude-agent-sdk'
 import { getSession, saveMessage, setAgentSessionId, setSessionStatus, profileFor, EFFORT_LEVELS } from './codeDeck.js'
 
 // Live, persistent Code Deck sessions backed by the Claude Agent SDK.
@@ -22,6 +22,13 @@ const DISPOSE_GRACE_MS = 10 * 60 * 1000
 type Block = { type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown; tool_use_id?: string; is_error?: boolean; content?: unknown }
 type StreamEvent = { type: string; delta?: { type: string; text?: string; thinking?: string } }
 
+// One question surfaced by an AskUserQuestion dialog. Mirrors the SDK's
+// AskUserQuestionInput question shape (label/description options + multiSelect).
+type QuestionSpec = { question: string; header: string; multiSelect: boolean; options: { label: string; description: string }[] }
+// The operator's pick per question: chosen option labels plus an optional
+// free-text "Other" answer (AskUserQuestion always offers an implicit Other).
+type QuestionPick = { question: string; selected: string[]; other?: string }
+
 function summarizeToolResult(block: Block): string {
   const c = block.content
   if (typeof c === 'string') return c.slice(0, 600)
@@ -36,6 +43,47 @@ function toolSummary(name: string | undefined, input: unknown): string {
   const main = pick('command') || pick('file_path') || pick('path') || pick('pattern') || pick('url') || pick('description') || ''
   const s = main || JSON.stringify(i)
   return `${name ?? 'tool'}(${s.replace(/\s+/g, ' ').slice(0, 120)})`
+}
+
+// Pull the question picker out of a request_user_dialog payload. Tolerant of
+// shape drift: accepts either { questions: [...] } or a single question object.
+function parseQuestions(payload: Record<string, unknown> | undefined): QuestionSpec[] {
+  if (!payload) return []
+  const raw = Array.isArray(payload.questions)
+    ? payload.questions
+    : (payload.question ? [payload] : [])
+  const out: QuestionSpec[] = []
+  for (const q of raw as unknown[]) {
+    if (!q || typeof q !== 'object') continue
+    const obj = q as Record<string, unknown>
+    const question = typeof obj.question === 'string' ? obj.question : ''
+    const header = typeof obj.header === 'string' ? obj.header : ''
+    const multiSelect = Boolean(obj.multiSelect)
+    const rawOpts = Array.isArray(obj.options) ? obj.options : []
+    const options = (rawOpts as unknown[])
+      .map((o) => {
+        const oo = (o ?? {}) as Record<string, unknown>
+        return { label: typeof oo.label === 'string' ? oo.label : String(oo.label ?? ''), description: typeof oo.description === 'string' ? oo.description : '' }
+      })
+      .filter((o) => o.label)
+    if (question && options.length) out.push({ question, header, multiSelect, options })
+  }
+  return out
+}
+
+// Validate the operator's answer payload from the WebSocket into QuestionPicks.
+function normalizePicks(raw: unknown): QuestionPick[] {
+  if (!Array.isArray(raw)) return []
+  const out: QuestionPick[] = []
+  for (const p of raw) {
+    if (!p || typeof p !== 'object') continue
+    const obj = p as Record<string, unknown>
+    if (typeof obj.question !== 'string') continue
+    const selected = Array.isArray(obj.selected) ? obj.selected.filter((s): s is string => typeof s === 'string') : []
+    const other = typeof obj.other === 'string' ? obj.other : undefined
+    out.push({ question: obj.question, selected, other })
+  }
+  return out
 }
 
 class AgentRunner {
@@ -56,6 +104,8 @@ class AgentRunner {
   private busy = false
   private readonly sockets = new Set<WebSocket>()
   private readonly pending = new Map<string, { resolve: (r: PermissionResult) => void; input: Record<string, unknown>; suggestions: PermissionUpdate[] }>()
+  // AskUserQuestion dialogs awaiting an operator answer, keyed by our requestId.
+  private readonly pendingDialogs = new Map<string, { resolve: (r: UserDialogResult) => void; questions: QuestionSpec[]; toolUseId?: string; messageId?: string }>()
   private disposeTimer: NodeJS.Timeout | null = null
   private lastSubmit: { text: string; at: number } | null = null
   private runSeq = 0
@@ -90,6 +140,11 @@ class AgentRunner {
     // Re-surface any permission requests still waiting on a human.
     for (const [requestId, p] of this.pending) {
       this.send(ws, { t: 'permission', requestId, tool: String((p.input as { __tool?: string }).__tool ?? ''), input: p.input, canAlways: p.suggestions.length > 0, reason: '' })
+    }
+    // Re-surface any AskUserQuestion pickers still waiting on a human, so the
+    // interactive card stays answerable after a reconnect.
+    for (const [requestId, d] of this.pendingDialogs) {
+      this.send(ws, { t: 'question', requestId, id: d.messageId, questions: d.questions, toolUseId: d.toolUseId })
     }
   }
 
@@ -177,7 +232,12 @@ class AgentRunner {
         model: row.model,
         ...(EFFORT_LEVELS.includes(row.effort) ? { effort: row.effort as 'low' | 'medium' | 'high' | 'xhigh' | 'max' } : {}),
         permissionMode: 'bypassPermissions',
+        // AskUserQuestion is allowed: it surfaces as a request_user_dialog the
+        // operator answers via the interactive picker (handleDialog below).
+        // ExitPlanMode stays disallowed — Code Deck has no plan-approval UI.
+        disallowedTools: ['ExitPlanMode'],
         includePartialMessages: true,
+        onUserDialog: (req, o) => this.handleDialog(req, o),
         env,
         ...(this.agentSessionId ? { resume: this.agentSessionId } : {}),
         stderr: (data: string) => {
@@ -374,6 +434,65 @@ class AgentRunner {
     this.broadcast({ t: 'permission_resolved', requestId, decision, always })
   }
 
+  // ---- AskUserQuestion dialogs ------------------------------------------
+  // The CLI surfaces AskUserQuestion as a blocking `request_user_dialog`. We
+  // render it as an interactive picker over the WebSocket and block until the
+  // operator answers. The returned `result` is the documented
+  // AskUserQuestionOutput shape ({ questions, answers }); we log the raw kind
+  // and payload so the exact contract is captured on the first real fire.
+  private handleDialog(req: UserDialogRequest, opts: { signal: AbortSignal }): Promise<UserDialogResult> {
+    this.log('user dialog', req.dialogKind, JSON.stringify(req.payload).slice(0, 600))
+    const questions = parseQuestions(req.payload)
+    // Only the question picker is supported here. Cancel anything else so the
+    // CLI falls back to that dialog's default behavior (required for unknown kinds).
+    if (!questions.length) {
+      this.log('dialog kind not handled, cancelling:', req.dialogKind)
+      return Promise.resolve({ behavior: 'cancelled' })
+    }
+    const requestId = randomUUID()
+    const saved = saveMessage(this.sessionId, 'system', '❓ question for you', { kind: 'question', requestId, questions, toolUseId: req.toolUseID })
+    this.broadcast({ t: 'question', requestId, id: saved.id, questions, toolUseId: req.toolUseID, at: saved.createdAt })
+    return new Promise<UserDialogResult>((resolve) => {
+      this.pendingDialogs.set(requestId, { resolve, questions, toolUseId: req.toolUseID, messageId: saved.id })
+      const onAbort = () => {
+        if (this.pendingDialogs.delete(requestId)) {
+          resolve({ behavior: 'cancelled' })
+          this.broadcast({ t: 'question_resolved', requestId, cancelled: true })
+        }
+      }
+      opts.signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  answerQuestion(requestId: string, picks: QuestionPick[]) {
+    const entry = this.pendingDialogs.get(requestId)
+    if (!entry) return
+    this.pendingDialogs.delete(requestId)
+    // Build the answers map exactly as AskUserQuestionOutput documents it:
+    // question text -> answer string, multi-select joined by ", ".
+    const answers: Record<string, string> = {}
+    for (const q of entry.questions) {
+      const pick = picks.find((p) => p.question === q.question)
+      const parts = [...(pick?.selected ?? [])]
+      const other = pick?.other?.trim()
+      if (other) parts.push(other)
+      answers[q.question] = parts.join(', ')
+    }
+    this.log('dialog answered', JSON.stringify(answers).slice(0, 400))
+    saveMessage(this.sessionId, 'system', '✓ answered', { kind: 'question_answer', requestId, answers })
+    entry.resolve({ behavior: 'completed', result: { questions: entry.questions, answers } })
+    this.broadcast({ t: 'question_resolved', requestId, answers })
+  }
+
+  cancelQuestion(requestId: string) {
+    const entry = this.pendingDialogs.get(requestId)
+    if (!entry) return
+    this.pendingDialogs.delete(requestId)
+    saveMessage(this.sessionId, 'system', '✗ question dismissed', { kind: 'question_answer', requestId, cancelled: true })
+    entry.resolve({ behavior: 'cancelled' })
+    this.broadcast({ t: 'question_resolved', requestId, cancelled: true })
+  }
+
   async interrupt() {
     this.log('interrupt by operator')
     const old = this.q
@@ -383,6 +502,7 @@ class AgentRunner {
     this.inputQueue = []
     // Deny any outstanding prompts so the run can unwind.
     for (const requestId of [...this.pending.keys()]) this.resolvePermission(requestId, 'deny')
+    for (const requestId of [...this.pendingDialogs.keys()]) this.cancelQuestion(requestId)
     this.busy = false
     saveMessage(this.sessionId, 'system', 'Stopped by operator.')
     setSessionStatus(this.sessionId, 'idle')
@@ -399,6 +519,7 @@ class AgentRunner {
     this.log('dispose (idle, no sockets)')
     this.closed = true
     for (const requestId of [...this.pending.keys()]) this.resolvePermission(requestId, 'deny')
+    for (const requestId of [...this.pendingDialogs.keys()]) this.cancelQuestion(requestId)
     this.inputResolve?.()
     this.inputResolve = null
     void this.q?.interrupt().catch(() => {})
@@ -433,11 +554,15 @@ export function attachCodeDeckAgentWs(server: Server) {
     runner.attach(ws)
     runner.start()
     ws.on('message', (raw) => {
-      let msg: { t?: string; text?: string; attachments?: unknown; requestId?: string; decision?: 'allow' | 'deny'; always?: boolean }
+      let msg: { t?: string; text?: string; attachments?: unknown; requestId?: string; decision?: 'allow' | 'deny'; always?: boolean; cancel?: boolean; answers?: unknown }
       try { msg = JSON.parse(String(raw)) } catch { return }
       if (msg.t === 'ping') { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' })) }
       else if (msg.t === 'user' && typeof msg.text === 'string') runner.submitUser(msg.text, Array.isArray(msg.attachments) ? msg.attachments.filter((p): p is string => typeof p === 'string') : [])
       else if (msg.t === 'permission' && msg.requestId && (msg.decision === 'allow' || msg.decision === 'deny')) runner.resolvePermission(msg.requestId, msg.decision, Boolean(msg.always))
+      else if (msg.t === 'question' && msg.requestId) {
+        if (msg.cancel) runner.cancelQuestion(msg.requestId)
+        else runner.answerQuestion(msg.requestId, normalizePicks(msg.answers))
+      }
       else if (msg.t === 'interrupt') void runner.interrupt()
     })
     ws.on('close', () => runner.detach(ws))
