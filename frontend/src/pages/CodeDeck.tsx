@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Copy, Folder, GripVertical, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Copy, Folder, GripVertical, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -37,6 +37,19 @@ function reorder(keys: string[], from: string, to: string): string[] {
   const idx = arr.indexOf(to)
   if (idx === -1) return keys
   arr.splice(idx, 0, from)
+  return arr
+}
+
+// Touch-friendly reorder: swap `key` with its neighbour in direction `dir`
+// (-1 up, +1 down). HTML5 drag events never fire for touch, so mobile drives
+// reordering through up/down buttons that call this instead of the DnD handlers.
+function moveInOrder(keys: string[], key: string, dir: -1 | 1): string[] {
+  const i = keys.indexOf(key)
+  if (i === -1) return keys
+  const j = i + dir
+  if (j < 0 || j >= keys.length) return keys
+  const arr = [...keys]
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
   return arr
 }
 
@@ -108,7 +121,7 @@ function CompactUsageBar({ pct, label }: { pct: number; label: string }) {
   )
 }
 
-function SessionCard({ s, selected, onSelect, onPin, onDelete, drag }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; drag?: { onDragStart: () => void; onDragEnd: () => void; onDrop: () => void; dragging: boolean } }) {
+function SessionCard({ s, selected, onSelect, onPin, onDelete, drag, move }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; drag?: { onDragStart: () => void; onDragEnd: () => void; onDrop: () => void; dragging: boolean }; move?: { onUp: () => void; onDown: () => void; canUp: boolean; canDown: boolean } }) {
   return (
     <div
       draggable={Boolean(drag)}
@@ -119,7 +132,7 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete, drag }: { s: Code
       className={drag?.dragging ? 'opacity-40' : ''}
     >
       <button type="button" onClick={onSelect} className={`flex w-full items-start gap-2 border p-3 text-left transition ${selected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.06)]' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}>
-        {drag && <GripVertical size={14} className="mt-0.5 shrink-0 cursor-grab text-[var(--color-text-faint)]" />}
+        {drag && <GripVertical size={14} className="mt-0.5 hidden shrink-0 cursor-grab text-[var(--color-text-faint)] lg:block" />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {s.pinned && <Pin size={12} className="shrink-0 text-[var(--color-accent)]" />}
@@ -129,6 +142,12 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete, drag }: { s: Code
           <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{s.cwd}</div>
         </div>
         <div className="flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
+          {move && (
+            <div className="flex flex-col lg:hidden">
+              <button type="button" onClick={move.onUp} disabled={!move.canUp} aria-label="Move up" className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronUp size={11} /></button>
+              <button type="button" onClick={move.onDown} disabled={!move.canDown} aria-label="Move down" className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronDown size={11} /></button>
+            </div>
+          )}
           <button type="button" onClick={onPin} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]">{s.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
           <button type="button" onClick={onDelete} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-danger)]"><Trash2 size={12} /></button>
         </div>
@@ -224,6 +243,10 @@ export default function CodeDeck() {
   const dropGroup = (target: string) => { if (drag?.type === 'group') { prefsMut.mutate({ groupOrder: reorder(groupNames, drag.key, target) }); setDrag(null) } }
   const dropProject = (group: string, ordered: string[], target: string) => { if (drag?.type === 'project' && drag.group === group) { prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: reorder(ordered, drag.key, target) } }); setDrag(null) } }
   const dropPinned = (target: string) => { if (drag?.type === 'pinned') { prefsMut.mutate({ pinnedOrder: reorder(pinned.map((s) => s.id), drag.key, target) }); setDrag(null) } }
+  // Touch reorder (mobile up/down buttons) — same persistence as the DnD drops.
+  const moveGroup = (name: string, dir: -1 | 1) => prefsMut.mutate({ groupOrder: moveInOrder(groupNames, name, dir) })
+  const moveProject = (group: string, ordered: string[], name: string, dir: -1 | 1) => prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: moveInOrder(ordered, name, dir) } })
+  const movePinned = (id: string, dir: -1 | 1) => prefsMut.mutate({ pinnedOrder: moveInOrder(pinned.map((s) => s.id), id, dir) })
 
   // Close the mobile drawer after a navigation action. No-op on desktop, where
   // the sidebar is a persistent inline column rather than an overlay.
@@ -642,7 +665,7 @@ export default function CodeDeck() {
               ) : pinned.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
               ) : (
-                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} drag={{ onDragStart: () => setDrag({ type: 'pinned', key: s.id }), onDragEnd: () => setDrag(null), onDrop: () => dropPinned(s.id), dragging: drag?.type === 'pinned' && drag.key === s.id }} />)}</div>
+                <div className="space-y-2">{pinned.map((s, i) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} drag={{ onDragStart: () => setDrag({ type: 'pinned', key: s.id }), onDragEnd: () => setDrag(null), onDrop: () => dropPinned(s.id), dragging: drag?.type === 'pinned' && drag.key === s.id }} move={{ onUp: () => movePinned(s.id, -1), onDown: () => movePinned(s.id, 1), canUp: i > 0, canDown: i < pinned.length - 1 }} />)}</div>
               )}
             </Card>
             <Card>
@@ -679,7 +702,7 @@ export default function CodeDeck() {
               {foldersCollapsed ? (
                 <div className="text-sm text-[var(--color-text-dim)]">Folders hidden.</div>
               ) : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
-                {projectGroups.map(([name, roots]) => {
+                {projectGroups.map(([name, roots], gi) => {
                   // The synthetic group-root entry (id `group:<name>`) drives the
                   // group header itself; it is not shown as a separate row.
                   const groupRoot = roots.find((r) => r.id === `group:${name}`)
@@ -704,7 +727,11 @@ export default function CodeDeck() {
                         onDrop={() => dropGroup(name)}
                         className={`mb-2 flex w-full items-center gap-1.5 ${drag?.type === 'group' && drag.key === name ? 'opacity-40' : ''}`}
                       >
-                        <GripVertical size={13} className="shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" />
+                        <GripVertical size={13} className="hidden shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)] lg:block" />
+                        <div className="flex shrink-0 flex-col lg:hidden">
+                          <button type="button" onClick={() => moveGroup(name, -1)} disabled={gi === 0} aria-label={`Move ${name} up`} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronUp size={11} /></button>
+                          <button type="button" onClick={() => moveGroup(name, 1)} disabled={gi === projectGroups.length - 1} aria-label={`Move ${name} down`} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronDown size={11} /></button>
+                        </div>
                         <button
                           type="button"
                           onClick={() => (groupRoot ? selectRoot(groupRoot.id) : toggleGroup(name))}
@@ -719,7 +746,7 @@ export default function CodeDeck() {
                         </button>
                       </div>
                       {!groupCollapsed && <div className="space-y-1.5">
-                        {orderedParentNames.map((parentName) => {
+                        {orderedParentNames.map((parentName, pi) => {
                           const parentRoot = parents.find((r) => r.label === parentName)
                           const kids = childrenByParent.get(parentName) ?? []
                           const key = `${name}:${parentName}`
@@ -735,7 +762,11 @@ export default function CodeDeck() {
                               className={`space-y-1.5 ${drag?.type === 'project' && drag.group === name && drag.key === parentName ? 'opacity-40' : ''}`}
                             >
                               <div className="flex items-stretch gap-1">
-                                <GripVertical size={14} className="mt-2 shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" />
+                                <GripVertical size={14} className="mt-2 hidden shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)] lg:block" />
+                                <div className="flex shrink-0 flex-col justify-center lg:hidden">
+                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, -1)} disabled={pi === 0} aria-label={`Move ${parentName} up`} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronUp size={11} /></button>
+                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, 1)} disabled={pi === orderedParentNames.length - 1} aria-label={`Move ${parentName} down`} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronDown size={11} /></button>
+                                </div>
                                 {kids.length > 0 ? (
                                   <button type="button" onClick={() => toggleFolder(key)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={open ? 'Collapse folder' : 'Expand folder'}>
                                     {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -840,16 +871,16 @@ export default function CodeDeck() {
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-end gap-2">
-                            <label className="flex flex-col gap-1 sm:w-56">
+                            <label className="flex w-full flex-col gap-1 sm:w-56">
                               <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
                               <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full" />
                             </label>
-                            <label className="flex flex-col gap-1 sm:w-44">
+                            <label className="flex w-[calc(50%-0.25rem)] flex-col gap-1 sm:w-44">
                               <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
                               <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full" />
                             </label>
                             {isClaudeProfile && (
-                              <label className="flex flex-col gap-1 sm:w-44">
+                              <label className="flex w-[calc(50%-0.25rem)] flex-col gap-1 sm:w-44">
                                 <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">effort</span>
                                 <Dropdown size="sm" value={selected.effort ?? ''} onChange={changeEffort} options={effortLevels.map((e) => ({ value: e, label: effortLabel(e) }))} className="w-full" />
                               </label>
@@ -997,7 +1028,7 @@ export default function CodeDeck() {
                           {uploadAttachment.error && <div className="text-xs text-[var(--color-danger)]">{(uploadAttachment.error as Error).message}</div>}
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-                              <span>Enter to send · Shift+Enter for newline</span>
+                              <span className="hidden sm:inline">Enter to send · Shift+Enter for newline</span>
                               <span className={agent.connected ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}>[{agent.connected ? 'live' : 'offline'}]</span>
                               {agent.busy && activeAgeLabel && <span className={longQuiet ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}>{longQuiet ? `waiting ${activeAgeLabel}` : `${activeStatus.toLowerCase()} ${activeAgeLabel}`}</span>}
                               {typeof agent.lastCostUsd === 'number' && <span>${agent.lastCostUsd.toFixed(4)}</span>}
