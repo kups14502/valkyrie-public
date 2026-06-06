@@ -15,6 +15,10 @@ on:
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
 
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   android:
     runs-on: ubuntu-latest

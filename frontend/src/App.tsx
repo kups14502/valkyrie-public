@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
@@ -8,6 +8,7 @@ import { TitleBar } from './components/TitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped } from './lib/auth'
+import { runUpdateCheck } from './lib/updater'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -206,6 +207,8 @@ function logout() {
 }
 
 export default function App() {
+  // Desktop app: check for updates once on launch (no-op on web).
+  useEffect(() => { void runUpdateCheck() }, [])
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>

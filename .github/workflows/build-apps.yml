@@ -1,9 +1,9 @@
 name: build-apps
 
 # Builds the dedicated Tauri desktop apps (Windows / macOS / Linux) on every
-# push to main that touches the frontend, plus on-demand via "Run workflow".
-# Installers are uploaded as downloadable artifacts on each run. Android and
-# iOS are added in a later pass.
+# push to main that touches the frontend, plus on-demand. Publishes a signed
+# GitHub Release (with the updater manifest latest.json) so installed apps
+# auto-update. Installers are also uploaded as run artifacts for direct download.
 
 on:
   push:
@@ -13,8 +13,14 @@ on:
       - '.github/workflows/build-apps.yml'
   workflow_dispatch:
 
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -52,16 +58,25 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build Tauri app
+      - name: Set build version (so installed apps detect the update)
+        run: node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='0.1.${{ github.run_number }}';require('fs').writeFileSync(f, JSON.stringify(c,null,2)+'\n')"
+
+      - name: Build + release Tauri app
         uses: tauri-apps/tauri-action@v0
-        with:
-          projectPath: frontend
         env:
-          # Bake the production API host into the bundled web build.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VITE_API_URL: https://master-control-api.brendonkupsch.com
           VITE_BUILD_ID: ${{ github.sha }}
+        with:
+          projectPath: frontend
+          tagName: app-v__VERSION__
+          releaseName: Master Control v__VERSION__
+          releaseDraft: false
+          prerelease: false
 
-      - name: Upload installers
+      - name: Upload installers (run artifact)
         uses: actions/upload-artifact@v4
         with:
           name: master-control-${{ matrix.platform }}

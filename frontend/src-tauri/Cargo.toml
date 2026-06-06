@@ -23,3 +23,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.2" }
 tauri-plugin-log = "2"
+
+# Desktop-only auto-update (not built on mobile targets).
+[target."cfg(any(target_os = \"macos\", target_os = \"windows\", target_os = \"linux\"))".dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
