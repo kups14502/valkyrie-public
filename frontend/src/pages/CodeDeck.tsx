@@ -199,6 +199,9 @@ export default function CodeDeck() {
   const termDivRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  // Key of the message whose collapse was last toggled, consumed once by an
+  // effect to scroll the chat when the *last* message is expanded below the fold.
+  const lastToggledKeyRef = useRef<string | null>(null)
   const linkBufRef = useRef('')
   const lastSendRef = useRef<{ text: string; at: number } | null>(null)
 
@@ -387,6 +390,12 @@ export default function CodeDeck() {
       return { ...item, done: item.done || !agent.busy || !isLatest }
     })
   }, [agent.items, agent.busy, finalAssistantKeys])
+
+  // Toggle key of the bottom-most rendered block (activity blocks key on their
+  // own `key`; messages on the underlying item's key).
+  const lastDisplayKey = displayItems.length
+    ? (() => { const last = displayItems[displayItems.length - 1]; return last.kind === 'activity' ? last.key : last.item.key })()
+    : null
 
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
@@ -596,7 +605,19 @@ export default function CodeDeck() {
       (it.kind === 'permission' && it.status !== 'pending')
     return toggledKeys.has(it.key) ? !defaultCollapsed : defaultCollapsed
   }
-  const toggleCollapsed = (key: string) => setToggledKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
+  const toggleCollapsed = (key: string) => { lastToggledKeyRef.current = key; setToggledKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next }) }
+
+  // When the bottom-most message is expanded, its revealed content can land
+  // below the viewport; pin the chat to the bottom so it scrolls into view.
+  // (Toggling any other message leaves the scroll position untouched.)
+  useEffect(() => {
+    const key = lastToggledKeyRef.current
+    lastToggledKeyRef.current = null
+    if (key && key === lastDisplayKey) {
+      const el = chatScrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
+  }, [toggledKeys, lastDisplayKey])
 
   const newSessionForm = (
     <Card title="New session">
