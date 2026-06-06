@@ -1,0 +1,73 @@
+name: build-android
+
+# Builds the Android APK for the dedicated phone app. Separate from the desktop
+# workflow because Android needs the full Java + Android SDK + NDK + Rust
+# cross-compile toolchain. First runs of this are expected to need iteration.
+#
+# Produces a DEBUG-signed APK (installable via sideload) for personal use — no
+# release keystore / Play Store yet. That can be added later.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + platform
+        run: sdkmanager "ndk;26.1.10909125" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Install Rust (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './frontend/src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Init + build Android (debug APK)
+        env:
+          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+          VITE_API_URL: https://master-control-api.brendonkupsch.com
+          VITE_BUILD_ID: ${{ github.sha }}
+        run: |
+          npx tauri android init --ci
+          npx tauri android build --apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-control-android
+          if-no-files-found: warn
+          path: |
+            frontend/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
