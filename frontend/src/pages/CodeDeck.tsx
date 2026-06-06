@@ -545,6 +545,12 @@ export default function CodeDeck() {
     if (lastSendRef.current?.text === dedupeKey && now - lastSendRef.current.at < 1500) return
     lastSendRef.current = { text: dedupeKey, at: now }
     agent.send(text, attached.map((a) => a.path))
+    // Drop manual collapse overrides on existing prompts so they fall back to
+    // the default (collapsed once they're no longer newest). Keeps the "only the
+    // newest prompt is expanded" rule airtight even if the current prompt was
+    // manually toggled. Overrides on assistant/activity blocks are preserved.
+    const userKeys = new Set(agent.items.filter((i) => i.kind === 'user').map((i) => i.key))
+    setToggledKeys((prev) => new Set([...prev].filter((k) => !userKeys.has(k))))
     setChatInput('')
     clearAttached()
   }
