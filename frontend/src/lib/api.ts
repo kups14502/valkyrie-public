@@ -450,6 +450,7 @@ export type CodeDeckSession = {
   cwd: string
   profileId: string
   model: string
+  effort: string
   pinned: boolean
   status: string
   notes: string
@@ -460,16 +461,23 @@ export type CodeDeckSession = {
 
 export type CodeDeckRoot = { id: string; label: string; path: string; folder: string; exists: boolean }
 export type CodeDeckProfile = { id: string; label: string; provider: string; defaultModel: string; command: string; env: Record<string, string> }
+export type CodeDeckPrefs = { groupOrder: string[]; projectOrder: Record<string, string[]>; pinnedOrder: string[] }
 export type CodeDeckState = {
   sessions: CodeDeckSession[]
   folders: string[]
   projectRoots: CodeDeckRoot[]
   profiles: CodeDeckProfile[]
+  prefs: CodeDeckPrefs
 }
 
 export const fetchCodeDeck = async () => {
   const r = await api.get<CodeDeckState>('/code-deck')
   return r.data
+}
+
+export const updateCodeDeckPrefs = async (body: Partial<CodeDeckPrefs>) => {
+  const r = await api.put<{ prefs: CodeDeckPrefs }>('/code-deck/prefs', body)
+  return r.data.prefs
 }
 
 export const createCodeDeckSession = async (body: Partial<CodeDeckSession>) => {

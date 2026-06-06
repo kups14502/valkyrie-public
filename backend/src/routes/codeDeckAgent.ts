@@ -2,7 +2,7 @@ import type { Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { randomUUID } from 'node:crypto'
 import { query, type Query, type PermissionResult, type PermissionUpdate, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import { getSession, saveMessage, setAgentSessionId, setSessionStatus, profileFor } from './codeDeck.js'
+import { getSession, saveMessage, setAgentSessionId, setSessionStatus, profileFor, EFFORT_LEVELS } from './codeDeck.js'
 
 // Live, persistent Code Deck sessions backed by the Claude Agent SDK.
 //
@@ -52,6 +52,7 @@ class AgentRunner {
   // restart — see applyConfigChange().
   private activeModel = ''
   private activeProfileId = ''
+  private activeEffort = ''
   private busy = false
   private readonly sockets = new Set<WebSocket>()
   private readonly pending = new Map<string, { resolve: (r: PermissionResult) => void; input: Record<string, unknown>; suggestions: PermissionUpdate[] }>()
@@ -135,8 +136,8 @@ class AgentRunner {
     // so this turn actually runs on the selected model. Don't wake the old input
     // generator (no inputResolve here) — the fresh stream picks up the queued turn.
     const row = getSession(this.sessionId)
-    if (this.started && this.q && row && (row.model !== this.activeModel || row.profileId !== this.activeProfileId)) {
-      this.log('config change', `${this.activeModel}/${this.activeProfileId} → ${row.model}/${row.profileId} — restarting stream`)
+    if (this.started && this.q && row && (row.model !== this.activeModel || row.profileId !== this.activeProfileId || row.effort !== this.activeEffort)) {
+      this.log('config change', `${this.activeModel}/${this.activeProfileId}/${this.activeEffort || 'default'} → ${row.model}/${row.profileId}/${row.effort || 'default'} — restarting stream`)
       void this.applyConfigChange()
       return
     }
@@ -162,6 +163,7 @@ class AgentRunner {
     this.usedResume = Boolean(this.agentSessionId)
     this.activeModel = row.model
     this.activeProfileId = row.profileId
+    this.activeEffort = row.effort
     setSessionStatus(this.sessionId, 'running')
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v
@@ -173,6 +175,7 @@ class AgentRunner {
       options: {
         cwd: row.cwd,
         model: row.model,
+        ...(EFFORT_LEVELS.includes(row.effort) ? { effort: row.effort as 'low' | 'medium' | 'high' | 'xhigh' | 'max' } : {}),
         permissionMode: 'bypassPermissions',
         includePartialMessages: true,
         env,

@@ -1,18 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Copy, Folder, PanelLeft, PanelLeftClose, Paperclip, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Copy, Folder, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
 import { Markdown } from '../components/Markdown'
-import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckSession } from '../lib/api'
+import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckPrefs, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckPrefs, type CodeDeckSession } from '../lib/api'
 import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
 const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
 const codexModels = ['gpt-5.5']
 const modelLabel = (m: string) => m.replace(/^claude-/, '')
+// Reasoning effort levels. '' = default (let the model decide).
+const effortLevels = ['', 'low', 'medium', 'high', 'xhigh', 'max']
+const effortLabel = (e: string) => (e ? `effort: ${e}` : 'effort: default')
+
+// Sort `items` by the user-defined `order` (list of keys); unknown/new items fall
+// back to alphabetical so they append in a stable, sensible position.
+function applyOrder<T>(items: T[], order: string[] | undefined, keyOf: (t: T) => string): T[] {
+  const idx = new Map((order ?? []).map((k, i) => [k, i] as const))
+  return [...items].sort((a, b) => {
+    const ai = idx.get(keyOf(a)) ?? Infinity
+    const bi = idx.get(keyOf(b)) ?? Infinity
+    return ai - bi || keyOf(a).localeCompare(keyOf(b))
+  })
+}
+
+// Move the item with `key` one slot up (dir -1) or down (dir +1) within `keys`,
+// returning the new full ordering. Used to persist reorder arrow clicks.
+function moveInOrder(keys: string[], key: string, dir: -1 | 1): string[] {
+  const arr = [...keys]
+  const i = arr.indexOf(key)
+  if (i === -1) return arr
+  const j = i + dir
+  if (j < 0 || j >= arr.length) return arr
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  return arr
+}
 
 
 const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
@@ -82,7 +108,7 @@ function CompactUsageBar({ pct, label }: { pct: number; label: string }) {
   )
 }
 
-function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void }) {
+function SessionCard({ s, selected, onSelect, onPin, onDelete, onMove }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; onMove?: (dir: -1 | 1) => void }) {
   return (
     <button type="button" onClick={onSelect} className={`w-full border p-3 text-left transition ${selected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.06)]' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}>
       <div className="flex items-start justify-between gap-2">
@@ -91,10 +117,16 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete }: { s: CodeDeckSe
             {s.pinned && <Pin size={12} className="shrink-0 text-[var(--color-accent)]" />}
             <div className="truncate text-sm font-semibold text-[var(--color-text)]">{s.title}</div>
           </div>
-          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{s.profileId} · {modelLabel(s.model)}</div>
+          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{s.profileId} · {modelLabel(s.model)}{s.effort ? ` · ${s.effort}` : ''}</div>
           <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{s.cwd}</div>
         </div>
         <div className="flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
+          {onMove && (
+            <div className="flex flex-col">
+              <button type="button" onClick={() => onMove(-1)} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Move up"><ChevronUp size={11} /></button>
+              <button type="button" onClick={() => onMove(1)} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Move down"><ChevronDown size={11} /></button>
+            </div>
+          )}
           <button type="button" onClick={onPin} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]">{s.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
           <button type="button" onClick={onDelete} className="border border-[var(--color-border)] p-1 text-[var(--color-text-dim)] hover:text-[var(--color-danger)]"><Trash2 size={12} /></button>
         </div>
@@ -111,6 +143,10 @@ export default function CodeDeck() {
   const [rootId, setRootId] = useState('work')
   const [profileId, setProfileId] = useState('main-claude')
   const [model, setModel] = useState('claude-sonnet-4-6')
+  const [effort, setEffort] = useState('')
+  const [customPath, setCustomPath] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const [renameText, setRenameText] = useState('')
   const [terminalState, setTerminalState] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
   const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
   const [chatInput, setChatInput] = useState('')
@@ -148,6 +184,7 @@ export default function CodeDeck() {
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); setShowNew(false); void refresh() } })
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<CodeDeckSession> }) => updateCodeDeckSession(id, body), onSuccess: () => { void refresh() } })
   const del = useMutation({ mutationFn: deleteCodeDeckSession, onSuccess: () => { setSelectedId(null); void refresh() } })
+  const prefsMut = useMutation({ mutationFn: updateCodeDeckPrefs, onSuccess: () => { void refresh() } })
 
   const sessions = deck.data?.sessions ?? []
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null
@@ -157,23 +194,32 @@ export default function CodeDeck() {
     mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) => uploadCodeDeckAttachment(sessionId, file),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['code-deck-messages', selected?.id] }); void refresh() },
   })
+  const prefs: CodeDeckPrefs = deck.data?.prefs ?? { groupOrder: [], projectOrder: {}, pinnedOrder: [] }
   const grouped = useMemo(() => {
     const out = new Map<string, CodeDeckSession[]>()
     for (const s of sessions) {
       if (!out.has(s.folder)) out.set(s.folder, [])
       out.get(s.folder)!.push(s)
     }
-    return Array.from(out.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [sessions])
+    return applyOrder(Array.from(out.entries()), prefs.groupOrder, ([name]) => name)
+  }, [sessions, prefs.groupOrder])
   const projectGroups = useMemo(() => {
     const out = new Map<string, NonNullable<typeof deck.data>['projectRoots']>()
     for (const r of deck.data?.projectRoots ?? []) {
       if (!out.has(r.folder)) out.set(r.folder, [])
       out.get(r.folder)!.push(r)
     }
-    return Array.from(out.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [deck.data])
-  const pinned = sessions.filter((s) => s.pinned)
+    return applyOrder(Array.from(out.entries()), prefs.groupOrder, ([name]) => name)
+  }, [deck.data, prefs.groupOrder])
+  const pinned = applyOrder(sessions.filter((s) => s.pinned), prefs.pinnedOrder, (s) => s.id)
+  // Ordered list of folder-group names, used to drive group reorder arrows.
+  const groupNames = useMemo(() => applyOrder(Array.from(new Set(projectGroups.map(([n]) => n))), prefs.groupOrder, (n) => n), [projectGroups, prefs.groupOrder])
+
+  // ----- reorder persistence helpers -----
+  const moveGroup = (name: string, dir: -1 | 1) => prefsMut.mutate({ groupOrder: moveInOrder(groupNames, name, dir) })
+  const moveProject = (groupName: string, orderedIds: string[], id: string, dir: -1 | 1) =>
+    prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [groupName]: moveInOrder(orderedIds, id, dir) } })
+  const movePinned = (id: string, dir: -1 | 1) => prefsMut.mutate({ pinnedOrder: moveInOrder(pinned.map((s) => s.id), id, dir) })
 
   const openSession = (id: string) => {
     setSelectedId(id)
@@ -236,6 +282,17 @@ export default function CodeDeck() {
     if (!selected) return
     update.mutate({ id: selected.id, body: { model: newModel } })
   }
+  const changeEffort = (newEffort: string) => {
+    if (!selected) return
+    update.mutate({ id: selected.id, body: { effort: newEffort } })
+  }
+  const startRename = () => { if (selected) { setRenameText(selected.title); setRenaming(true) } }
+  const commitRename = () => {
+    if (!selected) { setRenaming(false); return }
+    const t = renameText.trim()
+    if (t && t !== selected.title) update.mutate({ id: selected.id, body: { title: t } })
+    setRenaming(false)
+  }
 
   // Match accounts/providers to usage clients from the dashboard feed.
   const usageBars = useMemo(() => usageBarsForProfile(aiUsage.data as AIUsage | undefined, selectedProfile), [aiUsage.data, selectedProfile])
@@ -277,7 +334,14 @@ export default function CodeDeck() {
     return () => clearInterval(timer)
   }, [])
 
-  const makeSession = () => create.mutate({ title, folder: root?.folder, projectRootId: rootId, cwd: root?.path, profileId, model: availableModels.includes(model) ? model : availableModels[0] })
+  const makeSession = () => {
+    const custom = customPath.trim()
+    const base = { title, profileId, model: availableModels.includes(model) ? model : availableModels[0], effort: profile?.provider === 'codex' ? '' : effort }
+    const loc = custom
+      ? { cwd: custom, folder: 'Custom', projectRootId: 'custom' }
+      : { folder: root?.folder, projectRootId: rootId, cwd: root?.path }
+    create.mutate({ ...base, ...loc })
+  }
   const activeAgeSeconds = agent.lastEventAt ? Math.max(0, Math.floor((nowMs - agent.lastEventAt) / 1000)) : null
   const activeAgeLabel = activeAgeSeconds == null ? '' : activeAgeSeconds < 60 ? `${activeAgeSeconds}s` : `${Math.floor(activeAgeSeconds / 60)}m ${activeAgeSeconds % 60}s`
   const activeActivity = [...displayItems].reverse().find((item): item is ActivityBlock => item.kind === 'activity' && !item.done)
@@ -457,6 +521,7 @@ export default function CodeDeck() {
       return []
     })
     setToggledKeys(new Set())
+    setRenaming(false)
   }, [selected?.id])
 
   // Compute collapsed state directly from item kind/status — no effect needed.
@@ -478,12 +543,17 @@ export default function CodeDeck() {
         <div className="min-w-0 space-y-1 xl:col-span-2">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">selected server folder</span>
           <div className="min-w-0 overflow-hidden border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-sm text-[var(--color-text)]">
-            {root ? <span className="block truncate">[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder in the sidebar</span>}
+            {customPath.trim() ? <span className="block truncate text-[var(--color-accent)]">[Custom] {customPath.trim()}</span> : root ? <span className="block truncate">[{root.folder}] {root.label}</span> : <span className="text-[var(--color-text-faint)]">select a folder in the sidebar</span>}
           </div>
         </div>
         <button type="button" onClick={makeSession} disabled={create.isPending} className="mt-4 inline-flex items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)] disabled:opacity-50"><Plus size={14} /> create</button>
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <label className="mt-3 block min-w-0 space-y-1">
+        <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">custom path (optional — overrides folder; must be under /home/brendon)</span>
+        <input value={customPath} onChange={(e) => setCustomPath(e.target.value)} className="w-full min-w-0 border border-[var(--color-border)] bg-transparent px-3 py-2 font-mono text-sm outline-none focus:border-[var(--color-accent)]" placeholder="/home/brendon/some/folder" />
+      </label>
+      {create.error && <div className="mt-2 text-xs text-[var(--color-danger)]">{(create.error as Error).message}</div>}
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
         <label className="space-y-1">
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
           <Dropdown value={profileId} onChange={setProfileId} options={orderedProfiles(deck.data?.profiles).map((p) => ({ value: p.id, label: p.label }))} />
@@ -492,6 +562,12 @@ export default function CodeDeck() {
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
           <Dropdown value={availableModels.includes(model) ? model : availableModels[0]} onChange={setModel} options={availableModels.map((m) => ({ value: m, label: modelLabel(m) }))} />
         </label>
+        {profile?.provider !== 'codex' && (
+          <label className="space-y-1">
+            <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">reasoning effort</span>
+            <Dropdown value={effort} onChange={setEffort} options={effortLevels.map((e) => ({ value: e, label: effortLabel(e) }))} />
+          </label>
+        )}
       </div>
       <div className="mt-3 rounded border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-4">
         <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">usage for {profile?.label ?? 'selected account'}</div>
@@ -524,7 +600,7 @@ export default function CodeDeck() {
               ) : pinned.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
               ) : (
-                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} />)}</div>
+                <div className="space-y-2">{pinned.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} onMove={(dir) => movePinned(s.id, dir)} />)}</div>
               )}
             </Card>
             <Card>
@@ -571,15 +647,22 @@ export default function CodeDeck() {
                   }
                   const parentNames = new Set([...parents.map((r) => r.label), ...childrenByParent.keys()])
                   const groupCollapsed = collapsedGroups.has(name)
+                  const orderedParentNames = applyOrder([...parentNames], prefs.projectOrder[name], (pn) => pn)
                   return (
                     <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
-                      <button type="button" onClick={() => toggleGroup(name)} className="mb-2 flex w-full items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)] hover:opacity-80" aria-label={groupCollapsed ? `Expand ${name}` : `Collapse ${name}`}>
-                        <Folder size={14} className="shrink-0" />
-                        <span className="flex-1 text-left">{name}</span>
-                        {groupCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
-                      </button>
+                      <div className="mb-2 flex w-full items-center gap-1">
+                        <div className="flex flex-col">
+                          <button type="button" onClick={() => moveGroup(name, -1)} className="text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label={`Move ${name} up`}><ChevronUp size={11} /></button>
+                          <button type="button" onClick={() => moveGroup(name, 1)} className="text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label={`Move ${name} down`}><ChevronDown size={11} /></button>
+                        </div>
+                        <button type="button" onClick={() => toggleGroup(name)} className="flex flex-1 items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)] hover:opacity-80" aria-label={groupCollapsed ? `Expand ${name}` : `Collapse ${name}`}>
+                          <Folder size={14} className="shrink-0" />
+                          <span className="flex-1 text-left">{name}</span>
+                          {groupCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
+                        </button>
+                      </div>
                       {!groupCollapsed && <div className="space-y-1.5">
-                        {[...parentNames].sort().map((parentName) => {
+                        {orderedParentNames.map((parentName) => {
                           const parentRoot = parents.find((r) => r.label === parentName)
                           const kids = childrenByParent.get(parentName) ?? []
                           const key = `${name}:${parentName}`
@@ -587,6 +670,10 @@ export default function CodeDeck() {
                           return (
                             <div key={key} className="space-y-1.5">
                               <div className="flex gap-1">
+                                <div className="flex flex-col shrink-0">
+                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, -1)} className="border border-[var(--color-border)] px-1 text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label="Move up"><ChevronUp size={10} /></button>
+                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, 1)} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label="Move down"><ChevronDown size={10} /></button>
+                                </div>
                                 {kids.length > 0 ? (
                                   <button type="button" onClick={() => toggleFolder(key)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={open ? 'Collapse folder' : 'Expand folder'}>
                                     {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -662,7 +749,21 @@ export default function CodeDeck() {
                             <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-1.5 py-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={15} /></button>
                           )}
                           <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
-                          <span className="truncate">{selected.title}</span>
+                          {renaming ? (
+                            <input
+                              autoFocus
+                              value={renameText}
+                              onChange={(e) => setRenameText(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRename() } if (e.key === 'Escape') setRenaming(false) }}
+                              onBlur={commitRename}
+                              className="min-w-0 flex-1 border border-[var(--color-accent)] bg-transparent px-2 py-0.5 text-base font-semibold text-[var(--color-text)] outline-none sm:text-xl"
+                            />
+                          ) : (
+                            <>
+                              <span className="truncate">{selected.title}</span>
+                              <button type="button" onClick={startRename} className="shrink-0 text-[var(--color-text-faint)] hover:text-[var(--color-accent)]" aria-label="Rename session"><Pencil size={14} /></button>
+                            </>
+                          )}
                         </div>
                         {metaCollapsed && sessionUsage && <CompactUsageBar pct={sessionUsage.pct} label={sessionUsage.label} />}
                       </div>
@@ -678,6 +779,9 @@ export default function CodeDeck() {
                           <div className="flex flex-wrap items-center gap-2">
                             <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
                             <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full sm:w-44" />
+                            {isClaudeProfile && (
+                              <Dropdown size="sm" value={selected.effort ?? ''} onChange={changeEffort} options={effortLevels.map((e) => ({ value: e, label: effortLabel(e) }))} className="w-full sm:w-40" />
+                            )}
                             <button type="button" onClick={() => update.mutate({ id: selected.id, body: { pinned: !selected.pinned } })} className="shrink-0 border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">{selected.pinned ? 'unpin' : 'pin'}</button>
                           </div>
                           <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--color-text-dim)]"><Folder size={12} className="shrink-0 text-[var(--color-accent)]" /><span className="truncate">{selected.cwd}</span></div>
@@ -706,7 +810,10 @@ export default function CodeDeck() {
                           ) : displayItems.map((di) => {
                             if (di.kind === 'activity') {
                               const collapsed = !toggledKeys.has(di.key)
-                              const label = di.toolNames.length ? di.toolNames.slice(0, 6).join(' · ') : 'thinking'
+                              // Activity blocks with no tool calls are system notices (e.g. an
+                              // attachment-upload message logged before the first prompt) — not
+                              // thinking. Live thinking is shown by the busy status line below.
+                              const label = di.toolNames.length ? di.toolNames.slice(0, 6).join(' · ') : 'context'
                               return (
                                 <div key={di.key} className="rounded border border-[var(--color-border)]/50 bg-[rgba(255,255,255,0.01)]">
                                   <button type="button" onClick={() => toggleCollapsed(di.key)} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left">

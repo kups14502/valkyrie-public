@@ -28,6 +28,16 @@ function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'folder'
 }
 
+// Synthetic "run at the group root" entries. Folder groups are just labels with
+// no single folder on disk, so each is given an explicit root path. These are
+// keyed by id (not path) so Personal/OpenClaw can both point at the home dir
+// without the path-dedup below dropping one.
+const GROUP_ROOTS: ProjectRoot[] = [
+  { id: 'group:Personal', label: '● Personal (root)', path: homedir(), folder: 'Personal' },
+  { id: 'group:Work', label: '● Work (root)', path: path.join(homedir(), 'work'), folder: 'Work' },
+  { id: 'group:OpenClaw', label: '● OpenClaw (root)', path: homedir(), folder: 'OpenClaw' },
+]
+
 function discoverProjectRoots(): ProjectRoot[] {
   const roots: ProjectRoot[] = [...BASE_PROJECT_ROOTS]
   const addDir = (base: string, folder: string, prefix: string, maxDepth: number) => {
@@ -47,11 +57,12 @@ function discoverProjectRoots(): ProjectRoot[] {
   addDir(path.join(homedir(), 'work'), 'Work', 'work', 2)
   addDir(path.join(homedir(), 'Projects'), 'Projects', 'projects', 2)
   const seen = new Set<string>()
-  return roots.filter((r) => {
+  const deduped = roots.filter((r) => {
     if (seen.has(r.path)) return false
     seen.add(r.path)
     return true
-  }).sort((a, b) => a.folder.localeCompare(b.folder) || a.label.localeCompare(b.label))
+  })
+  return [...GROUP_ROOTS, ...deduped].sort((a, b) => a.folder.localeCompare(b.folder) || a.label.localeCompare(b.label))
 }
 
 export const PROFILES = [
@@ -89,6 +100,7 @@ export type SessionRow = {
   cwd: string
   profileId: string
   model: string
+  effort: string
   pinned: number
   status: string
   notes: string
@@ -120,6 +132,10 @@ export function db() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS code_deck_prefs (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS code_deck_messages (
       id TEXT PRIMARY KEY,
       sessionId TEXT NOT NULL,
@@ -134,6 +150,7 @@ export function db() {
   for (const stmt of [
     `ALTER TABLE code_deck_sessions ADD COLUMN agentSessionId TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE code_deck_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE code_deck_sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''`,
   ]) {
     try { d.exec(stmt) } catch { /* column already exists */ }
   }
@@ -141,6 +158,25 @@ export function db() {
 }
 
 export function now() { return new Date().toISOString() }
+
+// User-defined display ordering, persisted server-side so it survives reloads and
+// syncs across devices. groupOrder = ordered folder-group names; projectOrder =
+// { [groupName]: rootId[] }; pinnedOrder = ordered session ids. Unknown items
+// fall back to alphabetical on the client.
+type Prefs = { groupOrder: string[]; projectOrder: Record<string, string[]>; pinnedOrder: string[] }
+const PREF_KEYS = ['groupOrder', 'projectOrder', 'pinnedOrder'] as const
+
+function readPrefs(): Prefs {
+  const out: Prefs = { groupOrder: [], projectOrder: {}, pinnedOrder: [] }
+  const d = db()
+  const rows = d.prepare('SELECT key,value FROM code_deck_prefs').all() as { key: string; value: string }[]
+  d.close()
+  for (const r of rows) {
+    if (!(PREF_KEYS as readonly string[]).includes(r.key)) continue
+    try { (out as Record<string, unknown>)[r.key] = JSON.parse(r.value) } catch { /* keep default */ }
+  }
+  return out
+}
 
 function safePath(input: string): string | null {
   const resolved = path.resolve(input.replace(/^~(?=$|\/)/, homedir()))
@@ -161,9 +197,22 @@ function normalizeModel(profileId: string, requested: string) {
   return allowed.includes(requested) ? requested : allowed[0]
 }
 
+// Reasoning effort levels supported by the Claude SDK / CLI. '' means "default"
+// (let the model decide). Codex has no effort concept, so it's always cleared.
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+export function normalizeEffort(profileId: string, requested: string) {
+  const profile = PROFILES.find((p) => p.id === profileId) ?? PROFILES[0]
+  if (profile.provider !== 'claude') return ''
+  return EFFORT_LEVELS.includes(requested) ? requested : ''
+}
+
 function commandWithModel(row: SessionRow) {
   const profile = PROFILES.find((p) => p.id === row.profileId) ?? PROFILES[0]
-  if (profile.provider === 'claude') return `${profile.command} --model ${row.model}`
+  if (profile.provider === 'claude') {
+    const eff = EFFORT_LEVELS.includes(row.effort) ? ` --effort ${row.effort}` : ''
+    return `${profile.command} --model ${row.model}${eff}`
+  }
   return `${profile.command} --model ${row.model}`
 }
 
@@ -232,7 +281,7 @@ function runAgent(row: SessionRow, prompt: string): Promise<string> {
   const isClaude = profile.provider === 'claude'
   const cmd = profile.command
   const args = isClaude
-    ? ['-p', prompt, '--model', row.model, '--output-format', 'text', '--permission-mode', 'bypassPermissions']
+    ? ['-p', prompt, '--model', row.model, ...(EFFORT_LEVELS.includes(row.effort) ? ['--effort', row.effort] : []), '--output-format', 'text', '--permission-mode', 'bypassPermissions']
     : ['exec', '-m', row.model, '-C', row.cwd, '--skip-git-repo-check', '--sandbox', 'workspace-write', prompt]
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: row.cwd, env })
@@ -279,6 +328,7 @@ router.get('/code-deck', (_req, res) => {
       folders: Array.from(new Set([...discoverProjectRoots().map((p) => p.folder), ...rows.map((r) => r.folder)])).sort(),
       projectRoots: discoverProjectRoots().map((p) => ({ ...p, exists: fs.existsSync(p.path) })),
       profiles: PROFILES,
+      prefs: readPrefs(),
     })
   } catch (err) {
     console.error('[500] failed to read code deck:', err)
@@ -286,11 +336,32 @@ router.get('/code-deck', (_req, res) => {
   }
 })
 
+router.put('/code-deck/prefs', (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const d = db()
+    const upsert = d.prepare('INSERT INTO code_deck_prefs (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+    for (const key of PREF_KEYS) {
+      if (body[key] == null) continue
+      const value = JSON.stringify(body[key]).slice(0, 100000)
+      upsert.run(key, value)
+    }
+    d.close()
+    res.json({ prefs: readPrefs() })
+  } catch (err) {
+    console.error('[500] failed to save prefs:', err)
+    res.status(500).json({ error: 'failed to save prefs', detail: (err as Error).message })
+  }
+})
+
 router.post('/code-deck/sessions', (req, res) => {
   try {
     const body = req.body ?? {}
     const projectRoots = discoverProjectRoots()
-    const root = projectRoots.find((p) => p.id === body.projectRootId) ?? projectRoots[0]
+    const matched = projectRoots.find((p) => p.id === body.projectRootId)
+    // A free-form path with no matching predefined root → a "Custom" session.
+    const isCustom = !matched && Boolean(String(body.cwd || '').trim())
+    const root = matched ?? projectRoots[0]
     const profile = PROFILES.find((p) => p.id === body.profileId) ?? PROFILES[0]
     const cwd = safePath(String(body.cwd || root.path))
     if (!cwd) return res.status(400).json({ error: 'invalid cwd' })
@@ -298,11 +369,12 @@ router.post('/code-deck/sessions', (req, res) => {
     const row: SessionRow = {
       id: randomUUID(),
       title: String(body.title || 'New Code Session').slice(0, 120),
-      folder: String(root.folder || 'Inbox').slice(0, 80),
-      projectRootId: root.id,
+      folder: String((isCustom ? (body.folder || 'Custom') : root.folder) || 'Inbox').slice(0, 80),
+      projectRootId: isCustom ? 'custom' : root.id,
       cwd,
       profileId: profile.id,
       model: normalizeModel(profile.id, String(body.model || profile.defaultModel)).slice(0, 80),
+      effort: normalizeEffort(profile.id, String(body.effort || '')),
       pinned: body.pinned ? 1 : 0,
       status: 'planned',
       notes: String(body.notes || '').slice(0, 4000),
@@ -311,8 +383,8 @@ router.post('/code-deck/sessions', (req, res) => {
       agentSessionId: '',
     }
     const d = db()
-    d.prepare(`INSERT INTO code_deck_sessions (id,title,folder,projectRootId,cwd,profileId,model,pinned,status,notes,createdAt,updatedAt,agentSessionId)
-      VALUES (@id,@title,@folder,@projectRootId,@cwd,@profileId,@model,@pinned,@status,@notes,@createdAt,@updatedAt,@agentSessionId)`).run(row)
+    d.prepare(`INSERT INTO code_deck_sessions (id,title,folder,projectRootId,cwd,profileId,model,effort,pinned,status,notes,createdAt,updatedAt,agentSessionId)
+      VALUES (@id,@title,@folder,@projectRootId,@cwd,@profileId,@model,@effort,@pinned,@status,@notes,@createdAt,@updatedAt,@agentSessionId)`).run(row)
     d.close()
     res.json({ session: serialize(row) })
   } catch (err) {
@@ -365,13 +437,14 @@ router.patch('/code-deck/sessions/:id', (req, res) => {
       cwd: body.cwd != null ? (safePath(String(body.cwd)) ?? row.cwd) : row.cwd,
       profileId: nextProfileId,
       model: normalizeModel(nextProfileId, body.model != null ? String(body.model) : row.model).slice(0, 80),
+      effort: normalizeEffort(nextProfileId, body.effort != null ? String(body.effort) : row.effort),
       pinned: body.pinned != null ? (body.pinned ? 1 : 0) : row.pinned,
       status: body.status != null ? String(body.status).slice(0, 40) : row.status,
       notes: body.notes != null ? String(body.notes).slice(0, 4000) : row.notes,
       agentSessionId: accountChanged ? '' : row.agentSessionId,
       updatedAt: now(),
     }
-    d.prepare(`UPDATE code_deck_sessions SET title=@title, folder=@folder, projectRootId=@projectRootId, cwd=@cwd, profileId=@profileId, model=@model, pinned=@pinned, status=@status, notes=@notes, agentSessionId=@agentSessionId, updatedAt=@updatedAt WHERE id=@id`).run(next)
+    d.prepare(`UPDATE code_deck_sessions SET title=@title, folder=@folder, projectRootId=@projectRootId, cwd=@cwd, profileId=@profileId, model=@model, effort=@effort, pinned=@pinned, status=@status, notes=@notes, agentSessionId=@agentSessionId, updatedAt=@updatedAt WHERE id=@id`).run(next)
     d.close()
     res.json({ session: serialize(next) })
   } catch (err) {
