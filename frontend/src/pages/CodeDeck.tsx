@@ -302,32 +302,6 @@ export default function CodeDeck() {
   const newSessionUsageBars = useMemo(() => usageBarsForProfile(aiUsage.data as AIUsage | undefined, profile), [aiUsage.data, profile])
   const sessionUsage = usageBars.find((b) => b.label.toLowerCase().includes('session')) ?? usageBars[0]
 
-  // Group consecutive non-user/non-assistant items into a single activity block
-  // so the chat reads as: prompt → ↳ activity (collapsed) → response.
-  type ActivityBlock = { kind: 'activity'; key: string; toolNames: string[]; items: import('../lib/useCodeDeckAgent').AgentItem[]; done: boolean }
-  type DisplayItem = { kind: 'message'; item: import('../lib/useCodeDeckAgent').AgentItem } | ActivityBlock
-  const displayItems = useMemo((): DisplayItem[] => {
-    const result: DisplayItem[] = []
-    let group: import('../lib/useCodeDeckAgent').AgentItem[] = []
-    const flush = () => {
-      if (!group.length) return
-      const tools = group.filter((i) => i.kind === 'tool_use').map((i) => (i as { name: string }).name)
-      const done = group.every((i) => i.kind !== 'tool_use' || (i as { result?: string }).result !== undefined)
-      result.push({ kind: 'activity', key: `act-${group[0].key}`, toolNames: tools, items: group, done })
-      group = []
-    }
-    for (const it of agent.items) {
-      if (it.kind === 'user' || it.kind === 'assistant' || it.kind === 'error') { flush(); result.push({ kind: 'message', item: it }) }
-      else group.push(it)
-    }
-    flush()
-    return result.map((item, idx) => {
-      if (item.kind !== 'activity') return item
-      const isLatest = idx === result.length - 1
-      return { ...item, done: item.done || !agent.busy || !isLatest }
-    })
-  }, [agent.items, agent.busy])
-
   // An assistant turn can emit several text blocks (running commentary between
   // tool calls) plus the final answer — all rendered with a "claude" header.
   // Mark the last assistant block of each response (the one not followed by
@@ -348,6 +322,36 @@ export default function CodeDeck() {
     }
     return set
   }, [agent.items, agent.streaming, agent.busy])
+
+  // Fold everything between a user prompt and the final response — intermediate
+  // "thinking" commentary AND every tool call — into one collapsed activity block.
+  // Only user turns, errors, and the FINAL assistant message of each response
+  // stand on their own; the rest is grouped.
+  type ActivityBlock = { kind: 'activity'; key: string; toolNames: string[]; hasThinking: boolean; items: import('../lib/useCodeDeckAgent').AgentItem[]; done: boolean }
+  type DisplayItem = { kind: 'message'; item: import('../lib/useCodeDeckAgent').AgentItem } | ActivityBlock
+  const displayItems = useMemo((): DisplayItem[] => {
+    const result: DisplayItem[] = []
+    let group: import('../lib/useCodeDeckAgent').AgentItem[] = []
+    const flush = () => {
+      if (!group.length) return
+      const tools = group.filter((i) => i.kind === 'tool_use').map((i) => (i as { name: string }).name)
+      const hasThinking = group.some((i) => i.kind === 'assistant')
+      const done = group.every((i) => i.kind !== 'tool_use' || (i as { result?: string }).result !== undefined)
+      result.push({ kind: 'activity', key: `act-${group[0].key}`, toolNames: tools, hasThinking, items: group, done })
+      group = []
+    }
+    for (const it of agent.items) {
+      const isFinalAssistant = it.kind === 'assistant' && finalAssistantKeys.has(it.key)
+      if (it.kind === 'user' || it.kind === 'error' || isFinalAssistant) { flush(); result.push({ kind: 'message', item: it }) }
+      else group.push(it) // tools, system notices, AND intermediate "thinking" assistant text
+    }
+    flush()
+    return result.map((item, idx) => {
+      if (item.kind !== 'activity') return item
+      const isLatest = idx === result.length - 1
+      return { ...item, done: item.done || !agent.busy || !isLatest }
+    })
+  }, [agent.items, agent.busy, finalAssistantKeys])
 
   useEffect(() => {
     if (!availableModels.includes(model)) setModel(availableModels[0])
@@ -854,22 +858,35 @@ export default function CodeDeck() {
                           ) : displayItems.map((di) => {
                             if (di.kind === 'activity') {
                               const collapsed = !toggledKeys.has(di.key)
-                              // Activity blocks with no tool calls are system notices (e.g. an
-                              // attachment-upload message logged before the first prompt) — not
-                              // thinking. Live thinking is shown by the busy status line below.
-                              const label = di.toolNames.length ? di.toolNames.slice(0, 6).join(' · ') : 'context'
+                              // One collapsed block covering the work between prompt and answer:
+                              // intermediate "thinking" commentary + every tool call.
+                              const parts: string[] = []
+                              if (di.hasThinking) parts.push('thinking')
+                              if (di.toolNames.length) parts.push(...di.toolNames.slice(0, 6))
+                              const label = parts.join(' · ') || 'context'
+                              const toolCount = di.toolNames.length
                               return (
                                 <div key={di.key} className="rounded border border-[var(--color-border)]/50 bg-[rgba(255,255,255,0.01)]">
                                   <button type="button" onClick={() => toggleCollapsed(di.key)} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left">
                                     {collapsed ? <ChevronRight size={11} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={11} className="shrink-0 text-[var(--color-text-faint)]" />}
                                     <span className="truncate font-mono text-[10px] text-[var(--color-text-faint)]">↳ {label}</span>
+                                    {collapsed && toolCount > 0 && <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{toolCount} step{toolCount === 1 ? '' : 's'}</span>}
                                     {!di.done && <span className={`ml-auto shrink-0 text-[9px] uppercase tracking-[0.14em] ${longQuiet ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`}>{longQuiet ? `waiting ${activeAgeLabel}` : `${activeToolLabel ?? 'running'} ${activeAgeLabel}`}</span>}
                                   </button>
                                   {!collapsed && (
-                                    <div className="border-t border-[var(--color-border)]/40 px-3 pb-2 pt-1 space-y-1">
-                                      {di.items.filter((i) => i.kind === 'tool_use').map((i) => {
-                                        const t = i as { key: string; name: string; result?: string; isError?: boolean }
-                                        return <div key={t.key} className={`font-mono text-[11px] ${t.result === undefined ? 'text-[var(--color-text-faint)]' : t.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>🔧 {t.name}{t.result !== undefined ? (t.isError ? ' ✗' : ' ✓') : ' …'}</div>
+                                    <div className="border-t border-[var(--color-border)]/40 px-3 pb-2 pt-2 space-y-2">
+                                      {di.items.map((i) => {
+                                        if (i.kind === 'assistant') {
+                                          return <div key={i.key} className="border-l border-[var(--color-border)] pl-2 text-[11px] leading-relaxed text-[var(--color-text-dim)]"><Markdown>{i.text}</Markdown></div>
+                                        }
+                                        if (i.kind === 'tool_use') {
+                                          const t = i as { key: string; name: string; result?: string; isError?: boolean }
+                                          return <div key={t.key} className={`font-mono text-[11px] ${t.result === undefined ? 'text-[var(--color-text-faint)]' : t.isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>🔧 {t.name}{t.result !== undefined ? (t.isError ? ' ✗' : ' ✓') : ' …'}</div>
+                                        }
+                                        if (i.kind === 'system') {
+                                          return <div key={i.key} className="truncate font-mono text-[11px] text-[var(--color-text-faint)]">{i.text.split('\n')[0]}</div>
+                                        }
+                                        return null
                                       })}
                                     </div>
                                   )}
