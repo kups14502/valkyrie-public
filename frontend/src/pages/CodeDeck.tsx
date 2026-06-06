@@ -829,8 +829,14 @@ export default function CodeDeck() {
                       <div className="grid gap-3 lg:grid-cols-[minmax(260px,auto)_minmax(0,1fr)] lg:items-stretch">
                         <div className="min-w-0 space-y-3 lg:max-w-[520px]">
                           <div className="flex flex-wrap items-end gap-2">
-                            <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full sm:w-56" />
-                            <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full sm:w-44" />
+                            <label className="flex flex-col gap-1 sm:w-56">
+                              <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">account / engine</span>
+                              <Dropdown size="sm" value={selected.profileId} onChange={changeProfile} options={orderedProfiles((deck.data?.profiles ?? []).filter((p) => p.provider === selectedProfile?.provider)).map((p) => ({ value: p.id, label: p.label }))} className="w-full" />
+                            </label>
+                            <label className="flex flex-col gap-1 sm:w-44">
+                              <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">model</span>
+                              <Dropdown size="sm" value={selectedModels.includes(selected.model) ? selected.model : selectedModels[0]} onChange={changeModel} options={selectedModels.map((m) => ({ value: m, label: modelLabel(m) }))} className="w-full" />
+                            </label>
                             {isClaudeProfile && (
                               <label className="flex flex-col gap-1 sm:w-44">
                                 <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">effort</span>
