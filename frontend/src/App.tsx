@@ -52,16 +52,20 @@ const navItems = [
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
 
-// Resolve the app version: the real Tauri app version (e.g. "v0.1.9") when
-// running in the app, otherwise the web build id.
+// Resolve the app version. In the desktop/mobile app we ask Tauri for the real
+// installed version at runtime (authoritative, reflects auto-updates). On
+// web/PWA we show the release version baked in at build time from
+// tauri.conf.json (see vite.config.ts) plus the short build id, so it's always
+// a real version — never "dev" — and distinct deploys stay distinguishable.
 function useAppVersion(): string {
-  const [version, setVersion] = useState<string>(isTauri() ? '' : (BUILD_ID && BUILD_ID !== 'dev' ? `build ${BUILD_ID.slice(0, 7)}` : 'dev'))
+  const webVersion = `v${__APP_VERSION__}${BUILD_ID && BUILD_ID !== 'dev' ? ` · ${BUILD_ID.slice(0, 7)}` : ''}`
+  const [version, setVersion] = useState<string>(isTauri() ? '' : webVersion)
   useEffect(() => {
     if (!isTauri()) return
     void import('@tauri-apps/api/app')
       .then(({ getVersion }) => getVersion())
       .then((v) => setVersion(`v${v}`))
-      .catch(() => setVersion('app'))
+      .catch(() => setVersion(`v${__APP_VERSION__}`))
   }, [])
   return version
 }
@@ -147,7 +151,8 @@ function Shell() {
                 {version && (
                   <span
                     title={`Valkyrie ${version}`}
-                    className="shrink-0 rounded-sm border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.08)] px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.1em] text-[var(--color-accent)]"
+                    className="shrink-0 rounded-sm border border-[var(--color-accent)]/60 bg-[rgba(0,255,65,0.12)] px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.12em] text-[var(--color-accent)]"
+                    style={{ textShadow: '0 0 8px var(--color-accent)' }}
                   >
                     {version}
                   </span>
