@@ -5,10 +5,10 @@ import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as Activit
 import { LogOut } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
-import { TauriTitleBar } from './components/TauriTitleBar'
+import { WindowControls } from './components/TauriTitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
-import { clearToken, setAuthSkipped } from './lib/auth'
+import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
 import { runUpdateCheck } from './lib/updater'
 import Dashboard from './pages/Dashboard'
 
@@ -50,6 +50,20 @@ const navItems = [
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
+
+// Resolve the app version: the real Tauri app version (e.g. "v0.1.9") when
+// running in the app, otherwise the web build id.
+function useAppVersion(): string {
+  const [version, setVersion] = useState<string>(isTauri() ? '' : (BUILD_ID && BUILD_ID !== 'dev' ? `build ${BUILD_ID.slice(0, 7)}` : 'dev'))
+  useEffect(() => {
+    if (!isTauri()) return
+    void import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then((v) => setVersion(`v${v}`))
+      .catch(() => setVersion('app'))
+  }, [])
+  return version
+}
 
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
@@ -106,24 +120,31 @@ function CenterPage({ children }: { children: ReactNode }) {
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
+  const version = useAppVersion()
 
   return (
-    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]" style={{ paddingTop: 'var(--titlebar-h)' }}>
+    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
-      <header className="sticky z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]" style={{ top: 'var(--titlebar-h)' }}>
-        <div className="w-[calc(100vw-8px)] max-w-none px-4 py-3 sm:px-6">
+      {/* The header doubles as the frameless window's draggable title bar in the app. */}
+      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+        <div className="w-[calc(100vw-8px)] max-w-none px-4 py-2.5 sm:px-6">
           <div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
+            <div data-tauri-drag-region className="flex items-center gap-3">
+              <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2.5">
                 <div
                   className="text-base font-bold tracking-widest"
                   style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
                 >
                   BRNDN<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
                 </div>
-                <div className="hidden sm:block text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)] mt-0.5 truncate max-w-[180px]">
-                  mc · build:{BUILD_ID.slice(0, 7)}
-                </div>
+                {version && (
+                  <span
+                    title={`Master Control ${version}`}
+                    className="shrink-0 rounded-sm border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.08)] px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.1em] text-[var(--color-accent)]"
+                  >
+                    {version}
+                  </span>
+                )}
               </div>
               {/* theme picker: hidden on mobile */}
               <div className="hidden sm:block"><ThemePicker /></div>
@@ -173,6 +194,8 @@ function Shell() {
               >
                 {menuOpen ? <X size={16} /> : <Menu size={16} />}
               </button>
+              {/* Frameless-window controls (app only) — sit at the top-right corner. */}
+              <WindowControls />
             </div>
           </div>
         </div>
@@ -212,7 +235,6 @@ export default function App() {
   useEffect(() => { void runUpdateCheck() }, [])
   return (
     <QueryClientProvider client={queryClient}>
-      <TauriTitleBar />
       <AuthGate>
         <BrowserRouter>
           <Shell />
