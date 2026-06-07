@@ -124,6 +124,10 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   const version = useAppVersion()
+  // Code Deck is an app-like, full-bleed surface: drop the page margins so the
+  // sidebar (folders/sessions) and chat fill the screen edge-to-edge. Every
+  // other page keeps its comfortable gutter.
+  const fullBleed = location.pathname.startsWith('/code-deck')
 
   return (
     <div className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -179,7 +183,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
+      <main className={`min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden ${fullBleed ? '' : 'px-3 py-5 sm:px-6 sm:py-8'}`}>
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}
