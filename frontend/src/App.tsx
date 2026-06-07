@@ -161,7 +161,7 @@ function Shell() {
               </div>
               {/* desktop nav — page buttons. Fills remaining width, right-aligned,
                   scrolls rather than breaking; collapses to the hamburger below xl. */}
-              <nav className="pointer-events-auto hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
+              <nav className="hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
                 {navItems.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
@@ -169,7 +169,7 @@ function Shell() {
                     aria-label={label}
                     title={label}
                     className={({ isActive }) =>
-                      `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] uppercase tracking-[0.1em] transition-colors ${
+                      `pointer-events-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] uppercase tracking-[0.1em] transition-colors ${
                         isActive
                           ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
                           : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--color-text)]'
