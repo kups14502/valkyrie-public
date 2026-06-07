@@ -5,6 +5,7 @@ import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as Activit
 import { LogOut } from 'lucide-react'
 import { ThemePicker } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
+import { TauriTitleBar } from './components/TauriTitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped } from './lib/auth'
@@ -107,9 +108,9 @@ function Shell() {
   const location = useLocation()
 
   return (
-    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]" style={{ paddingTop: 'var(--titlebar-h)' }}>
       <TitleBar />
-      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+      <header className="sticky z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]" style={{ top: 'var(--titlebar-h)' }}>
         <div className="w-[calc(100vw-8px)] max-w-none px-4 py-3 sm:px-6">
           <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
             <div className="flex items-center gap-3 xl:col-start-2">
@@ -211,6 +212,7 @@ export default function App() {
   useEffect(() => { void runUpdateCheck() }, [])
   return (
     <QueryClientProvider client={queryClient}>
+      <TauriTitleBar />
       <AuthGate>
         <BrowserRouter>
           <Shell />

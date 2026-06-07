@@ -7,6 +7,8 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
 
 if (isTauri()) {
+  // Mark the document so the custom-title-bar offset (--titlebar-h) applies.
+  document.documentElement.classList.add('tauri')
   // The desktop/mobile app loads bundled assets and auto-updates via Tauri —
   // a service worker would only serve stale UI after an update. Make sure none
   // is registered (including one left by an earlier build that shipped the SW).

@@ -29,6 +29,11 @@ html, body, #root {
   font-feature-settings: 'liga' 0, 'calt' 0;
 }
 
+/* Height reserved for the custom Tauri title bar. 0 on web (no title bar);
+   set on the app via the `tauri` class added in main.tsx. */
+:root { --titlebar-h: 0px; }
+html.tauri { --titlebar-h: 34px; }
+
 body {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
