@@ -8,7 +8,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Prompt mode (not autoUpdate): a freshly deployed build waits until the
+      // user clicks "reload to update" in the header alarm. autoUpdate's silent
+      // swap is unreliable on iOS Safari / home-screen PWAs and gave no way to
+      // force the latest build.
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-icon.svg'],
       manifest: {
         name: 'Valkyrie',
@@ -31,7 +35,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        skipWaiting: true,
+        // Don't auto-skip-waiting: the new SW stays in "waiting" until the user
+        // accepts the update (updateServiceWorker(true) posts SKIP_WAITING).
+        skipWaiting: false,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         runtimeCaching: [

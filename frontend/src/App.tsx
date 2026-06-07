@@ -7,10 +7,10 @@ import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
 import { TitleBar } from './components/TitleBar'
 import { WindowControls } from './components/TauriTitleBar'
+import { UpdateAlarm } from './components/UpdateAlarm'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
-import { runUpdateCheck } from './lib/updater'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -152,17 +152,21 @@ function Shell() {
                   </span>
                 )}
               </div>
-              {/* Pages live in the menu at every width — one consistent layout. */}
-              <button
-                type="button"
-                className="pointer-events-auto ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
-                onClick={() => setMenuOpen((v) => !v)}
-                aria-label="Menu"
-              >
-                {menuOpen ? <X size={16} /> : <Menu size={16} />}
-              </button>
-              {/* Frameless-window controls (app only) — sit at the top-right corner. */}
-              <WindowControls />
+              {/* Right cluster: update alarm (app only), menu, window controls. */}
+              <div className="pointer-events-none ml-auto flex items-center gap-2">
+                <UpdateAlarm />
+                {/* Pages live in the menu at every width — one consistent layout. */}
+                <button
+                  type="button"
+                  className="pointer-events-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-label="Menu"
+                >
+                  {menuOpen ? <X size={16} /> : <Menu size={16} />}
+                </button>
+                {/* Frameless-window controls (app only) — sit at the top-right corner. */}
+                <WindowControls />
+              </div>
             </div>
           </div>
         </div>
@@ -206,8 +210,6 @@ export default function App() {
   }, [])
   // Restore saved UI zoom and enable Ctrl/Cmd +/-/0 to resize the whole UI.
   useEffect(() => setupZoom(), [])
-  // Desktop app: check for updates once on launch (no-op on web).
-  useEffect(() => { void runUpdateCheck() }, [])
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>
