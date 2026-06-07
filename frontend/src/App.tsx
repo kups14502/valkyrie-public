@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
+import { setupZoom } from './lib/zoom'
 import { TitleBar } from './components/TitleBar'
 import { WindowControls } from './components/TauriTitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -203,6 +204,8 @@ export default function App() {
   useEffect(() => {
     applyAccent(localStorage.getItem('mc-accent') ?? '#00ff41')
   }, [])
+  // Restore saved UI zoom and enable Ctrl/Cmd +/-/0 to resize the whole UI.
+  useEffect(() => setupZoom(), [])
   // Desktop app: check for updates once on launch (no-op on web).
   useEffect(() => { void runUpdateCheck() }, [])
   return (
