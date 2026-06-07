@@ -17,9 +17,9 @@
   <rect width="1024" height="1024" rx="208" fill="url(#bg)"/>
   <rect x="40" y="40" width="944" height="944" rx="176" fill="none" stroke="#00ffe5" stroke-opacity="0.22" stroke-width="4"/>
 
-  <!-- terminal prompt: chevron + underscore cursor -->
-  <g filter="url(#glow)" fill="none" stroke="#00ffe5" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="356,352 568,512 356,672"/>
-    <line x1="600" y1="672" x2="724" y2="672"/>
+  <!-- terminal "V" + cursor underscore -->
+  <g filter="url(#glow)" fill="none" stroke="#00ffe5" stroke-width="66" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="257,338 432,690 607,338"/>
+    <line x1="649" y1="690" x2="767" y2="690"/>
   </g>
 </svg>

@@ -96,17 +96,19 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
             )
           })}
         </div>
-        <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-3">
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3">
           <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">accent color</span>
-          <ThemePicker />
+          <div className="flex items-center gap-2">
+            <ThemePicker />
+            <button
+              type="button"
+              onClick={() => { onClose(); logout() }}
+              className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+            >
+              <LogOut size={12} /> sign out
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => { onClose(); logout() }}
-          className="flex w-full items-center justify-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-        >
-          <LogOut size={12} /> sign out
-        </button>
       </div>
     </div>
   )
