@@ -19,6 +19,18 @@ const modelLabel = (m: string) => m.replace(/^claude-/, '')
 const effortLevels = ['', 'low', 'medium', 'high', 'xhigh', 'max']
 const effortLabel = (e: string) => e || 'default'
 
+// Format a message timestamp in the device's local time zone (Intl with no
+// explicit timeZone uses the host's). Shows the time of day, prefixed with the
+// date when the message isn't from today.
+const fmtMsgTime = (iso?: string): string => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const today = new Date().toDateString() === d.toDateString()
+  return today ? time : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`
+}
+
 // Sort `items` by the user-defined `order` (list of keys); unknown/new items fall
 // back to alphabetical so they append in a stable, sensible position.
 function applyOrder<T>(items: T[], order: string[] | undefined, keyOf: (t: T) => string): T[] {
@@ -1061,6 +1073,7 @@ export default function CodeDeck() {
                                   {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--color-accent)]/60" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-accent)]/60" />}
                                   <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">you</span>
                                   {collapsed && <span className="ml-1 min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0]}</span>}
+                                  {it.at && <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums text-[var(--color-text-faint)]">{fmtMsgTime(it.at)}</span>}
                                 </button>
                                 {!collapsed && <div className="border-t border-[var(--color-accent)]/20 px-3 pb-3 pt-2 text-sm leading-relaxed text-[var(--color-text)] whitespace-pre-wrap break-words">{it.text}</div>}
                               </div>
@@ -1077,6 +1090,7 @@ export default function CodeDeck() {
                                     ? <span className="shrink-0 rounded-sm bg-[rgba(0,255,65,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent)]">✓ response</span>
                                     : <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">· thinking</span>}
                                   {collapsed && <span className="ml-1 min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">{it.text.split('\n')[0]}</span>}
+                                  {it.at && <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums text-[var(--color-text-faint)]">{fmtMsgTime(it.at)}</span>}
                                 </button>
                                 {!collapsed && <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-2"><Markdown>{it.text}</Markdown></div>}
                               </div>

@@ -17,8 +17,8 @@ export type QuestionSpec = { question: string; header: string; multiSelect: bool
 export type QuestionPick = { question: string; selected: string[]; other?: string }
 
 export type AgentItem =
-  | { kind: 'user'; key: string; text: string }
-  | { kind: 'assistant'; key: string; text: string }
+  | { kind: 'user'; key: string; text: string; at?: string }
+  | { kind: 'assistant'; key: string; text: string; at?: string }
   | { kind: 'tool_use'; key: string; toolUseId?: string; name: string; input: unknown; result?: string; isError?: boolean }
   | { kind: 'permission'; key: string; requestId: string; tool: string; input: unknown; reason?: string; canAlways?: boolean; status: 'pending' | 'allow' | 'deny' }
   | { kind: 'question'; key: string; requestId: string; questions: QuestionSpec[]; toolUseId?: string; status: 'pending' | 'answered' | 'cancelled'; answers?: Record<string, string> }
@@ -71,8 +71,8 @@ function seedFromHistory(rows: CodeDeckMessage[]): AgentItem[] {
   for (const r of rows) {
     let meta: Record<string, unknown> = {}
     try { meta = r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : {} } catch { /* ignore */ }
-    if (r.role === 'user') items.push({ kind: 'user', key: r.id, text: r.content })
-    else if (r.role === 'assistant') items.push({ kind: 'assistant', key: r.id, text: r.content })
+    if (r.role === 'user') items.push({ kind: 'user', key: r.id, text: r.content, at: r.createdAt })
+    else if (r.role === 'assistant') items.push({ kind: 'assistant', key: r.id, text: r.content, at: r.createdAt })
     else if (meta.kind === 'tool_use') {
       const toolUseId = meta.toolUseId as string | undefined
       const result = toolUseId ? toolResults.get(toolUseId) : undefined
@@ -189,7 +189,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
             else setThinking(false)
             break
           case 'user':
-            setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'user', key: m.id ?? crypto.randomUUID(), text: m.text ?? '' }])
+            setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'user', key: m.id ?? crypto.randomUUID(), text: m.text ?? '', at: m.at }])
             break
           case 'delta':
             setThinking(false)
@@ -201,7 +201,7 @@ export function useCodeDeckAgent(sessionId: string | null | undefined, enabled: 
             break
           case 'assistant':
             flushStreaming(); setThinking(false)
-            setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'assistant', key: m.id ?? crypto.randomUUID(), text: m.text ?? '' }])
+            setLive((prev) => prev.some((i) => i.key === m.id) ? prev : [...prev, { kind: 'assistant', key: m.id ?? crypto.randomUUID(), text: m.text ?? '', at: m.at }])
             break
           case 'tool_use':
             flushStreaming()
