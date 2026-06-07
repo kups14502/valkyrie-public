@@ -16,7 +16,7 @@ const DB_PATH = path.join(DATA_DIR, 'code-deck.sqlite')
 
 const BASE_PROJECT_ROOTS = [
   { id: 'work', label: 'Work / OneDrive', path: path.join(homedir(), 'work'), folder: 'Work' },
-  { id: 'master-control', label: 'Master Control', path: path.join(homedir(), 'master-control'), folder: 'Personal' },
+  { id: 'master-control', label: 'Valkyrie', path: path.join(homedir(), 'master-control'), folder: 'Personal' },
   { id: 'openclaw-home', label: 'OpenClaw Home', path: homedir(), folder: 'OpenClaw' },
   { id: 'dnd-bot', label: 'Bot Workspace', path: path.join(homedir(), 'dm-bot-runtime', 'workspace'), folder: 'OpenClaw' },
   { id: 'msp-platform', label: 'MSP Platform', path: path.join(homedir(), 'msp-platform'), folder: 'Work' },
@@ -273,7 +273,7 @@ function safeFilename(input: string) {
 
 function chatPrompt(row: SessionRow, messages: MessageRow[], userText: string) {
   const history = messages.slice(-12).map((m) => `${m.role.toUpperCase()}:\n${m.content}`).join('\n\n')
-  return `You are Code Deck, a direct Claude/Codex coding assistant running inside Master Control.\n\nProject folder: ${row.cwd}\nSession: ${row.title}\n\nWork in this folder. Be concise. If you edit files, say exactly what changed. If you need a command run, run it yourself when your tool/CLI supports it. Do not mention OpenClaw.\n\nRecent session history:\n${history || '(none)'}\n\nUSER:\n${userText}`
+  return `You are Code Deck, a direct Claude/Codex coding assistant running inside Valkyrie.\n\nProject folder: ${row.cwd}\nSession: ${row.title}\n\nWork in this folder. Be concise. If you edit files, say exactly what changed. If you need a command run, run it yourself when your tool/CLI supports it. Do not mention OpenClaw.\n\nRecent session history:\n${history || '(none)'}\n\nUSER:\n${userText}`
 }
 
 function runAgent(row: SessionRow, prompt: string): Promise<string> {

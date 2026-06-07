@@ -52,7 +52,7 @@ export function TitleBar() {
         <button type="button" onClick={() => window.location.reload()} aria-label="Refresh" className="flex h-7 w-7 items-center justify-center border border-transparent text-[var(--color-text-dim)] transition hover:border-[var(--color-border)] hover:text-[var(--color-accent)]"><RotateCw size={14} /></button>
       </div>
       <div className="ml-2 flex select-none items-center gap-2 text-[10px] font-bold uppercase tracking-[0.28em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}>
-        BRNDN//SYS
+        VALKYRIE//SYS
       </div>
     </div>
   )

@@ -14,7 +14,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[master-control] render crash', error, info)
+    console.error('[valkyrie] render crash', error, info)
   }
 
   render() {
@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div style={{ minHeight: '100vh', background: '#05070b', color: '#e6f1ff', padding: '32px', fontFamily: 'Inter, system-ui, sans-serif' }}>
           <div style={{ maxWidth: '840px', margin: '0 auto', border: '1px solid rgba(255,95,114,0.35)', borderRadius: '16px', padding: '24px', background: 'rgba(20,10,16,0.92)' }}>
-            <div style={{ fontSize: '12px', letterSpacing: '0.28em', textTransform: 'uppercase', color: '#ff8b98' }}>Master Control Crash</div>
+            <div style={{ fontSize: '12px', letterSpacing: '0.28em', textTransform: 'uppercase', color: '#ff8b98' }}>Valkyrie Crash</div>
             <h1 style={{ marginTop: '12px', marginBottom: '12px', fontSize: '28px' }}>Frontend render failed</h1>
             <p style={{ color: '#b9c7d8' }}>The dashboard hit a client-side error before it could render.</p>
             <pre style={{ marginTop: '16px', whiteSpace: 'pre-wrap', color: '#ffd3d9' }}>{this.state.message}</pre>

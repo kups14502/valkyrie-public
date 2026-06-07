@@ -72,7 +72,7 @@ jobs:
         with:
           projectPath: frontend
           tagName: app-v__VERSION__
-          releaseName: Master Control v__VERSION__
+          releaseName: Valkyrie v__VERSION__
           releaseDraft: false
           prerelease: false
 

@@ -108,6 +108,6 @@ attachCodeDeckWs(server)
 attachCodeDeckAgentWs(server)
 
 server.listen(PORT, BIND, () => {
-  console.log(`Master Control API listening on ${BIND}:${PORT}`)
+  console.log(`Valkyrie API listening on ${BIND}:${PORT}`)
   startAlerts()
 })

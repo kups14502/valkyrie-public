@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Master Control",
+  "productName": "Valkyrie",
   "version": "0.1.0",
   "identifier": "com.brendonkupsch.mastercontrol",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Master Control",
+        "title": "Valkyrie",
         "width": 1280,
         "height": 832,
         "minWidth": 380,
@@ -40,8 +40,8 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "category": "Productivity",
-    "shortDescription": "Master Control dashboard",
-    "longDescription": "Dedicated desktop and mobile app for the Master Control server dashboard.",
+    "shortDescription": "Valkyrie dashboard",
+    "longDescription": "Dedicated desktop and mobile app for the Valkyrie server dashboard.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

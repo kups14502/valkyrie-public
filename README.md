@@ -1,4 +1,4 @@
-# Master Control
+# Valkyrie
 
 Personal server control dashboard. Single pane for server health, AI usage, active sessions, projects, plus dedicated tabs for Home Assistant lights, game dev, Vaultwarden, and the trade bot.
 

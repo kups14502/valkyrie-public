@@ -11,9 +11,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-icon.svg'],
       manifest: {
-        name: 'Master Control',
-        short_name: 'MC',
-        description: 'BRNDN//SYS — central dashboard',
+        name: 'Valkyrie',
+        short_name: 'Valkyrie',
+        description: 'VALKYRIE//SYS — central dashboard',
         theme_color: '#000000',
         background_color: '#000000',
         display: 'standalone',

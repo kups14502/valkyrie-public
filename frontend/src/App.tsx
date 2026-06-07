@@ -141,11 +141,11 @@ function Shell() {
                   className="text-base font-bold tracking-widest"
                   style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
                 >
-                  BRNDN<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
+                  VALKYRIE<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
                 </div>
                 {version && (
                   <span
-                    title={`Master Control ${version}`}
+                    title={`Valkyrie ${version}`}
                     className="shrink-0 rounded-sm border border-[var(--color-accent)]/40 bg-[rgba(0,255,65,0.08)] px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.1em] text-[var(--color-accent)]"
                   >
                     {version}

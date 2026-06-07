@@ -46,9 +46,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <div className="w-full max-w-sm border border-[var(--color-border)] bg-[rgba(255,255,255,0.02)] p-6 shadow-[0_0_40px_rgba(0,255,65,0.06)]">
         <div className="mb-5 text-center">
           <div className="text-lg font-bold tracking-widest" style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}>
-            BRNDN<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
+            VALKYRIE<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
           </div>
-          <div className="mt-1 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">master control · secure access</div>
+          <div className="mt-1 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">valkyrie · secure access</div>
         </div>
 
         {phase === 'setup' && <SetupForm onEnrolled={() => setPhase('enroll')} />}
