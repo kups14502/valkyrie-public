@@ -122,7 +122,7 @@ function CompactUsageBar({ pct, label }: { pct: number; label: string }) {
   )
 }
 
-function SessionCard({ s, selected, onSelect, onPin, onDelete, drag, move }: { s: CodeDeckSession; selected: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; drag?: { onDragStart: () => void; onDragEnd: () => void; onDrop: () => void; dragging: boolean }; move?: { onUp: () => void; onDown: () => void; canUp: boolean; canDown: boolean } }) {
+function SessionCard({ s, selected, unread, onSelect, onPin, onDelete, drag, move }: { s: CodeDeckSession; selected: boolean; unread?: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void; drag?: { onDragStart: () => void; onDragEnd: () => void; onDrop: () => void; dragging: boolean }; move?: { onUp: () => void; onDown: () => void; canUp: boolean; canDown: boolean } }) {
   return (
     <div
       draggable={Boolean(drag)}
@@ -136,8 +136,16 @@ function SessionCard({ s, selected, onSelect, onPin, onDelete, drag, move }: { s
         {drag && <GripVertical size={14} className="mt-0.5 hidden shrink-0 cursor-grab text-[var(--color-text-faint)] lg:block" />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
+            {unread && (
+              <span
+                className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
+                style={{ boxShadow: '0 0 8px var(--color-accent)' }}
+                aria-label="unread response"
+                title="Unread AI response"
+              />
+            )}
             {s.pinned && <Pin size={12} className="shrink-0 text-[var(--color-accent)]" />}
-            <div className="truncate text-sm font-semibold text-[var(--color-text)]">{s.title}</div>
+            <div className={`truncate text-sm font-semibold ${unread ? 'text-[var(--color-accent)]' : 'text-[var(--color-text)]'}`}>{s.title}</div>
           </div>
           <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{s.profileId} · {modelLabel(s.model)}{s.effort ? ` · ${s.effort}` : ''}</div>
           <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-faint)]">{s.cwd}</div>
@@ -193,6 +201,19 @@ export default function CodeDeck() {
   const [metaCollapsed, setMetaCollapsed] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null)
+  // Per-session "last seen assistant reply" timestamps (ISO), persisted locally.
+  // A session shows an unread dot when its latest assistant reply is newer than
+  // what we've seen. Background sessions keep running server-side (10-min grace),
+  // so replies can land while you're viewing another session.
+  const [seenAssistant, setSeenAssistant] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('mc-codedeck-seen') || '{}') as Record<string, string> } catch { return {} }
+  })
+  const markSeen = (id: string, at: string) => setSeenAssistant((prev) => {
+    if ((prev[id] ?? '') >= at) return prev
+    const next = { ...prev, [id]: at }
+    try { localStorage.setItem('mc-codedeck-seen', JSON.stringify(next)) } catch { /* ignore */ }
+    return next
+  })
   const wsRef = useRef<WebSocket | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -304,6 +325,35 @@ export default function CodeDeck() {
   const selectedModels = selectedProfile?.provider === 'codex' ? codexModels : claudeModels
   const isClaudeProfile = selectedProfile ? selectedProfile.provider !== 'codex' : true
   const agent = useCodeDeckAgent(selected?.id ?? null, mode === 'chat' && Boolean(selected) && isClaudeProfile, messages.data ?? [])
+
+  // First-ever load: treat every existing reply as already seen so the sidebar
+  // doesn't light up wholesale. After this one-time baseline, only genuinely new
+  // replies count as unread. Guarded by a localStorage flag so reloads (and new
+  // background replies) are never re-baselined as read.
+  useEffect(() => {
+    if (!deck.data) return
+    if (localStorage.getItem('mc-codedeck-seen-init')) return
+    setSeenAssistant((prev) => {
+      const next = { ...prev }
+      for (const s of sessions) if (s.lastAssistantAt) next[s.id] = s.lastAssistantAt
+      try {
+        localStorage.setItem('mc-codedeck-seen', JSON.stringify(next))
+        localStorage.setItem('mc-codedeck-seen-init', '1')
+      } catch { /* ignore */ }
+      return next
+    })
+  }, [deck.data, sessions])
+
+  // The session you're viewing is read up to "now": mark it seen on open and on
+  // every agent update, so replies you're actively watching never show as unread
+  // and switching away leaves only later replies flagged.
+  useEffect(() => {
+    if (selected?.id) markSeen(selected.id, new Date().toISOString())
+  }, [selected?.id, agent.items.length, agent.streaming]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A non-selected session is unread when its newest reply post-dates what we've seen.
+  const isUnread = (s: CodeDeckSession) =>
+    s.id !== selected?.id && Boolean(s.lastAssistantAt) && (s.lastAssistantAt as string) > (seenAssistant[s.id] ?? '')
 
   const changeProfile = (newProfileId: string) => {
     if (!selected) return
@@ -715,12 +765,10 @@ export default function CodeDeck() {
                 <span className="truncate">&gt; Pinned <span className="text-[var(--color-text-faint)]">({pinned.length})</span></span>
                 {pinnedCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
-              {pinnedCollapsed ? (
-                <div className="text-sm text-[var(--color-text-dim)]">{pinned.length} pinned hidden.</div>
-              ) : pinned.length === 0 ? (
+              {pinnedCollapsed ? null : pinned.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No pinned sessions yet.</div>
               ) : (
-                <div className="space-y-2">{pinned.map((s, i) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} drag={{ onDragStart: () => setDrag({ type: 'pinned', key: s.id }), onDragEnd: () => setDrag(null), onDrop: () => dropPinned(s.id), dragging: drag?.type === 'pinned' && drag.key === s.id }} move={{ onUp: () => movePinned(s.id, -1), onDown: () => movePinned(s.id, 1), canUp: i > 0, canDown: i < pinned.length - 1 }} />)}</div>
+                <div className="space-y-2">{pinned.map((s, i) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} unread={isUnread(s)} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} drag={{ onDragStart: () => setDrag({ type: 'pinned', key: s.id }), onDragEnd: () => setDrag(null), onDrop: () => dropPinned(s.id), dragging: drag?.type === 'pinned' && drag.key === s.id }} move={{ onUp: () => movePinned(s.id, -1), onDown: () => movePinned(s.id, 1), canUp: i > 0, canDown: i < pinned.length - 1 }} />)}</div>
               )}
             </Card>
             <Card>
@@ -728,9 +776,7 @@ export default function CodeDeck() {
                 <span className="truncate">&gt; Sessions <span className="text-[var(--color-text-faint)]">({sessions.length})</span></span>
                 {sessionsCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
-              {sessionsCollapsed ? (
-                <div className="text-sm text-[var(--color-text-dim)]">{sessions.length} sessions hidden.</div>
-              ) : grouped.length === 0 ? (
+              {sessionsCollapsed ? null : grouped.length === 0 ? (
                 <div className="text-sm text-[var(--color-text-dim)]">No sessions yet.</div>
               ) : (
                 <div className="space-y-4">
@@ -742,7 +788,7 @@ export default function CodeDeck() {
                           <span className="truncate">{name} <span className="text-[var(--color-text-faint)]">({items.length})</span></span>
                           {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
                         </button>
-                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} />)}</div>}
+                        {!collapsed && <div className="space-y-2">{items.map((s) => <SessionCard key={s.id} s={s} selected={selected?.id === s.id} unread={isUnread(s)} onSelect={() => openSession(s.id)} onPin={() => update.mutate({ id: s.id, body: { pinned: !s.pinned } })} onDelete={() => setConfirmDelete({ id: s.id, title: s.title })} />)}</div>}
                       </div>
                     )
                   })}
@@ -754,9 +800,7 @@ export default function CodeDeck() {
                 <span className="truncate">&gt; Folders</span>
                 {foldersCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
-              {foldersCollapsed ? (
-                <div className="text-sm text-[var(--color-text-dim)]">Folders hidden.</div>
-              ) : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
+              {foldersCollapsed ? null : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
                 {projectGroups.map(([name, roots], gi) => {
                   // The synthetic group-root entry (id `group:<name>`) drives the
                   // group header itself; it is not shown as a separate row.

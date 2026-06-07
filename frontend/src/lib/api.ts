@@ -477,6 +477,9 @@ export type CodeDeckSession = {
   createdAt: string
   updatedAt: string
   launchCommand: string
+  // ISO timestamp of the latest assistant reply, or null if none yet. Used to
+  // flag sessions with an unread AI response in the sidebar.
+  lastAssistantAt: string | null
 }
 
 export type CodeDeckRoot = { id: string; label: string; path: string; folder: string; exists: boolean }

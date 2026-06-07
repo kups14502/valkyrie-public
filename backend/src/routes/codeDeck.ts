@@ -311,11 +311,14 @@ export function getSession(id: string): SessionRow | undefined {
   return row
 }
 
-function serialize(row: SessionRow) {
+function serialize(row: SessionRow, lastAssistantAt: string | null = null) {
   return {
     ...row,
     pinned: Boolean(row.pinned),
     launchCommand: launchCommand(row),
+    // Timestamp of the most recent assistant message — drives the client-side
+    // "unread AI response" indicator. null when the session has no reply yet.
+    lastAssistantAt,
   }
 }
 
@@ -323,9 +326,13 @@ router.get('/code-deck', (_req, res) => {
   try {
     const d = db()
     const rows = d.prepare('SELECT * FROM code_deck_sessions ORDER BY pinned DESC, updatedAt DESC').all() as SessionRow[]
+    const lastAssistant = d.prepare(
+      `SELECT sessionId, MAX(createdAt) AS at FROM code_deck_messages WHERE role='assistant' GROUP BY sessionId`,
+    ).all() as { sessionId: string; at: string }[]
     d.close()
+    const lastAssistantBy = new Map(lastAssistant.map((r) => [r.sessionId, r.at]))
     res.json({
-      sessions: rows.map(serialize),
+      sessions: rows.map((r) => serialize(r, lastAssistantBy.get(r.id) ?? null)),
       folders: Array.from(new Set([...discoverProjectRoots().map((p) => p.folder), ...rows.map((r) => r.folder)])).sort(),
       projectRoots: discoverProjectRoots().map((p) => ({ ...p, exists: fs.existsSync(p.path) })),
       profiles: PROFILES,
