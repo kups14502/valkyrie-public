@@ -36,7 +36,7 @@ export function WindowControls() {
   if (!isTauri()) return null
 
   return (
-    <div className="ml-1 flex items-center self-stretch">
+    <div className="pointer-events-auto ml-1 flex items-center self-stretch">
       <TitleButton label="Minimize" onClick={() => win?.minimize()}>
         <Minus size={14} />
       </TitleButton>

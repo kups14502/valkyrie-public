@@ -121,15 +121,19 @@ function Shell() {
   const version = useAppVersion()
 
   return (
-    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div className="flex min-h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
       {/* The header doubles as the frameless window's draggable title bar in the app. */}
-      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="w-[calc(100vw-8px)] max-w-none px-4 py-2.5 sm:px-6">
+      <header className="sticky top-0 z-10 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+        {/* Full-area drag layer: grab anywhere in the header to move the frameless
+            window (double-click toggles maximize). The interactive controls below
+            re-enable pointer events so their clicks aren't swallowed by the drag. */}
+        <div data-tauri-drag-region aria-hidden className="absolute inset-0" />
+        <div className="relative w-full px-4 py-2.5 sm:px-6">
           <div>
-            <div data-tauri-drag-region className="flex items-center gap-3">
+            <div className="pointer-events-none flex items-center gap-3">
               {/* left cluster: brand + version + theme + sign out */}
-              <div data-tauri-drag-region className="flex shrink-0 items-center gap-2.5">
+              <div className="flex shrink-0 items-center gap-2.5">
                 <div
                   className="text-base font-bold tracking-widest"
                   style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
@@ -144,20 +148,20 @@ function Shell() {
                     {version}
                   </span>
                 )}
-                <div className="hidden xl:block"><ThemePicker /></div>
+                <div className="pointer-events-auto hidden xl:block"><ThemePicker /></div>
                 <button
                   type="button"
                   onClick={logout}
                   title="Sign out"
                   aria-label="Sign out"
-                  className="hidden xl:flex items-center rounded-sm border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+                  className="pointer-events-auto hidden xl:flex items-center rounded-sm border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
                 >
                   <LogOut size={13} />
                 </button>
               </div>
               {/* desktop nav — page buttons. Fills remaining width, right-aligned,
                   scrolls rather than breaking; collapses to the hamburger below xl. */}
-              <nav className="hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
+              <nav className="pointer-events-auto hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
                 {navItems.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
@@ -181,7 +185,7 @@ function Shell() {
               {/* hamburger — shown until the full nav fits (xl) */}
               <button
                 type="button"
-                className="ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)] xl:hidden"
+                className="pointer-events-auto ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)] xl:hidden"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-label="Menu"
               >
@@ -195,7 +199,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="w-[calc(100vw-8px)] max-w-none overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
+      <main className="flex min-h-0 w-full flex-1 flex-col overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}

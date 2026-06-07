@@ -683,7 +683,7 @@ export default function CodeDeck() {
   )
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-4 lg:h-[calc(100dvh-150px)] lg:flex-row">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-4 lg:flex-row">
       {sidebarOpen && (
       <>
       {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
