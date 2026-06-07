@@ -68,9 +68,9 @@ function useAppVersion(): string {
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   return (
-    <div className="sm:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+    <div className="xl:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {navItems.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
             return (
@@ -78,17 +78,15 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 key={to}
                 to={to}
                 onClick={onClose}
-                className={`flex items-center gap-2 whitespace-nowrap border px-3 py-2 text-xs uppercase tracking-[0.12em] transition ${
+                className={`flex items-center gap-2 whitespace-nowrap rounded-[3px] border px-3 py-2 text-xs uppercase tracking-[0.12em] transition-colors ${
                   isActive
-                    ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
-                    : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
+                    ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
+                    : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text)]'
                 }`}
-                style={isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
+                style={isActive ? { boxShadow: '0 0 10px rgba(0,255,65,0.22)', textShadow: '0 0 8px var(--color-accent)' } : {}}
               >
-                <span className={isActive ? undefined : 'opacity-0'}>[</span>
                 <Icon size={12} className="shrink-0" />
                 <span>{label}</span>
-                <span className={isActive ? undefined : 'opacity-0'}>]</span>
               </NavLink>
             )
           })}
@@ -130,7 +128,8 @@ function Shell() {
         <div className="w-[calc(100vw-8px)] max-w-none px-4 py-2.5 sm:px-6">
           <div>
             <div data-tauri-drag-region className="flex items-center gap-3">
-              <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2.5">
+              {/* left cluster: brand + version + theme + sign out */}
+              <div data-tauri-drag-region className="flex shrink-0 items-center gap-2.5">
                 <div
                   className="text-base font-bold tracking-widest"
                   style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
@@ -145,20 +144,20 @@ function Shell() {
                     {version}
                   </span>
                 )}
+                <div className="hidden xl:block"><ThemePicker /></div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="hidden xl:flex items-center rounded-sm border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+                >
+                  <LogOut size={13} />
+                </button>
               </div>
-              {/* theme picker: hidden on mobile */}
-              <div className="hidden sm:block"><ThemePicker /></div>
-              <button
-                type="button"
-                onClick={logout}
-                title="Sign out"
-                aria-label="Sign out"
-                className="hidden sm:flex items-center border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-              >
-                <LogOut size={13} />
-              </button>
-              {/* desktop nav */}
-              <nav className="hidden sm:flex items-center gap-0.5 font-mono">
+              {/* desktop nav — page buttons. Fills remaining width, right-aligned,
+                  scrolls rather than breaking; collapses to the hamburger below xl. */}
+              <nav className="hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
                 {navItems.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
@@ -166,29 +165,23 @@ function Shell() {
                     aria-label={label}
                     title={label}
                     className={({ isActive }) =>
-                      `flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] transition border ${
+                      `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] uppercase tracking-[0.1em] transition-colors ${
                         isActive
-                          ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
-                          : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border)] hover:text-[var(--color-text)]'
+                          ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--color-text)]'
                       }`
                     }
-                    style={({ isActive }) => isActive ? { textShadow: '0 0 8px var(--color-accent)' } : {}}
+                    style={({ isActive }) => isActive ? { boxShadow: '0 0 10px rgba(0,255,65,0.22)', textShadow: '0 0 8px var(--color-accent)' } : {}}
                   >
-                    {({ isActive }) => (
-                      <>
-                        <span className={isActive ? undefined : 'opacity-0'}>[</span>
-                        <Icon size={13} className="shrink-0" />
-                        <span>{label}</span>
-                        <span className={isActive ? undefined : 'opacity-0'}>]</span>
-                      </>
-                    )}
+                    <Icon size={13} className="shrink-0" />
+                    <span>{label}</span>
                   </NavLink>
                 ))}
               </nav>
-              {/* mobile hamburger */}
+              {/* hamburger — shown until the full nav fits (xl) */}
               <button
                 type="button"
-                className="sm:hidden border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
+                className="ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)] xl:hidden"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-label="Menu"
               >
