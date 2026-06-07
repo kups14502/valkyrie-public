@@ -68,9 +68,9 @@ function useAppVersion(): string {
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   return (
-    <div className="xl:hidden border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+    <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           {navItems.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
             return (
@@ -132,7 +132,7 @@ function Shell() {
         <div className="pointer-events-none relative w-full px-4 py-2.5 sm:px-6">
           <div>
             <div className="pointer-events-none flex items-center gap-3">
-              {/* left cluster: brand + version + theme + sign out */}
+              {/* left cluster: brand + version */}
               <div className="flex shrink-0 items-center gap-2.5">
                 <div
                   className="text-base font-bold tracking-widest"
@@ -148,44 +148,11 @@ function Shell() {
                     {version}
                   </span>
                 )}
-                <div className="pointer-events-auto hidden xl:block"><ThemePicker /></div>
-                <button
-                  type="button"
-                  onClick={logout}
-                  title="Sign out"
-                  aria-label="Sign out"
-                  className="pointer-events-auto hidden xl:flex items-center rounded-sm border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-                >
-                  <LogOut size={13} />
-                </button>
               </div>
-              {/* desktop nav — page buttons. Fills remaining width, right-aligned,
-                  scrolls rather than breaking; collapses to the hamburger below xl. */}
-              <nav className="hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex">
-                {navItems.map(({ to, label, icon: Icon }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    aria-label={label}
-                    title={label}
-                    className={({ isActive }) =>
-                      `pointer-events-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] uppercase tracking-[0.1em] transition-colors ${
-                        isActive
-                          ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
-                          : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--color-text)]'
-                      }`
-                    }
-                    style={({ isActive }) => isActive ? { boxShadow: '0 0 10px rgba(0,255,65,0.22)', textShadow: '0 0 8px var(--color-accent)' } : {}}
-                  >
-                    <Icon size={13} className="shrink-0" />
-                    <span>{label}</span>
-                  </NavLink>
-                ))}
-              </nav>
-              {/* hamburger — shown until the full nav fits (xl) */}
+              {/* Pages live in the menu at every width — one consistent layout. */}
               <button
                 type="button"
-                className="pointer-events-auto ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)] xl:hidden"
+                className="pointer-events-auto ml-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-label="Menu"
               >
