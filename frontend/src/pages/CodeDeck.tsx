@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, ChevronUp, Copy, Folder, GripVertical, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Copy, ExternalLink, Folder, GripVertical, PanelLeft, PanelLeftClose, Paperclip, Pencil, Pin, PinOff, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -8,7 +8,7 @@ import { Card } from '../components/Card'
 import { Dropdown } from '../components/Dropdown'
 import { Markdown } from '../components/Markdown'
 import { QuestionCard } from '../components/QuestionCard'
-import { getToken } from '../lib/auth'
+import { getToken, isTauri } from '../lib/auth'
 import { createCodeDeckSession, deleteCodeDeckSession, fetchAIUsage, fetchCodeDeck, fetchCodeDeckMessages, updateCodeDeckPrefs, updateCodeDeckSession, uploadCodeDeckAttachment, type AIClientUsage, type AIUsage, type CodeDeckPrefs, type CodeDeckSession } from '../lib/api'
 import { useCodeDeckAgent } from '../lib/useCodeDeckAgent'
 
@@ -177,10 +177,13 @@ function SessionCard({ s, selected, unread, onSelect, onPin, onDelete, drag, mov
   )
 }
 
-export default function CodeDeck() {
+// `popoutId` puts Code Deck in single-session "pop-out" mode (own window): the
+// sidebar and page chrome are hidden and only that session's chat is shown.
+export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
+  const popout = Boolean(popoutId)
   const qc = useQueryClient()
   const deck = useQuery({ queryKey: ['code-deck'], queryFn: fetchCodeDeck })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(popoutId ?? null)
   const [title, setTitle] = useState('New Code Session')
   const [rootId, setRootId] = useState('work')
   const [profileId, setProfileId] = useState('main-claude')
@@ -208,7 +211,7 @@ export default function CodeDeck() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   // Start with the sidebar closed on phones so the chat is immediately visible;
   // open by default on desktop. (There's a toggle button either way.)
-  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1024)
+  const [sidebarOpen, setSidebarOpen] = useState(() => !popoutId && (typeof window === 'undefined' || window.innerWidth >= 1024))
   const [showNew, setShowNew] = useState(false)
   const [metaCollapsed, setMetaCollapsed] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
@@ -298,6 +301,29 @@ export default function CodeDeck() {
     setSelectedId(id)
     setShowNew(false)
     closeSidebarOnMobile()
+  }
+
+  // Pop a session out into its own window so several can run side-by-side. Both
+  // load index.html with ?popoutSession=<id> (App renders the single-session
+  // view). Desktop: a native Tauri window; web: a browser popup. Same origin, so
+  // the auth token in localStorage carries over.
+  const openPopout = (id: string) => {
+    const url = `${window.location.origin}/?popoutSession=${encodeURIComponent(id)}`
+    if (isTauri()) {
+      void import('@tauri-apps/api/webviewWindow')
+        .then(({ WebviewWindow }) => {
+          const w = new WebviewWindow(`session-${id}-${Date.now()}`, {
+            url: `index.html?popoutSession=${encodeURIComponent(id)}`,
+            title: 'Valkyrie · Code Deck',
+            width: 960,
+            height: 860,
+          })
+          void w.once('tauri://error', () => { window.open(url, '_blank') })
+        })
+        .catch(() => { window.open(url, '_blank') })
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer,width=960,height=860')
+    }
   }
 
   const toggleFolder = (key: string) => {
@@ -763,7 +789,7 @@ export default function CodeDeck() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 max-w-full flex-col gap-4 lg:flex-row">
-      {sidebarOpen && (
+      {sidebarOpen && !popout && (
       <>
       {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
       <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
@@ -925,7 +951,7 @@ export default function CodeDeck() {
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-        {!(selected && !showNew && metaCollapsed) && (
+        {!popout && !(selected && !showNew && metaCollapsed) && (
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-3">
             {!sidebarOpen && (
@@ -954,7 +980,7 @@ export default function CodeDeck() {
                     <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3">
                       <div className="flex min-w-0 flex-1 items-center gap-4">
                         <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text)] sm:text-xl">
-                          {!sidebarOpen && (
+                          {!sidebarOpen && !popout && (
                             <button type="button" onClick={() => setSidebarOpen(true)} className="shrink-0 border border-[var(--color-border)] px-1.5 py-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Open sidebar"><PanelLeft size={15} /></button>
                           )}
                           <Terminal size={18} className="shrink-0 text-[var(--color-accent)]" />
@@ -976,6 +1002,9 @@ export default function CodeDeck() {
                         </div>
                         {metaCollapsed && sessionUsage && <CompactUsageBar pct={sessionUsage.pct} label={sessionUsage.label} />}
                       </div>
+                      {!popout && (
+                        <button type="button" onClick={() => openPopout(selected.id)} title="Open session in a new window" aria-label="Pop out session" className="shrink-0 border border-[var(--color-border)] p-1.5 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><ExternalLink size={14} /></button>
+                      )}
                       <button type="button" onClick={() => setMetaCollapsed((v) => !v)} className="shrink-0 inline-flex items-center gap-2 text-left text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label={metaCollapsed ? 'Expand session account settings' : 'Collapse session account settings'}>
                         <span className="hidden sm:inline">account / model</span>
                         {metaCollapsed ? <ChevronRight size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}

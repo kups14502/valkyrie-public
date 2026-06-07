@@ -213,6 +213,21 @@ function logout() {
   clearToken()
 }
 
+// Standalone single-session window opened via Code Deck's "pop out" button
+// (?popoutSession=<id>). No header/sidebar — just that session's chat, filling
+// the window, so multiple sessions can run side-by-side.
+function CodeDeckPopout({ id }: { id: string }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-bg)] p-2 text-[var(--color-text)]">
+      <Suspense fallback={<PageFallback />}>
+        <ErrorBoundary compact>
+          <CodeDeck popoutId={id} />
+        </ErrorBoundary>
+      </Suspense>
+    </div>
+  )
+}
+
 export default function App() {
   // Apply the saved accent color immediately on launch so the correct color
   // is shown before the user opens the hamburger menu (ThemePicker mounts
@@ -222,12 +237,17 @@ export default function App() {
   }, [])
   // Restore saved UI zoom and enable Ctrl/Cmd +/-/0 to resize the whole UI.
   useEffect(() => setupZoom(), [])
+  const popoutSession = new URLSearchParams(window.location.search).get('popoutSession')
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>
-        <BrowserRouter>
-          <Shell />
-        </BrowserRouter>
+        {popoutSession
+          ? <CodeDeckPopout id={popoutSession} />
+          : (
+            <BrowserRouter>
+              <Shell />
+            </BrowserRouter>
+          )}
       </AuthGate>
     </QueryClientProvider>
   )
