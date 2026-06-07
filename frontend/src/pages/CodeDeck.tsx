@@ -205,31 +205,10 @@ export default function CodeDeck() {
   const linkBufRef = useRef('')
   const lastSendRef = useRef<{ text: string; at: number } | null>(null)
 
-  // On large screens Code Deck is an app-like full-height pane: measure its
-  // distance from the top of the viewport and fill the rest so the chat/terminal
-  // scroll internally instead of stretching the whole page. Self-adjusts to the
-  // header height (no magic numbers). Below lg it stacks and the page scrolls.
-  const paneRef = useRef<HTMLDivElement | null>(null)
-  const [paneHeight, setPaneHeight] = useState<number | undefined>()
-  useEffect(() => {
-    const compute = () => {
-      const el = paneRef.current
-      if (!el || !window.matchMedia('(min-width: 1024px)').matches) {
-        setPaneHeight(undefined)
-        return
-      }
-      // The Ctrl/Cmd +/- zoom uses CSS `zoom`, which scales getBoundingClientRect()
-      // but NOT window.innerHeight. Divide the available space by the zoom factor so
-      // the pane fills the viewport exactly at any zoom (no overflow-scroll, no gap).
-      const zoom = parseFloat(document.documentElement.style.zoom) || 1
-      const top = el.getBoundingClientRect().top
-      // Keep the main's bottom padding (sm:py-8 = 32px) clear so nothing scrolls.
-      setPaneHeight(Math.max(320, (window.innerHeight - top) / zoom - 32))
-    }
-    compute()
-    window.addEventListener('resize', compute)
-    return () => window.removeEventListener('resize', compute)
-  }, [])
+  // Code Deck is an app-like full-height pane that fills <main> (the shell's
+  // scroll container) via pure CSS — the sidebar and chat scroll internally,
+  // the page itself does not. No JS height measurement (zoom-proof, no magic
+  // numbers, no phantom outer scrollbar).
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); setShowNew(false); void refresh() } })
@@ -721,11 +700,7 @@ export default function CodeDeck() {
   )
 
   return (
-    <div
-      ref={paneRef}
-      style={paneHeight ? { height: paneHeight } : undefined}
-      className="flex min-w-0 max-w-full flex-col gap-4 lg:flex-row"
-    >
+    <div className="flex h-full min-h-0 min-w-0 max-w-full flex-col gap-4 lg:flex-row">
       {sidebarOpen && (
       <>
       {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
@@ -889,7 +864,7 @@ export default function CodeDeck() {
       </>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col gap-4 lg:min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         {!(selected && !showNew && metaCollapsed) && (
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -906,14 +881,14 @@ export default function CodeDeck() {
         )}
 
               {(showNew || !selected) ? (
-                <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-auto">
+                <div className="min-h-0 flex-1 space-y-3 overflow-auto">
                   {selected && (
                     <button type="button" onClick={() => setShowNew(false)} className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"><X size={14} /> back to chat</button>
                   )}
                   {newSessionForm}
                 </div>
               ) : (
-              <div className="panel flex max-w-full flex-col overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1">
+              <div className="panel flex min-h-0 max-w-full flex-1 flex-col overflow-hidden p-4 sm:p-5">
                 {(
                   <div className="flex min-h-0 flex-1 flex-col gap-4">
                     <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3">
@@ -987,7 +962,7 @@ export default function CodeDeck() {
                         {!isClaudeProfile && (
                           <div className="rounded border border-[var(--color-warning)]/50 bg-[rgba(245,158,11,0.06)] p-3 text-xs text-[var(--color-warning)]">Live chat is Claude-only. Switch this session to a Claude profile, or use terminal mode for codex.</div>
                         )}
-                        <div ref={chatScrollRef} className="min-h-[55vh] max-h-[62vh] flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3 lg:min-h-[140px] lg:max-h-none">
+                        <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-3 overflow-auto rounded border border-[var(--color-border)] bg-black/30 p-3">
                           {messages.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading chat…</div> : agent.items.length === 0 && !agent.streaming ? (
                             <div className="flex h-full items-start justify-center px-4 py-8 text-center text-sm text-[var(--color-text-dim)]">No chat history yet.</div>
                           ) : displayItems.map((di) => {

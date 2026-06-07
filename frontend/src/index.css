@@ -54,10 +54,12 @@ button, input, select, textarea {
 }
 
 html {
-  overflow-y: scroll;
+  /* The shell (App.tsx) is a full-height flex column and <main> is the scroll
+     container, so the root must never scroll — otherwise it shows a permanent,
+     useless outer scrollbar. */
+  overflow: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--color-accent-rgb), 0.55) #000000;
-  scrollbar-gutter: stable;
 }
 
 ::-webkit-scrollbar {

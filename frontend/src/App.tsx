@@ -122,10 +122,11 @@ function Shell() {
   const version = useAppVersion()
 
   return (
-    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
-      {/* The header doubles as the frameless window's draggable title bar in the app. */}
-      <header className="sticky top-0 z-10 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+      {/* The header doubles as the frameless window's draggable title bar in the app.
+          shrink-0 so it keeps its height; <main> below is the scroll container. */}
+      <header className="z-10 shrink-0 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         {/* Full-area drag layer: grab anywhere in the header to move the frameless
             window (double-click toggles maximize). The interactive controls below
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
@@ -173,7 +174,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="w-full overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
+      <main className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}
