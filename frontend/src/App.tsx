@@ -112,8 +112,8 @@ function Shell() {
       <TitleBar />
       <header className="sticky z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]" style={{ top: 'var(--titlebar-h)' }}>
         <div className="w-[calc(100vw-8px)] max-w-none px-4 py-3 sm:px-6">
-          <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
-            <div className="flex items-center gap-3 xl:col-start-2">
+          <div>
+            <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div
                   className="text-base font-bold tracking-widest"
@@ -137,7 +137,7 @@ function Shell() {
                 <LogOut size={13} />
               </button>
               {/* desktop nav */}
-              <nav className="hidden sm:flex flex-1 items-center justify-end gap-0.5 font-mono">
+              <nav className="hidden sm:flex items-center gap-0.5 font-mono">
                 {navItems.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
@@ -145,7 +145,7 @@ function Shell() {
                     aria-label={label}
                     title={label}
                     className={({ isActive }) =>
-                      `flex items-center gap-1.5 whitespace-nowrap px-3.5 py-1.5 text-xs uppercase tracking-[0.14em] transition border ${
+                      `flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] transition border ${
                         isActive
                           ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[rgba(0,255,65,0.07)]'
                           : 'border-transparent text-[var(--color-text-dim)] hover:border-[var(--color-border)] hover:text-[var(--color-text)]'
