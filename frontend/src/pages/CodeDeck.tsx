@@ -218,9 +218,13 @@ export default function CodeDeck() {
         setPaneHeight(undefined)
         return
       }
+      // The Ctrl/Cmd +/- zoom uses CSS `zoom`, which scales getBoundingClientRect()
+      // but NOT window.innerHeight. Divide the available space by the zoom factor so
+      // the pane fills the viewport exactly at any zoom (no overflow-scroll, no gap).
+      const zoom = parseFloat(document.documentElement.style.zoom) || 1
       const top = el.getBoundingClientRect().top
       // Keep the main's bottom padding (sm:py-8 = 32px) clear so nothing scrolls.
-      setPaneHeight(Math.max(320, window.innerHeight - top - 32))
+      setPaneHeight(Math.max(320, (window.innerHeight - top) / zoom - 32))
     }
     compute()
     window.addEventListener('resize', compute)
@@ -623,6 +627,18 @@ export default function CodeDeck() {
     const el = chatScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [agent.items.length, agent.streaming, agent.busy])
+
+  // On opening/switching a session, jump straight to the most recent message
+  // once its history has loaded. The effect above can fire before the markdown
+  // (and images) finish laying out — leaving you at the top, especially on
+  // mobile — so wait two frames for layout to settle, then pin to the bottom.
+  useEffect(() => {
+    if (messages.isLoading) return
+    const el = chatScrollRef.current
+    if (!el) return
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => { el.scrollTop = el.scrollHeight }))
+    return () => cancelAnimationFrame(raf)
+  }, [selected?.id, messages.isLoading])
 
   // Clear the attachment tray (and free object URLs) when switching sessions.
   useEffect(() => {

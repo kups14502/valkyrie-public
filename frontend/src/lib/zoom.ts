@@ -23,6 +23,9 @@ export function applyZoom(z: number) {
   // `zoom` isn't in the typed CSSStyleDeclaration but is honored at runtime.
   ;(document.documentElement.style as unknown as Record<string, string>).zoom = String(level)
   localStorage.setItem(KEY, String(level))
+  // Let layout-measuring listeners (e.g. Code Deck's viewport-fit pane) recompute,
+  // since `zoom` changes don't fire a native resize event on their own.
+  window.dispatchEvent(new Event('resize'))
   return level
 }
 
