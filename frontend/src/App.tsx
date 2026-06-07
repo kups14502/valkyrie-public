@@ -213,17 +213,42 @@ function logout() {
   clearToken()
 }
 
+// Custom frameless title bar for pop-out windows — matches Valkyrie instead of
+// the native OS bar. The whole strip is a drag region (move the window); the
+// window controls re-enable pointer events for their clicks. On web this is just
+// a thin brand bar (WindowControls renders null there).
+function PopoutTitleBar() {
+  return (
+    <div
+      data-tauri-drag-region
+      className="flex shrink-0 select-none items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg)] pl-3"
+    >
+      <div
+        className="pointer-events-none flex items-center gap-2 py-2 text-[10px] font-bold uppercase tracking-[0.28em]"
+        style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
+      >
+        VALKYRIE<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
+        <span className="ml-1 text-[var(--color-text-faint)]">· code deck</span>
+      </div>
+      <WindowControls />
+    </div>
+  )
+}
+
 // Standalone single-session window opened via Code Deck's "pop out" button
-// (?popoutSession=<id>). No header/sidebar — just that session's chat, filling
-// the window, so multiple sessions can run side-by-side.
+// (?popoutSession=<id>). No app header/sidebar — a custom title bar plus that
+// session's chat filling the window, so multiple sessions run side-by-side.
 function CodeDeckPopout({ id }: { id: string }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-bg)] p-2 text-[var(--color-text)]">
-      <Suspense fallback={<PageFallback />}>
-        <ErrorBoundary compact>
-          <CodeDeck popoutId={id} />
-        </ErrorBoundary>
-      </Suspense>
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+      <PopoutTitleBar />
+      <div className="min-h-0 flex-1 overflow-hidden p-2">
+        <Suspense fallback={<PageFallback />}>
+          <ErrorBoundary compact>
+            <CodeDeck popoutId={id} />
+          </ErrorBoundary>
+        </Suspense>
+      </div>
     </div>
   )
 }

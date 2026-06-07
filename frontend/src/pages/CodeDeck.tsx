@@ -317,6 +317,11 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
             title: 'Valkyrie · Code Deck',
             width: 960,
             height: 860,
+            minWidth: 420,
+            minHeight: 540,
+            // Frameless like the main window — we render a custom Valkyrie title bar.
+            decorations: false,
+            resizable: true,
           })
           void w.once('tauri://error', () => { window.open(url, '_blank') })
         })
