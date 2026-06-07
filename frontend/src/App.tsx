@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
 import { LogOut } from 'lucide-react'
-import { ThemePicker } from './components/ThemePicker'
+import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { TitleBar } from './components/TitleBar'
 import { WindowControls } from './components/TauriTitleBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -197,6 +197,12 @@ function logout() {
 }
 
 export default function App() {
+  // Apply the saved accent color immediately on launch so the correct color
+  // is shown before the user opens the hamburger menu (ThemePicker mounts
+  // lazily inside MobileMenu, causing a green flash without this).
+  useEffect(() => {
+    applyAccent(localStorage.getItem('mc-accent') ?? '#00ff41')
+  }, [])
   // Desktop app: check for updates once on launch (no-op on web).
   useEffect(() => { void runUpdateCheck() }, [])
   return (
