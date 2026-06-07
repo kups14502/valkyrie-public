@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { BellRing, RefreshCw } from 'lucide-react'
+import { BellRing, Download, RefreshCw } from 'lucide-react'
 import { useDesktopUpdate } from '../lib/updater'
 import { useWebUpdate } from '../lib/pwaUpdate'
 
-// Header alarm shown once a newer build is available. On the desktop app the
-// update is downloaded + staged and the action relaunches into it ("restart to
-// update"); on the web/PWA a new service worker is waiting and the action
-// activates it + reloads ("reload to update"). Pulses to draw attention.
+// Header update indicator, styled to match Valkyrie (no native Windows installer
+// dialog — the install runs silently and all UX lives here).
+// Desktop app: shows download progress, then a pulsing alarm with "restart to
+// update" (installs silently + relaunches). Web/PWA: a waiting service worker
+// surfaces "reload to update".
 export function UpdateAlarm() {
-  const { status, version, restart } = useDesktopUpdate()
+  const { status, version, progress, restart } = useDesktopUpdate()
   const { needRefresh, reload } = useWebUpdate()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -21,11 +22,13 @@ export function UpdateAlarm() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const downloading = status === 'downloading'
+  const installing = status === 'installing'
   const desktopReady = status === 'ready'
-  const visible = desktopReady || needRefresh
-  if (!visible) return null
+  if (!(downloading || installing || desktopReady || needRefresh)) return null
 
-  const label = desktopReady ? 'restart to update' : 'reload to update'
+  const actionable = desktopReady || needRefresh
+  const pct = Math.round(progress * 100)
   const onAct = desktopReady ? () => { void restart() } : () => reload()
 
   return (
@@ -33,27 +36,52 @@ export function UpdateAlarm() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Update available"
-        title="Update available"
-        className="flex h-8 w-8 items-center justify-center border border-[var(--color-accent)] text-[var(--color-accent)] animate-pulse"
-        style={{ boxShadow: '0 0 10px var(--color-accent)' }}
+        aria-label="Update"
+        title="Update"
+        className={`flex h-8 w-8 items-center justify-center border text-[var(--color-accent)] ${actionable ? 'animate-pulse border-[var(--color-accent)]' : 'border-[var(--color-border)]'}`}
+        style={actionable ? { boxShadow: '0 0 10px var(--color-accent)' } : undefined}
       >
-        <BellRing size={15} />
+        {downloading ? <Download size={15} /> : installing ? <RefreshCw size={15} className="animate-spin" /> : <BellRing size={15} />}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-56 border border-[var(--color-border)] bg-[var(--color-surface,#05070b)] p-4">
-          <div className="mb-1 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">&gt; update ready</div>
-          <div className="mb-3 font-mono text-xs text-[var(--color-text-dim)]">
-            {desktopReady ? `v${version ?? ''} downloaded` : 'new version available'}
-          </div>
-          <button
-            type="button"
-            onClick={onAct}
-            className="flex w-full items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] transition hover:bg-[rgba(0,255,65,0.08)]"
-          >
-            <RefreshCw size={13} /> {label}
-          </button>
+        <div className="absolute right-0 top-full z-50 mt-2 w-60 border border-[var(--color-border)] bg-[var(--color-surface,#05070b)] p-4">
+          <div className="mb-2 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">&gt; update</div>
+
+          {downloading && (
+            <>
+              <div className="mb-2 font-mono text-xs text-[var(--color-text-dim)]">
+                downloading {version ? `v${version}` : ''} · {pct}%
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded bg-[rgba(255,255,255,0.08)]">
+                <div
+                  className="h-full rounded transition-[width] duration-200"
+                  style={{ width: `${pct}%`, background: 'var(--color-accent)', boxShadow: '0 0 10px var(--color-accent)' }}
+                />
+              </div>
+            </>
+          )}
+
+          {installing && (
+            <div className="flex items-center gap-2 font-mono text-xs text-[var(--color-accent)]">
+              <RefreshCw size={13} className="animate-spin" /> installing update…
+            </div>
+          )}
+
+          {(desktopReady || needRefresh) && (
+            <>
+              <div className="mb-3 font-mono text-xs text-[var(--color-text-dim)]">
+                {desktopReady ? `v${version ?? ''} ready to install` : 'new version available'}
+              </div>
+              <button
+                type="button"
+                onClick={onAct}
+                className="flex w-full items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] transition hover:bg-[rgba(0,255,65,0.08)]"
+              >
+                <RefreshCw size={13} /> {desktopReady ? 'restart to update' : 'reload to update'}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
