@@ -756,7 +756,11 @@ export default function CodeDeck() {
       {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
       <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
       <aside className="fixed inset-y-0 left-0 z-50 w-[88%] max-w-[340px] space-y-4 overflow-auto border-r border-[var(--color-border)] bg-[var(--color-bg)] p-4 lg:static lg:z-auto lg:w-[320px] lg:max-w-none lg:shrink-0 lg:self-stretch lg:overflow-auto lg:border-r-0 lg:bg-transparent lg:p-0 lg:pr-1">
-            <div className="flex gap-2">
+            {/* Stays pinned to the top of the column while the lists scroll
+                under it. Full-bleed (negative margins + matching padding) so the
+                opaque background covers the drawer's edge padding on mobile; the
+                desktop column has no padding so those are zeroed out at lg. */}
+            <div className="sticky top-0 z-20 -mx-4 -mt-4 flex gap-2 bg-[var(--color-bg)] px-4 pb-3 pt-4 lg:mx-0 lg:mt-0 lg:px-0 lg:pt-0">
               <button type="button" onClick={() => { setShowNew(true); setSelectedId(null) }} className="inline-flex flex-1 items-center justify-center gap-2 border border-[var(--color-accent)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--color-accent)] hover:bg-[rgba(0,255,65,0.08)]"><Plus size={14} /> new</button>
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
             </div>
