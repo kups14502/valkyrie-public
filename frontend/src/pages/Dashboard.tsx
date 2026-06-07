@@ -227,20 +227,25 @@ export default function Dashboard() {
 
   return (
     <div className="min-w-0 space-y-8 overflow-hidden">
-      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)]">
-        <div className="min-w-0 space-y-4 xl:col-start-2">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
-              <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
-            </div>
-            <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-              [live telemetry]
+      <div className="space-y-4">
+        {/* Heading stays aligned over the center column… */}
+        <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)]">
+          <div className="min-w-0 xl:col-start-2">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
+                <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
+              </div>
+              <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+                [live telemetry]
+              </div>
             </div>
           </div>
-
-          <NowBanner />
         </div>
+
+        {/* …but // now spans the full width (above AI Usage + Launcher + Server)
+            so its segments fit on fewer rows and the banner stays short. */}
+        <NowBanner />
       </div>
 
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
