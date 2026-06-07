@@ -5,6 +5,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
 import authRoute from './routes/auth.js'
+import updatesRoute from './routes/updates.js'
 import systemRoute from './routes/system.js'
 import sessionsRoute from './routes/sessions.js'
 import aiUsageRoute from './routes/aiUsage.js'
@@ -78,8 +79,10 @@ app.use((req, _res, next) => {
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
-// Public auth endpoints (login/setup/status) — must be reachable without a token.
+// Public endpoints (no token required): auth (login/setup/status) and the
+// desktop app's auto-update mirror.
 app.use('/api', authRoute)
+app.use('/api', updatesRoute)
 
 app.use('/api', requireAuth)
 app.use('/api', systemRoute)
