@@ -121,7 +121,7 @@ function Shell() {
   const version = useAppVersion()
 
   return (
-    <div className="flex min-h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div className="min-h-full max-w-full overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
       {/* The header doubles as the frameless window's draggable title bar in the app. */}
       <header className="sticky top-0 z-10 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
@@ -129,7 +129,7 @@ function Shell() {
             window (double-click toggles maximize). The interactive controls below
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
         <div data-tauri-drag-region aria-hidden className="absolute inset-0" />
-        <div className="relative w-full px-4 py-2.5 sm:px-6">
+        <div className="pointer-events-none relative w-full px-4 py-2.5 sm:px-6">
           <div>
             <div className="pointer-events-none flex items-center gap-3">
               {/* left cluster: brand + version + theme + sign out */}
@@ -199,7 +199,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="flex min-h-0 w-full flex-1 flex-col overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
+      <main className="w-full overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}

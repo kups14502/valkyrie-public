@@ -205,6 +205,28 @@ export default function CodeDeck() {
   const linkBufRef = useRef('')
   const lastSendRef = useRef<{ text: string; at: number } | null>(null)
 
+  // On large screens Code Deck is an app-like full-height pane: measure its
+  // distance from the top of the viewport and fill the rest so the chat/terminal
+  // scroll internally instead of stretching the whole page. Self-adjusts to the
+  // header height (no magic numbers). Below lg it stacks and the page scrolls.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const [paneHeight, setPaneHeight] = useState<number | undefined>()
+  useEffect(() => {
+    const compute = () => {
+      const el = paneRef.current
+      if (!el || !window.matchMedia('(min-width: 1024px)').matches) {
+        setPaneHeight(undefined)
+        return
+      }
+      const top = el.getBoundingClientRect().top
+      // Keep the main's bottom padding (sm:py-8 = 32px) clear so nothing scrolls.
+      setPaneHeight(Math.max(320, window.innerHeight - top - 32))
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    return () => window.removeEventListener('resize', compute)
+  }, [])
+
   const refresh = () => qc.invalidateQueries({ queryKey: ['code-deck'] })
   const create = useMutation({ mutationFn: createCodeDeckSession, onSuccess: (s) => { setSelectedId(s.id); setMode('chat'); setShowNew(false); void refresh() } })
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<CodeDeckSession> }) => updateCodeDeckSession(id, body), onSuccess: () => { void refresh() } })
@@ -683,7 +705,11 @@ export default function CodeDeck() {
   )
 
   return (
-    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-4 lg:flex-row">
+    <div
+      ref={paneRef}
+      style={paneHeight ? { height: paneHeight } : undefined}
+      className="flex min-w-0 max-w-full flex-col gap-4 lg:flex-row"
+    >
       {sidebarOpen && (
       <>
       {/* Mobile-only backdrop: tap outside the drawer to dismiss it. */}
