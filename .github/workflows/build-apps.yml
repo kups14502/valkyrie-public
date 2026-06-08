@@ -44,11 +44,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './frontend/src-tauri -> target'
-
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -76,10 +71,11 @@ jobs:
           releaseDraft: false
           prerelease: false
 
-      - name: Upload installers (run artifact)
+      - name: Upload installers (short-lived run artifact)
         uses: actions/upload-artifact@v4
         with:
           name: master-control-${{ matrix.platform }}
+          retention-days: 2
           if-no-files-found: warn
           path: |
             frontend/src-tauri/target/release/bundle/**/*

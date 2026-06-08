@@ -51,11 +51,6 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './frontend/src-tauri -> target'
-
       - name: Install frontend dependencies
         run: npm ci
 
@@ -72,6 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: master-control-android
+          retention-days: 2
           if-no-files-found: warn
           path: |
             frontend/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
