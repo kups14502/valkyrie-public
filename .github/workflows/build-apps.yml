@@ -1,9 +1,16 @@
 name: build-apps
 
-# Builds the dedicated Tauri desktop apps (Windows / macOS / Linux) on every
-# push to main that touches the frontend, plus on-demand. Publishes a signed
-# GitHub Release (with the updater manifest latest.json) so installed apps
-# auto-update. Installers are also uploaded as run artifacts for direct download.
+# Builds the dedicated Tauri desktop apps and publishes a signed GitHub Release
+# (with updater manifest) so installed apps auto-update.
+#
+# COST MANAGEMENT
+# macOS runners cost 10× GitHub-hosted minutes; Linux 1×; Windows 2×.
+# To stay well within the 2,000 free min/month:
+#  - Auto (every push to main): Linux + Windows only (~15 min/run)
+#  - Manual dispatch: choose "all" to include macOS, or leave default for Linux+Windows
+#
+# TODO: set matrix.runner for ubuntu to [self-hosted, linux] once the Actions
+# runner is installed on the OpenClaw server — that drops Linux to 0 billed min.
 
 on:
   push:
@@ -12,6 +19,13 @@ on:
       - 'frontend/**'
       - '.github/workflows/build-apps.yml'
   workflow_dispatch:
+    inputs:
+      include_macos:
+        description: 'Include macOS build (costs 10× minutes)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 concurrency:
   group: build-apps-${{ github.ref }}
@@ -25,10 +39,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          # Linux — swap runner to [self-hosted, linux] once runner is configured
+          # on the OpenClaw server to eliminate these billed minutes entirely.
           - platform: ubuntu-22.04
+            runner: ubuntu-22.04
+          # Windows — 2× minute multiplier (~10 min/build)
           - platform: windows-latest
-    runs-on: ${{ matrix.platform }}
+            runner: windows-latest
+          # macOS — 10× minute multiplier (~50 min/build). Only on manual dispatch
+          # when explicitly opted in to avoid burning the monthly minute quota.
+          - platform: macos-latest
+            runner: macos-latest
+
+    runs-on: ${{ matrix.runner }}
+
+    # Skip macOS unless this is a manual dispatch that explicitly opts in.
+    if: >-
+      matrix.platform != 'macos-latest' ||
+      (github.event_name == 'workflow_dispatch' && inputs.include_macos == 'true')
+
     defaults:
       run:
         working-directory: frontend
@@ -43,6 +72,13 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/target
+          key: ${{ runner.os }}-rust-${{ hashFiles('frontend/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-rust-
 
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -74,7 +110,7 @@ jobs:
       - name: Upload installers (short-lived run artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: master-control-${{ matrix.platform }}
+          name: valkyrie-${{ matrix.platform }}
           retention-days: 2
           if-no-files-found: warn
           path: |

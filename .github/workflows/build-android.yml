@@ -7,12 +7,9 @@ name: build-android
 # Produces a DEBUG-signed APK (installable via sideload) for personal use — no
 # release keystore / Play Store yet. That can be added later.
 
+# Android builds are manual-only — the ubuntu runner takes ~12 min per run
+# and we rarely need a new APK on every push. Trigger manually when needed.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/build-android.yml'
   workflow_dispatch:
 
 concurrency:
