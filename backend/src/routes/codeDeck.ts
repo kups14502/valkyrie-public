@@ -190,7 +190,7 @@ function allowedModels(profileId: string) {
   const profile = PROFILES.find((p) => p.id === profileId) ?? PROFILES[0]
   return profile.provider === 'codex'
     ? ['gpt-5.5']
-    : ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5']
+    : ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5', 'claude-fable-5']
 }
 
 function normalizeModel(profileId: string, requested: string) {
