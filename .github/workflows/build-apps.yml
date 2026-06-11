@@ -111,8 +111,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: valkyrie-${{ matrix.platform }}
-          retention-days: 2
+          retention-days: 1
           if-no-files-found: warn
+          # Installer files only — the full bundle/ tree (unpacked AppImage etc.)
+          # is ~200MB/run and blows the 0.5GB free Actions storage. Installers are
+          # also published to the GitHub Release, which doesn't count against quota.
           path: |
-            frontend/src-tauri/target/release/bundle/**/*
-            frontend/src-tauri/target/*/release/bundle/**/*
+            frontend/src-tauri/target/**/release/bundle/**/*.AppImage
+            frontend/src-tauri/target/**/release/bundle/**/*.deb
+            frontend/src-tauri/target/**/release/bundle/**/*.rpm
+            frontend/src-tauri/target/**/release/bundle/**/*.dmg
+            frontend/src-tauri/target/**/release/bundle/**/*.msi
+            frontend/src-tauri/target/**/release/bundle/**/*.exe
