@@ -10,9 +10,16 @@ const appVersion = JSON.parse(
   readFileSync(new URL('./src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
 ).version as string
 
+// Build id for the web/PWA so deploy freshness is visible in the header (the
+// web version string is always the static config version, so the short SHA is
+// the real "did it actually update?" signal). Cloudflare Pages exposes the
+// commit as CF_PAGES_COMMIT_SHA; fall back to an explicit VITE_BUILD_ID or dev.
+const buildId = process.env.VITE_BUILD_ID || process.env.CF_PAGES_COMMIT_SHA || 'dev'
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    'import.meta.env.VITE_BUILD_ID': JSON.stringify(buildId),
   },
   plugins: [
     react(),

@@ -235,6 +235,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
   const termDivRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null)
   // Key of the message whose collapse was last toggled, consumed once by an
   // effect to scroll the chat when the *last* message is expanded below the fold.
   const lastToggledKeyRef = useRef<string | null>(null)
@@ -695,6 +696,17 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
     if (el) el.scrollTop = el.scrollHeight
   }, [agent.items.length, agent.streaming, agent.busy])
 
+  // Auto-grow the chat input with its content (capped), so multi-line drafts
+  // aren't clipped by a fixed height and the top doesn't scroll out of view as
+  // you type. Runs on every value change, including the programmatic clear
+  // after send.
+  useEffect(() => {
+    const el = chatInputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
+  }, [chatInput])
+
   // On opening/switching a session, jump straight to the most recent message
   // once its history has loaded. The effect above can fire before the markdown
   // (and images) finish laying out — leaving you at the top, especially on
@@ -1130,7 +1142,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
                           )}
                         </div>
                         <div className="shrink-0 space-y-2">
-                          <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="h-20 w-full resize-none border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
+                          <textarea ref={chatInputRef} rows={2} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} onPaste={handlePaste} className="max-h-[240px] min-h-[3.25rem] w-full resize-none overflow-y-auto border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" placeholder="Message Code Deck…" />
                           {attached.length > 0 && (
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-success)]">{attached.length} attached</span>
