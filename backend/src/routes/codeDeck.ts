@@ -15,7 +15,7 @@ const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
 const DB_PATH = path.join(DATA_DIR, 'code-deck.sqlite')
 
 const BASE_PROJECT_ROOTS = [
-  { id: 'work', label: 'Work / OneDrive', path: path.join(homedir(), 'work'), folder: 'Work' },
+  { id: 'work', label: 'OneDrive', path: path.join(homedir(), 'work'), folder: 'Work' },
   { id: 'master-control', label: 'Valkyrie', path: path.join(homedir(), 'master-control'), folder: 'Personal' },
   { id: 'openclaw-home', label: 'OpenClaw Home', path: homedir(), folder: 'OpenClaw' },
   { id: 'dnd-bot', label: 'Bot Workspace', path: path.join(homedir(), 'dm-bot-runtime', 'workspace'), folder: 'OpenClaw' },

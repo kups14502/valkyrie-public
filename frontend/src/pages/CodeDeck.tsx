@@ -275,22 +275,17 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
       if (!out.has(r.folder)) out.set(r.folder, [])
       out.get(r.folder)!.push(r)
     }
-    return applyOrder(Array.from(out.entries()), prefs.groupOrder, ([name]) => name)
-  }, [deck.data, prefs.groupOrder])
+    // Folders are listed alphabetically (manual reordering removed).
+    return Array.from(out.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [deck.data])
   const pinned = applyOrder(sessions.filter((s) => s.pinned), prefs.pinnedOrder, (s) => s.id)
-  // Ordered list of folder-group names, used to drive group reordering.
-  const groupNames = useMemo(() => applyOrder(Array.from(new Set(projectGroups.map(([n]) => n))), prefs.groupOrder, (n) => n), [projectGroups, prefs.groupOrder])
 
   // ----- drag-and-drop reorder -----
   // `drag` holds the item currently being dragged; drop handlers persist the new
   // order only when dropping onto a sibling of the same type/group.
   const [drag, setDrag] = useState<{ type: 'group' | 'project' | 'pinned'; group?: string; key: string } | null>(null)
-  const dropGroup = (target: string) => { if (drag?.type === 'group') { prefsMut.mutate({ groupOrder: reorder(groupNames, drag.key, target) }); setDrag(null) } }
-  const dropProject = (group: string, ordered: string[], target: string) => { if (drag?.type === 'project' && drag.group === group) { prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: reorder(ordered, drag.key, target) } }); setDrag(null) } }
   const dropPinned = (target: string) => { if (drag?.type === 'pinned') { prefsMut.mutate({ pinnedOrder: reorder(pinned.map((s) => s.id), drag.key, target) }); setDrag(null) } }
   // Touch reorder (mobile up/down buttons) — same persistence as the DnD drops.
-  const moveGroup = (name: string, dir: -1 | 1) => prefsMut.mutate({ groupOrder: moveInOrder(groupNames, name, dir) })
-  const moveProject = (group: string, ordered: string[], name: string, dir: -1 | 1) => prefsMut.mutate({ projectOrder: { ...prefs.projectOrder, [group]: moveInOrder(ordered, name, dir) } })
   const movePinned = (id: string, dir: -1 | 1) => prefsMut.mutate({ pinnedOrder: moveInOrder(pinned.map((s) => s.id), id, dir) })
 
   // Close the mobile drawer after a navigation action. No-op on desktop, where
@@ -848,7 +843,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
                 {foldersCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
               {foldersCollapsed ? null : deck.isLoading ? <div className="text-sm text-[var(--color-text-dim)]">Loading…</div> : deck.error ? <div className="text-sm text-[var(--color-danger)]">Code Deck unavailable</div> : <div className="space-y-5">
-                {projectGroups.map(([name, roots], gi) => {
+                {projectGroups.map(([name, roots]) => {
                   // The synthetic group-root entry (id `group:<name>`) drives the
                   // group header itself; it is not shown as a separate row.
                   const groupRoot = roots.find((r) => r.id === `group:${name}`)
@@ -861,27 +856,15 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
                   }
                   const parentNames = new Set([...parents.map((r) => r.label), ...childrenByParent.keys()])
                   const groupCollapsed = collapsedGroups.has(name)
-                  const orderedParentNames = applyOrder([...parentNames], prefs.projectOrder[name], (pn) => pn)
+                  const orderedParentNames = [...parentNames].sort((a, b) => a.localeCompare(b))
                   const groupSelected = Boolean(groupRoot && rootId === groupRoot.id)
                   return (
                     <div key={name} className="border-l border-[var(--color-accent)]/50 pl-3">
-                      <div
-                        draggable
-                        onDragStart={() => setDrag({ type: 'group', key: name })}
-                        onDragEnd={() => setDrag(null)}
-                        onDragOver={drag?.type === 'group' ? (e) => e.preventDefault() : undefined}
-                        onDrop={() => dropGroup(name)}
-                        className={`mb-2 flex w-full items-center gap-1.5 ${drag?.type === 'group' && drag.key === name ? 'opacity-40' : ''}`}
-                      >
-                        <GripVertical size={13} className="hidden shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)] lg:block" />
-                        <div className="flex shrink-0 flex-col lg:hidden">
-                          <button type="button" onClick={() => moveGroup(name, -1)} disabled={gi === 0} aria-label={`Move ${name} up`} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronUp size={11} /></button>
-                          <button type="button" onClick={() => moveGroup(name, 1)} disabled={gi === projectGroups.length - 1} aria-label={`Move ${name} down`} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronDown size={11} /></button>
-                        </div>
+                      <div className="mb-2 flex w-full items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => (groupRoot ? selectRoot(groupRoot.id) : toggleGroup(name))}
-                          className={`flex flex-1 items-center gap-2 border px-2 py-1.5 text-xs font-bold uppercase tracking-[0.18em] transition ${groupSelected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-transparent text-[var(--color-accent)] hover:border-[var(--color-border-strong)]'}`}
+                          className={`flex flex-1 items-center gap-2 border px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition ${groupSelected ? 'border-[var(--color-accent)] bg-[rgba(0,255,65,0.07)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-accent)] hover:border-[var(--color-border-strong)]'}`}
                           title={groupRoot ? `Run at ${groupRoot.path}` : undefined}
                         >
                           <Folder size={14} className="shrink-0" />
@@ -892,27 +875,14 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
                         </button>
                       </div>
                       {!groupCollapsed && <div className="space-y-1.5">
-                        {orderedParentNames.map((parentName, pi) => {
+                        {orderedParentNames.map((parentName) => {
                           const parentRoot = parents.find((r) => r.label === parentName)
                           const kids = childrenByParent.get(parentName) ?? []
                           const key = `${name}:${parentName}`
                           const open = expandedFolders.has(key)
                           return (
-                            <div
-                              key={key}
-                              draggable
-                              onDragStart={() => setDrag({ type: 'project', group: name, key: parentName })}
-                              onDragEnd={() => setDrag(null)}
-                              onDragOver={drag?.type === 'project' && drag.group === name ? (e) => e.preventDefault() : undefined}
-                              onDrop={() => dropProject(name, orderedParentNames, parentName)}
-                              className={`space-y-1.5 ${drag?.type === 'project' && drag.group === name && drag.key === parentName ? 'opacity-40' : ''}`}
-                            >
+                            <div key={key} className="space-y-1.5">
                               <div className="flex items-stretch gap-1">
-                                <GripVertical size={14} className="mt-2 hidden shrink-0 cursor-grab text-[var(--color-text-faint)] hover:text-[var(--color-accent)] lg:block" />
-                                <div className="flex shrink-0 flex-col justify-center lg:hidden">
-                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, -1)} disabled={pi === 0} aria-label={`Move ${parentName} up`} className="border border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronUp size={11} /></button>
-                                  <button type="button" onClick={() => moveProject(name, orderedParentNames, parentName, 1)} disabled={pi === orderedParentNames.length - 1} aria-label={`Move ${parentName} down`} className="border border-t-0 border-[var(--color-border)] px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-30"><ChevronDown size={11} /></button>
-                                </div>
                                 {kids.length > 0 ? (
                                   <button type="button" onClick={() => toggleFolder(key)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label={open ? 'Collapse folder' : 'Expand folder'}>
                                     {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
