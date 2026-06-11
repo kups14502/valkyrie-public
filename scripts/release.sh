@@ -44,7 +44,9 @@ if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
 fi
 
 cd "$FRONTEND"
-npm ci
+# --include=dev: the server runs with NODE_ENV=production, under which `npm ci`
+# omits devDependencies (@tauri-apps/cli, vite, etc.) and the build can't run.
+npm ci --include=dev
 
 export TAURI_SIGNING_PRIVATE_KEY
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
