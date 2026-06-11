@@ -281,6 +281,18 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
   }, [deck.data])
   const pinned = applyOrder(sessions.filter((s) => s.pinned), prefs.pinnedOrder, (s) => s.id)
 
+  // Default the Folders view to a tidy top-level list: collapse every folder
+  // group on first load (so you land on just OpenClaw / Personal / Work).
+  // Runs once — any expand/collapse the user does afterward is preserved.
+  const groupsInitRef = useRef(false)
+  useEffect(() => {
+    if (groupsInitRef.current) return
+    const names = projectGroups.map(([n]) => n)
+    if (names.length === 0) return
+    groupsInitRef.current = true
+    setCollapsedGroups(new Set(names))
+  }, [projectGroups])
+
   // ----- drag-and-drop reorder -----
   // `drag` holds the item currently being dragged; drop handlers persist the new
   // order only when dropping onto a sibling of the same type/group.
@@ -815,7 +827,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
               <button type="button" onClick={() => setSidebarOpen(false)} className="shrink-0 border border-[var(--color-border)] px-2 text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" aria-label="Collapse sidebar"><PanelLeftClose size={16} /></button>
             </div>
             <Card>
-              <button type="button" onClick={() => setPinnedCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={pinnedCollapsed ? 'Expand pinned section' : 'Collapse pinned section'}>
+              <button type="button" onClick={() => setPinnedCollapsed((v) => !v)} className={`flex w-full items-center justify-between gap-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)] ${pinnedCollapsed ? '' : 'mb-4 border-b border-[var(--color-border)] pb-2'}`} style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={pinnedCollapsed ? 'Expand pinned section' : 'Collapse pinned section'}>
                 <span className="truncate">&gt; Pinned <span className="text-[var(--color-text-faint)]">({pinned.length})</span></span>
                 {pinnedCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
@@ -826,7 +838,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
               )}
             </Card>
             <Card>
-              <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
+              <button type="button" onClick={() => setSessionsCollapsed((v) => !v)} className={`flex w-full items-center justify-between gap-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)] ${sessionsCollapsed ? '' : 'mb-4 border-b border-[var(--color-border)] pb-2'}`} style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={sessionsCollapsed ? 'Expand sessions section' : 'Collapse sessions section'}>
                 <span className="truncate">&gt; Sessions <span className="text-[var(--color-text-faint)]">({sessions.length})</span></span>
                 {sessionsCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
@@ -850,7 +862,7 @@ export default function CodeDeck({ popoutId }: { popoutId?: string } = {}) {
               )}
             </Card>
             <Card>
-              <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className="mb-4 flex w-full items-center justify-between gap-2 border-b border-[var(--color-border)] pb-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
+              <button type="button" onClick={() => setFoldersCollapsed((v) => !v)} className={`flex w-full items-center justify-between gap-2 text-left text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent)] hover:text-[var(--color-accent)] ${foldersCollapsed ? '' : 'mb-4 border-b border-[var(--color-border)] pb-2'}`} style={{ textShadow: '0 0 8px var(--color-accent)' }} aria-label={foldersCollapsed ? 'Expand folders section' : 'Collapse folders section'}>
                 <span className="truncate">&gt; Folders</span>
                 {foldersCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
               </button>
