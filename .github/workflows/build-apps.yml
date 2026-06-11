@@ -5,19 +5,13 @@ name: build-apps
 #
 # COST MANAGEMENT
 # macOS runners cost 10× GitHub-hosted minutes; Linux 1×; Windows 2×.
-# To stay well within the 2,000 free min/month:
-#  - Auto (every push to main): Linux + Windows only (~15 min/run)
-#  - Manual dispatch: choose "all" to include macOS, or leave default for Linux+Windows
-#
-# TODO: set matrix.runner for ubuntu to [self-hosted, linux] once the Actions
-# runner is installed on the OpenClaw server — that drops Linux to 0 billed min.
+# Trigger policy: tag-only releases (app-v*) to avoid burning Windows minutes
+# on every commit. Linux runs on the self-hosted OpenClaw runner (0 billed min).
+# Manual workflow_dispatch available for test/pre-release builds.
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/build-apps.yml'
+    tags: ['app-v*']
   workflow_dispatch:
     inputs:
       include_macos:
@@ -39,10 +33,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux — swap runner to [self-hosted, linux] once runner is configured
-          # on the OpenClaw server to eliminate these billed minutes entirely.
+          # Linux — runs on the self-hosted OpenClaw runner (0 billed minutes).
           - platform: ubuntu-22.04
-            runner: ubuntu-22.04
+            runner: [self-hosted, openclaw]
           # Windows — 2× minute multiplier (~10 min/build)
           - platform: windows-latest
             runner: windows-latest
@@ -81,7 +74,7 @@ jobs:
           restore-keys: ${{ runner.os }}-rust-
 
       - name: Install Linux build deps
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -89,8 +82,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Set build version (so installed apps detect the update)
-        run: node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='0.1.${{ github.run_number }}';require('fs').writeFileSync(f, JSON.stringify(c,null,2)+'\n')"
+      - name: Set build version
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VER="${GITHUB_REF_NAME#app-v}"
+          else
+            VER="0.0.0-dev.${{ github.run_number }}"
+          fi
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='$VER';require('fs').writeFileSync(f,JSON.stringify(c,null,2)+'\n')"
 
       - name: Build + release Tauri app
         uses: tauri-apps/tauri-action@v0
