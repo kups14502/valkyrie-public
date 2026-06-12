@@ -12,7 +12,7 @@ import { generateSecret, generateURI, verifySync } from 'otplib'
 
 const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
 const DB_PATH = path.join(DATA_DIR, 'auth.sqlite')
-const ISSUER = 'Master Control'
+const ISSUER = 'Valkyrie'
 const ACCOUNT = process.env.AUTH_ACCOUNT_LABEL || 'owner'
 // Accept codes within ±30s (one step) of the server clock to tolerate drift.
 const TOTP_TOLERANCE = 30

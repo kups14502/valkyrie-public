@@ -3,7 +3,7 @@ import { Check, ChevronDown } from 'lucide-react'
 
 export type DropdownOption = { value: string; label: string }
 
-// Master Control styled dropdown — replaces native <select> so the picker
+// Valkyrie styled dropdown — replaces native <select> so the picker
 // looks the same on mobile and desktop instead of the OS-branded control.
 export function Dropdown({ value, options, onChange, className = '', size = 'md' }: {
   value: string

@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken'
 import jwksClient from 'jwks-rsa'
 import { verifyAppToken } from '../auth/token.js'
 
-// Auth for Master Control. Accepted credentials, checked in order:
+// Auth for Valkyrie. Accepted credentials, checked in order:
 //   1. Self-hosted app token (Authorization: Bearer <jwt>, or ?token= for WS) —
 //      the dedicated desktop/mobile apps use this.
 //   2. Cloudflare Access JWT (cf-access-jwt-assertion header) — transitional,

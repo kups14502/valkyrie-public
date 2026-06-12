@@ -18,7 +18,7 @@
 
 ## Goal (user's words)
 
-> "I am tired of using Master Control in PWA apps and Safari on my phone; and I'm
+> "I am tired of using Valkyrie in PWA apps and Safari on my phone; and I'm
 > tired of logging in with the Cloudflare email code, why not just use an OTP on
 > my phone. It's time to make dedicated desktop and mobile apps."
 
