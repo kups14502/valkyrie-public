@@ -32,6 +32,7 @@ type ClaudeQuota = {
 }
 
 type ClaudeAccount = {
+  id: string
   email: string
   subscription: string
   configDir: string
@@ -107,9 +108,13 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
   }
 }
 
+const DEFAULT_CLAUDE_DIR = '/home/brendon/.claude'
+
 const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
-  { email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude' },
-  { email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
+  { id: 'claude-acct-a', email: 'user@example.com', subscription: 'Claude Team', configDir: DEFAULT_CLAUDE_DIR },
+  { id: 'claude-acct-b', email: 'user@example.com', subscription: 'Claude Team', configDir: '/home/brendon/.claude-accounts/acct-b' },
+  { id: 'claude-acct-c', email: 'user@example.com', subscription: 'Claude Team', configDir: '/home/brendon/.claude-accounts/acct-c' },
+  { id: 'claude-botacct', email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
 ]
 
 function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
@@ -483,27 +488,37 @@ async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
-      const botClaudeEnv = { CLAUDE_CONFIG_DIR: CLAUDE_ACCOUNTS[1].configDir }
-      const [teamClaudeBlocks, teamClaude, botClaudeBlocks, botClaude, teamClaudeQuota, botClaudeQuota, codexUsage, codexRateLimits, dmBot] = await Promise.all([
-        readClaudeBlocks(),
-        readClaudeUsage(),
-        readClaudeBlocks(botClaudeEnv),
-        readClaudeUsage(botClaudeEnv),
-        readClaudeOAuthQuota(CLAUDE_ACCOUNTS[0].configDir),
-        readClaudeOAuthQuota(CLAUDE_ACCOUNTS[1].configDir),
+      // Read each Claude account from its own config dir. Accounts without a
+      // logged-in .credentials.json simply return empty usage / null quota.
+      const claudeResults = await Promise.all(CLAUDE_ACCOUNTS.map(async (acct) => {
+        const env = acct.configDir === DEFAULT_CLAUDE_DIR ? undefined : { CLAUDE_CONFIG_DIR: acct.configDir }
+        const [blocks, usage, quota] = await Promise.all([
+          readClaudeBlocks(env),
+          readClaudeUsage(env),
+          readClaudeOAuthQuota(acct.configDir),
+        ])
+        return { acct, blocks, usage, quota }
+      }))
+      const [codexUsage, codexRateLimits, dmBot] = await Promise.all([
         readCodexUsage(),
         readCodexRateLimits(),
         readDMBotUsage(),
       ])
-      const claude = { ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: teamClaudeQuota }
+
+      const claudeClients = claudeResults.map(({ acct, blocks, usage, quota }) => ({
+        id: acct.id, kind: 'claude', label: acct.email, subscription: acct.subscription,
+        ...usage, session: blocks.activeBlock, quota,
+      }))
+
+      // legacy `claude` field kept for alerts / older deployed frontends: first listed account
+      const primary = claudeResults[0]
+      const claude = { ...primary.usage, session: primary.blocks.activeBlock, quota: primary.quota }
       const data = {
-        // legacy fields kept for alerts / older deployed frontends
         claude,
         codex: { ...codexUsage, rateLimits: codexRateLimits },
         // explicit client list for the dashboard panel; display quota/rate-limit percentages, not token totals
         aiClients: [
-          { id: 'claude-work', kind: 'claude', label: 'user@example.com', subscription: CLAUDE_ACCOUNTS[0].subscription, ...teamClaude, session: teamClaudeBlocks.activeBlock, quota: teamClaudeQuota },
-          { id: 'claude-botacct', kind: 'claude', label: 'bot@example.com', subscription: CLAUDE_ACCOUNTS[1].subscription, ...botClaude, session: botClaudeBlocks.activeBlock, quota: botClaudeQuota },
+          ...claudeClients,
           { id: 'codex-work', kind: 'codex', label: 'Codex user@example.com', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
         ],
         dmBot,
