@@ -483,7 +483,7 @@ export type CodeDeckSession = {
 }
 
 export type CodeDeckRoot = { id: string; label: string; path: string; folder: string; exists: boolean }
-export type CodeDeckProfile = { id: string; label: string; provider: string; defaultModel: string; command: string; env: Record<string, string> }
+export type CodeDeckProfile = { id: string; label: string; provider: string; defaultModel: string; command: string; env: Record<string, string>; usageClientId?: string }
 export type CodeDeckPrefs = { groupOrder: string[]; projectOrder: Record<string, string[]>; pinnedOrder: string[] }
 export type CodeDeckState = {
   sessions: CodeDeckSession[]

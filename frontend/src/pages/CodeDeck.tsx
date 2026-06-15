@@ -67,8 +67,7 @@ function moveInOrder(keys: string[], key: string, dir: -1 | 1): string[] {
 }
 
 
-const emailOf = (s: string) => s.match(/[\w.+-]+@[\w.-]+/)?.[0]?.toLowerCase()
-const profileOrder = ['main-claude', 'botacct-claude', 'main-codex']
+const profileOrder = ['main-claude', 'acct-b-claude', 'acct-c-claude', 'acct-e-claude', 'botacct-claude', 'main-codex']
 const orderedProfiles = (profiles: { id: string; label: string }[] = []) =>
   [...profiles].sort((a, b) => {
     const ai = profileOrder.indexOf(a.id)
@@ -78,17 +77,12 @@ const orderedProfiles = (profiles: { id: string; label: string }[] = []) =>
 
 type UsageBarData = { label: string; pct: number; sub?: string; warn?: boolean }
 
-function usageBarsForProfile(data: AIUsage | undefined, profile: { id: string; provider: string; label: string } | undefined): UsageBarData[] {
+function usageBarsForProfile(data: AIUsage | undefined, profile: { id: string; provider: string; label: string; usageClientId?: string } | undefined): UsageBarData[] {
   if (!data || !profile) return []
-  const wantEmail = profile.id === 'botacct-claude'
-    ? 'bot@example.com'
-    : profile.id === 'main-claude' || profile.id === 'main-codex'
-    ? 'user@example.com'
-    : emailOf(profile.label)
   const clients = data.aiClients ?? []
   if (profile.provider === 'claude') {
-    const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && (!wantEmail || emailOf(c.label) === wantEmail))
-    const quota = match?.quota ?? (wantEmail && emailOf('user@example.com') === wantEmail ? data.claude.quota : null)
+    const match = clients.find((c): c is Extract<AIClientUsage, { kind: 'claude' }> => c.kind === 'claude' && c.id === profile.usageClientId)
+    const quota = match?.quota ?? null
     if (!quota) return []
     return [
       { label: 'Session (5h)', pct: quota.sessionPct, sub: quota.sessionResetsAt ? `Resets in ${Math.max(0, Math.round((new Date(quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min` : quota.status?.replace(/_/g, ' ') ?? undefined },

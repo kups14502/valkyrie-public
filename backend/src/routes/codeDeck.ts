@@ -66,30 +66,63 @@ function discoverProjectRoots(): ProjectRoot[] {
   return [...GROUP_ROOTS, ...deduped].sort((a, b) => a.folder.localeCompare(b.folder) || a.label.localeCompare(b.label))
 }
 
+// `usageClientId` correlates each profile with its aiUsage client (see
+// aiUsage.ts CLAUDE_ACCOUNTS ids) so Code Deck can show the right quota bars.
+// Existing profile ids are kept stable so stored sessions keep resolving.
 export const PROFILES = [
   {
     id: 'main-claude',
-    label: 'acct-e claude',
+    label: 'Account A',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
     command: '/home/brendon/.local/bin/claude',
     env: {},
+    usageClientId: 'claude-acct-a',
+  },
+  {
+    id: 'acct-b-claude',
+    label: 'Account B',
+    provider: 'claude',
+    defaultModel: 'claude-sonnet-4-6',
+    command: '/home/brendon/.local/bin/claude',
+    env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-accounts/acct-b' },
+    usageClientId: 'claude-acct-b',
+  },
+  {
+    id: 'acct-c-claude',
+    label: 'Account C',
+    provider: 'claude',
+    defaultModel: 'claude-sonnet-4-6',
+    command: '/home/brendon/.local/bin/claude',
+    env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-accounts/acct-c' },
+    usageClientId: 'claude-acct-c',
+  },
+  {
+    id: 'acct-e-claude',
+    label: 'Account E',
+    provider: 'claude',
+    defaultModel: 'claude-sonnet-4-6',
+    command: '/home/brendon/.local/bin/claude',
+    env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-accounts/acct-e' },
+    usageClientId: 'claude-acct-e',
   },
   {
     id: 'botacct-claude',
-    label: 'bot claude',
+    label: 'Bot account',
     provider: 'claude',
     defaultModel: 'claude-sonnet-4-6',
     command: '/home/brendon/.local/bin/claude',
     env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-botacct' },
+    usageClientId: 'claude-botacct',
   },
   {
     id: 'main-codex',
-    label: 'codex',
+    label: 'Codex',
     provider: 'codex',
     defaultModel: 'gpt-5.5',
     command: '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex',
     env: {},
+    usageClientId: 'codex-work',
   },
 ]
 
