@@ -33,6 +33,7 @@ type ClaudeQuota = {
 
 type ClaudeAccount = {
   id: string
+  label: string
   email: string
   subscription: string
   configDir: string
@@ -111,10 +112,11 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
 const DEFAULT_CLAUDE_DIR = '/home/brendon/.claude'
 
 const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
-  { id: 'claude-acct-a', email: 'user@example.com', subscription: 'Claude Team', configDir: DEFAULT_CLAUDE_DIR },
-  { id: 'claude-acct-b', email: 'user@example.com', subscription: 'Claude Team', configDir: '/home/brendon/.claude-accounts/acct-b' },
-  { id: 'claude-acct-c', email: 'user@example.com', subscription: 'Claude Team', configDir: '/home/brendon/.claude-accounts/acct-c' },
-  { id: 'claude-botacct', email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
+  { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: DEFAULT_CLAUDE_DIR },
+  { id: 'claude-acct-b', label: 'Account B', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-b' },
+  { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-c' },
+  { id: 'claude-acct-e', label: 'Account E', email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude-accounts/acct-e' },
+  { id: 'claude-botacct', label: 'Bot account', email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
 ]
 
 function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
@@ -506,7 +508,7 @@ async function refreshAIUsage(): Promise<void> {
       ])
 
       const claudeClients = claudeResults.map(({ acct, blocks, usage, quota }) => ({
-        id: acct.id, kind: 'claude', label: acct.email, subscription: acct.subscription,
+        id: acct.id, kind: 'claude', label: acct.label, subscription: acct.subscription,
         ...usage, session: blocks.activeBlock, quota,
       }))
 
@@ -519,7 +521,7 @@ async function refreshAIUsage(): Promise<void> {
         // explicit client list for the dashboard panel; display quota/rate-limit percentages, not token totals
         aiClients: [
           ...claudeClients,
-          { id: 'codex-work', kind: 'codex', label: 'Codex user@example.com', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
+          { id: 'codex-work', kind: 'codex', label: 'Codex', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
         ],
         dmBot,
         updatedAt: new Date().toISOString(),
