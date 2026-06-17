@@ -196,7 +196,7 @@ function Shell() {
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
-            <Route path="/trade" element={<CenterPage><TradeBot /></CenterPage>} />
+            <Route path="/trade" element={<TradeBot />} />
             <Route path="/emails" element={<CenterPage><Emails /></CenterPage>} />
             <Route path="/code-deck" element={<CodeDeck />} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
