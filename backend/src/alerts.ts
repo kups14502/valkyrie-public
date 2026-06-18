@@ -72,11 +72,14 @@ async function fetchJSON<T>(p: string): Promise<T | null> {
   }
 }
 
+type AIClient = {
+  id: string
+  session: { isActive: boolean; endTime: string } | null
+  quota: { sessionPct: number; sessionResetsAt: string | null } | null
+}
+
 type AIUsageShape = {
-  claude: {
-    session: { isActive: boolean; endTime: string } | null
-    quota: { sessionPct: number; sessionResetsAt: string | null } | null
-  }
+  aiClients?: AIClient[]
 }
 type SystemShape = { disk: { percent: number } }
 type VaultShape = {
@@ -104,8 +107,9 @@ async function tick(state: AlertState): Promise<AlertState> {
   const next = { ...state }
   const now = Date.now()
 
-  const quota = ai?.claude?.quota
-  const sessionReset = ai?.claude?.session?.isActive ? ai.claude.session.endTime : null
+  const acct-a = ai?.aiClients?.find((c) => c.id === 'claude-acct-a')
+  const quota = acct-a?.quota
+  const sessionReset = acct-a?.session?.isActive ? acct-a.session.endTime : null
   const resetSource = quota?.sessionResetsAt ?? sessionReset
   if (resetSource) {
     const resetsAt = resetSource
