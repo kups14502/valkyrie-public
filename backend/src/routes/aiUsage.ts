@@ -115,6 +115,7 @@ const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
   { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: DEFAULT_CLAUDE_DIR },
   { id: 'claude-acct-b', label: 'Account B', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-b' },
   { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-c' },
+  { id: 'claude-acct-d', label: 'Account D', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-d' },
   { id: 'claude-acct-e', label: 'Account E', email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude-accounts/acct-e' },
   { id: 'claude-botacct', label: 'Bot account', email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
 ]

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Valkyrie",
-  "version": "0.1.0",
+  "version": "0.2.4",
   "identifier": "com.brendonkupsch.mastercontrol",
   "build": {
     "frontendDist": "../dist",
@@ -40,7 +40,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg", "deb", "rpm", "appimage"],
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
     "createUpdaterArtifacts": true,
     "category": "Productivity",
     "shortDescription": "Valkyrie dashboard",

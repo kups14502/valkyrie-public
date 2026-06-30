@@ -98,6 +98,15 @@ export const PROFILES = [
     usageClientId: 'claude-acct-c',
   },
   {
+    id: 'acct-d-claude',
+    label: 'Account D',
+    provider: 'claude',
+    defaultModel: 'claude-sonnet-4-6',
+    command: '/home/brendon/.local/bin/claude',
+    env: { CLAUDE_CONFIG_DIR: '/home/brendon/.claude-accounts/acct-d' },
+    usageClientId: 'claude-acct-d',
+  },
+  {
     id: 'acct-e-claude',
     label: 'Account E',
     provider: 'claude',
