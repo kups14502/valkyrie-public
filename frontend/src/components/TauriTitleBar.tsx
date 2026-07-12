@@ -3,9 +3,12 @@ import { Minus, Square, Copy, X } from 'lucide-react'
 import { isTauri } from '../lib/auth'
 
 // Window controls (minimize / maximize / close) for the frameless Tauri window.
-// Rendered inline at the right edge of the app header — the header itself is the
-// draggable title bar (see App.tsx data-tauri-drag-region), so there's no
-// separate title strip. Returns null on web (the browser/PWA keeps its chrome).
+// Absolutely positioned flush against the header's top-right corner (see App.tsx,
+// rendered as a sibling outside the header's padded content row) so the close
+// button sits exactly at the window corner, like a native title bar. The header
+// itself is the draggable title bar (see App.tsx data-tauri-drag-region), so
+// there's no separate title strip. Returns null on web (the browser/PWA keeps
+// its chrome).
 
 type AppWindow = {
   minimize: () => Promise<void>
@@ -36,7 +39,7 @@ export function WindowControls() {
   if (!isTauri()) return null
 
   return (
-    <div className="pointer-events-auto ml-1 flex items-center self-stretch">
+    <div className="absolute right-0 top-0 flex h-full items-stretch">
       <TitleButton label="Minimize" onClick={() => win?.minimize()}>
         <Minus size={14} />
       </TitleButton>
@@ -61,7 +64,7 @@ function TitleButton({ children, onClick, label, danger }: {
       type="button"
       aria-label={label}
       onClick={onClick}
-      className={`flex h-8 w-11 items-center justify-center text-[var(--color-text-dim)] transition-colors ${
+      className={`flex h-full w-11 items-center justify-center text-[var(--color-text-dim)] transition-colors ${
         danger
           ? 'hover:bg-[var(--color-danger)] hover:text-white'
           : 'hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text)]'

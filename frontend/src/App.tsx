@@ -130,7 +130,7 @@ function Shell() {
       <TitleBar />
       {/* The header doubles as the frameless window's draggable title bar in the app.
           shrink-0 so it keeps its height; <main> below is the scroll container. */}
-      <header className="z-10 shrink-0 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+      <header className="relative z-10 shrink-0 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         {/* Full-area drag layer: grab anywhere in the header to move the frameless
             window (double-click toggles maximize). The interactive controls below
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
@@ -170,12 +170,14 @@ function Shell() {
                 >
                   {menuOpen ? <X size={16} /> : <Menu size={16} />}
                 </button>
-                {/* Frameless-window controls (app only) — sit at the top-right corner. */}
-                <WindowControls />
               </div>
             </div>
           </div>
         </div>
+        {/* Frameless-window controls (app only) — flush against the actual top-right
+            corner of the window, outside the header's horizontal padding, so Fitts's-law
+            corner-throwing works like a native title bar. */}
+        <WindowControls />
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
