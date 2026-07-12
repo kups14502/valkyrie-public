@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, type AIClientUsage } from '../lib/api'
 import { EmailSignalCard } from './Emails'
 
 const fmtBytes = (b: number) => {
@@ -204,11 +205,179 @@ function NowBanner() {
   )
 }
 
+// "resets in 42m" / "resets in 3h 10m" / "resets Mon Jul 14" — pick the
+// granularity that reads best for the distance.
+function fmtResetAt(iso: string | null | undefined): string | undefined {
+  if (!iso) return undefined
+  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000)
+  if (mins <= 0) return 'resets now'
+  if (mins < 100) return `resets in ${mins}m`
+  if (mins < 48 * 60) return `resets in ${Math.floor(mins / 60)}h ${mins % 60}m`
+  return `resets ${new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+}
+
+function AIClientCard({ client }: { client: AIClientUsage }) {
+  const isClaude = client.kind === 'claude'
+  return (
+    <div className="flex min-w-0 flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
+        <div className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+          {isClaude ? 'claude' : 'codex'} · {client.subscription.replace(/ plan$/i, '')}
+        </div>
+      </div>
+      {isClaude && client.quota ? (
+        <div className="space-y-2.5">
+          <UsageBar
+            claude
+            pct={client.quota.sessionPct}
+            label="5h session"
+            sub={fmtResetAt(client.quota.sessionResetsAt)}
+          />
+          <UsageBar
+            claude
+            pct={client.quota.weeklyPct}
+            label="Week"
+            sub={fmtResetAt(client.quota.weeklyResetsAt)}
+          />
+        </div>
+      ) : isClaude ? (
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            ['Today', client.today],
+            ['7d', client.last7d],
+            ['30d', client.last30d],
+          ] as const).map(([label, bucket]) => (
+            <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
+              <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
+              <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
+              <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
+            </div>
+          ))}
+        </div>
+      ) : client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
+        <div className="space-y-2.5">
+          {client.rateLimits.session5h && (
+            <UsageBar
+              codex
+              pct={client.rateLimits.session5h.pct}
+              label="5h session"
+              sub={`resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))}m`}
+            />
+          )}
+          {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Week" />}
+        </div>
+      ) : (
+        <div className="text-[11px] text-[var(--color-text-faint)]">usage unavailable</div>
+      )}
+    </div>
+  )
+}
+
+// The primary thing on the dashboard: every AI account's quota at a glance,
+// full width, sorted hottest-first so the account closest to a limit leads.
+function AIUsageHero() {
+  const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
+  const clients: AIClientUsage[] = aiUsage.data?.aiClients ?? (aiUsage.data
+    ? [
+        { id: 'claude-default', kind: 'claude' as const, label: 'Claude', subscription: 'Claude', ...aiUsage.data.claude },
+        { id: 'codex-default', kind: 'codex' as const, label: 'Codex', subscription: 'Codex', ...aiUsage.data.codex },
+      ]
+    : [])
+  const hottest = (c: AIClientUsage) =>
+    c.kind === 'claude'
+      ? Math.max(c.quota?.sessionPct ?? -1, c.quota?.weeklyPct ?? -1)
+      : Math.max(c.rateLimits.session5h?.pct ?? -1, c.rateLimits.weekly?.pct ?? -1)
+  const sorted = [...clients].sort((a, b) => hottest(b) - hottest(a))
+  return (
+    <Card title="AI Usage">
+      {aiUsage.isLoading && !aiUsage.data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : aiUsage.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          {sorted.map((client) => <AIClientCard key={client.id} client={client} />)}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function TradeQuickView() {
+  const trading = useQuery({ queryKey: ['trading'], queryFn: fetchTrading, refetchInterval: 60_000 })
+  const data = trading.data
+  const allPositions = data?.portfolio
+    ? [...data.portfolio.stockPositions, ...data.portfolio.cryptoPositions, ...data.portfolio.optionsPositions]
+    : []
+  const tradeable = allPositions.filter((p) => !p.locked)
+  const totalValue = tradeable.reduce((acc, p) => acc + p.quantity * p.currentPrice, 0)
+  const totalCost = tradeable.reduce((acc, p) => acc + p.quantity * p.avgBuyPrice, 0)
+  const totalPnlPct = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0
+  const unrealizedUSD = totalValue - totalCost
+  const realizedUSD = data?.realized?.totalUSD ?? 0
+  const fmtUSD = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const updatedAgo = data?.lastUpdated ? fmtAgo(new Date(data.lastUpdated).getTime()) : null
+  return (
+    <Card
+      title="Trading"
+      action={
+        <Link to="/trade" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
+          open →
+        </Link>
+      }
+    >
+      {trading.isLoading && !data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : trading.error || !data ? (
+        <div className="text-sm text-[var(--color-danger)]">Trade bot status unavailable</div>
+      ) : !data.portfolio ? (
+        <div className="text-sm text-[var(--color-text-dim)]">No portfolio snapshot yet</div>
+      ) : (
+        <div className="space-y-4">
+          <Stat
+            label="Equity"
+            value={fmtUSD(data.portfolio.equity)}
+            sub={`buying power ${fmtUSD(data.portfolio.buyingPower)}`}
+            chart={data.equityHistory.length > 1
+              ? <Sparkline
+                  values={data.equityHistory.map((p) => p.equity)}
+                  color={unrealizedUSD + realizedUSD < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
+                />
+              : undefined}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Unrealized</div>
+              <div className={`mt-1 text-sm font-semibold ${totalPnlPct > 0 ? 'text-[var(--color-success)]' : totalPnlPct < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
+                {totalPnlPct > 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%
+              </div>
+              <div className="text-[11px] text-[var(--color-text-faint)]">{fmtUSD(unrealizedUSD)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Realized</div>
+              <div className={`mt-1 text-sm font-semibold ${realizedUSD > 0 ? 'text-[var(--color-success)]' : realizedUSD < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
+                {realizedUSD >= 0 ? '+' : ''}{fmtUSD(realizedUSD)}
+              </div>
+              <div className="text-[11px] text-[var(--color-text-faint)]">{data.realized?.closedTrades ?? 0} closed</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-text-dim)]">
+            <span>{tradeable.length} position{tradeable.length === 1 ? '' : 's'}</span>
+            {data.marketRegime && <span className="uppercase tracking-[0.12em]">[{data.marketRegime}]</span>}
+            {data.executedToday.length > 0 && <span>{data.executedToday.length} trade{data.executedToday.length === 1 ? '' : 's'} today</span>}
+            {updatedAgo && <span className="text-[var(--color-text-faint)]">{updatedAgo}</span>}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
-  const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
   const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
   const emailSignals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 120_000 })
@@ -228,104 +397,25 @@ export default function Dashboard() {
   return (
     <div className="min-w-0 space-y-8 overflow-hidden">
       <div className="space-y-4">
-        {/* Heading stays aligned over the center column… */}
-        <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)]">
-          <div className="min-w-0 xl:col-start-2">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
-                <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
-              </div>
-              <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-                [live telemetry]
-              </div>
-            </div>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
+            <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
+          </div>
+          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            [live telemetry]
           </div>
         </div>
 
-        {/* …but // now spans the full width (above AI Usage + Launcher + Server)
-            so its segments fit on fewer rows and the banner stays short. */}
         <NowBanner />
       </div>
 
+      {/* AI usage is the headline: full width, first thing under the banner. */}
+      <AIUsageHero />
+
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 xl:sticky xl:top-24 xl:order-1">
-            <Card title="AI Usage">
-              {aiUsage.isLoading && !aiUsage.data ? (
-                <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-              ) : aiUsage.error ? (
-                <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
-              ) : aiUsage.data ? (
-                <div className="space-y-6">
-                  {(aiUsage.data.aiClients ?? [
-                    { id: 'claude-work', kind: 'claude' as const, label: 'user@example.com', subscription: 'Claude Pro', ...aiUsage.data.claude },
-                    { id: 'codex-work', kind: 'codex' as const, label: 'Codex user@example.com', subscription: 'Codex', ...aiUsage.data.codex },
-                  ]).map((client) => (
-                    <div key={client.id} className="min-w-0 space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">{client.kind === 'claude' ? 'Claude' : 'Codex'}</div>
-                          <div className="mt-1 break-all text-sm font-semibold text-[var(--color-text)] sm:break-normal">{client.label}</div>
-                        </div>
-                        <div className="max-w-[34%] shrink-0 break-words text-right text-[8px] uppercase tracking-[0.08em] text-[var(--color-text-faint)] sm:max-w-[42%] sm:text-[10px] sm:tracking-[0.16em]">{client.subscription}</div>
-                      </div>
-                      {client.kind === 'claude' && client.quota ? (
-                        <div className="space-y-2">
-                          <UsageBar
-                            claude
-                            pct={client.quota.sessionPct}
-                            label="Current session"
-                            sub={client.quota.sessionResetsAt
-                              ? `Resets in ${Math.max(0, Math.round((new Date(client.quota.sessionResetsAt).getTime() - Date.now()) / 60000))} min${client.quota.status ? ` · ${client.quota.status.replace(/_/g, ' ')}` : ''}`
-                              : client.quota.status?.replace(/_/g, ' ')}
-                          />
-                          <UsageBar
-                            claude
-                            pct={client.quota.weeklyPct}
-                            label="Subscription week"
-                            sub={client.quota.weeklyResetsAt
-                              ? `Resets ${new Date(client.quota.weeklyResetsAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-                              : undefined}
-                          />
-                        </div>
-                      ) : client.kind === 'claude' ? (
-                        <div className="space-y-2">
-                          <div className="text-[11px] text-[var(--color-text-faint)]">Subscription quota unavailable</div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {([
-                              ['Today', client.today],
-                              ['7d', client.last7d],
-                              ['30d', client.last30d],
-                            ] as const).map(([label, bucket]) => (
-                              <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
-                                <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
-                                <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
-                                <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
-                        <div className="space-y-2">
-                          {client.rateLimits.session5h && (
-                            <UsageBar
-                              codex
-                              pct={client.rateLimits.session5h.pct}
-                              label="5h session"
-                              sub={`Resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))} min`}
-                            />
-                          )}
-                          {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Subscription week" />}
-                        </div>
-                      ) : client.kind === 'codex' ? (
-                        <div className="text-[11px] text-[var(--color-text-faint)]">Subscription usage unavailable</div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </Card>
+          <TradeQuickView />
         </div>
 
         <div className="order-3 min-w-0 space-y-6 xl:order-2">

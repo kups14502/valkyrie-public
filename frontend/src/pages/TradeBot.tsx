@@ -143,7 +143,7 @@ export default function TradeBot() {
   const tradeableOptions = data?.portfolio?.optionsPositions.filter((p) => !p.locked).length ?? 0
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// market</div>
@@ -167,6 +167,7 @@ export default function TradeBot() {
         <Card><div className="text-sm text-[var(--color-danger)]">Trade bot status unavailable</div></Card>
       ) : (
         <>
+          {/* Hero: equity with a real chart, key numbers alongside. */}
           {data.portfolio && (() => {
             const unrealizedUSD = totalValue - totalCost
             const realizedUSD = data.realized?.totalUSD ?? 0
@@ -174,40 +175,45 @@ export default function TradeBot() {
             const closedTrades = data.realized?.closedTrades ?? 0
             return (
             <Card title="Portfolio">
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-                <Stat
-                  label="Equity"
-                  value={fmtUSD(data.portfolio.equity)}
-                  sub={data.equityHistory.length > 1
-                    ? `${data.equityHistory.length} day${data.equityHistory.length === 1 ? '' : 's'} · excl locked`
-                    : 'tradeable account'}
-                  chart={data.equityHistory.length > 1
-                    ? <Sparkline
-                        values={data.equityHistory.map((p) => p.equity)}
-                        color={netUSD < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
-                      />
-                    : undefined}
-                />
-                <Stat label="Buying power" value={fmtUSD(data.portfolio.buyingPower)} sub="deployable" />
-                <Stat
-                  label="Positions"
-                  value={tradeable.length}
-                  sub={`${tradeableStocks}S · ${tradeableCrypto}C · ${tradeableOptions}O${lockedPositions.length > 0 ? ` · ${lockedPositions.length} locked` : ''}`}
-                />
-                <Stat
-                  label="Unrealized P&L"
-                  value={`${totalPnlPct > 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`}
-                  sub={`${fmtUSD(unrealizedUSD)} on ${fmtUSD(totalCost)}`}
-                />
-                <Stat
-                  label="Realized P&L"
-                  value={closedTrades > 0
-                    ? `${realizedUSD >= 0 ? '+' : ''}${fmtUSD(realizedUSD)}`
-                    : '—'}
-                  sub={closedTrades > 0
-                    ? `${closedTrades} closed · approx`
-                    : 'no closed trades yet'}
-                />
+              <div className="grid gap-6 lg:grid-cols-[minmax(260px,1.2fr)_2fr] lg:items-center">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Equity</div>
+                  <div className="mt-2 text-3xl font-semibold tracking-tight text-[var(--color-text)]">{fmtUSD(data.portfolio.equity)}</div>
+                  {data.equityHistory.length > 1 && (
+                    <Sparkline
+                      values={data.equityHistory.map((p) => p.equity)}
+                      color={netUSD < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
+                      height={48}
+                    />
+                  )}
+                  <div className="mt-1 text-xs text-[var(--color-text-dim)]">
+                    {data.equityHistory.length > 1
+                      ? `${data.equityHistory.length} day${data.equityHistory.length === 1 ? '' : 's'} · excl locked`
+                      : 'tradeable account'}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <Stat label="Buying power" value={fmtUSD(data.portfolio.buyingPower)} sub="deployable" />
+                  <Stat
+                    label="Positions"
+                    value={tradeable.length}
+                    sub={`${tradeableStocks}S · ${tradeableCrypto}C · ${tradeableOptions}O${lockedPositions.length > 0 ? ` · ${lockedPositions.length} locked` : ''}`}
+                  />
+                  <Stat
+                    label="Unrealized P&L"
+                    value={`${totalPnlPct > 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`}
+                    sub={`${fmtUSD(unrealizedUSD)} on ${fmtUSD(totalCost)}`}
+                  />
+                  <Stat
+                    label="Realized P&L"
+                    value={closedTrades > 0
+                      ? `${realizedUSD >= 0 ? '+' : ''}${fmtUSD(realizedUSD)}`
+                      : '—'}
+                    sub={closedTrades > 0
+                      ? `${closedTrades} closed · approx`
+                      : 'no closed trades yet'}
+                  />
+                </div>
               </div>
               {data.latestRun && (
                 <div className="mt-4 text-[11px] text-[var(--color-text-faint)]">
@@ -218,100 +224,102 @@ export default function TradeBot() {
             )
           })()}
 
-          {data.portfolio && allPositions.length > 0 && (
-            <div className="grid gap-6 xl:grid-cols-3">
-              {data.portfolio.stockPositions.length > 0 && (
-                <Card title="Stocks">
-                  <div className="divide-y divide-[var(--color-border)]">
-                    {data.portfolio.stockPositions.map((p) => <PositionRow key={p.symbol} pos={p} />)}
+          {/* Positions on the left; what the bot is doing (plan + fills) on the right. */}
+          <div className="grid gap-6 xl:grid-cols-[minmax(340px,2fr)_minmax(420px,3fr)] xl:items-start">
+            {data.portfolio && allPositions.length > 0 && (
+              <Card title={`Positions · ${allPositions.length}`}>
+                <div className="space-y-5">
+                  {([
+                    ['Stocks', data.portfolio.stockPositions],
+                    ['Crypto', data.portfolio.cryptoPositions],
+                    ['Options', data.portfolio.optionsPositions],
+                  ] as const).filter(([, list]) => list.length > 0).map(([label, list]) => (
+                    <div key={label}>
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">{label}</div>
+                      <div className="divide-y divide-[var(--color-border)]">
+                        {list.map((p) => <PositionRow key={p.symbol} pos={p} />)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            <div className="min-w-0 space-y-6">
+              {data.latestRun?.plan && (
+                <Card title={`Latest plan · ${fmtRelative(data.latestRun.timestamp)} · ${data.runsToday} run${data.runsToday === 1 ? '' : 's'} today`}>
+                  <div className="space-y-4">
+                    {data.latestRun.plan.trades.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Today's trades</div>
+                        {data.latestRun.plan.trades.map((t, i) => (
+                          <PlannedTradeRow key={i} trade={t} execution={findExecution(t, data.executedToday)} />
+                        ))}
+                      </div>
+                    )}
+                    {data.latestRun.plan.reasoning && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Reasoning</div>
+                        <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">{data.latestRun.plan.reasoning}</p>
+                      </div>
+                    )}
+                    {data.latestRun.plan.riskAssessment && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Risk</div>
+                        <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">{data.latestRun.plan.riskAssessment}</p>
+                      </div>
+                    )}
                   </div>
                 </Card>
               )}
-              {data.portfolio.cryptoPositions.length > 0 && (
-                <Card title="Crypto">
+
+              {data.executedRecent.length > 0 && (
+                <Card title={`Recent trades · ${data.executedRecent.length}`}>
                   <div className="divide-y divide-[var(--color-border)]">
-                    {data.portfolio.cryptoPositions.map((p) => <PositionRow key={p.symbol} pos={p} />)}
-                  </div>
-                </Card>
-              )}
-              {data.portfolio.optionsPositions.length > 0 && (
-                <Card title="Options">
-                  <div className="divide-y divide-[var(--color-border)]">
-                    {data.portfolio.optionsPositions.map((p) => <PositionRow key={p.symbol} pos={p} />)}
+                    {data.executedRecent.map((t, i) => {
+                      const d = new Date(t.timestamp)
+                      const datePart = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+                      const timePart = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
+                          <div className="flex min-w-0 items-baseline gap-3">
+                            <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                              {datePart} {timePart}
+                            </span>
+                            <span className={`text-[11px] uppercase tracking-[0.18em] ${t.action === 'buy' ? 'text-[var(--color-success)]' : t.action === 'sell' ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
+                              [{t.action}]
+                            </span>
+                            <span className="font-semibold text-[var(--color-text)]">{t.symbol}</span>
+                            <span className="text-[11px] text-[var(--color-text-faint)]">{t.assetType}</span>
+                          </div>
+                          <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${statusColor(t.status)}`}>
+                            [{t.status}]
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </Card>
               )}
             </div>
-          )}
+          </div>
 
-          {data.latestRun?.plan && (
-            <Card title={`Latest plan · ${fmtRelative(data.latestRun.timestamp)} · ${data.runsToday} run${data.runsToday === 1 ? '' : 's'} today`}>
-              <div className="space-y-4">
-                {data.latestRun.plan.trades.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Today's trades</div>
-                    {data.latestRun.plan.trades.map((t, i) => (
-                      <PlannedTradeRow key={i} trade={t} execution={findExecution(t, data.executedToday)} />
-                    ))}
+          {/* Context last: the bot's market narrative and its watchlist. */}
+          {(data.marketSummary || data.signals.length > 0) && (
+            <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
+              {data.marketSummary && (
+                <Card title="Market read">
+                  <p className="text-sm leading-relaxed text-[var(--color-text-dim)]">{data.marketSummary}</p>
+                </Card>
+              )}
+              {data.signals.length > 0 && (
+                <Card title="Signals">
+                  <div className="divide-y divide-[var(--color-border)]">
+                    {data.signals.map((s) => <SignalRow key={s.symbol} signal={s} />)}
                   </div>
-                )}
-                {data.latestRun.plan.reasoning && (
-                  <div className="space-y-1">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Reasoning</div>
-                    <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">{data.latestRun.plan.reasoning}</p>
-                  </div>
-                )}
-                {data.latestRun.plan.riskAssessment && (
-                  <div className="space-y-1">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">Risk</div>
-                    <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">{data.latestRun.plan.riskAssessment}</p>
-                  </div>
-                )}
-              </div>
-            </Card>
-          )}
-
-          {data.executedRecent.length > 0 && (
-            <Card title={`Recent trades · ${data.executedRecent.length}`}>
-              <div className="divide-y divide-[var(--color-border)]">
-                {data.executedRecent.map((t, i) => {
-                  const d = new Date(t.timestamp)
-                  const datePart = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
-                  const timePart = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                  return (
-                    <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <div className="flex min-w-0 items-baseline gap-3">
-                        <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
-                          {datePart} {timePart}
-                        </span>
-                        <span className={`text-[11px] uppercase tracking-[0.18em] ${t.action === 'buy' ? 'text-[var(--color-success)]' : t.action === 'sell' ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
-                          [{t.action}]
-                        </span>
-                        <span className="font-semibold text-[var(--color-text)]">{t.symbol}</span>
-                        <span className="text-[11px] text-[var(--color-text-faint)]">{t.assetType}</span>
-                      </div>
-                      <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${statusColor(t.status)}`}>
-                        [{t.status}]
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
-          )}
-
-          {data.marketSummary && (
-            <Card title="Market read">
-              <p className="text-sm leading-relaxed text-[var(--color-text-dim)]">{data.marketSummary}</p>
-            </Card>
-          )}
-
-          {data.signals.length > 0 && (
-            <Card title="Signals">
-              <div className="divide-y divide-[var(--color-border)]">
-                {data.signals.map((s) => <SignalRow key={s.symbol} signal={s} />)}
-              </div>
-            </Card>
+                </Card>
+              )}
+            </div>
           )}
         </>
       )}

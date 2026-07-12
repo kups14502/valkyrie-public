@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, Code2, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -19,7 +19,6 @@ const TradeBot = lazy(() => import('./pages/TradeBot'))
 const Services = lazy(() => import('./pages/Services'))
 const Emails = lazy(() => import('./pages/Emails'))
 const Activity = lazy(() => import('./pages/Activity'))
-const CodeDeck = lazy(() => import('./pages/CodeDeck'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,7 +40,6 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/code-deck', label: 'code deck', icon: Code2 },
   { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -126,10 +124,6 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   const version = useAppVersion()
-  // Code Deck is an app-like, full-bleed surface: drop the page margins so the
-  // sidebar (folders/sessions) and chat fill the screen edge-to-edge. Every
-  // other page keeps its comfortable gutter.
-  const fullBleed = location.pathname.startsWith('/code-deck')
 
   return (
     <div className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -185,7 +179,7 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className={`min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden ${fullBleed ? '' : 'px-3 py-5 sm:px-6 sm:py-8'}`}>
+      <main className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}
@@ -198,7 +192,6 @@ function Shell() {
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
             <Route path="/trade" element={<TradeBot />} />
             <Route path="/emails" element={<CenterPage><Emails /></CenterPage>} />
-            <Route path="/code-deck" element={<CodeDeck />} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
           </Routes>
           </ErrorBoundary>
@@ -213,46 +206,6 @@ function logout() {
   clearToken()
 }
 
-// Custom frameless title bar for pop-out windows — matches Valkyrie instead of
-// the native OS bar. The whole strip is a drag region (move the window); the
-// window controls re-enable pointer events for their clicks. On web this is just
-// a thin brand bar (WindowControls renders null there).
-function PopoutTitleBar() {
-  return (
-    <div
-      data-tauri-drag-region
-      className="flex shrink-0 select-none items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg)] pl-3"
-    >
-      <div
-        className="pointer-events-none flex items-center gap-2 py-2 text-[10px] font-bold uppercase tracking-[0.28em]"
-        style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
-      >
-        VALKYRIE<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
-        <span className="ml-1 text-[var(--color-text-faint)]">· code deck</span>
-      </div>
-      <WindowControls />
-    </div>
-  )
-}
-
-// Standalone single-session window opened via Code Deck's "pop out" button
-// (?popoutSession=<id>). No app header/sidebar — a custom title bar plus that
-// session's chat filling the window, so multiple sessions run side-by-side.
-function CodeDeckPopout({ id }: { id: string }) {
-  return (
-    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
-      <PopoutTitleBar />
-      <div className="min-h-0 flex-1 overflow-hidden p-2">
-        <Suspense fallback={<PageFallback />}>
-          <ErrorBoundary compact>
-            <CodeDeck popoutId={id} />
-          </ErrorBoundary>
-        </Suspense>
-      </div>
-    </div>
-  )
-}
-
 export default function App() {
   // Apply the saved accent color immediately on launch so the correct color
   // is shown before the user opens the hamburger menu (ThemePicker mounts
@@ -262,17 +215,12 @@ export default function App() {
   }, [])
   // Restore saved UI zoom and enable Ctrl/Cmd +/-/0 to resize the whole UI.
   useEffect(() => setupZoom(), [])
-  const popoutSession = new URLSearchParams(window.location.search).get('popoutSession')
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>
-        {popoutSession
-          ? <CodeDeckPopout id={popoutSession} />
-          : (
-            <BrowserRouter>
-              <Shell />
-            </BrowserRouter>
-          )}
+        <BrowserRouter>
+          <Shell />
+        </BrowserRouter>
       </AuthGate>
     </QueryClientProvider>
   )

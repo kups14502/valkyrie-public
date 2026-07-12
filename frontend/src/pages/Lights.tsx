@@ -123,13 +123,13 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
   }
 
   return (
-    <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
+    <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''} ${light.unavailable ? 'opacity-50' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="inline-block h-7 w-7 border border-[var(--color-border-strong)] shadow-[0_0_12px_rgba(255,255,255,0.12)]" style={{ backgroundColor: swatchColor }} aria-hidden />
           <div>
             <div className="text-base font-semibold text-[var(--color-text)]">{light.name}</div>
-            <div className="text-xs text-[var(--color-text-faint)]">{light.unavailable ? 'unavailable' : light.on ? 'on' : 'off'}</div>
+            <div className="text-xs text-[var(--color-text-faint)]">{light.unavailable ? 'unplugged / unavailable' : light.on ? 'on' : 'off'}</div>
           </div>
         </div>
         <button
@@ -316,6 +316,19 @@ export default function Lights() {
         <Card><div className="text-sm text-[var(--color-danger)]">Home Assistant unreachable</div></Card>
       ) : (
         <>
+          {all.length > 0 && availableTargets.length === 0 && (
+            <Card>
+              <div className="space-y-1 text-sm">
+                <div className="text-[var(--color-warning)]">All lights unavailable</div>
+                <div className="text-[var(--color-text-dim)]">
+                  Home Assistant can't reach any bulb. If some are plugged in, the Cync
+                  integration likely needs re-authentication (HA → Settings → Devices &
+                  Services → Cync).
+                </div>
+              </div>
+            </Card>
+          )}
+
           {availableTargets.length > 0 && (
             <Card title={`All ${availableTargets.length} lights`}>
               <div className="space-y-4">
@@ -377,8 +390,10 @@ export default function Lights() {
             </Card>
           )}
 
+          {/* Plugged-in lights first; unplugged ones trail dimmed so two live
+              bulbs don't drown in a grid of dead cards. */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {all.map((light) => (
+            {[...all].sort((a, b) => Number(a.unavailable) - Number(b.unavailable)).map((light) => (
               <LightCard key={light.entity_id} light={light} onUpdate={updateOne} />
             ))}
           </div>

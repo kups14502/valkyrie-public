@@ -18,13 +18,11 @@ import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
 import emailsRoute from './routes/emails.js'
 import emailSignalsRoute from './routes/emailSignals.js'
-import codeDeckRoute, { attachCodeDeckWs } from './routes/codeDeck.js'
-import { attachCodeDeckAgentWs } from './routes/codeDeckAgent.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
-// exception (e.g. a transient DB error inside an agent run) would otherwise
-// kill the whole backend and drop every live Code Deck session at once.
+// exception (e.g. a transient error inside a poller) would otherwise kill the
+// whole backend.
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err)
 })
@@ -97,15 +95,11 @@ app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
 app.use('/api', emailsRoute)
 app.use('/api', emailSignalsRoute)
-app.use('/api', codeDeckRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
   res.status(500).json({ error: 'internal error' })
 })
-
-attachCodeDeckWs(server)
-attachCodeDeckAgentWs(server)
 
 server.listen(PORT, BIND, () => {
   console.log(`Valkyrie API listening on ${BIND}:${PORT}`)

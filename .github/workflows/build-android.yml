@@ -64,7 +64,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: master-control-android
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: warn
           path: |
             frontend/src-tauri/gen/android/app/build/outputs/apk/**/*.apk

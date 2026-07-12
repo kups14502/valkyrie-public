@@ -84,4 +84,23 @@ router.get('/updates/asset/:name', async (req, res) => {
   }
 })
 
+// Phone-friendly stable URL for the Android app: streams whatever .apk is
+// attached to the latest release. Open it on the phone, sideload, done.
+router.get('/updates/android.apk', async (_req, res) => {
+  try {
+    const rel = await latestRelease()
+    const asset = rel.assets.find((a) => a.name.endsWith('.apk'))
+    if (!asset) return res.status(404).json({ error: 'no apk in latest release' })
+    const ar = await assetResponse(asset)
+    if (!ar.ok || !ar.body) return res.status(502).json({ error: 'asset fetch failed', status: ar.status })
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive')
+    const len = ar.headers.get('content-length')
+    if (len) res.setHeader('Content-Length', len)
+    res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`)
+    Readable.fromWeb(ar.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res)
+  } catch (e) {
+    res.status(502).json({ error: 'apk unavailable', detail: (e as Error).message })
+  }
+})
+
 export default router
