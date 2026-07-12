@@ -1,15 +1,15 @@
 {
-  "version": "0.2.4",
-  "notes": "Trade page fits small windows",
-  "pub_date": "2026-06-17T14:40:09Z",
+  "version": "0.3.0",
+  "notes": "AI-usage-first dashboard, trading quick view, Code Deck removed, launches maximized",
+  "pub_date": "2026-07-12T07:43:10Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFlaWxSa3pXVTdTbWZoZ2VWN1kxOWN1eWlnVDVoZzg0VjNGL2R4WFRmNmtVcjZ3cE9UeTlUb05SUGNCY2c5cEUzWlJaNGs0OWxXdi9qMHp4UEZYd1FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxNzA3MjA5CWZpbGU6VmFsa3lyaWVfMC4yLjRfeDY0LXNldHVwLmV4ZQpqMnpCZWhGeDhnbHpIdkZCRmY4bVZVZW0vSWZlZkUxSEdjNityUzJ6T1lEVTZlbFBZNUJMSEhJVGc0ZTZaNmtQREJjQksxR1FQYk9WcHFpZlNuMGFBZz09Cg==",
-      "url": "https://github.com/kups14502/master-control/releases/download/app-v0.2.4/Valkyrie_0.2.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVkrOFRiUnBKcHNGVDk5ZVY1dHJrNHBmSGRJZGIycG9na1pEeW9pSGs4ZlhybE9UTjBBQWQrTVBERW5CYkVjeVpYN1dFRmxsYmkwSGcxNUJRZUY5L3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODQyMTkwCWZpbGU6VmFsa3lyaWVfMC4zLjBfeDY0LXNldHVwLmV4ZQpuR0t0M1B6NVAvMHlLYzdOeFZpeTlKd2tydzBLdnhrOWgxcDJOUVRPcGNveFJydVFiRGQ5RjRNTVpDQTZSTzQ0d3VZSWdOQzZPUlk3UVcrcXFyZEZBUT09Cg==",
+      "url": "https://github.com/kups14502/master-control/releases/download/app-v0.3.0/Valkyrie_0.3.0_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZHRlIvTVQzYm9lTXJ0aUp3ZVFQQU4vT3JrWVkwczRJclV2MWRBTjRsSWZJdDlBUTl1RUhIcXdTa3dpN3V0VDZtRHRDVDVUT3QyMHhTaCtuSE9UUXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxNzA3MTYzCWZpbGU6VmFsa3lyaWVfMC4yLjRfYW1kNjQuQXBwSW1hZ2UKcERPRWhJNUUyT1hYRVlsVFRLa1d1WVNFeHVHZ09UcUdaWk1HVkdHdU1wdmJKZk8xZ1plVmt1T2E0WlpzZm1tU21iQkVoUFVIS0JLQ3RmNTgyaG9WRFE9PQo=",
-      "url": "https://github.com/kups14502/master-control/releases/download/app-v0.2.4/Valkyrie_0.2.4_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVo5VllRVVNHRGVVMzRIY2VycEd1aDlJa3Bkd2lMMHFpQVd4aC8vTjRmRUUrZTgzUCtPci9SSUw2dlVKOEp3czIwR3JNUVpqcThxaG5EcGtGNlB1SHdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODQyMTQzCWZpbGU6VmFsa3lyaWVfMC4zLjBfYW1kNjQuQXBwSW1hZ2UKNHdIeXYyNWw5dDhYdlYyd2dKRkQxaEtEWDZVOU1UKzZKTmJvK2xORWtIZ1VhTXhmN1lQdGg1NVpyVEY4SDI5Q2dvRHJuMEZObkk4SkdBemlVT0U1Qmc9PQo=",
+      "url": "https://github.com/kups14502/master-control/releases/download/app-v0.3.0/Valkyrie_0.3.0_amd64.AppImage"
     }
   }
 }
