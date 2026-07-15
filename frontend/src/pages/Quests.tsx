@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { QuestProgressBar } from '../components/QuestProgressBar'
+import { questColor } from '../lib/questColor'
 import {
   fetchQuests, createQuest, updateQuest, deleteQuest, deleteQuestLink,
   type Quest, type QuestRow, type QuestCategory, type QuestStatus,
@@ -15,9 +16,10 @@ const errMsg = (e: unknown) => {
 }
 
 // KCD2-style quest journal: category tabs up top, grouped quest list on the
-// left, and a journal pane on the right for the selected quest. Selection is
-// gold (accent-2), like the game's parchment highlight. The list pane is
-// resizable (drag the divider) and collapsible (button, or drag it closed).
+// left, and a journal pane on the right for the selected quest. Every quest
+// has its own stable identity color (hashed from its id) used for its marker,
+// selection highlight, and journal heading. The list pane is resizable (drag
+// the divider) and collapsible (button, or drag it closed).
 
 const CATEGORY_LABEL: Record<QuestCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY', work: 'WORK' }
 // Work (Autotask tickets) and personal (main/side/daily) are separate worlds;
@@ -31,7 +33,10 @@ const STATUS_GLYPH: Record<QuestStatus, { glyph: string; tone: string; label: st
   active: { glyph: '◆', tone: 'text-[var(--color-accent)]', label: 'active' },
   completed: { glyph: '✓', tone: 'text-[var(--color-success)]', label: 'done' },
   failed: { glyph: '✗', tone: 'text-[var(--color-danger)]', label: 'failed' },
-  on_hold: { glyph: '◼', tone: 'text-[var(--color-warning)]', label: 'on hold' },
+  // Paused, not alarming: steel blue (yellow stays for real warnings).
+  // Literal class (not template) so Tailwind's JIT sees it; keep in sync
+  // with HOLD_COLOR in lib/questColor.ts.
+  on_hold: { glyph: '◼', tone: 'text-[#7c9cc4]', label: 'on hold' },
 }
 
 // Sort: tracked first, then by status urgency, then newest first.
@@ -82,28 +87,32 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
   const dimmed = quest.status === 'completed' || quest.status === 'failed'
   const { autotask } = splitDetail(quest.detail)
   const nextSub = quest.subquests.find((x) => x.status !== 'completed')
+  // Every quest carries its own identity color: the marker box, and the
+  // selection stripe/highlight/title when it's open in the journal.
+  const color = questColor(quest.id)
   return (
     <button
       type="button"
       onClick={onSelect}
       className={`block w-full border-l-2 px-3 py-2.5 text-left transition ${
-        selected
-          ? 'border-[var(--color-accent-2)] bg-[rgba(255,229,0,0.07)]'
-          : 'border-transparent hover:bg-[rgba(var(--color-accent-rgb),0.04)]'
+        selected ? '' : 'border-transparent hover:bg-[rgba(var(--color-accent-rgb),0.04)]'
       } ${dimmed ? 'opacity-55' : ''}`}
+      style={selected ? { borderLeftColor: color, backgroundColor: questColor(quest.id, 0.08) } : undefined}
     >
       <div className="flex items-center gap-2.5">
         <span
-          className={`flex h-6 w-6 shrink-0 items-center justify-center border text-[13px] ${s.tone} ${
-            selected ? 'border-[var(--color-accent-2)]/60' : 'border-[var(--color-border)]'
-          }`}
+          className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px]"
+          style={{ color, borderColor: selected ? questColor(quest.id, 0.6) : questColor(quest.id, 0.3) }}
           title={s.label}
         >
           {s.glyph}
         </span>
-        <span className={`min-w-0 flex-1 truncate text-[15px] ${
-          selected ? 'font-semibold text-[var(--color-accent-2)]' : dimmed ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'
-        }`}>
+        <span
+          className={`min-w-0 flex-1 truncate text-[15px] ${
+            selected ? 'font-semibold' : dimmed ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'
+          }`}
+          style={selected ? { color } : undefined}
+        >
           {quest.title}
         </span>
         {quest.tracked && !dimmed && (
@@ -111,9 +120,10 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
         )}
       </div>
       {/* KCD2 shows the objective under the highlighted quest, and a red note
-          on unavailable ones; here that note is the Autotask waiting status. */}
+          on unavailable ones; here that note is the Autotask waiting status
+          (steel = paused, not a warning). */}
       {quest.status === 'on_hold' && autotask ? (
-        <div className="mt-1 pl-[34px] text-[11px] uppercase tracking-[0.1em] text-[var(--color-warning)]">{autotask}</div>
+        <div className="mt-1 pl-[34px] text-[11px] uppercase tracking-[0.1em] text-[#7c9cc4]">{autotask}</div>
       ) : (selected || quest.tracked) && nextSub && quest.status === 'active' ? (
         <div className="mt-1 truncate pl-[34px] text-xs italic text-[var(--color-text-dim)]">{nextSub.title}</div>
       ) : null}
@@ -228,14 +238,15 @@ function QuestJournal({ quest }: { quest: Quest }) {
   const s = STATUS_GLYPH[quest.status]
   const { autotask, body } = splitDetail(quest.detail)
   const mutationError = patch.error ?? addSub.error ?? remove.error ?? removeLink.error
+  const color = questColor(quest.id)
 
   return (
     <div className="border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-      {/* title + meta, gold like the game's journal heading */}
+      {/* title + meta in the quest's own identity color */}
       <div className="flex items-start justify-between gap-3">
         <h2
-          className="min-w-0 text-xl font-bold leading-snug tracking-[0.04em] text-[var(--color-accent-2)]"
-          style={{ textShadow: '0 0 14px rgba(255,229,0,0.35)' }}
+          className="min-w-0 text-xl font-bold leading-snug tracking-[0.04em]"
+          style={{ color, textShadow: `0 0 14px ${questColor(quest.id, 0.4)}` }}
         >
           {quest.title}
         </h2>
@@ -289,7 +300,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
         </span>
         <span className={`text-xs uppercase tracking-[0.14em] ${s.tone}`}>{s.glyph} {s.label}</span>
         {autotask && (
-          <span className="border border-[var(--color-warning)]/50 px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-warning)]">
+          <span className="border border-[#7c9cc4]/50 px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[#7c9cc4]">
             autotask: {autotask}
           </span>
         )}
@@ -301,7 +312,10 @@ function QuestJournal({ quest }: { quest: Quest }) {
 
       {/* journal body */}
       {body && (
-        <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-dim)] first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--color-accent-2)]">
+        <p
+          className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-dim)] first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--qc)]"
+          style={{ '--qc': color } as CSSProperties}
+        >
           {body}
         </p>
       )}

@@ -5,6 +5,7 @@ import { Sparkline } from '../components/Sparkline'
 import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchQuests, type AIClientUsage } from '../lib/api'
 import { EmailSignalCard } from './Emails'
 import { QuestProgressBar } from '../components/QuestProgressBar'
+import { questColor } from '../lib/questColor'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -406,11 +407,11 @@ function QuestTracker() {
           {tracked.slice(0, 6).map((q) => {
             const next = q.subquests.find((s) => s.status !== 'completed')
             return (
-              <div key={q.id} className="border-l-2 border-[var(--color-accent)]/60 pl-2.5">
+              <div key={q.id} className="border-l-2 pl-2.5" style={{ borderLeftColor: questColor(q.id, 0.75) }}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{q.title}</span>
                   {q.status === 'on_hold' && (
-                    <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[var(--color-warning)]">[hold]</span>
+                    <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[#7c9cc4]">[hold]</span>
                   )}
                 </div>
                 {q.progress.total > 0 && (
