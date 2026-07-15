@@ -1,15 +1,15 @@
 {
-  "version": "0.3.1",
-  "notes": "Quest tracker, email intake queue, Valkyrie rename",
-  "pub_date": "2026-07-15T15:51:48Z",
+  "version": "0.3.2",
+  "notes": "fix(header): reserve window-controls strip in app; ai-usage: Work seat is Team Premium",
+  "pub_date": "2026-07-15T17:12:23Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNUZlAwNEpVQlZjSmlQbmxRY1diVDkxL2VVT09kVEU1a1M4MzlPcnVjYXJlb2UvVnRNWTdyeHdhWFdLeTNRbHYvdk9WREZ5dDJjS2xTRm8xVGE4bmdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTMwNzA4CWZpbGU6VmFsa3lyaWVfMC4zLjFfeDY0LXNldHVwLmV4ZQpNRUs0ZjR5K0lBMmt5dU5MQkVRSTZaaHovMUE3ZHgzL1ZxTXkzYlhySS9xQzU5U0lTZ2szV2NmdHptUEJHb3hyYmt2L2diTkVyWnhTWnRxS0wwTnVCUT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.1/Valkyrie_0.3.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZoQm5xd3RpbEJjRStrdGRZMXBLYlVJM1c5RU9uUm1JUTUxVnZHUSs2Rnp2ZlpWUVFjL2krRHZzTGRRUUp1aWQvcGl6N2tlZG9jVWFlMytjZW9DVmcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTM1NTQzCWZpbGU6VmFsa3lyaWVfMC4zLjJfeDY0LXNldHVwLmV4ZQpUeVZpWVp0UjFpUVhkRWZGcTBlODNkUllUZFpTa2JkVStiNGljeHlXamJSV0xib1hLN2lMT1ViTSt4UmlVdDlCc2s4Vk1OQnhlRlI2RXNWdHlzUEREQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.2/Valkyrie_0.3.2_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVp5U2k2d0ZyR2wrMkRZTGowTzJpWU9SakZRRW93QUVISE1nckR3bkZBb2F0NGFxNTg2dDIxckRuMFJ1UGxpRndlNHZRUG9pTHlWS0Z2dEJXQjI1S1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTMwNjA2CWZpbGU6VmFsa3lyaWVfMC4zLjFfYW1kNjQuQXBwSW1hZ2UKRUhrYlREd2xwam1wbEwwNTRWWTRHQlNOcFFkZCsvU0tub3FPaXlMRjU0K2VxWldiZ2UrSXhyN2RLeldzaDdEMkI1S29MaXZqaWtyUTA0aTBoeC9PREE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.1/Valkyrie_0.3.1_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVHS2FWRzhPSEJRc0NxR0wxaFEyM1dCRUxKUXVEUXE5T0sybzdXRGxOVFl6T3oyRVBnRm15UTVkSzAzZEF3bk42bWlLQUorR0VvL3hsd1paZlRsUUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTM1NTAyCWZpbGU6VmFsa3lyaWVfMC4zLjJfYW1kNjQuQXBwSW1hZ2UKc2xtQWdsYjFnUTZUOHU4aiszZ1R2YVhDTnhCSFNaYWNNTi9oN3F0QllSbG10WXhMOTNDZnltbm9MbGU0dlErYUVOWVJCelNTZEVWVnU2Nkg1dFQwRHc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.2/Valkyrie_0.3.2_amd64.AppImage"
     }
   }
 }
