@@ -136,7 +136,9 @@ function Shell() {
         {/* Full-area drag layer: grab anywhere in the header to move the frameless
             window (double-click toggles maximize). The interactive controls below
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
-        <div className="relative w-full px-4 py-0 sm:px-6">
+        {/* In the app, reserve the window-controls strip (3 × 44px buttons, see
+            TauriTitleBar) so the menu button never slides underneath it. */}
+        <div className={`relative w-full py-0 ${isTauri() ? 'pl-4 pr-[140px] sm:pl-6' : 'px-4 sm:px-6'}`}>
           {/* Drag layer scoped to the toolbar row ONLY — not the dropdown menu
               below — and sits behind the controls so it never swallows clicks. */}
           <div data-tauri-drag-region aria-hidden className="pointer-events-auto absolute inset-0" />
