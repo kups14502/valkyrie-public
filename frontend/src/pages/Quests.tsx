@@ -401,7 +401,9 @@ function QuestJournal({ quest }: { quest: Quest }) {
               <div key={l.id} className="group flex items-center gap-2 text-xs text-[var(--color-text-dim)]">
                 <Link2 size={13} className="shrink-0 text-[var(--color-text-faint)]" />
                 <span className="shrink-0 uppercase tracking-[0.1em] text-[var(--color-text-faint)]">[{l.kind}]</span>
-                <span className="min-w-0 truncate">{l.label || l.ref}</span>
+                {/* Tickets show their number (the useful identifier); the
+                    title already is the quest heading. Others show the label. */}
+                <span className="min-w-0 truncate">{l.kind === 'ticket' ? l.ref : (l.label || l.ref)}</span>
                 <button
                   type="button"
                   onClick={() => removeLink.mutate(l.id)}
