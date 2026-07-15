@@ -1,36 +1,23 @@
-# Valkyrie rename: remaining infrastructure
+# Valkyrie rename: status
 
-All code-level names are now Valkyrie (package names, Tauri crate, artifact names, localStorage keys with legacy fallbacks, MCP client name, user-agent strings, launcher id). What remains is infrastructure whose identifiers live outside this repo. Each item below breaks something if renamed in code alone, so rename the infrastructure first, then flip the matching code reference in the same deploy.
+Completed 2026-07-15 (code + infra):
 
-## 1. GitHub repo (`kups14502/master-control`)
+- GitHub repo renamed to `kups14502/valkyrie` (old URLs redirect; server remote updated).
+- API hostname `valkyrie-api.brendonkupsch.com` live via Cloudflare Tunnel; `master-control-api.brendonkupsch.com` and `api.brendonkupsch.com` kept as aliases so installed apps keep updating.
+- Server directory renamed to `/home/brendon/valkyrie`; all code paths updated; backend rebuilt.
+- systemd units renamed: `valkyrie-api.service`, `cloudflared-valkyrie.service` (old units removed).
+- Samba/bifrost bind mount now exports `valkyrie` (Windows path: `B:\valkyrie`).
+- Tauri updater signing keys renamed to `~/.tauri/valkyrie-updater.{key,pw}`; release scripts updated.
+- Desktop release v0.3.1 published from the renamed repo; updater manifest verified on both hostnames.
 
-- `gh repo rename valkyrie --repo kups14502/master-control`
-- GitHub redirects old clone/release URLs, but Cloudflare Pages Git integration sometimes breaks on rename. Check the Pages project after renaming and reconnect the repo if builds stop.
-- Then update: `scripts/release.sh` (REPO), `backend/src/routes/updates.ts` (REPO const), `frontend/src-tauri/Cargo.toml` (repository), local git remotes.
+## Remaining (Cloudflare dashboard, no API token on server)
 
-## 2. DNS hostnames (Cloudflare)
+1. **Pages custom domain**: Cloudflare dashboard, Workers and Pages, project `master-control`, Custom domains, add `valkyrie.brendonkupsch.com`. Code (CORS, auth, launcher, `_headers`) already accepts it. Keep `master-control.brendonkupsch.com` attached during transition.
+2. **Pages Git integration**: after a repo rename, Pages sometimes stops auto-building. Check the project's latest deployment; if stale, Settings, Builds and deployments, reconnect the `kups14502/valkyrie` repo.
+3. **Cloudflare Access**: if the Access application is scoped to the old hostnames, add `valkyrie-api.brendonkupsch.com` (and `valkyrie.brendonkupsch.com`) to it in Zero Trust, Access, Applications. The backend's own token auth protects the API regardless.
+4. **Pages project name** (optional, cosmetic): projects cannot be renamed; recreating as `valkyrie` changes the `*.pages.dev` preview domain, which is referenced in `backend/src/index.ts` and `backend/src/middleware/auth.ts` preview regexes. Skip unless it bothers you.
 
-- `master-control.brendonkupsch.com` (frontend) and `master-control-api.brendonkupsch.com` (API tunnel). Add `valkyrie.brendonkupsch.com` and `valkyrie-api.brendonkupsch.com` as new records/tunnel ingress first, keep the old ones as aliases during transition.
-- Then update: `frontend/.env.production`, both GitHub workflow files (VITE_API_URL), `frontend/public/_headers`, `backend/.env` + `.env.example` (ALLOWED_ORIGINS), `backend/src/middleware/auth.ts` (trusted origins/hosts), `backend/src/routes/updates.ts` (PUBLIC_BASE), `backend/src/routes/launcher.ts` (url), `frontend/src-tauri/tauri.conf.json` (updater endpoint). Keep old hostnames accepted in auth.ts until all installed apps have updated, because shipped desktop apps poll the old updater URL.
+## Deliberately kept
 
-## 3. Cloudflare Pages project (`master-control` / `master-control-72u.pages.dev`)
-
-- Pages projects cannot be renamed cleanly; create a `valkyrie` project pointing at the same repo/branch or accept the old project name.
-- Then update the preview-origin regexes in `backend/src/index.ts` and `backend/src/middleware/auth.ts`.
-
-## 4. Server directory (`/home/brendon/master-control`)
-
-- Renaming the directory breaks the running service, the projects/activity feeds, ccusage path, alerts state path, and this share (B:\master-control). If ever done: stop service, `mv`, update `backend/src/alerts.ts`, `routes/activity.ts`, `routes/projects.ts`, `routes/aiUsage.ts` (CCUSAGE_BIN), `backend/src/auth/store.ts` and `backend/src/quests/store.ts` (DATA_DIR), the email-assistant QUESTS_DB path, systemd unit WorkingDirectory, remount share.
-
-## 5. systemd unit (`master-control-api.service`)
-
-- On the server: copy the unit to `valkyrie-api.service`, `systemctl --user disable --now master-control-api && systemctl --user enable --now valkyrie-api` (or system scope if applicable).
-- Then update `backend/src/routes/launcher.ts` (owner field).
-
-## 6. Tauri bundle identifier (`com.brendonkupsch.mastercontrol`)
-
-- Deliberately NOT renamed. Changing it makes installed desktop/mobile apps treat the next update as a different app (orphaned installs, duplicate registry entries). Only change it if you accept a clean reinstall on every device.
-
-## 7. Tauri updater signing key files
-
-- `scripts/release.sh` defaults to `$HOME/.tauri/mc-updater.key` / `mc-updater.pw`. If you want those renamed, rename the files where releases run and update the two defaults in release.sh together.
+- **Tauri bundle identifier `com.brendonkupsch.mastercontrol`**: changing it makes every installed desktop/mobile app treat the next build as a brand-new app (orphaned installs, lost settings). Only change if you accept reinstalling on every device.
+- Old hostnames in `middleware/auth.ts` / `ALLOWED_ORIGINS` / tunnel ingress: remove them once every device uses the new URLs and the last pre-0.3.1 app has updated.
