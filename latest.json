@@ -1,15 +1,15 @@
 {
-  "version": "0.3.2",
-  "notes": "fix(header): reserve window-controls strip in app; ai-usage: Work seat is Team Premium",
-  "pub_date": "2026-07-15T17:12:23Z",
+  "version": "0.3.3",
+  "notes": "feat(intake+quests): training feedback and Autotask ticket->quest sync",
+  "pub_date": "2026-07-15T18:52:09Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZoQm5xd3RpbEJjRStrdGRZMXBLYlVJM1c5RU9uUm1JUTUxVnZHUSs2Rnp2ZlpWUVFjL2krRHZzTGRRUUp1aWQvcGl6N2tlZG9jVWFlMytjZW9DVmcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTM1NTQzCWZpbGU6VmFsa3lyaWVfMC4zLjJfeDY0LXNldHVwLmV4ZQpUeVZpWVp0UjFpUVhkRWZGcTBlODNkUllUZFpTa2JkVStiNGljeHlXamJSV0xib1hLN2lMT1ViTSt4UmlVdDlCc2s4Vk1OQnhlRlI2RXNWdHlzUEREQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.2/Valkyrie_0.3.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJmalBMVGtGckZIQkE0aXJOWUhPU1JOcFpWb01iL1l5c0d5anhTRWR1SWZ4SHJKcXVaOXdLRkNraVVaRUxCMTIraXpvZmpUV2NxbmhXZEVCMCtlMVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTQxNTI5CWZpbGU6VmFsa3lyaWVfMC4zLjNfeDY0LXNldHVwLmV4ZQo0am1ReVg2NVFaRnBaM3JOeGZEMVRCbFlFSWNJamIwcjlIYlNsc2FrZld4MVphNkRNVk5OYzJUL1l2cTZVZnBCdXFMWUkyaWRsRWJCejUxaEdwSC9Bdz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.3/Valkyrie_0.3.3_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVHS2FWRzhPSEJRc0NxR0wxaFEyM1dCRUxKUXVEUXE5T0sybzdXRGxOVFl6T3oyRVBnRm15UTVkSzAzZEF3bk42bWlLQUorR0VvL3hsd1paZlRsUUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTM1NTAyCWZpbGU6VmFsa3lyaWVfMC4zLjJfYW1kNjQuQXBwSW1hZ2UKc2xtQWdsYjFnUTZUOHU4aiszZ1R2YVhDTnhCSFNaYWNNTi9oN3F0QllSbG10WXhMOTNDZnltbm9MbGU0dlErYUVOWVJCelNTZEVWVnU2Nkg1dFQwRHc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.2/Valkyrie_0.3.2_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMvZFhQV0Y1L1pCR2lMaS80cWl2ZXFVUlhaWG5KTDZQci90YTF3Q2swcWl6TEhwVHlyTkNncW5ON01PaDNab09NaW5HSkh4Z2tPaldqZHRERUdnZFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTQxNDg3CWZpbGU6VmFsa3lyaWVfMC4zLjNfYW1kNjQuQXBwSW1hZ2UKekxsaUFjSk1KZnkrMkJvM0JBMnF5S3ZiV2xBZ05BODJEUmhaYmQ2TllydXRKR1hsV3JoSWFFQm5ITWRzdW1oNFEvV285cW8rc2R6OFZ5MXQ4WkRBRHc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.3/Valkyrie_0.3.3_amd64.AppImage"
     }
   }
 }
