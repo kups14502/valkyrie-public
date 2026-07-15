@@ -522,6 +522,7 @@ export type IntakeItem = {
   status: 'pending' | 'linked' | 'dismissed'
   linkedKind: string | null
   linkedRef: string | null
+  linkedBy: 'auto' | 'user' | null
   processedAt: string
   sender: string
   subject: string
@@ -551,7 +552,7 @@ export const linkIntakeItem = async (
   return r.data
 }
 
-export type EmailCorrection = 'spam' | 'not_important' | 'important' | 'flip_side'
+export type EmailCorrection = 'spam' | 'spam_once' | 'not_important' | 'important' | 'flip_side'
 
 export const sendEmailFeedback = async (account: string, uid: string, correction: EmailCorrection) => {
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>('/emails/feedback', { account, uid, correction })
@@ -563,6 +564,14 @@ export const dismissIntakeItem = async (account: string, uid: string) => {
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
     `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/dismiss`)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to dismiss intake item')
+  return r.data
+}
+
+// Undo a link (auto or manual): the item returns to the pending queue.
+export const unlinkIntakeItem = async (account: string, uid: string) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
+    `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/unlink`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to unlink intake item')
   return r.data
 }
 

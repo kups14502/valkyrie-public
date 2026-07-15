@@ -26,6 +26,7 @@ type IntakeRow = {
   status: string
   linked_kind: string | null
   linked_ref: string | null
+  linked_by: string | null
   processed_at: string
   // joined from messages
   sender: string | null
@@ -63,6 +64,7 @@ function serialize(r: IntakeRow) {
     status: r.status,
     linkedKind: r.linked_kind,
     linkedRef: r.linked_ref,
+    linkedBy: r.linked_by ?? null,
     processedAt: r.processed_at,
     sender: r.sender ?? '',
     subject: r.subject ?? '(no subject)',
@@ -103,11 +105,11 @@ router.get('/emails/intake', (req, res) => {
   }
 })
 
-function markIntake(account: string, uid: string, status: 'linked' | 'dismissed' | 'pending', linkedKind: string | null, linkedRef: string | null) {
+function markIntake(account: string, uid: string, status: 'linked' | 'dismissed' | 'pending', linkedKind: string | null, linkedRef: string | null, linkedBy: string | null = null) {
   const db = getDb(false)
   try {
-    const result = db.prepare('UPDATE intake SET status = ?, linked_kind = ?, linked_ref = ? WHERE account = ? AND uid = ?')
-      .run(status, linkedKind, linkedRef, account, uid)
+    const result = db.prepare('UPDATE intake SET status = ?, linked_kind = ?, linked_ref = ?, linked_by = ? WHERE account = ? AND uid = ?')
+      .run(status, linkedKind, linkedRef, linkedBy, account, uid)
     if (result.changes === 0) throw new Error('intake item not found')
   } finally {
     db.close()
@@ -155,14 +157,14 @@ router.post('/emails/intake/:account/:uid/link', (req, res) => {
     if (kind === 'ticket') {
       const ticketRef = String(ref ?? '').trim()
       if (!ticketRef) return res.status(400).json({ error: 'ref required for ticket link' })
-      markIntake(account, uid, 'linked', 'ticket', ticketRef)
+      markIntake(account, uid, 'linked', 'ticket', ticketRef, 'user')
       return res.json({ ok: true, linked: { kind: 'ticket', ref: ticketRef } })
     }
     if (kind === 'quest') {
       const questId = String(ref ?? '').trim()
       if (!questId || !getQuest(questId)) return res.status(400).json({ error: 'quest not found' })
       addLink(questId, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'quest', questId)
+      markIntake(account, uid, 'linked', 'quest', questId, 'user')
       return res.json({ ok: true, linked: { kind: 'quest', ref: questId } })
     }
     if (kind === 'new-quest') {
@@ -170,7 +172,7 @@ router.post('/emails/intake/:account/:uid/link', (req, res) => {
       if (!questTitle) return res.status(400).json({ error: 'title required for new-quest link' })
       const quest = createQuest({ title: questTitle, category: 'side' })
       addLink(quest.id, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'quest', quest.id)
+      markIntake(account, uid, 'linked', 'quest', quest.id, 'user')
       return res.json({ ok: true, linked: { kind: 'quest', ref: quest.id }, quest })
     }
     res.status(400).json({ error: 'invalid link kind' })
@@ -179,6 +181,19 @@ router.post('/emails/intake/:account/:uid/link', (req, res) => {
     if (/not found/.test(message)) return res.status(400).json({ error: 'failed to link intake item', detail: message })
     console.error('[500] failed to link intake item:', err)
     res.status(500).json({ error: 'failed to link intake item', detail: message })
+  }
+})
+
+// Undo: put an item (e.g. a wrong auto-link) back in the pending queue.
+router.post('/emails/intake/:account/:uid/unlink', (req, res) => {
+  try {
+    markIntake(req.params.account, req.params.uid, 'pending', null, null, null)
+    res.json({ ok: true })
+  } catch (err) {
+    const message = (err as Error).message || 'unknown error'
+    if (/not found/.test(message)) return res.status(400).json({ error: 'failed to unlink intake item', detail: message })
+    console.error('[500] failed to unlink intake item:', err)
+    res.status(500).json({ error: 'failed to unlink intake item', detail: message })
   }
 })
 
@@ -202,7 +217,7 @@ router.post('/emails/intake/:account/:uid/dismiss', (req, res) => {
 // applied to the current row so the UI reflects the correction immediately.
 // ---------------------------------------------------------------------------
 
-const CORRECTIONS = ['spam', 'not_important', 'important', 'flip_side'] as const
+const CORRECTIONS = ['spam', 'spam_once', 'not_important', 'important', 'flip_side'] as const
 type Correction = (typeof CORRECTIONS)[number]
 
 function recordFeedback(account: string, uid: string, correction: string) {
@@ -228,9 +243,12 @@ router.post('/emails/feedback', (req, res) => {
     recordFeedback(account, uid, correction!)
     const db = getDb(false)
     try {
-      if (correction === 'spam') {
+      if (correction === 'spam' || correction === 'spam_once') {
+        // 'spam' teaches the assistant to filter this sender forever (the
+        // Python side builds its blocklist from correction='spam' rows);
+        // 'spam_once' only buries this one email.
         db.prepare('UPDATE messages SET classification = ?, reason = ? WHERE account = ? AND uid = ?')
-          .run('spam', 'Marked spam by user', account, uid)
+          .run('spam', correction === 'spam' ? 'Marked spam by user (sender blocked)' : 'Marked spam by user (one-off)', account, uid)
         db.prepare("UPDATE intake SET status = 'dismissed' WHERE account = ? AND uid = ? AND status = 'pending'")
           .run(account, uid)
       } else if (correction === 'not_important') {

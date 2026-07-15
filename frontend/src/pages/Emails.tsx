@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import {
-  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, sendEmailFeedback,
+  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, unlinkIntakeItem, sendEmailFeedback,
   type EmailSignalItem, type EmailCorrection, type IntakeItem,
 } from '../lib/api'
 
@@ -85,7 +85,8 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
               {isImportant && (
                 <FeedbackButton label="not important" title="Train: downgrade this kind of email" disabled={feedback.isPending} onClick={() => feedback.mutate('not_important')} />
               )}
-              <FeedbackButton label="spam" title="Train: sender is spam from now on" disabled={feedback.isPending} onClick={() => feedback.mutate('spam')} />
+              <FeedbackButton label="spam" title="Spam: bury this one email only" disabled={feedback.isPending} onClick={() => feedback.mutate('spam_once')} />
+              <FeedbackButton label="block sender" title="Spam with memory: never show this sender again" disabled={feedback.isPending} onClick={() => feedback.mutate('spam')} />
             </div>
             <span className="text-[9px] text-[var(--color-text-faint)]">{fmtDate(item.seen_at)}</span>
           </div>
@@ -118,6 +119,11 @@ function IntakeRow({ item }: { item: IntakeItem }) {
   })
   const feedback = useEmailFeedback(item.account, item.uid)
   const busy = link.isPending || dismiss.isPending || feedback.isPending
+  // No ticket candidates and no quest suggestion: nothing to connect to, so
+  // this needs a decision (new quest, spam, block, or dismiss).
+  const unknown = item.isWork
+    ? item.ticketMatches.length === 0
+    : !item.questMatch && !item.suggestedQuestTitle
 
   return (
     <div className="space-y-2 border border-[var(--color-border)] px-3 py-2.5">
@@ -128,6 +134,11 @@ function IntakeRow({ item }: { item: IntakeItem }) {
             <span className={`text-[9px] font-bold uppercase tracking-[0.14em] ${item.isWork ? 'text-[var(--color-accent)]' : 'text-[#48e3ce]'}`}>
               [{item.isWork ? 'work' : 'personal'}]
             </span>
+            {unknown && (
+              <span className="border border-[var(--color-warning)]/60 px-1.5 py-px text-[8px] font-bold uppercase tracking-[0.14em] text-[var(--color-warning)]">
+                unknown
+              </span>
+            )}
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--color-text-dim)]">{item.summary}</div>
           <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">{item.sender} · {item.account}</div>
@@ -139,7 +150,8 @@ function IntakeRow({ item }: { item: IntakeItem }) {
             disabled={busy}
             onClick={() => feedback.mutate('flip_side')}
           />
-          <FeedbackButton label="spam" title="Train: sender is spam from now on" disabled={busy} onClick={() => feedback.mutate('spam')} />
+          <FeedbackButton label="spam" title="Spam: bury this one email only" disabled={busy} onClick={() => feedback.mutate('spam_once')} />
+          <FeedbackButton label="block sender" title="Spam with memory: never show this sender again" disabled={busy} onClick={() => feedback.mutate('spam')} />
           <button
             type="button"
             disabled={busy}
@@ -188,6 +200,16 @@ function IntakeRow({ item }: { item: IntakeItem }) {
                 link
               </button>
             </form>
+            {unknown && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => link.mutate({ kind: 'new-quest', title: item.subject.slice(0, 60) })}
+                className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
+              >
+                + new quest: {item.subject.slice(0, 32)}
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -255,6 +277,46 @@ function IntakeCard() {
   )
 }
 
+// Feed of what the scanner connected on its own (exact ticket-number matches).
+// Every entry has an undo that returns it to the pending queue.
+function AutoLinkedFeed() {
+  const queryClient = useQueryClient()
+  const linked = useQuery({ queryKey: ['email-intake-linked'], queryFn: () => fetchEmailIntake('linked'), refetchInterval: 60_000 })
+  const undo = useMutation({
+    mutationFn: (item: IntakeItem) => unlinkIntakeItem(item.account, item.uid),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
+      void queryClient.invalidateQueries({ queryKey: ['email-intake-linked'] })
+    },
+  })
+  const items = (linked.data?.items ?? []).filter((i) => i.linkedBy === 'auto').slice(0, 12)
+  if (items.length === 0) return null
+  return (
+    <Card title={`Auto-Linked (${items.length})`}>
+      <div className="space-y-1.5">
+        {items.map((i) => (
+          <div key={`${i.account}-${i.uid}`} className="group flex items-center gap-2 text-[11px]">
+            <span className="shrink-0 font-bold text-[var(--color-accent)]">→ {i.linkedRef}</span>
+            <span className="min-w-0 flex-1 truncate text-[var(--color-text-dim)]" title={i.subject}>{i.subject}</span>
+            <span className="hidden shrink-0 text-[9px] text-[var(--color-text-faint)] sm:inline">{fmtDate(i.processedAt)}</span>
+            <button
+              type="button"
+              disabled={undo.isPending}
+              onClick={() => undo.mutate(i)}
+              className="shrink-0 border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] opacity-0 transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+            >
+              undo
+            </button>
+          </div>
+        ))}
+      </div>
+      {undo.error != null && (
+        <div className="mt-2 text-[10px] text-[var(--color-danger)]">undo failed, try again</div>
+      )}
+    </Card>
+  )
+}
+
 export default function Emails() {
   const signals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 60_000 })
   const d = signals.data
@@ -276,6 +338,7 @@ export default function Emails() {
       </div>
 
       <IntakeCard />
+      <AutoLinkedFeed />
 
       <Card title="Service">
         {signals.isLoading ? (
