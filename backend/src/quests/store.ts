@@ -15,7 +15,7 @@ const DATA_DIR = path.join(homedir(), 'valkyrie', 'backend', 'data')
 const DB_PATH = path.join(DATA_DIR, 'quests.sqlite')
 
 export type QuestStatus = 'active' | 'completed' | 'failed' | 'on_hold'
-export type QuestCategory = 'main' | 'side' | 'daily'
+export type QuestCategory = 'main' | 'side' | 'daily' | 'work'
 export type QuestLinkKind = 'email' | 'ticket' | 'url'
 
 export type QuestLink = {
@@ -48,7 +48,7 @@ export type Quest = QuestRow & {
 }
 
 const STATUSES: QuestStatus[] = ['active', 'completed', 'failed', 'on_hold']
-const CATEGORIES: QuestCategory[] = ['main', 'side', 'daily']
+const CATEGORIES: QuestCategory[] = ['main', 'side', 'daily', 'work']
 const LINK_KINDS: QuestLinkKind[] = ['email', 'ticket', 'url']
 
 let db: Database.Database | null = null

@@ -442,7 +442,7 @@ export const fetchEmailStatus = async () => {
 }
 
 export type QuestStatus = 'active' | 'completed' | 'failed' | 'on_hold'
-export type QuestCategory = 'main' | 'side' | 'daily'
+export type QuestCategory = 'main' | 'side' | 'daily' | 'work'
 
 export type QuestLink = {
   id: number
@@ -548,6 +548,14 @@ export const linkIntakeItem = async (
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
     `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/link`, input)
   if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to link intake item')
+  return r.data
+}
+
+export type EmailCorrection = 'spam' | 'not_important' | 'important' | 'flip_side'
+
+export const sendEmailFeedback = async (account: string, uid: string, correction: EmailCorrection) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>('/emails/feedback', { account, uid, correction })
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to record feedback')
   return r.data
 }
 

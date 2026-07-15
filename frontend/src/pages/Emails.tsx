@@ -2,9 +2,36 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import {
-  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem,
-  type EmailSignalItem, type IntakeItem,
+  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, sendEmailFeedback,
+  type EmailSignalItem, type EmailCorrection, type IntakeItem,
 } from '../lib/api'
+
+// Feedback buttons train the classifier: corrections are stored and fed back
+// into the next scans (spam senders are auto-filtered thereafter).
+function useEmailFeedback(account: string, uid: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (correction: EmailCorrection) => sendEmailFeedback(account, uid, correction),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['email-signals'] })
+      void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
+    },
+  })
+}
+
+function FeedbackButton({ label, title, onClick, disabled }: { label: string; title: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      className="border border-[var(--color-border)] px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40"
+    >
+      {label}
+    </button>
+  )
+}
 
 function fmtDate(d: string) {
   try { return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }
@@ -21,6 +48,7 @@ function fmtRelative(iso: string) {
 
 export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
   const [expanded, setExpanded] = useState(false)
+  const feedback = useEmailFeedback(item.account, item.uid)
   const isImportant = item.classification === 'important'
   return (
     <div
@@ -52,7 +80,18 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
           <div className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
             reason: {item.reason}
           </div>
-          <div className="text-[9px] text-[var(--color-text-faint)]">{fmtDate(item.seen_at)}</div>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-1.5">
+              {isImportant && (
+                <FeedbackButton label="not important" title="Train: downgrade this kind of email" disabled={feedback.isPending} onClick={() => feedback.mutate('not_important')} />
+              )}
+              <FeedbackButton label="spam" title="Train: sender is spam from now on" disabled={feedback.isPending} onClick={() => feedback.mutate('spam')} />
+            </div>
+            <span className="text-[9px] text-[var(--color-text-faint)]">{fmtDate(item.seen_at)}</span>
+          </div>
+          {feedback.error != null && (
+            <div className="text-[10px] text-[var(--color-danger)]">feedback failed, try again</div>
+          )}
         </div>
       )}
     </div>
@@ -77,7 +116,8 @@ function IntakeRow({ item }: { item: IntakeItem }) {
     mutationFn: () => dismissIntakeItem(item.account, item.uid),
     onSettled: invalidate,
   })
-  const busy = link.isPending || dismiss.isPending
+  const feedback = useEmailFeedback(item.account, item.uid)
+  const busy = link.isPending || dismiss.isPending || feedback.isPending
 
   return (
     <div className="space-y-2 border border-[var(--color-border)] px-3 py-2.5">
@@ -92,14 +132,23 @@ function IntakeRow({ item }: { item: IntakeItem }) {
           <div className="mt-0.5 text-[11px] text-[var(--color-text-dim)]">{item.summary}</div>
           <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">{item.sender} · {item.account}</div>
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => dismiss.mutate()}
-          className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-dim)] disabled:opacity-40"
-        >
-          dismiss
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FeedbackButton
+            label={item.isWork ? '→ personal' : '→ work'}
+            title="Train: this email belongs on the other side"
+            disabled={busy}
+            onClick={() => feedback.mutate('flip_side')}
+          />
+          <FeedbackButton label="spam" title="Train: sender is spam from now on" disabled={busy} onClick={() => feedback.mutate('spam')} />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => dismiss.mutate()}
+            className="border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-dim)] disabled:opacity-40"
+          >
+            dismiss
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">

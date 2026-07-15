@@ -185,12 +185,78 @@ router.post('/emails/intake/:account/:uid/link', (req, res) => {
 router.post('/emails/intake/:account/:uid/dismiss', (req, res) => {
   try {
     markIntake(req.params.account, req.params.uid, 'dismissed', null, null)
+    // Dismissals are training signal too: "this needed no intake".
+    try { recordFeedback(req.params.account, req.params.uid, 'dismissed') } catch { /* best effort */ }
     res.json({ ok: true })
   } catch (err) {
     const message = (err as Error).message || 'unknown error'
     if (/not found/.test(message)) return res.status(400).json({ error: 'failed to dismiss intake item', detail: message })
     console.error('[500] failed to dismiss intake item:', err)
     res.status(500).json({ error: 'failed to dismiss intake item', detail: message })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Training feedback. Corrections are stored in mail.sqlite (the email
+// assistant reads them back into its classifier prompt on every scan) and
+// applied to the current row so the UI reflects the correction immediately.
+// ---------------------------------------------------------------------------
+
+const CORRECTIONS = ['spam', 'not_important', 'important', 'flip_side'] as const
+type Correction = (typeof CORRECTIONS)[number]
+
+function recordFeedback(account: string, uid: string, correction: string) {
+  const db = getDb(false)
+  try {
+    db.prepare(`CREATE TABLE IF NOT EXISTS feedback(
+      account text, uid text, correction text, created_at text,
+      primary key(account, uid, correction)
+    )`).run()
+    db.prepare('INSERT OR REPLACE INTO feedback (account, uid, correction, created_at) VALUES (?,?,?,?)')
+      .run(account, uid, correction, new Date().toISOString())
+  } finally {
+    db.close()
+  }
+}
+
+router.post('/emails/feedback', (req, res) => {
+  try {
+    const { account, uid, correction } = (req.body ?? {}) as { account?: string; uid?: string; correction?: string }
+    if (!account || !uid) return res.status(400).json({ error: 'account and uid required' })
+    if (!CORRECTIONS.includes(correction as Correction)) return res.status(400).json({ error: 'invalid correction' })
+
+    recordFeedback(account, uid, correction!)
+    const db = getDb(false)
+    try {
+      if (correction === 'spam') {
+        db.prepare('UPDATE messages SET classification = ?, reason = ? WHERE account = ? AND uid = ?')
+          .run('spam', 'Marked spam by user', account, uid)
+        db.prepare("UPDATE intake SET status = 'dismissed' WHERE account = ? AND uid = ? AND status = 'pending'")
+          .run(account, uid)
+      } else if (correction === 'not_important') {
+        db.prepare('UPDATE messages SET classification = ?, reason = ? WHERE account = ? AND uid = ?')
+          .run('normal', 'Downgraded by user', account, uid)
+      } else if (correction === 'important') {
+        db.prepare('UPDATE messages SET classification = ?, reason = ? WHERE account = ? AND uid = ?')
+          .run('important', 'Upgraded by user', account, uid)
+      } else if (correction === 'flip_side') {
+        db.prepare('UPDATE intake SET is_work = CASE is_work WHEN 1 THEN 0 ELSE 1 END WHERE account = ? AND uid = ?')
+          .run(account, uid)
+        // A row flipped to personal needs a quest-title suggestion for the UI's
+        // "new quest" button; fall back to the email subject.
+        db.prepare(`UPDATE intake SET suggested_quest_title = COALESCE(
+            suggested_quest_title,
+            (SELECT substr(subject, 1, 60) FROM messages WHERE messages.account = intake.account AND messages.uid = intake.uid)
+          ) WHERE account = ? AND uid = ? AND is_work = 0`)
+          .run(account, uid)
+      }
+    } finally {
+      db.close()
+    }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[500] failed to record feedback:', err)
+    res.status(500).json({ error: 'failed to record feedback', detail: (err as Error).message })
   }
 })
 

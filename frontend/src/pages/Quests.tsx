@@ -17,11 +17,12 @@ const errMsg = (e: unknown) => {
 // Game-style quest log: quests with subquests, a tracked flag (surfaces the
 // quest on the dashboard HUD), and status at a glance.
 
-const CATEGORY_LABEL: Record<QuestCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY' }
+const CATEGORY_LABEL: Record<QuestCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY', work: 'WORK' }
 const CATEGORY_TONE: Record<QuestCategory, string> = {
   main: 'border-[var(--color-accent)]/70 text-[var(--color-accent)]',
   side: 'border-[var(--color-border)] text-[var(--color-text-dim)]',
   daily: 'border-[#48e3ce]/60 text-[#48e3ce]',
+  work: 'border-[var(--color-warning)]/60 text-[var(--color-warning)]',
 }
 
 const STATUS_GLYPH: Record<QuestStatus, { glyph: string; tone: string; label: string }> = {
@@ -271,6 +272,7 @@ function QuestCard({ quest }: { quest: Quest }) {
                 <option value="main">main</option>
                 <option value="side">side</option>
                 <option value="daily">daily</option>
+                <option value="work">work</option>
               </select>
               {confirmDelete ? (
                 <span className="flex items-center gap-1.5">
@@ -379,6 +381,7 @@ export default function Quests() {
             <option value="main">main</option>
             <option value="side">side</option>
             <option value="daily">daily</option>
+            <option value="work">work</option>
           </select>
           <button
             type="submit"
