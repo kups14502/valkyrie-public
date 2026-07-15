@@ -486,8 +486,9 @@ export default function Quests() {
   return (
     // @container: the pane split below reacts to the space this page actually
     // gets, not the viewport, so UI zoom / DPI scaling / small windows keep
-    // the two-pane layout as long as it physically fits.
-    <div className="@container mx-auto w-full max-w-6xl space-y-5">
+    // the two-pane layout as long as it physically fits. Full width always:
+    // the journal is the page, no reading-column cap.
+    <div className="@container w-full space-y-5">
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// quest log</div>

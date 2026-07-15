@@ -377,12 +377,18 @@ function TradeQuickView() {
 
 // HUD-style tracked-quests widget: the quests marked "tracked" in the quest
 // log, with progress and the next open objective — like a game's quest HUD.
+// With nothing explicitly tracked, fall back to the active quests so the HUD
+// is never empty (eye-toggling a quest in the log takes over the slots).
 function QuestTracker() {
   const quests = useQuery({ queryKey: ['quests'], queryFn: fetchQuests, refetchInterval: 60_000 })
-  const tracked = (quests.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
+  const explicit = (quests.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
+  const auto = explicit.length === 0
+  const tracked = auto
+    ? (quests.data ?? []).filter((q) => q.status === 'active').sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : explicit
   return (
     <Card
-      title="Tracked Quests"
+      title={auto && tracked.length > 0 ? 'Active Quests' : 'Tracked Quests'}
       action={
         <Link to="/quests" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
           quest log →
@@ -394,7 +400,7 @@ function QuestTracker() {
       ) : quests.error ? (
         <div className="text-sm text-[var(--color-danger)]">Quest log unavailable</div>
       ) : tracked.length === 0 ? (
-        <div className="text-sm text-[var(--color-text-dim)]">&gt; no quests tracked.</div>
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; no active quests. accept one in the quest log.</div>
       ) : (
         <div className="space-y-3">
           {tracked.slice(0, 6).map((q) => {
