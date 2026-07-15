@@ -1,15 +1,15 @@
 {
-  "version": "0.3.7",
-  "notes": "feat(quests): drop ticket-number prefix from work quest titles",
-  "pub_date": "2026-07-15T23:13:48Z",
+  "version": "0.3.8",
+  "notes": "feat(quests): hover tooltips on status + icon controls, steel hold hover",
+  "pub_date": "2026-07-15T23:45:04Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVhvZXYraWlhTitKUlZBU25FcGh2NVlxOW16b0FwMCtGYmcwOEZ2NXJwR3lpclRLN3pzVjRmRUtNUTFIVmRHUFBEWjdBaHFham44bUYwYjhaTVU1Q1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTU3MjI4CWZpbGU6VmFsa3lyaWVfMC4zLjdfeDY0LXNldHVwLmV4ZQppQzJhTjR4K1F6QzBpVkY3VTVtdGxuSlF3WVVmcndGWHpEL2haU3Y3MzVmejhJNlpVUDF3SmltY0Ywck9QaHY2SG92OWtUenJac2UxUHorMFNXcVJBQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.7/Valkyrie_0.3.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVRQTmtCNmwxbnJpOUE4UEd1c1VKNmFEeEt0Y2VmRTZ6KzlVQUdIRmlSZHdhS2hRWC9HOXJFQm53NUlPQmh3QVRKS1dqZ1M0ZlFaQWl3eTFHUU03aGcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTU5MTA0CWZpbGU6VmFsa3lyaWVfMC4zLjhfeDY0LXNldHVwLmV4ZQp1QkR1N1lrU3RoZHI2eCtTeTdTWlBsQlVxMFpjQUwrWWxHaVdJUzc1NlpCNzFCRXRWSHJYT2oyREVzMG5yVFFWUXZ5aW1JajM1QWtHYlZZeGxqdlBCQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.8/Valkyrie_0.3.8_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVY0Yk9wUnNvWUpSUWhHcmtKbE9FeFNPMzhRQzRqM3NVMjJ2Ym1La2VMUTdtVWVjWjJaNXNLVTNOY0xzOXlqZFhkVyszRmJYZnBzS0c2TzRKNnpZd3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTU3MTg2CWZpbGU6VmFsa3lyaWVfMC4zLjdfYW1kNjQuQXBwSW1hZ2UKait1MWsrektPVnJxZTFzTTkzR0dmdGJxdndjbU5vRVA2WGR4K3JTckpyQjFsTitHVXJ5SFM0N3pXVlNXamlkVU5zQmkrQUhnVlExMklyYStqQ2FvRFE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.7/Valkyrie_0.3.7_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlDdWViSjMvZzVBcGM1MUVJSEd5OEdCYjF6YXpBM01USVhWTVBLNldFbDNOTHAySllINjg3VEtrZFVuRjJXeU1oVmNmU3dvU0tXWlIwZW9PVkRXZkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTU5MDYyCWZpbGU6VmFsa3lyaWVfMC4zLjhfYW1kNjQuQXBwSW1hZ2UKL2IrMWlPalpYa05GSVdYcG05Q2Z4aVBWbXdPbU9lNzlWejdyYjF1U3l2T1dkd1hyWTlpQUIxenhVUkp6Q0hKbzZFTmpyVHFuTlJqQk9UYUdtNWsvQnc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.8/Valkyrie_0.3.8_amd64.AppImage"
     }
   }
 }
