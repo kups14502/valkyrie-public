@@ -193,7 +193,9 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/quests" element={<CenterPage><Quests /></CenterPage>} />
+            {/* Quests is a wide two-pane journal; it manages its own max width
+                instead of CenterPage's narrow reading column. */}
+            <Route path="/quests" element={<Quests />} />
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />

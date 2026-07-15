@@ -446,18 +446,25 @@ export default function Quests() {
   const quests = useQuery({ queryKey: ['quests'], queryFn: fetchQuests, refetchInterval: 30_000 })
   const [tab, setTab] = useState<Tab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const journalRef = useRef<HTMLDivElement>(null)
 
   const groups = useMemo(() => buildGroups(quests.data ?? [], tab), [quests.data, tab])
   const flat = useMemo(() => groups.flatMap((g) => g.quests), [groups])
   const selected = flat.find((q) => q.id === selectedId) ?? flat[0] ?? null
 
-  // On narrow screens the journal stacks under the list; bring it into view.
+  // When the container is too narrow for two panes, the journal stacks under
+  // the list; bring it into view. Measured from the actual layout (works at
+  // any zoom level) rather than a viewport media query.
   const selectQuest = (id: string) => {
     setSelectedId(id)
-    if (window.matchMedia('(max-width: 1023px)').matches) {
-      setTimeout(() => journalRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
-    }
+    setTimeout(() => {
+      const list = listRef.current
+      const journal = journalRef.current
+      if (!list || !journal) return
+      const stacked = journal.getBoundingClientRect().top >= list.getBoundingClientRect().bottom - 4
+      if (stacked) journal.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
   }
 
   const counts = useMemo(() => {
@@ -470,11 +477,14 @@ export default function Quests() {
   }, [quests.data])
 
   return (
-    <div className="space-y-5">
+    // @container: the pane split below reacts to the space this page actually
+    // gets, not the viewport, so UI zoom / DPI scaling / small windows keep
+    // the two-pane layout as long as it physically fits.
+    <div className="@container mx-auto w-full max-w-6xl space-y-5">
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// quest log</div>
-          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
+          <h1 className="mt-1 whitespace-nowrap text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
             quests<span className="cursor-blink">_</span>
           </h1>
         </div>
@@ -507,9 +517,9 @@ export default function Quests() {
       ) : quests.error ? (
         <div className="text-sm text-[var(--color-danger)]">quest log unavailable</div>
       ) : (
-        <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[5fr_7fr] lg:items-start">
+        <div className="flex flex-col gap-4 @2xl:grid @2xl:grid-cols-[5fr_7fr] @2xl:items-start">
           {/* left: the quest list */}
-          <div className="space-y-2 lg:max-h-[calc(100vh-230px)] lg:overflow-y-auto lg:pr-1">
+          <div ref={listRef} className="space-y-2 @2xl:max-h-[calc(100vh-230px)] @2xl:overflow-y-auto @2xl:pr-1">
             <NewQuestRow onCreated={(q) => setSelectedId(q.id)} />
             {flat.length === 0 && (
               <div className="px-1 py-4 text-sm text-[var(--color-text-dim)]">
