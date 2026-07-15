@@ -1,10 +1,10 @@
 [package]
-name = "master-control"
+name = "valkyrie"
 version = "0.1.0"
 description = "Valkyrie dashboard — dedicated desktop and mobile app"
 authors = ["Brendon Kupsch"]
 license = "MIT"
-repository = "https://github.com/kups14502/master-control"
+repository = "https://github.com/kups14502/valkyrie"
 edition = "2021"
 rust-version = "1.77.2"
 

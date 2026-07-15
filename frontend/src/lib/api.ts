@@ -441,6 +441,123 @@ export const fetchEmailStatus = async () => {
   return r.data
 }
 
+export type QuestStatus = 'active' | 'completed' | 'failed' | 'on_hold'
+export type QuestCategory = 'main' | 'side' | 'daily'
+
+export type QuestLink = {
+  id: number
+  questId: string
+  kind: 'email' | 'ticket' | 'url'
+  ref: string
+  label: string
+  createdAt: string
+}
+
+export type QuestRow = {
+  id: string
+  parentId: string | null
+  title: string
+  detail: string
+  category: QuestCategory
+  status: QuestStatus
+  tracked: boolean
+  sort: number
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export type Quest = QuestRow & {
+  subquests: QuestRow[]
+  links: QuestLink[]
+  progress: { done: number; total: number }
+}
+
+export const fetchQuests = async () => {
+  const r = await api.get<{ quests: Quest[] } | { error?: string; detail?: string }>('/quests')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid quests response')
+  return (r.data as { quests: Quest[] }).quests
+}
+
+export const createQuest = async (input: { title: string; detail?: string; category?: QuestCategory; parentId?: string; tracked?: boolean }) => {
+  const r = await api.post<{ quest: QuestRow; error?: string; detail?: string }>('/quests', input)
+  if (!r.data.quest) throw new Error(r.data.detail || r.data.error || 'Failed to create quest')
+  return r.data.quest
+}
+
+export const updateQuest = async (id: string, patch: { title?: string; detail?: string; category?: QuestCategory; status?: QuestStatus; tracked?: boolean; sort?: number }) => {
+  const r = await api.patch<{ quest: QuestRow; error?: string; detail?: string }>(`/quests/${id}`, patch)
+  if (!r.data.quest) throw new Error(r.data.detail || r.data.error || 'Failed to update quest')
+  return r.data.quest
+}
+
+export const deleteQuest = async (id: string) => {
+  const r = await api.delete<{ ok?: boolean; error?: string; detail?: string }>(`/quests/${id}`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to delete quest')
+  return r.data
+}
+
+export const addQuestLink = async (questId: string, input: { kind: 'email' | 'ticket' | 'url'; ref: string; label?: string }) => {
+  const r = await api.post<{ link: QuestLink; error?: string; detail?: string }>(`/quests/${questId}/links`, input)
+  if (!r.data.link) throw new Error(r.data.detail || r.data.error || 'Failed to add link')
+  return r.data.link
+}
+
+export const deleteQuestLink = async (questId: string, linkId: number) => {
+  const r = await api.delete<{ ok?: boolean; error?: string; detail?: string }>(`/quests/${questId}/links/${linkId}`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to delete link')
+  return r.data
+}
+
+export type IntakeTicketMatch = { id: number; ticketNumber: string; title: string; score: number }
+
+export type IntakeItem = {
+  account: string
+  uid: string
+  isWork: boolean
+  summary: string
+  ticketMatches: IntakeTicketMatch[]
+  questMatch: { id: string; title: string } | null
+  suggestedQuestTitle: string | null
+  status: 'pending' | 'linked' | 'dismissed'
+  linkedKind: string | null
+  linkedRef: string | null
+  processedAt: string
+  sender: string
+  subject: string
+  date: string
+  snippet: string
+  classification: string
+}
+
+export type IntakeResponse = {
+  items: IntakeItem[]
+  counts: { pending: number; linked: number; dismissed: number }
+}
+
+export const fetchEmailIntake = async (status: 'pending' | 'linked' | 'dismissed' | 'all' = 'pending') => {
+  const r = await api.get<IntakeResponse>(`/emails/intake?status=${status}`)
+  return r.data
+}
+
+export const linkIntakeItem = async (
+  account: string,
+  uid: string,
+  input: { kind: 'ticket' | 'quest' | 'new-quest'; ref?: string; title?: string },
+) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
+    `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/link`, input)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to link intake item')
+  return r.data
+}
+
+export const dismissIntakeItem = async (account: string, uid: string) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
+    `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/dismiss`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to dismiss intake item')
+  return r.data
+}
+
 export type EmailSignalItem = {
   account: string; uid: string; sender: string; subject: string
   date: string; classification: 'important' | 'routine'; reason: string

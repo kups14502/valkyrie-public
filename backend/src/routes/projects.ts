@@ -8,7 +8,7 @@ const exec = promisify(execFile)
 const router = Router()
 
 const TRACKED = [
-  '/home/brendon/master-control',
+  '/home/brendon/valkyrie',
   '/home/brendon/msp-platform',
   '/home/brendon/slop-factory',
   '/home/brendon/trading',

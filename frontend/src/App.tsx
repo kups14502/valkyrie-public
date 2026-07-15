@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, ScrollText } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -13,6 +13,7 @@ import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
 import Dashboard from './pages/Dashboard'
 
+const Quests = lazy(() => import('./pages/Quests'))
 const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
@@ -40,6 +41,7 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
+  { to: '/quests', label: 'quests', icon: ScrollText },
   { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -189,6 +191,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/quests" element={<CenterPage><Quests /></CenterPage>} />
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
@@ -213,7 +216,7 @@ export default function App() {
   // is shown before the user opens the hamburger menu (ThemePicker mounts
   // lazily inside MobileMenu, causing a green flash without this).
   useEffect(() => {
-    applyAccent(localStorage.getItem('mc-accent') ?? '#00ff41')
+    applyAccent(localStorage.getItem('valkyrie-accent') ?? localStorage.getItem('mc-accent') ?? '#00ff41')
   }, [])
   // Restore saved UI zoom and enable Ctrl/Cmd +/-/0 to resize the whole UI.
   useEffect(() => setupZoom(), [])

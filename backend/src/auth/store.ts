@@ -10,7 +10,7 @@ import { generateSecret, generateURI, verifySync } from 'otplib'
 // DB. This replaces the Cloudflare Access email-code login. Single-user by
 // design — there is exactly one owner row.
 
-const DATA_DIR = path.join(homedir(), 'master-control', 'backend', 'data')
+const DATA_DIR = path.join(homedir(), 'valkyrie', 'backend', 'data')
 const DB_PATH = path.join(DATA_DIR, 'auth.sqlite')
 const ISSUER = 'Valkyrie'
 const ACCOUNT = process.env.AUTH_ACCOUNT_LABEL || 'owner'

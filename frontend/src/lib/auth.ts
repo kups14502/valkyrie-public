@@ -4,18 +4,21 @@
 // the OS secure store + biometric unlock behind the same getToken/setToken API.
 // Kept free of any import of ./api so the api <-> auth wiring has no import cycle.
 
-const TOKEN_KEY = 'mc.appToken'
-const EXP_KEY = 'mc.appTokenExp'
-const AUTH_EVENT = 'mc-auth-changed'
+const TOKEN_KEY = 'valkyrie.appToken'
+const EXP_KEY = 'valkyrie.appTokenExp'
+// Pre-rename keys — read as fallbacks so existing sessions survive the rename.
+const LEGACY_TOKEN_KEY = 'mc.appToken'
+const LEGACY_EXP_KEY = 'mc.appTokenExp'
+const AUTH_EVENT = 'valkyrie-auth-changed'
 
 let memToken: string | null = null
 
 export function getToken(): string | null {
   if (memToken) return memToken
   try {
-    const t = localStorage.getItem(TOKEN_KEY)
+    const t = localStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(LEGACY_TOKEN_KEY)
     if (!t) return null
-    const exp = Number(localStorage.getItem(EXP_KEY) || 0)
+    const exp = Number(localStorage.getItem(EXP_KEY) ?? localStorage.getItem(LEGACY_EXP_KEY) ?? 0)
     if (exp && exp <= Date.now()) { clearToken(); return null }
     memToken = t
     return t
@@ -38,6 +41,8 @@ export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(EXP_KEY)
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    localStorage.removeItem(LEGACY_EXP_KEY)
   } catch { /* storage unavailable */ }
   notifyAuthChange()
 }
@@ -57,7 +62,7 @@ export function isTauri(): boolean {
 // Migration-only escape hatch: when the backend isn't strict yet, the user can
 // proceed without a token (the legacy bypass still authorizes them). Scoped to
 // the tab so it never persists past a real cutover.
-const SKIP_KEY = 'mc.authSkip'
+const SKIP_KEY = 'valkyrie.authSkip'
 export function setAuthSkipped(v: boolean): void {
   try { v ? sessionStorage.setItem(SKIP_KEY, '1') : sessionStorage.removeItem(SKIP_KEY) } catch { /* ignore */ }
   notifyAuthChange()

@@ -8,7 +8,7 @@ const RESETSAT_JITTER_MS = 30 * 60_000
 const DISK_THRESHOLD = 90
 const CLAUDE_THRESHOLD = 90
 const BACKEND = `http://127.0.0.1:${process.env.PORT || 3001}`
-const STATE_PATH = path.join('/home/brendon/master-control/backend/data', 'alerts.json')
+const STATE_PATH = path.join('/home/brendon/valkyrie/backend/data', 'alerts.json')
 
 type AlertState = {
   sessionResetsAt: string | null

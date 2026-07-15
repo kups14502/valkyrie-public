@@ -19,7 +19,7 @@ function hexToRgb(hex: string): [number, number, number] | null {
 const c = (n: number) => Math.min(255, Math.max(0, Math.round(n)))
 
 function updateScrollbarStyle(r: number, g: number, b: number) {
-  const id = 'mc-scrollbar-style'
+  const id = 'valkyrie-scrollbar-style'
   let el = document.getElementById(id) as HTMLStyleElement | null
   if (!el) {
     el = document.createElement('style')
@@ -52,12 +52,12 @@ export function applyAccent(hex: string) {
   root.style.setProperty('--color-text-dim', `rgb(${c(r * 0.45 + 90)},${c(g * 0.45 + 90)},${c(b * 0.45 + 90)})`)
   root.style.setProperty('--color-text-faint', `rgb(${c(r * 0.28 + 40)},${c(g * 0.28 + 40)},${c(b * 0.28 + 40)})`)
   updateScrollbarStyle(r, g, b)
-  localStorage.setItem('mc-accent', hex)
+  localStorage.setItem('valkyrie-accent', hex)
 }
 
 export function ThemePicker() {
   const [open, setOpen] = useState(false)
-  const [hex, setHex] = useState(() => localStorage.getItem('mc-accent') ?? '#00ff41')
+  const [hex, setHex] = useState(() => localStorage.getItem('valkyrie-accent') ?? localStorage.getItem('mc-accent') ?? '#00ff41')
   const [draft, setDraft] = useState(hex)
   const ref = useRef<HTMLDivElement>(null)
 

@@ -1,7 +1,10 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
-import { fetchEmailSignals, type EmailSignalItem } from '../lib/api'
+import {
+  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem,
+  type EmailSignalItem, type IntakeItem,
+} from '../lib/api'
 
 function fmtDate(d: string) {
   try { return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }
@@ -56,6 +59,153 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
   )
 }
 
+// One pending intake suggestion: connect the email to an Autotask ticket
+// (work) or a quest (personal), or dismiss it.
+function IntakeRow({ item }: { item: IntakeItem }) {
+  const queryClient = useQueryClient()
+  const [manualTicket, setManualTicket] = useState('')
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
+    void queryClient.invalidateQueries({ queryKey: ['quests'] })
+  }
+  const link = useMutation({
+    mutationFn: (input: { kind: 'ticket' | 'quest' | 'new-quest'; ref?: string; title?: string }) =>
+      linkIntakeItem(item.account, item.uid, input),
+    onSettled: invalidate,
+  })
+  const dismiss = useMutation({
+    mutationFn: () => dismissIntakeItem(item.account, item.uid),
+    onSettled: invalidate,
+  })
+  const busy = link.isPending || dismiss.isPending
+
+  return (
+    <div className="space-y-2 border border-[var(--color-border)] px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-xs font-semibold text-[var(--color-text)]">{item.subject}</span>
+            <span className={`text-[9px] font-bold uppercase tracking-[0.14em] ${item.isWork ? 'text-[var(--color-accent)]' : 'text-[#48e3ce]'}`}>
+              [{item.isWork ? 'work' : 'personal'}]
+            </span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--color-text-dim)]">{item.summary}</div>
+          <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">{item.sender} · {item.account}</div>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => dismiss.mutate()}
+          className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-dim)] disabled:opacity-40"
+        >
+          dismiss
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {item.isWork ? (
+          <>
+            {item.ticketMatches.map((t) => (
+              <button
+                key={t.ticketNumber || String(t.id)}
+                type="button"
+                disabled={busy}
+                onClick={() => link.mutate({ kind: 'ticket', ref: t.ticketNumber || String(t.id) })}
+                title={t.title}
+                className="border border-[var(--color-accent)]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] disabled:opacity-40"
+              >
+                → {t.ticketNumber || `#${t.id}`}{t.title ? ` · ${t.title.slice(0, 32)}` : ''}
+              </button>
+            ))}
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const ref = manualTicket.trim()
+                if (ref) link.mutate({ kind: 'ticket', ref })
+              }}
+            >
+              <input
+                value={manualTicket}
+                onChange={(e) => setManualTicket(e.target.value)}
+                placeholder={item.ticketMatches.length === 0 ? 'ticket # (no auto match)' : 'other ticket #'}
+                className="w-40 border border-[var(--color-border)] bg-transparent px-2 py-1 text-[10px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-border-strong)]"
+              />
+              <button
+                type="submit"
+                disabled={busy || !manualTicket.trim()}
+                className="border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+              >
+                link
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            {item.questMatch && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => link.mutate({ kind: 'quest', ref: item.questMatch!.id })}
+                className="border border-[var(--color-accent)]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] disabled:opacity-40"
+              >
+                → quest: {item.questMatch.title.slice(0, 40)}
+              </button>
+            )}
+            {item.suggestedQuestTitle && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => link.mutate({ kind: 'new-quest', title: item.suggestedQuestTitle! })}
+                className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
+              >
+                + new quest: {item.suggestedQuestTitle.slice(0, 40)}
+              </button>
+            )}
+          </>
+        )}
+        {(link.error || dismiss.error) && (
+          <span className="text-[10px] text-[var(--color-danger)]">
+            {(() => {
+              const e = (link.error || dismiss.error) as { detail?: string; message?: string }
+              return e.detail || e.message || 'request failed'
+            })()}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function IntakeCard() {
+  const intake = useQuery({ queryKey: ['email-intake'], queryFn: () => fetchEmailIntake('pending'), refetchInterval: 60_000 })
+  const d = intake.data
+  return (
+    <Card
+      title={`Intake Queue (${d?.counts.pending ?? 0})`}
+      action={
+        d && (
+          <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
+            {d.counts.linked} connected · {d.counts.dismissed} dismissed
+          </span>
+        )
+      }
+    >
+      {intake.isLoading ? (
+        <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+      ) : intake.error ? (
+        <div className="text-sm text-[var(--color-danger)]">intake queue unavailable</div>
+      ) : (d?.items.length ?? 0) === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; nothing waiting for intake.</div>
+      ) : (
+        <div className="space-y-2">
+          {d!.items.map((item) => <IntakeRow key={`${item.account}-${item.uid}`} item={item} />)}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Emails() {
   const signals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 60_000 })
   const d = signals.data
@@ -75,6 +225,8 @@ export default function Emails() {
           </h1>
         </div>
       </div>
+
+      <IntakeCard />
 
       <Card title="Service">
         {signals.isLoading ? (

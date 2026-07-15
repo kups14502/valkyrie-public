@@ -4,7 +4,9 @@
 // on fixed-px Tailwind classes (text-[10px], etc.) that wouldn't respond to a
 // rem-based scale. The level is persisted so it survives app restarts.
 
-const KEY = 'mc-zoom'
+const KEY = 'valkyrie-zoom'
+// Pre-rename key — read as a fallback so saved zoom survives the rename.
+const LEGACY_KEY = 'mc-zoom'
 const MIN = 0.6
 const MAX = 2.0
 const STEP = 0.1
@@ -14,7 +16,7 @@ function clamp(z: number) {
 }
 
 export function getZoom(): number {
-  const stored = parseFloat(localStorage.getItem(KEY) ?? '1')
+  const stored = parseFloat(localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY) ?? '1')
   return Number.isFinite(stored) ? clamp(stored) : 1
 }
 

@@ -54,7 +54,7 @@ jobs:
       - name: Init + build Android (debug APK)
         env:
           NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
-          VITE_API_URL: https://master-control-api.brendonkupsch.com
+          VITE_API_URL: https://valkyrie-api.brendonkupsch.com
           VITE_BUILD_ID: ${{ github.sha }}
         run: |
           npx tauri android init --ci
@@ -63,7 +63,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: master-control-android
+          name: valkyrie-android
           retention-days: 7
           if-no-files-found: warn
           path: |

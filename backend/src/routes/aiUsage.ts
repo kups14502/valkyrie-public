@@ -49,7 +49,7 @@ const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
 const CACHE_TTL_MS = 300_000
-const CCUSAGE_BIN = path.join('/home/brendon/master-control/backend', 'node_modules', '.bin', 'ccusage')
+const CCUSAGE_BIN = path.join('/home/brendon/valkyrie/backend', 'node_modules', '.bin', 'ccusage')
 let cache: { at: number; data: any } | null = null
 let refreshing: Promise<void> | null = null
 
@@ -280,7 +280,7 @@ async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null
     await syncCodexAuth()
 
     const { spawn } = await import('node:child_process')
-    const initMsg = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'master-control', version: '1.0' } } }) + '\n'
+    const initMsg = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'valkyrie', version: '1.0' } } }) + '\n'
     const rateLimitsMsg = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'account/rateLimits/read', params: {} }) + '\n'
 
     return await new Promise((resolve) => {

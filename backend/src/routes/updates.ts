@@ -15,8 +15,8 @@ import { Readable } from 'node:stream'
 
 const router = Router()
 const OWNER = 'kups14502'
-const REPO = 'master-control'
-const PUBLIC_BASE = process.env.PUBLIC_API_URL || 'https://master-control-api.brendonkupsch.com'
+const REPO = 'valkyrie'
+const PUBLIC_BASE = process.env.PUBLIC_API_URL || 'https://valkyrie-api.brendonkupsch.com'
 
 let tokenCache = ''
 function ghToken(): string {
@@ -33,7 +33,7 @@ let relCache: { at: number; rel: Release } | null = null
 async function latestRelease(): Promise<Release> {
   if (relCache && Date.now() - relCache.at < 30_000) return relCache.rel
   const r = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`, {
-    headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json', 'User-Agent': 'mc-updates' },
+    headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json', 'User-Agent': 'valkyrie-updates' },
   })
   if (!r.ok) throw new Error(`github releases ${r.status}`)
   const rel = (await r.json()) as Release
@@ -42,7 +42,7 @@ async function latestRelease(): Promise<Release> {
 }
 
 function assetResponse(asset: Asset): Promise<Response> {
-  return fetch(asset.url, { headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/octet-stream', 'User-Agent': 'mc-updates' } })
+  return fetch(asset.url, { headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/octet-stream', 'User-Agent': 'valkyrie-updates' } })
 }
 
 // The Tauri updater manifest, with download URLs pointed back at this mirror.

@@ -24,7 +24,7 @@ function createSession(profileId: string): string {
   const id = 'smoke-' + randomUUID()
   const d = db(); const t = now()
   d.prepare(`INSERT INTO code_deck_sessions (id,title,folder,projectRootId,cwd,profileId,model,pinned,status,notes,createdAt,updatedAt,agentSessionId)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, 'smoke', 'Personal', 'master-control', '/tmp', profileId, MODEL, 0, 'planned', '', t, t, '')
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, 'smoke', 'Personal', 'valkyrie', '/tmp', profileId, MODEL, 0, 'planned', '', t, t, '')
   d.close()
   return id
 }

@@ -3,12 +3,12 @@ set -euo pipefail
 
 VERSION="${1:?usage: scripts/release.sh <version>}"
 TAG="app-v${VERSION}"
-REPO="${REPO:-kups14502/master-control}"
+REPO="${REPO:-kups14502/valkyrie}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND="$ROOT/frontend"
 TAURI_CONF="$FRONTEND/src-tauri/tauri.conf.json"
-KEY_FILE="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/mc-updater.key}"
-PW_FILE="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE:-$HOME/.tauri/mc-updater.pw}"
+KEY_FILE="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/valkyrie-updater.key}"
+PW_FILE="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE:-$HOME/.tauri/valkyrie-updater.pw}"
 NOTES="${RELEASE_NOTES:-Pop-out windows, iOS Safari fix, custom Windows updater}"
 MANIFEST_NOTES="${MANIFEST_NOTES:-Pop-out windows, mobile fixes, custom updater UI}"
 

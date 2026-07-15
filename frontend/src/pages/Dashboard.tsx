@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, type AIClientUsage } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchQuests, type AIClientUsage } from '../lib/api'
 import { EmailSignalCard } from './Emails'
+import { QuestProgressBar } from '../components/QuestProgressBar'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -374,6 +375,56 @@ function TradeQuickView() {
   )
 }
 
+// HUD-style tracked-quests widget: the quests marked "tracked" in the quest
+// log, with progress and the next open objective — like a game's quest HUD.
+function QuestTracker() {
+  const quests = useQuery({ queryKey: ['quests'], queryFn: fetchQuests, refetchInterval: 60_000 })
+  const tracked = (quests.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
+  return (
+    <Card
+      title="Tracked Quests"
+      action={
+        <Link to="/quests" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
+          quest log →
+        </Link>
+      }
+    >
+      {quests.isLoading && !quests.data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : quests.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Quest log unavailable</div>
+      ) : tracked.length === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; no quests tracked.</div>
+      ) : (
+        <div className="space-y-3">
+          {tracked.slice(0, 6).map((q) => {
+            const next = q.subquests.find((s) => s.status !== 'completed')
+            return (
+              <div key={q.id} className="border-l-2 border-[var(--color-accent)]/60 pl-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{q.title}</span>
+                  {q.status === 'on_hold' && (
+                    <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[var(--color-warning)]">[hold]</span>
+                  )}
+                </div>
+                {q.progress.total > 0 && (
+                  <div className="mt-1">
+                    <QuestProgressBar done={q.progress.done} total={q.progress.total} status={q.status} />
+                  </div>
+                )}
+                {next && <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">▸ {next.title}</div>}
+              </div>
+            )
+          })}
+          {tracked.length > 6 && (
+            <div className="text-[10px] text-[var(--color-text-faint)]">+{tracked.length - 6} more tracked</div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
@@ -414,7 +465,8 @@ export default function Dashboard() {
       <AIUsageHero />
 
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-        <div className="order-1 min-w-0 xl:sticky xl:top-24 xl:order-1">
+        <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
+          <QuestTracker />
           <TradeQuickView />
         </div>
 

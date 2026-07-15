@@ -31,8 +31,13 @@ function isTrustedLegacyPair(req: Pick<IncomingMessage, 'headers'>): boolean {
   const origin = String(req.headers['origin'] || '')
   const host = String(req.headers['host'] || '')
   const trustedPagesPreview = /^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)
-  const trustedFrontend = origin === 'https://master-control.brendonkupsch.com' || trustedPagesPreview
-  const trustedApiHost = host === 'master-control-api.brendonkupsch.com' || host === 'api.brendonkupsch.com'
+  // Old hostnames stay accepted until every device/bookmark has moved over.
+  const trustedFrontend = origin === 'https://valkyrie.brendonkupsch.com'
+    || origin === 'https://master-control.brendonkupsch.com'
+    || trustedPagesPreview
+  const trustedApiHost = host === 'valkyrie-api.brendonkupsch.com'
+    || host === 'master-control-api.brendonkupsch.com'
+    || host === 'api.brendonkupsch.com'
   return trustedFrontend && trustedApiHost
 }
 
