@@ -18,7 +18,9 @@ const errMsg = (e: unknown) => {
 // gold (accent-2), like the game's parchment highlight.
 
 const CATEGORY_LABEL: Record<QuestCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY', work: 'WORK' }
-const GROUP_ORDER: QuestCategory[] = ['main', 'work', 'side', 'daily']
+// Work (Autotask tickets) and personal (main/side/daily) are separate worlds;
+// the tabs split them and the group banners keep them sorted within a tab.
+const GROUP_ORDER: QuestCategory[] = ['work', 'main', 'side', 'daily']
 const GROUP_TITLE: Record<QuestCategory, string> = {
   main: 'main quests', work: 'work orders', side: 'side quests', daily: 'dailies',
 }
@@ -47,13 +49,18 @@ function splitDetail(detail: string): { autotask: string | null; body: string } 
   return { autotask: null, body: (detail || '').trim() }
 }
 
-type Tab = 'all' | QuestCategory | 'done'
-const TABS: Tab[] = ['all', 'main', 'work', 'side', 'daily', 'done']
+type Tab = 'all' | 'work' | 'personal' | 'done'
+const TABS: Tab[] = ['all', 'work', 'personal', 'done']
 
 function buildGroups(all: Quest[], tab: Tab): { cat: QuestCategory; quests: Quest[] }[] {
   const isDone = (q: Quest) => q.status === 'completed' || q.status === 'failed'
-  const visible = all.filter((q) =>
-    tab === 'done' ? isDone(q) : tab === 'all' ? !isDone(q) : q.category === tab && !isDone(q))
+  const visible = all.filter((q) => {
+    if (tab === 'done') return isDone(q)
+    if (isDone(q)) return false
+    if (tab === 'work') return q.category === 'work'
+    if (tab === 'personal') return q.category !== 'work'
+    return true
+  })
   return GROUP_ORDER
     .map((cat) => ({ cat, quests: visible.filter((q) => q.category === cat).sort(questSort) }))
     .filter((g) => g.quests.length > 0)
