@@ -254,7 +254,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
           <button
             type="button"
             onClick={() => patch.mutate({ id: quest.id, patch: { tracked: !quest.tracked } })}
-            title={quest.tracked ? 'Untrack quest' : 'Track quest'}
+            title={quest.tracked ? 'Untrack: remove this quest from the dashboard HUD.' : 'Track: pin this quest to the dashboard HUD.'}
             aria-label={quest.tracked ? 'Untrack quest' : 'Track quest'}
             className={`border p-2 transition ${
               quest.tracked
@@ -286,6 +286,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
               type="button"
               onClick={() => setConfirmDelete(true)}
               aria-label="Delete quest"
+              title="Delete this quest permanently (removes it entirely; use abandon to just shelve it)."
               className="border border-[var(--color-border)] p-2 text-[var(--color-text-faint)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
             >
               <Trash2 size={16} />
@@ -342,6 +343,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
                   type="button"
                   onClick={() => patch.mutate({ id: sub.id, patch: { status: done ? 'active' : 'completed' } })}
                   aria-label={done ? 'Reopen objective' : 'Complete objective'}
+                  title={done ? 'Reopen this objective.' : 'Mark this objective complete.'}
                   className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center border text-xs transition ${
                     done
                       ? 'border-[var(--color-success)]/50 text-[var(--color-success)] opacity-70'
@@ -359,6 +361,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
                   type="button"
                   onClick={() => remove.mutate(sub.id)}
                   aria-label="Delete objective"
+                  title="Delete this objective."
                   className="shrink-0 pt-0.5 text-[var(--color-text-faint)] opacity-0 transition hover:text-[var(--color-danger)] group-hover:opacity-100"
                 >
                   <X size={14} />
@@ -385,6 +388,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
             type="submit"
             disabled={!subTitle.trim() || addSub.isPending}
             aria-label="Add objective"
+            title="Add this objective (a checklist step) to the quest."
             className="border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
           >
             <Plus size={14} />
@@ -423,6 +427,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
         {quest.status !== 'completed' && (
           <button
             type="button"
+            title="Mark this quest done and move it to the Done tab."
             onClick={() => patch.mutate({ id: quest.id, patch: { status: 'completed' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-success)] hover:text-[var(--color-success)]"
           >
@@ -432,8 +437,9 @@ function QuestJournal({ quest }: { quest: Quest }) {
         {quest.status === 'active' && (
           <button
             type="button"
+            title="Pause this quest as on-hold (a work quest returns to active if its Autotask ticket is still actionable)."
             onClick={() => patch.mutate({ id: quest.id, patch: { status: 'on_hold' } })}
-            className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]"
+            className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[#7c9cc4] hover:text-[#7c9cc4]"
           >
             ◼ hold
           </button>
@@ -441,6 +447,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
         {quest.status !== 'active' && (
           <button
             type="button"
+            title="Reopen this quest as active."
             onClick={() => patch.mutate({ id: quest.id, patch: { status: 'active' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
@@ -450,6 +457,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
         {quest.status === 'active' && (
           <button
             type="button"
+            title="Abandon this quest: marks it failed and moves it to the Done tab. It stays there (the sync won't reopen it and the Autotask ticket is untouched)."
             onClick={() => patch.mutate({ id: quest.id, patch: { status: 'failed' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
           >
@@ -460,6 +468,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
           value={quest.category}
           onChange={(e) => patch.mutate({ id: quest.id, patch: { category: e.target.value as QuestCategory } })}
           aria-label="Quest category"
+          title="Change this quest's category (moves it between the work and personal tabs)."
           className="ml-auto border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs uppercase tracking-[0.1em] text-[var(--color-text-dim)] outline-none"
         >
           <option value="main">main</option>
