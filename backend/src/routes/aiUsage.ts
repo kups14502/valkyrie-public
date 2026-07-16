@@ -68,7 +68,27 @@ const localDateKey = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const CODEX_BIN = '/home/brendon/.npm/_npx/c8ab89660c602c20/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex'
+// The codex binary is vendored inside an npx cache dir whose hash is
+// machine-specific, so a hardcoded path breaks on a device move. Resolve it at
+// startup: env override, then any npx cache, then common global locations,
+// then bare "codex" on PATH.
+function resolveCodexBin(): string {
+  const rel = 'node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex'
+  const envBin = process.env.CODEX_BIN
+  if (envBin && existsSync(envBin)) return envBin
+  const npxRoot = path.join(homedir(), '.npm', '_npx')
+  try {
+    for (const hash of readdirSync(npxRoot)) {
+      const candidate = path.join(npxRoot, hash, rel)
+      if (existsSync(candidate)) return candidate
+    }
+  } catch { /* no npx cache on this box */ }
+  for (const p of ['/usr/local/bin/codex', path.join(homedir(), '.local/bin/codex'), path.join(homedir(), '.codex', 'bin', 'codex')]) {
+    if (existsSync(p)) return p
+  }
+  return 'codex'
+}
+const CODEX_BIN = resolveCodexBin()
 const OPENCLAW_AUTH_PROFILES = path.join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json')
 const CODEX_AUTH_JSON = path.join(homedir(), '.codex', 'auth.json')
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -117,7 +137,6 @@ const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
   { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-c' },
   { id: 'claude-acct-d', label: 'Account D', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-d' },
   { id: 'claude-acct-e', label: 'Account E', email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude-accounts/acct-e' },
-  { id: 'claude-botacct', label: 'Bot account', email: 'bot@example.com', subscription: 'Claude plan', configDir: '/home/brendon/dm-bot-runtime/.claude' },
 ]
 
 function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
@@ -437,56 +456,6 @@ async function readCodexUsage(): Promise<ProviderUsage> {
   return out
 }
 
-const DM_BOT_SESSIONS_DIR = '/home/brendon/dm-bot-runtime/.claude/projects/-home-brendon-dm-bot-runtime-workspace'
-
-async function readDMBotUsage(): Promise<ProviderUsage & { byModel: Record<string, Bucket> }> {
-  const result = { ...emptyProvider(), byModel: {} as Record<string, Bucket> }
-  const cutoff = daysAgoMs(30)
-  let files: string[] = []
-  try {
-    files = readdirSync(DM_BOT_SESSIONS_DIR).filter((f) => f.endsWith('.jsonl'))
-  } catch { return result }
-  const todayCutoff = todayStartMs()
-  const sevenCutoff = daysAgoMs(7)
-
-  await Promise.all(files.map(async (f) => {
-    const full = path.join(DM_BOT_SESSIONS_DIR, f)
-    let stat
-    try { stat = statSync(full) } catch { return }
-    if (stat.mtimeMs < cutoff) return
-    await new Promise<void>((resolve) => {
-      const rl = createInterface({ input: createReadStream(full, { encoding: 'utf8' }), crlfDelay: Infinity })
-      rl.on('line', (line) => {
-        if (!line || line.length < 50) return
-        if (!line.includes('"usage"')) return
-        let obj: any
-        try { obj = JSON.parse(line) } catch { return }
-        const usage = obj?.message?.usage
-        if (!usage) return
-        const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
-        if (!Number.isFinite(ts) || ts < cutoff) return
-        const tokens = (
-          Number(usage.input_tokens || 0) +
-          Number(usage.cache_creation_input_tokens || 0) +
-          Number(usage.cache_read_input_tokens || 0) +
-          Number(usage.output_tokens || 0)
-        )
-        if (tokens === 0) return
-        if (ts >= cutoff) { result.last30d.tokens += tokens; result.last30d.messages += 1 }
-        if (ts >= sevenCutoff) { result.last7d.tokens += tokens; result.last7d.messages += 1 }
-        if (ts >= todayCutoff) { result.today.tokens += tokens; result.today.messages += 1 }
-        const model = String(obj?.message?.model ?? 'unknown')
-        if (!result.byModel[model]) result.byModel[model] = emptyBucket()
-        result.byModel[model].tokens += tokens
-        result.byModel[model].messages += 1
-      })
-      rl.on('close', () => resolve())
-      rl.on('error', () => resolve())
-    })
-  }))
-  return result
-}
-
 async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
@@ -502,10 +471,9 @@ async function refreshAIUsage(): Promise<void> {
         ])
         return { acct, blocks, usage, quota }
       }))
-      const [codexUsage, codexRateLimits, dmBot] = await Promise.all([
+      const [codexUsage, codexRateLimits] = await Promise.all([
         readCodexUsage(),
         readCodexRateLimits(),
-        readDMBotUsage(),
       ])
 
       const claudeClients = claudeResults.map(({ acct, blocks, usage, quota }) => ({
@@ -524,7 +492,6 @@ async function refreshAIUsage(): Promise<void> {
           ...claudeClients,
           { id: 'codex-work', kind: 'codex', label: 'Codex', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
         ],
-        dmBot,
         updatedAt: new Date().toISOString(),
       }
       cache = { at: Date.now(), data }

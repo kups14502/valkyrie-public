@@ -177,15 +177,17 @@ function Shell() {
                     to="/dashboard"
                     aria-label="Dashboard"
                     title="Go to dashboard"
-                    className="pointer-events-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
+                    className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-accent)]"
                   >
                     <LayoutDashboard size={16} />
                   </NavLink>
                 )}
-                {/* Pages live in the menu at every width — one consistent layout. */}
+                {/* Pages live in the menu at every width — one consistent layout.
+                    Borderless like the window controls so the top-right icon
+                    cluster reads as one row. */}
                 <button
                   type="button"
-                  className="pointer-events-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
+                  className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text)]"
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Menu"
                 >

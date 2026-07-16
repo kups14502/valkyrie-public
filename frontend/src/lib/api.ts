@@ -118,7 +118,6 @@ export type AIUsage = {
     rateLimits: RateLimits
   }
   aiClients?: AIClientUsage[]
-  dmBot?: ProviderUsage & { byModel: Record<string, UsageBucket> }
   updatedAt: string
 }
 
