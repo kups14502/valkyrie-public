@@ -24,7 +24,8 @@ need gh
 need jq
 need cargo
 need rustup
-need makensis.exe
+# NSIS: accept makensis or makensis.exe (Arch nsis pkg provides makensis).
+command -v makensis.exe >/dev/null 2>&1 || command -v makensis >/dev/null 2>&1 || { echo "missing required command: makensis (install the nsis package)" >&2; exit 1; }
 
 if [[ ! -f "$KEY_FILE" ]]; then
   echo "missing Tauri signing private key: $KEY_FILE" >&2
