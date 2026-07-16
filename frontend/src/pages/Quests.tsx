@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from 'lucide-react'
 import { QuestProgressBar } from '../components/QuestProgressBar'
 import { questColor } from '../lib/questColor'
 import {
@@ -106,6 +106,7 @@ function buildGroups(all: Quest[], tab: Tab): Group[] {
 // Split-pane sizing (wide mode only; persisted across sessions).
 const LIST_W_KEY = 'valkyrie-quests-listw'
 const COLLAPSED_KEY = 'valkyrie-quests-collapsed'
+const GROUPS_KEY = 'valkyrie-quests-collapsed-groups'
 const MIN_LIST_W = 280
 const COLLAPSE_AT = 160
 const DEFAULT_LIST_W = 480
@@ -533,6 +534,19 @@ export default function Quests() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1')
   useEffect(() => { localStorage.setItem(LIST_W_KEY, String(listW)) }, [listW])
   useEffect(() => { localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0') }, [collapsed])
+
+  // Per-group collapse (client/category dropdowns); persisted by group key.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(GROUPS_KEY) ?? '[]') as string[]) }
+    catch { return new Set() }
+  })
+  useEffect(() => { localStorage.setItem(GROUPS_KEY, JSON.stringify([...collapsedGroups])) }, [collapsedGroups])
+  const toggleGroup = (key: string) => setCollapsedGroups((prev) => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
   const splitRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
 
@@ -667,19 +681,31 @@ export default function Quests() {
                 &gt; no quests{tab !== 'all' ? ` (${tab})` : ''}. accept one above.
               </div>
             )}
-            {groups.map((g) => (
-              <div key={g.key}>
-                <div className="mb-1 flex items-center justify-between border-y border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-dim)]">
-                  <span className="min-w-0 truncate">{g.title}</span>
-                  <span className="shrink-0 text-[var(--color-text-faint)]">{g.quests.length}</span>
+            {groups.map((g) => {
+              const groupCollapsed = collapsedGroups.has(g.key)
+              return (
+                <div key={g.key}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.key)}
+                    aria-expanded={!groupCollapsed}
+                    title={groupCollapsed ? `Expand ${g.title}` : `Collapse ${g.title}`}
+                    className="mb-1 flex w-full items-center gap-2 border-y border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] hover:text-[var(--color-text)]"
+                  >
+                    {groupCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+                    <span className="min-w-0 flex-1 truncate text-left">{g.title}</span>
+                    <span className="shrink-0 text-[var(--color-text-faint)]">{g.quests.length}</span>
+                  </button>
+                  {!groupCollapsed && (
+                    <div className="space-y-0.5">
+                      {g.quests.map((q) => (
+                        <QuestListRow key={q.id} quest={q} selected={selected?.id === q.id} onSelect={() => selectQuest(q.id)} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-0.5">
-                  {g.quests.map((q) => (
-                    <QuestListRow key={q.id} quest={q} selected={selected?.id === q.id} onSelect={() => selectQuest(q.id)} />
-                  ))}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* drag divider (wide mode only): resize the list, drag closed to collapse */}
