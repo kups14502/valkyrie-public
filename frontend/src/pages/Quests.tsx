@@ -70,14 +70,20 @@ const TABS: Tab[] = ['all', 'work', 'personal', 'done']
 
 type Group = { key: string; title: string; quests: Quest[] }
 
+// A quest is "waiting on others" when it's on hold (the ticket sync parks
+// waiting-customer/vendor/materials tickets there); nothing for you to do.
+const isWaiting = (q: Quest) => q.status === 'on_hold'
+
 // Work quests group by client (from the Autotask companyID); personal quests
 // group by category. In the "all"/"done" tabs work-client groups lead, then
-// the personal category groups.
-function buildGroups(all: Quest[], tab: Tab): Group[] {
+// the personal category groups. When hideWaiting is set, on-hold quests are
+// dropped entirely.
+function buildGroups(all: Quest[], tab: Tab, hideWaiting: boolean): Group[] {
   const isDone = (q: Quest) => q.status === 'completed' || q.status === 'failed'
   const visible = all.filter((q) => {
     if (tab === 'done') return isDone(q)
     if (isDone(q)) return false
+    if (hideWaiting && isWaiting(q)) return false
     if (tab === 'work') return q.category === 'work'
     if (tab === 'personal') return q.category !== 'work'
     return true
@@ -107,6 +113,7 @@ function buildGroups(all: Quest[], tab: Tab): Group[] {
 const LIST_W_KEY = 'valkyrie-quests-listw'
 const COLLAPSED_KEY = 'valkyrie-quests-collapsed'
 const GROUPS_KEY = 'valkyrie-quests-collapsed-groups'
+const HIDE_WAITING_KEY = 'valkyrie-quests-hide-waiting'
 const MIN_LIST_W = 280
 const COLLAPSE_AT = 160
 const DEFAULT_LIST_W = 480
@@ -567,7 +574,10 @@ export default function Quests() {
     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* already released */ }
   }
 
-  const groups = useMemo(() => buildGroups(quests.data ?? [], tab), [quests.data, tab])
+  const [hideWaiting, setHideWaiting] = useState(() => localStorage.getItem(HIDE_WAITING_KEY) === '1')
+  useEffect(() => { localStorage.setItem(HIDE_WAITING_KEY, hideWaiting ? '1' : '0') }, [hideWaiting])
+
+  const groups = useMemo(() => buildGroups(quests.data ?? [], tab, hideWaiting), [quests.data, tab, hideWaiting])
   const flat = useMemo(() => groups.flatMap((g) => g.quests), [groups])
   const selected = flat.find((q) => q.id === selectedId) ?? flat[0] ?? null
 
@@ -613,7 +623,7 @@ export default function Quests() {
       </div>
 
       {/* category tabs, KCD2's shield strip */}
-      <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] pb-2">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] pb-2">
         {TABS.map((t) => (
           <button
             key={t}
@@ -629,6 +639,20 @@ export default function Quests() {
             {t}
           </button>
         ))}
+        {/* Hide everything that's waiting on someone else (on-hold quests). */}
+        <button
+          type="button"
+          onClick={() => setHideWaiting((v) => !v)}
+          title={hideWaiting ? 'Show quests that are waiting on others' : 'Hide quests that are waiting on others'}
+          aria-pressed={hideWaiting}
+          className={`ml-auto border px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition ${
+            hideWaiting
+              ? 'border-[#7c9cc4]/70 bg-[rgba(124,156,196,0.1)] text-[#7c9cc4]'
+              : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]'
+          }`}
+        >
+          {hideWaiting ? '◼ waiting hidden' : '◼ hide waiting'}
+        </button>
       </div>
 
       {quests.isLoading ? (
@@ -683,17 +707,27 @@ export default function Quests() {
             )}
             {groups.map((g) => {
               const groupCollapsed = collapsedGroups.has(g.key)
+              // Nothing to do here if every quest in the group is waiting on
+              // someone else: grey the header (steel) so it recedes.
+              const allWaiting = g.quests.length > 0 && g.quests.every(isWaiting)
               return (
                 <div key={g.key}>
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.key)}
                     aria-expanded={!groupCollapsed}
-                    title={groupCollapsed ? `Expand ${g.title}` : `Collapse ${g.title}`}
-                    className="mb-1 flex w-full items-center gap-2 border-y border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] hover:text-[var(--color-text)]"
+                    title={allWaiting
+                      ? `${g.title} — all waiting on others (nothing to do)`
+                      : groupCollapsed ? `Expand ${g.title}` : `Collapse ${g.title}`}
+                    className={`mb-1 flex w-full items-center gap-2 border-y px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] transition ${
+                      allWaiting
+                        ? 'border-[var(--color-border)]/60 bg-transparent text-[#7c9cc4]/70 hover:text-[#7c9cc4]'
+                        : 'border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] text-[var(--color-text-dim)] hover:bg-[rgba(var(--color-accent-rgb),0.08)] hover:text-[var(--color-text)]'
+                    }`}
                   >
                     {groupCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
                     <span className="min-w-0 flex-1 truncate text-left">{g.title}</span>
+                    {allWaiting && <span className="shrink-0 text-[9px] tracking-[0.14em] text-[#7c9cc4]/70">waiting</span>}
                     <span className="shrink-0 text-[var(--color-text-faint)]">{g.quests.length}</span>
                   </button>
                   {!groupCollapsed && (
