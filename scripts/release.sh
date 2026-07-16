@@ -24,8 +24,9 @@ need gh
 need jq
 need cargo
 need rustup
-# NSIS: accept makensis or makensis.exe (Arch nsis pkg provides makensis).
-command -v makensis.exe >/dev/null 2>&1 || command -v makensis >/dev/null 2>&1 || { echo "missing required command: makensis (install the nsis package)" >&2; exit 1; }
+# NSIS: Tauri v2 downloads its own NSIS into the tauri cache when bundling
+# on Linux, so a system makensis is not required. Just note if absent.
+command -v makensis.exe >/dev/null 2>&1 || command -v makensis >/dev/null 2>&1 || echo "note: no system makensis; Tauri will download NSIS during the nsis bundle step" >&2
 
 if [[ ! -f "$KEY_FILE" ]]; then
   echo "missing Tauri signing private key: $KEY_FILE" >&2
