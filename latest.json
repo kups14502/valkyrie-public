@@ -1,15 +1,15 @@
 {
-  "version": "0.3.10",
-  "notes": "feat(shell): dashboard opens with nav menu; quick dashboard button; pin window controls",
-  "pub_date": "2026-07-16T01:16:08Z",
+  "version": "0.3.11",
+  "notes": "fix(release): don't hard-require system makensis (Tauri downloads NSIS)",
+  "pub_date": "2026-07-16T22:38:20Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVRa3FxZ1o2ZFRQWXZ1d1RRcnpSeUo0d1JwdHJ2MVQ0dWF6TUxBeU5iYURyL1crcC9OMW03T2xIVDI1cXlwRjNmNmNYdzNEMElxTzduaDNZZzlxMWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTY0MDA1CWZpbGU6VmFsa3lyaWVfMC4zLjlfeDY0LXNldHVwLmV4ZQpjMTVhR003WkYrQWU4M3BJUW9BZkVjeDh5RUNOMUd2VHBUTGpqdGR6N0UyZkhSQzFVT0RHbVN3c2Y4SGt6Y1VQanFtb2VkeXE4b1F1aVZkOHFQSUdDQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.10/Valkyrie_0.3.9_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNKdEExb0tDaDZZa1VoTC8rKzRwOEtHTEVvajMwRkdUTHRKTVpTMW51SVV2RFVjakpiU3pzMEpLNDVCSVRvVHk4c3dpQ2dkb3BERDhCV2g4ZFhEOWc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MjQxNTAwCWZpbGU6VmFsa3lyaWVfMC4zLjExX3g2NC1zZXR1cC5leGUKL2ZaSlhnWFZKUVhuaU93SUIxRlc1bzFBMjNvNlVNVUMxZWxRMC9QT0dGeThYOExsQVN6R05ldWJ4TXdSUUtmNHpCZjVxVG1Kc3J2ZHdPdGJBamJVQ2c9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.11/Valkyrie_0.3.11_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlteVVWcWdGcnFMeGdsTGZJblVGYWhEenhEajBhSU9rYSs2MU4wK0NmeWFTVGRmY0xFWnFLeERjZFBRSEhsd3pIbWl3ZVVFNVVjZGQ0WjExbTZ6bEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTY0NTI2CWZpbGU6VmFsa3lyaWVfMC4zLjEwX2FtZDY0LkFwcEltYWdlCkkvV2x1aldzcVlvaE52Y0M1NlNPaG1XV05kc0dSaWRFY2R2ajF0WUZBUlJrekFyZHFCNy92c2hrUDJGVTFNeGtnVEM1dXVUa2g1Yy8xM3NSbkYvR0JBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.10/Valkyrie_0.3.10_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVh6SG1Gb1JGYm1TeGRjQU95NDNZZSs5VGJRT2d4VjN3cEIxMzRvKzNrTUFJVzFuSTFSSElTRnJqenpOQ3FvQy9qWk1WSE94eDQvYXphWlFIaTBMTGcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MjQxMzk0CWZpbGU6VmFsa3lyaWVfMC4zLjExX2FtZDY0LkFwcEltYWdlCjhzTVQ0NGNKVWNZdXR4TjRlMWhEM2dvMTh1RXZDN0J1U3VIdnlyZmt0WGhIeHQ2TWRnVzZzZXNKNFRubC8vYTd1dnpGcFF0UHkyeVJEY3lnYzY0S0FBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.11/Valkyrie_0.3.11_amd64.AppImage"
     }
   }
 }
