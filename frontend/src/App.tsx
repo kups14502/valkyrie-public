@@ -127,6 +127,12 @@ function Shell() {
   const location = useLocation()
   const version = useAppVersion()
 
+  // The dashboard opens with the nav menu already down (as a launcher); it
+  // stays closeable, and closing it while on the dashboard sticks because this
+  // only fires when the route actually becomes /dashboard.
+  const onDashboard = location.pathname === '/dashboard'
+  useEffect(() => { if (onDashboard) setMenuOpen(true) }, [onDashboard])
+
   return (
     <div className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
@@ -162,9 +168,20 @@ function Shell() {
                   </span>
                 )}
               </div>
-              {/* Right cluster: update alarm (app only), menu, window controls. */}
+              {/* Right cluster: update alarm (app only), quick dashboard, menu. */}
               <div className="pointer-events-none ml-auto flex items-center gap-2">
                 <UpdateAlarm />
+                {/* Quick jump home, shown only when you're not already there. */}
+                {!onDashboard && (
+                  <NavLink
+                    to="/dashboard"
+                    aria-label="Dashboard"
+                    title="Go to dashboard"
+                    className="pointer-events-auto border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
+                  >
+                    <LayoutDashboard size={16} />
+                  </NavLink>
+                )}
                 {/* Pages live in the menu at every width — one consistent layout. */}
                 <button
                   type="button"
@@ -177,11 +194,11 @@ function Shell() {
               </div>
             </div>
           </div>
+          {/* Window controls live inside the toolbar row (not the header) so
+              they pin to the top-right corner and keep the row's height instead
+              of stretching down when the nav menu opens below. */}
+          <WindowControls />
         </div>
-        {/* Frameless-window controls (app only) — flush against the actual top-right
-            corner of the window, outside the header's horizontal padding, so Fitts's-law
-            corner-throwing works like a native title bar. */}
-        <WindowControls />
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 

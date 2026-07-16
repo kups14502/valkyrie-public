@@ -3,12 +3,12 @@ import { Minus, Square, Copy, X } from 'lucide-react'
 import { isTauri } from '../lib/auth'
 
 // Window controls (minimize / maximize / close) for the frameless Tauri window.
-// Absolutely positioned flush against the header's top-right corner (see App.tsx,
-// rendered as a sibling outside the header's padded content row) so the close
-// button sits exactly at the window corner, like a native title bar. The header
-// itself is the draggable title bar (see App.tsx data-tauri-drag-region), so
-// there's no separate title strip. Returns null on web (the browser/PWA keeps
-// its chrome).
+// Absolutely positioned flush against the top-right corner of the toolbar ROW
+// (see App.tsx) so the close button sits exactly at the window corner like a
+// native title bar, and keeps the row's height rather than stretching when the
+// nav menu opens below. The header itself is the draggable title bar (see
+// App.tsx data-tauri-drag-region), so there's no separate title strip. Returns
+// null on web (the browser/PWA keeps its chrome).
 
 type AppWindow = {
   minimize: () => Promise<void>
