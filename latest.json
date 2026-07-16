@@ -1,15 +1,15 @@
 {
-  "version": "0.3.9",
-  "notes": "feat(quests): collapsible client/category group dropdowns",
-  "pub_date": "2026-07-16T01:06:45Z",
+  "version": "0.3.10",
+  "notes": "feat(shell): dashboard opens with nav menu; quick dashboard button; pin window controls",
+  "pub_date": "2026-07-16T01:16:08Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVRa3FxZ1o2ZFRQWXZ1d1RRcnpSeUo0d1JwdHJ2MVQ0dWF6TUxBeU5iYURyL1crcC9OMW03T2xIVDI1cXlwRjNmNmNYdzNEMElxTzduaDNZZzlxMWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTY0MDA1CWZpbGU6VmFsa3lyaWVfMC4zLjlfeDY0LXNldHVwLmV4ZQpjMTVhR003WkYrQWU4M3BJUW9BZkVjeDh5RUNOMUd2VHBUTGpqdGR6N0UyZkhSQzFVT0RHbVN3c2Y4SGt6Y1VQanFtb2VkeXE4b1F1aVZkOHFQSUdDQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.9/Valkyrie_0.3.9_x64-setup.exe"
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.10/Valkyrie_0.3.9_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVF6ZkoyanRvTjBJSUY4cTM0VVJUQUl0R0NTRnZTRkc4OVZLRERDQ04yb3BQaEd1MlhvK1JoTTJGVVJ2dTBrR0UxVUszQ1ArWmxhS2ZsZE55MzF6Q3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTYzOTYzCWZpbGU6VmFsa3lyaWVfMC4zLjlfYW1kNjQuQXBwSW1hZ2UKRmZjWWc3M0wzQ2FqVjdnckZGclZTY3dSRU5kbGFIaWxML3hzK24ycWhQV1FTY045WnBxMzlGZVJuT3hXdjBJNDZjUEh2Mk5wanRjWnVncWdCdmhQQkE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.9/Valkyrie_0.3.9_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlteVVWcWdGcnFMeGdsTGZJblVGYWhEenhEajBhSU9rYSs2MU4wK0NmeWFTVGRmY0xFWnFLeERjZFBRSEhsd3pIbWl3ZVVFNVVjZGQ0WjExbTZ6bEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MTY0NTI2CWZpbGU6VmFsa3lyaWVfMC4zLjEwX2FtZDY0LkFwcEltYWdlCkkvV2x1aldzcVlvaE52Y0M1NlNPaG1XV05kc0dSaWRFY2R2ajF0WUZBUlJrekFyZHFCNy92c2hrUDJGVTFNeGtnVEM1dXVUa2g1Yy8xM3NSbkYvR0JBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.10/Valkyrie_0.3.10_amd64.AppImage"
     }
   }
 }
