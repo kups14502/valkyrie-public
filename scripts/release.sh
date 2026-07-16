@@ -73,9 +73,15 @@ if ! command -v cargo-xwin >/dev/null 2>&1; then
 fi
 npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
 
-APPIMAGE="$(find "$FRONTEND/src-tauri/target/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage' | sort | tail -1)"
+# Select this build's artifacts by exact version name. The bundle dirs keep
+# every past build, so a glob + `sort | tail -1` grabbed the wrong file once
+# patches hit two digits (lexicographically "0.3.10" sorts before "0.3.9"),
+# which shipped a stale installer in the manifest. Naming the exact file is
+# deterministic and the existence check below fails loudly if Tauri's naming
+# ever changes.
+APPIMAGE="$FRONTEND/src-tauri/target/release/bundle/appimage/Valkyrie_${VERSION}_amd64.AppImage"
 APPIMAGE_SIG="$APPIMAGE.sig"
-SETUP_EXE="$(find "$FRONTEND/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis" -maxdepth 1 -type f -name '*setup.exe' | sort | tail -1)"
+SETUP_EXE="$FRONTEND/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Valkyrie_${VERSION}_x64-setup.exe"
 SETUP_SIG="$SETUP_EXE.sig"
 for f in "$APPIMAGE" "$APPIMAGE_SIG" "$SETUP_EXE" "$SETUP_SIG"; do
   [[ -f "$f" ]] || { echo "missing expected artifact: $f" >&2; exit 1; }
