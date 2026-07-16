@@ -47,19 +47,33 @@ function questSort(a: Quest, b: Quest): number {
   return b.createdAt.localeCompare(a.createdAt)
 }
 
-// The ticket sync manages a "[Autotask] <status>" first line in the detail;
-// split it out so it renders as a status chip instead of journal text.
-function splitDetail(detail: string): { autotask: string | null; body: string } {
+// The ticket sync manages a "[Autotask] <status> · due <date> · client:<name>"
+// first line in the detail; split it into the status chip, the client (used to
+// group work quests), and the journal body.
+function splitDetail(detail: string): { autotask: string | null; client: string | null; body: string } {
   const lines = (detail || '').split('\n')
   const m = lines[0]?.match(/^\[Autotask\] (.+)$/)
-  if (m) return { autotask: m[1], body: lines.slice(1).join('\n').trim() }
-  return { autotask: null, body: (detail || '').trim() }
+  const body = lines.slice(1).join('\n').trim()
+  if (!m) return { autotask: null, client: null, body: (detail || '').trim() }
+  let auto = m[1]
+  let client: string | null = null
+  const cm = auto.match(/ · client:(.+)$/)
+  if (cm) { client = cm[1].trim(); auto = auto.slice(0, cm.index).trim() }
+  return { autotask: auto, client, body }
 }
+
+const questClient = (q: Quest): string | null => splitDetail(q.detail).client
+const UNASSIGNED = 'Unassigned'
 
 type Tab = 'all' | 'work' | 'personal' | 'done'
 const TABS: Tab[] = ['all', 'work', 'personal', 'done']
 
-function buildGroups(all: Quest[], tab: Tab): { cat: QuestCategory; quests: Quest[] }[] {
+type Group = { key: string; title: string; quests: Quest[] }
+
+// Work quests group by client (from the Autotask companyID); personal quests
+// group by category. In the "all"/"done" tabs work-client groups lead, then
+// the personal category groups.
+function buildGroups(all: Quest[], tab: Tab): Group[] {
   const isDone = (q: Quest) => q.status === 'completed' || q.status === 'failed'
   const visible = all.filter((q) => {
     if (tab === 'done') return isDone(q)
@@ -68,9 +82,25 @@ function buildGroups(all: Quest[], tab: Tab): { cat: QuestCategory; quests: Ques
     if (tab === 'personal') return q.category !== 'work'
     return true
   })
-  return GROUP_ORDER
-    .map((cat) => ({ cat, quests: visible.filter((q) => q.category === cat).sort(questSort) }))
-    .filter((g) => g.quests.length > 0)
+
+  const byClient = new Map<string, Quest[]>()
+  for (const q of visible.filter((q) => q.category === 'work')) {
+    const c = questClient(q) || UNASSIGNED
+    ;(byClient.get(c) ?? byClient.set(c, []).get(c)!).push(q)
+  }
+  const workGroups: Group[] = [...byClient.entries()]
+    .sort((a, b) =>
+      a[0] === UNASSIGNED ? 1 : b[0] === UNASSIGNED ? -1 : a[0].localeCompare(b[0]))
+    .map(([client, qs]) => ({ key: `client:${client}`, title: client, quests: qs.sort(questSort) }))
+
+  const personalGroups: Group[] = GROUP_ORDER
+    .filter((cat) => cat !== 'work')
+    .map((cat) => ({ key: cat, title: GROUP_TITLE[cat], quests: visible.filter((q) => q.category === cat).sort(questSort) }))
+
+  const out = tab === 'work' ? workGroups
+    : tab === 'personal' ? personalGroups
+    : [...workGroups, ...personalGroups]
+  return out.filter((g) => g.quests.length > 0)
 }
 
 // Split-pane sizing (wide mode only; persisted across sessions).
@@ -236,7 +266,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
   })
 
   const s = STATUS_GLYPH[quest.status]
-  const { autotask, body } = splitDetail(quest.detail)
+  const { autotask, client, body } = splitDetail(quest.detail)
   const mutationError = patch.error ?? addSub.error ?? remove.error ?? removeLink.error
   const color = questColor(quest.id)
 
@@ -299,6 +329,11 @@ function QuestJournal({ quest }: { quest: Quest }) {
         <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
           {CATEGORY_LABEL[quest.category]}
         </span>
+        {client && (
+          <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color }}>
+            {client}
+          </span>
+        )}
         <span className={`text-xs uppercase tracking-[0.14em] ${s.tone}`}>{s.glyph} {s.label}</span>
         {autotask && (
           <span className="border border-[#7c9cc4]/50 px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[#7c9cc4]">
@@ -633,9 +668,10 @@ export default function Quests() {
               </div>
             )}
             {groups.map((g) => (
-              <div key={g.cat}>
-                <div className="mb-1 border-y border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-dim)]">
-                  {GROUP_TITLE[g.cat]}
+              <div key={g.key}>
+                <div className="mb-1 flex items-center justify-between border-y border-[var(--color-border)] bg-[rgba(var(--color-accent-rgb),0.04)] px-3 py-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-dim)]">
+                  <span className="min-w-0 truncate">{g.title}</span>
+                  <span className="shrink-0 text-[var(--color-text-faint)]">{g.quests.length}</span>
                 </div>
                 <div className="space-y-0.5">
                   {g.quests.map((q) => (
