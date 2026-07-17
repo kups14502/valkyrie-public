@@ -65,6 +65,36 @@ function splitDetail(detail: string): { autotask: string | null; client: string 
 const questClient = (q: Quest): string | null => splitDetail(q.detail).client
 const UNASSIGNED = 'Unassigned'
 
+// The ticket sync writes notes as '[Jul 16, 21:23] Author\ntext' blocks
+// separated by blank lines; older syncs wrote single '[07-16 21:23] Author:
+// text' lines. Parse both into dated entries; anything else (hand-written
+// detail) stays a plain prose block.
+type JournalEntry = { when?: string; who?: string; text: string }
+
+function parseJournal(body: string): JournalEntry[] {
+  const out: JournalEntry[] = []
+  for (const block of body.split(/\n{2,}/)) {
+    const lines = block.split('\n').filter((l) => l.trim() !== '')
+    if (lines.length === 0) continue
+    const header = lines[0].match(/^\[([^\]]+)\]\s+([^:]+)$/)
+    if (header && lines.length > 1) {
+      out.push({ when: header[1], who: header[2], text: lines.slice(1).join(' ') })
+      continue
+    }
+    if (lines.some((l) => /^\[[^\]]+\]\s+[^:]+:\s+/.test(l))) {
+      for (const line of lines) {
+        const m = line.match(/^\[([^\]]+)\]\s+([^:]+):\s+(.+)$/)
+        if (m) out.push({ when: m[1], who: m[2], text: m[3] })
+        else if (out.length > 0 && out[out.length - 1].when) out[out.length - 1].text += ' ' + line
+        else out.push({ text: line })
+      }
+    } else {
+      out.push({ text: block })
+    }
+  }
+  return out
+}
+
 type Tab = 'all' | 'work' | 'personal' | 'done'
 const TABS: Tab[] = ['all', 'work', 'personal', 'done']
 
@@ -354,14 +384,30 @@ function QuestJournal({ quest }: { quest: Quest }) {
         <div className="mt-3 text-xs text-[var(--color-danger)]">! {errMsg(mutationError)}</div>
       )}
 
-      {/* journal body */}
+      {/* journal body: ticket notes render as dated entries, plain detail as prose */}
       {body && (
-        <p
-          className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-dim)] first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--qc)]"
-          style={{ '--qc': color } as CSSProperties}
-        >
-          {body}
-        </p>
+        <div className="mt-4 space-y-3.5">
+          {parseJournal(body).map((e, i) =>
+            e.when ? (
+              <div key={i}>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                  <span style={{ color }}>{e.when}</span> · {e.who}
+                </div>
+                <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-dim)]">{e.text}</p>
+              </div>
+            ) : (
+              <p
+                key={i}
+                className={`whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-dim)] ${
+                  i === 0 ? 'first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--qc)]' : ''
+                }`}
+                style={{ '--qc': color } as CSSProperties}
+              >
+                {e.text}
+              </p>
+            )
+          )}
+        </div>
       )}
 
       {/* objectives, journal-entry style: done ones read as past entries */}
