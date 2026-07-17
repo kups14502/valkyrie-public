@@ -1,15 +1,15 @@
 {
-  "version": "0.3.20",
-  "notes": "merge: feature/assistant — Jarvis voice+touch kiosk for odin",
-  "pub_date": "2026-07-17T15:50:48Z",
+  "version": "0.3.21",
+  "notes": "feat(app): remember window size/position across launches",
+  "pub_date": "2026-07-17T17:08:54Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZpS2M0VTZUU0JxQnRUd0dsNDdIdDVxMHNIcnlCZlh4Yi9GSEtqNi9LSHp3UXd5dXF5RXZ3bHh6Ujh4SzF1YjB5TUdYandGZDZKazlYNHRDSDl4blFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzAzNDQ4CWZpbGU6VmFsa3lyaWVfMC4zLjIwX3g2NC1zZXR1cC5leGUKV1l5WGxNMVNwM3VYTGVFOXBQMnRDYlhMQmVpUDVpZFpZV1BxNmpQUURDNjFRS2J0akMzNnBmZWpka2dOVmhkSENsczJCMXlPQjM0UDB6TWIwNmRlREE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.20/Valkyrie_0.3.20_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpLcGJDUlNzUk1Lc2I1UEJ5L0V5c0pKUnhOSlNadzJkVmtnT2d4NFYrbEFCaXN3MW5aaHJhVnJpWmFSbGU3OGM5dGNRbkFVNXFmOStsWUZQNXhMYmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzA4MTM0CWZpbGU6VmFsa3lyaWVfMC4zLjIxX3g2NC1zZXR1cC5leGUKVWIvZjQxcS9EWi94TURadzgrTVBDV3pSejlwSWFWdDBFNVlzTGt2cEZaQ005ZG0zWS9RYlhSMGNGMDN5S1NBV2xSdkJBc0VVSzBUeDR3V21PN2pWRFE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.21/Valkyrie_0.3.21_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpVN3hnRVNZMFV2aTM3U3lveHdOOGtUSlFoNDc1bitNY0ZWcVJ0MWFIbllKL2E0cG0zU3Rza1lJWTFaUVJ6aVp3SXpQZmxrKzc0aE5jdHBoZ0tER3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzAzMzU3CWZpbGU6VmFsa3lyaWVfMC4zLjIwX2FtZDY0LkFwcEltYWdlCnB3RTYwSWZKZnFWaXdNQWRuSDVyVXhWS2d2Rmt4K1RQZ09SU1hQVW9hS292UmNiNkRBWm1UVDBOaXQrOVZHUlFOMFhBSXREc0V5bFE2S2JqY1R0d0NBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.20/Valkyrie_0.3.20_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMxeDE3bmJSUm94L2dBbU41T0ZRMzNla1BUQ3pYL0pORVZRWHg0SFM3a1JyTlhyc0NHWC9VRzFpMk1wdisvd2J2TkNoOWt1RGJMN0FWeDU4T3RudmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzA4MDUyCWZpbGU6VmFsa3lyaWVfMC4zLjIxX2FtZDY0LkFwcEltYWdlClVGcmF3NjJIY3hKOVhIemtqdVIxVlRvOU0zc0JhakxsSndWNm1FSzR3N0JWN00yOWh5eVNZamJVNDVxVnU2Q1ViSVNJY2lMQ29lN0ljcDdEcCtiQUFBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.21/Valkyrie_0.3.21_amd64.AppImage"
     }
   }
 }
