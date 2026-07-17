@@ -1,9 +1,7 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createReadStream, readdirSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
-import { createInterface } from 'node:readline'
-import { homedir } from 'node:os'
+import { writeFileSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const exec = promisify(execFile)
@@ -39,12 +37,6 @@ type ClaudeAccount = {
   configDir: string
 }
 
-type CodexRateLimit = {
-  pct: number
-  windowMins: number
-  resetsAt: number
-}
-
 const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
@@ -68,30 +60,6 @@ const localDateKey = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// The codex binary is vendored inside an npx cache dir whose hash is
-// machine-specific, so a hardcoded path breaks on a device move. Resolve it at
-// startup: env override, then any npx cache, then common global locations,
-// then bare "codex" on PATH.
-function resolveCodexBin(): string {
-  const rel = 'node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex'
-  const envBin = process.env.CODEX_BIN
-  if (envBin && existsSync(envBin)) return envBin
-  const npxRoot = path.join(homedir(), '.npm', '_npx')
-  try {
-    for (const hash of readdirSync(npxRoot)) {
-      const candidate = path.join(npxRoot, hash, rel)
-      if (existsSync(candidate)) return candidate
-    }
-  } catch { /* no npx cache on this box */ }
-  for (const p of ['/usr/local/bin/codex', path.join(homedir(), '.local/bin/codex'), path.join(homedir(), '.codex', 'bin', 'codex')]) {
-    if (existsSync(p)) return p
-  }
-  return 'codex'
-}
-const CODEX_BIN = resolveCodexBin()
-const OPENCLAW_AUTH_PROFILES = path.join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json')
-const CODEX_AUTH_JSON = path.join(homedir(), '.codex', 'auth.json')
-const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const ANTHROPIC_OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 
@@ -238,116 +206,6 @@ async function readClaudeAIQuota(): Promise<ClaudeQuota | null> {
   }
 }
 
-async function syncCodexAuth(): Promise<void> {
-  const profiles = JSON.parse(readFileSync(OPENCLAW_AUTH_PROFILES, 'utf8'))
-  const profile = profiles?.profiles?.['openai-codex:user@example.com']
-  if (!profile?.access || !profile?.refresh) throw new Error('no openai-codex profile')
-
-  const fmt = (d: Date) => d.toISOString().replace(/(\.\d{3})Z$/, 'Z')
-  const accessExp = JSON.parse(Buffer.from(profile.access.split('.')[1], 'base64url').toString()).exp * 1000
-  const needsRefresh = Date.now() > accessExp - 60_000
-
-  let accessToken = profile.access
-  let refreshToken = profile.refresh
-  let idToken: string | undefined
-  let scope = 'openid profile email offline_access'
-  let expiresAt = new Date(accessExp)
-
-  if (needsRefresh) {
-    const { stdout } = await exec('curl', [
-      '-s', '-X', 'POST', 'https://auth.openai.com/oauth/token',
-      '-H', 'Content-Type: application/x-www-form-urlencoded',
-      '-d', `grant_type=refresh_token&refresh_token=${refreshToken}&client_id=${OPENAI_CLIENT_ID}`,
-    ], { timeout: 15_000 })
-    const tokenData = JSON.parse(stdout)
-    if (!tokenData.access_token) throw new Error('refresh failed')
-    accessToken = tokenData.access_token
-    refreshToken = tokenData.refresh_token ?? refreshToken
-    idToken = tokenData.id_token
-    scope = tokenData.scope ?? scope
-    expiresAt = new Date(Date.now() + tokenData.expires_in * 1000)
-
-    profiles.profiles['openai-codex:user@example.com'].access = accessToken
-    profiles.profiles['openai-codex:user@example.com'].refresh = refreshToken
-    profiles.profiles['openai-codex:user@example.com'].expires = expiresAt.getTime()
-    writeFileSync(OPENCLAW_AUTH_PROFILES, JSON.stringify(profiles, null, 2))
-  } else if (existsSync(CODEX_AUTH_JSON)) {
-    try {
-      const existing = JSON.parse(readFileSync(CODEX_AUTH_JSON, 'utf8'))
-      idToken = existing?.tokens?.id_token
-      scope = existing?.tokens?.scope ?? scope
-    } catch {}
-  }
-
-  // Keep Codex CLI auth.json mirrored to OpenClaw's fresher OAuth profile.
-  // The Codex CLI refresh token can go stale independently and then rate-limit reads return 401.
-  writeFileSync(CODEX_AUTH_JSON, JSON.stringify({
-    tokens: {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      id_token: idToken,
-      token_type: 'Bearer',
-      scope,
-      expires_at: fmt(expiresAt),
-    },
-    last_refresh: fmt(new Date()),
-  }, null, 2))
-}
-
-async function readCodexRateLimits(): Promise<{ session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }> {
-  try {
-    await syncCodexAuth()
-
-    const { spawn } = await import('node:child_process')
-    const initMsg = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'valkyrie', version: '1.0' } } }) + '\n'
-    const rateLimitsMsg = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'account/rateLimits/read', params: {} }) + '\n'
-
-    return await new Promise((resolve) => {
-      const proc = spawn(CODEX_BIN, ['app-server', '--listen', 'stdio://'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-
-      const lines: string[] = []
-      const rl = createInterface({ input: proc.stdout, crlfDelay: Infinity })
-      rl.on('line', (line) => lines.push(line))
-
-      let done = false
-      const finish = () => {
-        if (done) return
-        done = true
-        proc.stdin.end()
-        const rateLimitLine = lines.find((l) => l.includes('"rateLimits"'))
-        if (!rateLimitLine) return resolve({ session5h: null, weekly: null })
-        try {
-          const parsed = JSON.parse(rateLimitLine)
-          const rl = parsed?.result?.rateLimits
-          if (!rl) return resolve({ session5h: null, weekly: null })
-          resolve({
-            session5h: rl.primary ? { pct: clampPct(rl.primary.usedPercent), windowMins: rl.primary.windowDurationMins, resetsAt: rl.primary.resetsAt } : null,
-            weekly: rl.secondary ? { pct: clampPct(rl.secondary.usedPercent), windowMins: rl.secondary.windowDurationMins, resetsAt: rl.secondary.resetsAt } : null,
-          })
-        } catch {
-          resolve({ session5h: null, weekly: null })
-        }
-      }
-
-      const timer = setTimeout(() => { proc.kill(); finish() }, 20_000)
-      proc.on('close', () => { clearTimeout(timer); finish() })
-
-      proc.stdin.write(initMsg)
-      setTimeout(() => {
-        if (!done) {
-          proc.stdin.write(rateLimitsMsg)
-          setTimeout(() => { proc.kill(); finish() }, 15_000)
-        }
-      }, 1_000)
-    })
-  } catch (err) {
-    console.error('[ai-usage] codex rate limits failed', (err as Error).message)
-    return { session5h: null, weekly: null }
-  }
-}
-
 async function readClaudeBlocks(env?: NodeJS.ProcessEnv): Promise<{ activeBlock: ClaudeBlock | null; cur7dTokens: number }> {
   try {
     const since = new Date()
@@ -414,48 +272,6 @@ async function readClaudeUsage(env?: NodeJS.ProcessEnv): Promise<ProviderUsage &
   return result
 }
 
-async function readCodexUsage(): Promise<ProviderUsage> {
-  const sessionsDir = path.join(homedir(), '.openclaw', 'agents', 'main', 'sessions')
-  const out = emptyProvider()
-  const cutoff = daysAgoMs(30)
-  let files: string[] = []
-  try {
-    files = readdirSync(sessionsDir).filter((f) => f.endsWith('.jsonl') && !f.includes('.deleted.') && !f.includes('.reset.') && !f.includes('.trajectory.'))
-  } catch { return out }
-  const todayCutoff = todayStartMs()
-  const sevenCutoff = daysAgoMs(7)
-
-  await Promise.all(files.map(async (f) => {
-    const full = path.join(sessionsDir, f)
-    let stat
-    try { stat = statSync(full) } catch { return }
-    if (stat.mtimeMs < cutoff) return
-    await new Promise<void>((resolve) => {
-      const rl = createInterface({ input: createReadStream(full, { encoding: 'utf8' }), crlfDelay: Infinity })
-      rl.on('line', (line) => {
-        if (!line || line.length < 50) return
-        if (!line.includes('"provider":"openai-codex"')) return
-        let obj: any
-        try { obj = JSON.parse(line) } catch { return }
-        const msg = obj?.message
-        if (!msg || msg.provider !== 'openai-codex') return
-        const usage = msg.usage
-        if (!usage) return
-        const ts = typeof msg.timestamp === 'number' ? msg.timestamp : (typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN)
-        if (!Number.isFinite(ts)) return
-        const tokens = Number(usage.totalTokens ?? usage.total ?? (Number(usage.input) + Number(usage.output) + Number(usage.cacheRead || 0) + Number(usage.cacheWrite || 0)))
-        const cost = Number(usage.cost?.total ?? 0)
-        if (ts >= cutoff) { out.last30d.tokens += tokens; out.last30d.costUSD += cost; out.last30d.messages += 1 }
-        if (ts >= sevenCutoff) { out.last7d.tokens += tokens; out.last7d.costUSD += cost; out.last7d.messages += 1 }
-        if (ts >= todayCutoff) { out.today.tokens += tokens; out.today.costUSD += cost; out.today.messages += 1 }
-      })
-      rl.on('close', () => resolve())
-      rl.on('error', () => resolve())
-    })
-  }))
-  return out
-}
-
 async function refreshAIUsage(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
@@ -471,10 +287,6 @@ async function refreshAIUsage(): Promise<void> {
         ])
         return { acct, blocks, usage, quota }
       }))
-      const [codexUsage, codexRateLimits] = await Promise.all([
-        readCodexUsage(),
-        readCodexRateLimits(),
-      ])
 
       const claudeClients = claudeResults.map(({ acct, blocks, usage, quota }) => ({
         id: acct.id, kind: 'claude', label: acct.label, subscription: acct.subscription,
@@ -486,12 +298,8 @@ async function refreshAIUsage(): Promise<void> {
       const claude = { ...primary.usage, session: primary.blocks.activeBlock, quota: primary.quota }
       const data = {
         claude,
-        codex: { ...codexUsage, rateLimits: codexRateLimits },
-        // explicit client list for the dashboard panel; display quota/rate-limit percentages, not token totals
-        aiClients: [
-          ...claudeClients,
-          { id: 'codex-work', kind: 'codex', label: 'Codex', subscription: 'Codex', ...codexUsage, rateLimits: codexRateLimits },
-        ],
+        // explicit client list for the dashboard panel; display quota percentages, not token totals
+        aiClients: claudeClients,
         updatedAt: new Date().toISOString(),
       }
       cache = { at: Date.now(), data }

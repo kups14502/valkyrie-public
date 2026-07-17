@@ -88,8 +88,6 @@ export type ClaudeQuota = {
   status?: string | null
 }
 
-export type CodexRateLimit = { pct: number; windowMins: number; resetsAt: number }
-export type RateLimits = { session5h: CodexRateLimit | null; weekly: CodexRateLimit | null }
 export type ClaudeUsageClient = ProviderUsage & {
   id: string
   kind: 'claude'
@@ -99,23 +97,13 @@ export type ClaudeUsageClient = ProviderUsage & {
   session: ClaudeSession | null
   quota: ClaudeQuota | null
 }
-export type CodexUsageClient = ProviderUsage & {
-  id: string
-  kind: 'codex'
-  label: string
-  subscription: string
-  rateLimits: RateLimits
-}
-export type AIClientUsage = ClaudeUsageClient | CodexUsageClient
+export type AIClientUsage = ClaudeUsageClient
 
 export type AIUsage = {
   claude: ProviderUsage & {
     byModel: Record<string, UsageBucket>
     session: ClaudeSession | null
     quota: ClaudeQuota | null
-  }
-  codex: ProviderUsage & {
-    rateLimits: RateLimits
   }
   aiClients?: AIClientUsage[]
   updatedAt: string

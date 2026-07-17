@@ -27,12 +27,10 @@ const clampPct = (pct: number) => Math.max(0, Math.min(100, Math.round(Number.is
 const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(n)
 const fmtCost = (n: number) => n > 0 ? `$${n.toFixed(n >= 10 ? 0 : 2)}` : '—'
 
-function UsageBar({ pct, label, sub, warn, claude, codex }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean; codex?: boolean }) {
+function UsageBar({ pct, label, sub, warn, claude }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean }) {
   const clamped = clampPct(pct)
   const color = claude
     ? (clamped >= 85 ? 'var(--color-danger)' : '#D97757')
-    : codex
-    ? (clamped >= 85 ? 'var(--color-danger)' : '#1E40AF')
     : (warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
   return (
     <div className="space-y-1.5">
@@ -124,12 +122,6 @@ function NowBanner() {
     note(`Claude ${claudeSessionPct}% 5h`, tone)
   }
 
-  const codex5h = aiUsage.data?.codex.rateLimits.session5h?.pct
-  if (typeof codex5h === 'number' && codex5h > 0) {
-    const tone: Tone = codex5h >= 85 ? 'alert' : codex5h >= 70 ? 'watch' : 'ok'
-    note(`Codex ${codex5h}% 5h`, tone)
-  }
-
   if (vault.data) {
     const v = vault.data
     if (!v.container.running) note('vault down', 'alert')
@@ -219,16 +211,15 @@ function fmtResetAt(iso: string | null | undefined): string | undefined {
 }
 
 function AIClientCard({ client }: { client: AIClientUsage }) {
-  const isClaude = client.kind === 'claude'
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
       <div className="flex items-baseline justify-between gap-2">
         <div className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
         <div className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-          {isClaude ? 'claude' : 'codex'} · {client.subscription.replace(/ plan$/i, '')}
+          claude · {client.subscription.replace(/ plan$/i, '')}
         </div>
       </div>
-      {isClaude && client.quota ? (
+      {client.quota ? (
         <div className="space-y-2.5">
           <UsageBar
             claude
@@ -243,7 +234,7 @@ function AIClientCard({ client }: { client: AIClientUsage }) {
             sub={fmtResetAt(client.quota.weeklyResetsAt)}
           />
         </div>
-      ) : isClaude ? (
+      ) : (
         <div className="grid grid-cols-3 gap-2">
           {([
             ['Today', client.today],
@@ -257,20 +248,6 @@ function AIClientCard({ client }: { client: AIClientUsage }) {
             </div>
           ))}
         </div>
-      ) : client.kind === 'codex' && (client.rateLimits.session5h || client.rateLimits.weekly) ? (
-        <div className="space-y-2.5">
-          {client.rateLimits.session5h && (
-            <UsageBar
-              codex
-              pct={client.rateLimits.session5h.pct}
-              label="5h session"
-              sub={`resets in ${Math.max(0, Math.round((client.rateLimits.session5h.resetsAt - Date.now() / 1000) / 60))}m`}
-            />
-          )}
-          {client.rateLimits.weekly && <UsageBar codex pct={client.rateLimits.weekly.pct} label="Week" />}
-        </div>
-      ) : (
-        <div className="text-[11px] text-[var(--color-text-faint)]">usage unavailable</div>
       )}
     </div>
   )
@@ -281,15 +258,9 @@ function AIClientCard({ client }: { client: AIClientUsage }) {
 function AIUsageHero() {
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const clients: AIClientUsage[] = aiUsage.data?.aiClients ?? (aiUsage.data
-    ? [
-        { id: 'claude-default', kind: 'claude' as const, label: 'Claude', subscription: 'Claude', ...aiUsage.data.claude },
-        { id: 'codex-default', kind: 'codex' as const, label: 'Codex', subscription: 'Codex', ...aiUsage.data.codex },
-      ]
+    ? [{ id: 'claude-default', kind: 'claude' as const, label: 'Claude', subscription: 'Claude', ...aiUsage.data.claude }]
     : [])
-  const hottest = (c: AIClientUsage) =>
-    c.kind === 'claude'
-      ? Math.max(c.quota?.sessionPct ?? -1, c.quota?.weeklyPct ?? -1)
-      : Math.max(c.rateLimits.session5h?.pct ?? -1, c.rateLimits.weekly?.pct ?? -1)
+  const hottest = (c: AIClientUsage) => Math.max(c.quota?.sessionPct ?? -1, c.quota?.weeklyPct ?? -1)
   const sorted = [...clients].sort((a, b) => hottest(b) - hottest(a))
   return (
     <Card title="AI Usage">
