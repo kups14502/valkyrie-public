@@ -33,6 +33,9 @@ export type GigRow = {
   title: string
   detail: string
   category: GigCategory
+  // Optional custom grouping in the gig list ("Org C", "House", …).
+  // Work gigs group by their Autotask client instead; section is for the rest.
+  section: string
   status: GigStatus
   tracked: boolean
   sort: number
@@ -83,6 +86,8 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_gigs_parent ON gigs(parent_id);
     CREATE INDEX IF NOT EXISTS idx_links_gig ON gig_links(gig_id);
   `)
+  // Databases created before custom sections lack the column; add in place.
+  try { d.exec("ALTER TABLE gigs ADD COLUMN section TEXT NOT NULL DEFAULT ''") } catch { /* exists */ }
   db = d
   return d
 }
@@ -93,6 +98,7 @@ type DbGigRow = {
   title: string
   detail: string
   category: string
+  section: string
   status: string
   tracked: number
   sort: number
@@ -117,6 +123,7 @@ function toRow(r: DbGigRow): GigRow {
     title: r.title,
     detail: r.detail,
     category: (CATEGORIES.includes(r.category as GigCategory) ? r.category : 'side') as GigCategory,
+    section: r.section ?? '',
     status: (STATUSES.includes(r.status as GigStatus) ? r.status : 'active') as GigStatus,
     tracked: Boolean(r.tracked),
     sort: r.sort,
@@ -172,6 +179,7 @@ export function createGig(input: {
   title: string
   detail?: string
   category?: string
+  section?: string
   parentId?: string | null
   tracked?: boolean
 }): GigRow {
@@ -191,6 +199,7 @@ export function createGig(input: {
     title,
     detail: String(input.detail ?? '').slice(0, 4000),
     category,
+    section: String(input.section ?? '').trim().slice(0, 100),
     status: 'active',
     // Gigs are born active, so they're born tracked (tracking follows
     // workability); subgigs never track.
@@ -200,8 +209,8 @@ export function createGig(input: {
     updated_at: now,
     completed_at: null,
   }
-  getDb().prepare(`INSERT INTO gigs (id, parent_id, title, detail, category, status, tracked, sort, created_at, updated_at, completed_at)
-    VALUES (@id, @parent_id, @title, @detail, @category, @status, @tracked, @sort, @created_at, @updated_at, @completed_at)`).run(row)
+  getDb().prepare(`INSERT INTO gigs (id, parent_id, title, detail, category, section, status, tracked, sort, created_at, updated_at, completed_at)
+    VALUES (@id, @parent_id, @title, @detail, @category, @section, @status, @tracked, @sort, @created_at, @updated_at, @completed_at)`).run(row)
   return toRow(row)
 }
 
@@ -209,6 +218,7 @@ export function updateGig(id: string, patch: {
   title?: string
   detail?: string
   category?: string
+  section?: string
   status?: string
   tracked?: boolean
   sort?: number
@@ -226,6 +236,7 @@ export function updateGig(id: string, patch: {
     if (!CATEGORIES.includes(patch.category as GigCategory)) throw new Error('invalid category')
     next.category = patch.category as GigCategory
   }
+  if (patch.section !== undefined) next.section = String(patch.section).trim().slice(0, 100)
   if (patch.status !== undefined) {
     if (!STATUSES.includes(patch.status as GigStatus)) throw new Error('invalid status')
     next.status = patch.status as GigStatus
@@ -239,12 +250,13 @@ export function updateGig(id: string, patch: {
   if (patch.tracked !== undefined) next.tracked = Boolean(patch.tracked)
   if (patch.sort !== undefined && Number.isFinite(patch.sort)) next.sort = Number(patch.sort)
   next.updatedAt = new Date().toISOString()
-  getDb().prepare(`UPDATE gigs SET title=@title, detail=@detail, category=@category, status=@status,
+  getDb().prepare(`UPDATE gigs SET title=@title, detail=@detail, category=@category, section=@section, status=@status,
     tracked=@tracked, sort=@sort, updated_at=@updatedAt, completed_at=@completedAt WHERE id=@id`).run({
     id: next.id,
     title: next.title,
     detail: next.detail,
     category: next.category,
+    section: next.section,
     status: next.status,
     tracked: next.tracked ? 1 : 0,
     sort: next.sort,

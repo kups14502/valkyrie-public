@@ -38,6 +38,16 @@ if [[ ! -f "$PW_FILE" ]]; then
 fi
 
 cd "$ROOT"
+# Build from main, but remember and restore whatever branch was checked out:
+# parallel feature-branch sessions must not find their checkout yanked away
+# by a release build.
+PREV_BRANCH="$(git branch --show-current || true)"
+restore_branch() {
+  if [[ -n "$PREV_BRANCH" && "$PREV_BRANCH" != "main" ]]; then
+    git checkout "$PREV_BRANCH" >/dev/null 2>&1 || true
+  fi
+}
+trap restore_branch EXIT
 git checkout main
 git pull --ff-only
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -112,6 +122,18 @@ else
     --notes "$NOTES" \
     --repo "$REPO"
 fi
+
+# Commit the version bump here, on main, while we still hold the checkout —
+# the EXIT trap restores any feature branch afterwards, so deferring this
+# would land the bump on the wrong branch.
+cd "$ROOT"
+git add "$TAURI_CONF" "$MANIFEST"
+git commit -m "release: v${VERSION}
+
+App version bump and updater manifest from the v${VERSION} desktop build.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" || true
+git push origin main
 
 echo "release: https://github.com/$REPO/releases/tag/$TAG"
 echo "manifest: $MANIFEST"
