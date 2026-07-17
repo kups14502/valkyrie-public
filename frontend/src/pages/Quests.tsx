@@ -828,7 +828,7 @@ export default function Quests() {
           </div>
         </div>
       )}
-      <QuestChat />
+      <QuestChat openQuest={selected ? { id: selected.id, title: selected.title } : null} />
     </div>
   )
 }

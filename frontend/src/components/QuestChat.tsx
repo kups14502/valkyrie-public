@@ -21,7 +21,7 @@ const ACTION_LABEL: Record<string, string> = {
   add_link: 'linking',
 }
 
-export function QuestChat() {
+export function QuestChat({ openQuest }: { openQuest: { id: string; title: string } | null }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -55,7 +55,7 @@ export function QuestChat() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ message: text, sessionId: sessionRef.current }),
+        body: JSON.stringify({ message: text, sessionId: sessionRef.current, openQuest }),
       })
       if (!resp.ok || !resp.body) throw new Error(`agent unavailable (${resp.status})`)
 
@@ -117,26 +117,37 @@ export function QuestChat() {
       className="fixed bottom-5 right-5 z-40 flex w-[min(420px,calc(100vw-40px))] flex-col border border-[var(--color-border-strong)] bg-[var(--color-bg)]"
       style={{ height: 'min(560px, calc(100vh - 120px))', boxShadow: '0 0 24px rgba(0,0,0,0.6), 0 0 12px rgba(var(--color-accent-rgb),0.15)' }}
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3.5 py-2.5">
-        <span className="text-[11px] uppercase tracking-[0.28em] text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }}>
-          // quest agent
-        </span>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="Close agent"
-          className="p-1 text-[var(--color-text-faint)] transition hover:text-[var(--color-text)]"
-        >
-          <X size={15} />
-        </button>
+      <div className="shrink-0 border-b border-[var(--color-border)] px-3.5 py-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-[0.28em] text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }}>
+            // quest agent
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close agent"
+            className="p-1 text-[var(--color-text-faint)] transition hover:text-[var(--color-text)]"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        {openQuest && (
+          <div
+            className="mt-1 truncate text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]"
+            title={`"this quest" = ${openQuest.title}`}
+          >
+            ctx: {openQuest.title}
+          </div>
+        )}
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3.5 py-3">
         {messages.length === 0 && (
           <div className="text-xs leading-relaxed text-[var(--color-text-faint)]">
             &gt; add, complete, and modify quests in plain language.
-            <br />&gt; try: "add a quest to prep the ACME budget deck with 3 objectives"
-            <br />&gt; or: "mark the printer quest done"
+            <br />&gt; the open quest is the default target: "put this on hold",
+            <br />&gt; "add an objective: call marc", "mark it done".
+            <br />&gt; or name one: "complete the printer quest"
           </div>
         )}
         {messages.map((m, i) => (

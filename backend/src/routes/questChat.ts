@@ -109,13 +109,23 @@ Rules:
 - WORK quests sync FROM Autotask every ~10 minutes: the ticket is the source of truth for status/title/notes. Flipping a work quest between active/on_hold here will be reverted by the sync if the ticket disagrees; completing one here does NOT close the real ticket (warn the user, do it only if they insist).
 - Deleting is permanent: ask for explicit confirmation first, then call delete_quest with confirm=true.
 - Style: answer in 1-3 short lines, terminal flavor, no fluff. After acting, state exactly what changed ("✓ quest accepted: …", "✓ completed: …"). If ambiguous, ask one sharp question.
+- A <ui_context> tag may precede the user's message: it is UI state (not user words) naming the quest currently open in their journal pane. When they say "this quest" / "it" or give no quest name, act on that open quest. An explicit quest name in their message always beats the open one.
 - Today is {{DATE}}.`
 
 router.post('/quests/chat', async (req, res) => {
-  const { message, sessionId } = (req.body ?? {}) as { message?: string; sessionId?: string }
+  const { message, sessionId, openQuest } = (req.body ?? {}) as {
+    message?: string
+    sessionId?: string
+    openQuest?: { id?: string; title?: string } | null
+  }
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'message required' })
   }
+  // The quest open in the UI rides along each turn (it can change mid
+  // -conversation), so "mark this done" needs no quest name.
+  const ctx = openQuest?.id && openQuest?.title
+    ? `<ui_context>quest open in the journal pane: "${String(openQuest.title).slice(0, 200)}" (id: ${String(openQuest.id).slice(0, 64)})</ui_context>\n`
+    : ''
 
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -131,7 +141,7 @@ router.post('/quests/chat', async (req, res) => {
 
   try {
     const q = query({
-      prompt: message.slice(0, 4000),
+      prompt: ctx + message.slice(0, 4000),
       options: {
         model: MODEL,
         systemPrompt: SYSTEM_PROMPT.replace('{{DATE}}', new Date().toDateString()),
