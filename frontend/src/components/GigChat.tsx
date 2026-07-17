@@ -3,31 +3,31 @@ import { useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, Send, X } from 'lucide-react'
 import { getToken } from '../lib/auth'
 
-// Quest agent chat: a floating terminal-styled panel on the quest log that
-// drives the backend quest agent (SSE). The agent's tools are server-side
-// wrappers around the quest store, so anything it does shows up in the log
-// immediately (we invalidate the quests query after every turn).
+// Gig agent chat: a floating terminal-styled panel on the gig log that
+// drives the backend gig agent (SSE). The agent's tools are server-side
+// wrappers around the gig store, so anything it does shows up in the log
+// immediately (we invalidate the gigs query after every turn).
 
 const API_BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api'
 
 type ChatMsg = { role: 'user' | 'agent'; text: string; actions?: string[] }
 
 const ACTION_LABEL: Record<string, string> = {
-  list_quests: 'reading quest log',
-  create_quest: 'accepting quest',
-  update_quest: 'updating quest',
+  list_gigs: 'reading gig log',
+  create_gig: 'accepting gig',
+  update_gig: 'updating gig',
   add_objectives: 'adding objectives',
-  delete_quest: 'deleting quest',
+  delete_gig: 'deleting gig',
   add_link: 'linking',
 }
 
-export function QuestChat({ openQuest }: { openQuest: { id: string; title: string } | null }) {
+export function GigChat({ openGig }: { openGig: { id: string; title: string } | null }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [messages, setMessages] = useState<ChatMsg[]>([])
-  const sessionRef = useRef<string | null>(sessionStorage.getItem('valkyrie-quest-agent-session'))
+  const sessionRef = useRef<string | null>(sessionStorage.getItem('valkyrie-gig-agent-session'))
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -48,14 +48,14 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
 
     try {
       const token = getToken()
-      const resp = await fetch(`${API_BASE}/quests/chat`, {
+      const resp = await fetch(`${API_BASE}/gigs/chat`, {
         method: 'POST',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ message: text, sessionId: sessionRef.current, openQuest }),
+        body: JSON.stringify({ message: text, sessionId: sessionRef.current, openGig }),
       })
       if (!resp.ok || !resp.body) throw new Error(`agent unavailable (${resp.status})`)
 
@@ -78,11 +78,11 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
           } else if (ev.type === 'action' && ev.name) {
             const label = ACTION_LABEL[ev.name] ?? ev.name
             append((last) => ({ ...last, actions: [...(last.actions ?? []), label] }))
-            if (ev.name !== 'list_quests') void queryClient.invalidateQueries({ queryKey: ['quests'] })
+            if (ev.name !== 'list_gigs') void queryClient.invalidateQueries({ queryKey: ['gigs'] })
           } else if (ev.type === 'done') {
             if (ev.sessionId) {
               sessionRef.current = ev.sessionId
-              sessionStorage.setItem('valkyrie-quest-agent-session', ev.sessionId)
+              sessionStorage.setItem('valkyrie-gig-agent-session', ev.sessionId)
             }
           } else if (ev.type === 'error') {
             append((last) => ({ ...last, text: last.text || `! ${ev.message ?? 'agent failed'}` }))
@@ -93,7 +93,7 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
       append((last) => ({ ...last, text: last.text || `! ${(err as Error).message}` }))
     } finally {
       setBusy(false)
-      void queryClient.invalidateQueries({ queryKey: ['quests'] })
+      void queryClient.invalidateQueries({ queryKey: ['gigs'] })
       inputRef.current?.focus()
     }
   }
@@ -103,7 +103,7 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title="Quest agent: add, complete, and modify quests in plain language"
+        title="Gig agent: add, complete, and modify gigs in plain language"
         className="fixed bottom-5 right-5 z-40 flex items-center gap-2 border border-[var(--color-accent)]/60 bg-[var(--color-bg)] px-3.5 py-2.5 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)]"
         style={{ boxShadow: '0 0 12px rgba(var(--color-accent-rgb),0.25)' }}
       >
@@ -120,7 +120,7 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
       <div className="shrink-0 border-b border-[var(--color-border)] px-3.5 py-2.5">
         <div className="flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-[0.28em] text-[var(--color-accent)]" style={{ textShadow: '0 0 8px var(--color-accent)' }}>
-            // quest agent
+            // gig agent
           </span>
           <button
             type="button"
@@ -131,12 +131,12 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
             <X size={15} />
           </button>
         </div>
-        {openQuest && (
+        {openGig && (
           <div
             className="mt-1 truncate text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]"
-            title={`"this quest" = ${openQuest.title}`}
+            title={`"this gig" = ${openGig.title}`}
           >
-            ctx: {openQuest.title}
+            ctx: {openGig.title}
           </div>
         )}
       </div>
@@ -144,10 +144,10 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3.5 py-3">
         {messages.length === 0 && (
           <div className="text-xs leading-relaxed text-[var(--color-text-faint)]">
-            &gt; add, complete, and modify quests in plain language.
-            <br />&gt; the open quest is the default target: "put this on hold",
+            &gt; add, complete, and modify gigs in plain language.
+            <br />&gt; the open gig is the default target: "put this on hold",
             <br />&gt; "add an objective: call marc", "mark it done".
-            <br />&gt; or name one: "complete the printer quest"
+            <br />&gt; or name one: "complete the printer gig"
           </div>
         )}
         {messages.map((m, i) => (
@@ -178,7 +178,7 @@ export function QuestChat({ openQuest }: { openQuest: { id: string; title: strin
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={busy ? 'working…' : 'command your quest log…'}
+          placeholder={busy ? 'working…' : 'command your gig log…'}
           disabled={busy}
           className="min-w-0 flex-1 border border-[var(--color-border)] bg-transparent px-2.5 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-border-strong)] disabled:opacity-50"
         />

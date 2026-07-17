@@ -2,10 +2,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchQuests, type AIClientUsage } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchGigs, type AIClientUsage } from '../lib/api'
 import { EmailSignalCard } from './Emails'
-import { QuestProgressBar } from '../components/QuestProgressBar'
-import { questColor } from '../lib/questColor'
+import { GigProgressBar } from '../components/GigProgressBar'
+import { gigColor } from '../lib/gigColor'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -347,38 +347,38 @@ function TradeQuickView() {
   )
 }
 
-// HUD-style tracked-quests widget: the quests marked "tracked" in the quest
-// log, with progress and the next open objective — like a game's quest HUD.
-// With nothing explicitly tracked, fall back to the active quests so the HUD
-// is never empty (eye-toggling a quest in the log takes over the slots).
-function QuestTracker() {
-  const quests = useQuery({ queryKey: ['quests'], queryFn: fetchQuests, refetchInterval: 60_000 })
-  const explicit = (quests.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
+// HUD-style tracked-gigs widget: the gigs marked "tracked" in the gig
+// log, with progress and the next open objective — like a game's gig HUD.
+// With nothing explicitly tracked, fall back to the active gigs so the HUD
+// is never empty (eye-toggling a gig in the log takes over the slots).
+function GigTracker() {
+  const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, refetchInterval: 60_000 })
+  const explicit = (gigs.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
   const auto = explicit.length === 0
   const tracked = auto
-    ? (quests.data ?? []).filter((q) => q.status === 'active').sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    ? (gigs.data ?? []).filter((q) => q.status === 'active').sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     : explicit
   return (
     <Card
-      title={auto && tracked.length > 0 ? 'Active Quests' : 'Tracked Quests'}
+      title={auto && tracked.length > 0 ? 'Active Gigs' : 'Tracked Gigs'}
       action={
-        <Link to="/quests" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
-          quest log →
+        <Link to="/gigs" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
+          gig log →
         </Link>
       }
     >
-      {quests.isLoading && !quests.data ? (
+      {gigs.isLoading && !gigs.data ? (
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-      ) : quests.error ? (
-        <div className="text-sm text-[var(--color-danger)]">Quest log unavailable</div>
+      ) : gigs.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Gig log unavailable</div>
       ) : tracked.length === 0 ? (
-        <div className="text-sm text-[var(--color-text-dim)]">&gt; no active quests. accept one in the quest log.</div>
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; no active gigs. accept one in the gig log.</div>
       ) : (
         <div className="space-y-3">
           {tracked.slice(0, 6).map((q) => {
-            const next = q.subquests.find((s) => s.status !== 'completed')
+            const next = q.subgigs.find((s) => s.status !== 'completed')
             return (
-              <div key={q.id} className="border-l-2 pl-2.5" style={{ borderLeftColor: questColor(q.id, 0.75) }}>
+              <div key={q.id} className="border-l-2 pl-2.5" style={{ borderLeftColor: gigColor(q.id, 0.75) }}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{q.title}</span>
                   {q.status === 'on_hold' && (
@@ -387,7 +387,7 @@ function QuestTracker() {
                 </div>
                 {q.progress.total > 0 && (
                   <div className="mt-1">
-                    <QuestProgressBar done={q.progress.done} total={q.progress.total} status={q.status} />
+                    <GigProgressBar done={q.progress.done} total={q.progress.total} status={q.status} />
                   </div>
                 )}
                 {next && <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">▸ {next.title}</div>}
@@ -444,7 +444,7 @@ export default function Dashboard() {
 
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
-          <QuestTracker />
+          <GigTracker />
           <TradeQuickView />
         </div>
 

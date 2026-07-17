@@ -100,16 +100,16 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
 }
 
 // One pending intake suggestion: connect the email to an Autotask ticket
-// (work) or a quest (personal), or dismiss it.
+// (work) or a gig (personal), or dismiss it.
 function IntakeRow({ item }: { item: IntakeItem }) {
   const queryClient = useQueryClient()
   const [manualTicket, setManualTicket] = useState('')
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
-    void queryClient.invalidateQueries({ queryKey: ['quests'] })
+    void queryClient.invalidateQueries({ queryKey: ['gigs'] })
   }
   const link = useMutation({
-    mutationFn: (input: { kind: 'ticket' | 'quest' | 'new-quest'; ref?: string; title?: string }) =>
+    mutationFn: (input: { kind: 'ticket' | 'gig' | 'new-gig'; ref?: string; title?: string }) =>
       linkIntakeItem(item.account, item.uid, input),
     onSettled: invalidate,
   })
@@ -119,11 +119,11 @@ function IntakeRow({ item }: { item: IntakeItem }) {
   })
   const feedback = useEmailFeedback(item.account, item.uid)
   const busy = link.isPending || dismiss.isPending || feedback.isPending
-  // No ticket candidates and no quest suggestion: nothing to connect to, so
-  // this needs a decision (new quest, spam, block, or dismiss).
+  // No ticket candidates and no gig suggestion: nothing to connect to, so
+  // this needs a decision (new gig, spam, block, or dismiss).
   const unknown = item.isWork
     ? item.ticketMatches.length === 0
-    : !item.questMatch && !item.suggestedQuestTitle
+    : !item.gigMatch && !item.suggestedGigTitle
 
   return (
     <div className="space-y-2 border border-[var(--color-border)] px-3 py-2.5">
@@ -204,33 +204,33 @@ function IntakeRow({ item }: { item: IntakeItem }) {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => link.mutate({ kind: 'new-quest', title: item.subject.slice(0, 60) })}
+                onClick={() => link.mutate({ kind: 'new-gig', title: item.subject.slice(0, 60) })}
                 className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
               >
-                + new quest: {item.subject.slice(0, 32)}
+                + new gig: {item.subject.slice(0, 32)}
               </button>
             )}
           </>
         ) : (
           <>
-            {item.questMatch && (
+            {item.gigMatch && (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => link.mutate({ kind: 'quest', ref: item.questMatch!.id })}
+                onClick={() => link.mutate({ kind: 'gig', ref: item.gigMatch!.id })}
                 className="border border-[var(--color-accent)]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] disabled:opacity-40"
               >
-                → quest: {item.questMatch.title.slice(0, 40)}
+                → gig: {item.gigMatch.title.slice(0, 40)}
               </button>
             )}
-            {item.suggestedQuestTitle && (
+            {item.suggestedGigTitle && (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => link.mutate({ kind: 'new-quest', title: item.suggestedQuestTitle! })}
+                onClick={() => link.mutate({ kind: 'new-gig', title: item.suggestedGigTitle! })}
                 className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
               >
-                + new quest: {item.suggestedQuestTitle.slice(0, 40)}
+                + new gig: {item.suggestedGigTitle.slice(0, 40)}
               </button>
             )}
           </>

@@ -1,14 +1,14 @@
-// Stable per-quest identity color: hash the quest id into a hue and render it
-// at terminal-friendly saturation/lightness. The same quest always gets the
+// Stable per-gig identity color: hash the gig id into a hue and render it
+// at terminal-friendly saturation/lightness. The same gig always gets the
 // same color, on every device, with no stored state.
-function questHue(id: string): number {
+function gigHue(id: string): number {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
   return h % 360
 }
 
-export function questColor(id: string, alpha?: number): string {
-  const hue = questHue(id)
+export function gigColor(id: string, alpha?: number): string {
+  const hue = gigHue(id)
   return alpha === undefined ? `hsl(${hue} 85% 62%)` : `hsl(${hue} 85% 62% / ${alpha})`
 }
 

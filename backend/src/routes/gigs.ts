@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { listQuests, createQuest, updateQuest, deleteQuest, addLink, deleteLink } from '../quests/store.js'
+import { listGigs, createGig, updateGig, deleteGig, addLink, deleteLink } from '../gigs/store.js'
 
 const router = Router()
 
-// Store functions throw plain Errors for bad input ("title required", "quest
+// Store functions throw plain Errors for bad input ("title required", "gig
 // not found", ...). Map those to 400s; anything else is a real 500.
 function fail(res: import('express').Response, err: unknown, action: string) {
   const message = (err as Error).message || 'unknown error'
@@ -12,42 +12,42 @@ function fail(res: import('express').Response, err: unknown, action: string) {
   res.status(isInputError ? 400 : 500).json({ error: action, detail: message })
 }
 
-router.get('/quests', (_req, res) => {
+router.get('/gigs', (_req, res) => {
   try {
-    res.json({ quests: listQuests() })
+    res.json({ gigs: listGigs() })
   } catch (err) {
-    fail(res, err, 'failed to list quests')
+    fail(res, err, 'failed to list gigs')
   }
 })
 
-router.post('/quests', (req, res) => {
+router.post('/gigs', (req, res) => {
   try {
     const { title, detail, category, parentId, tracked } = req.body ?? {}
-    res.json({ quest: createQuest({ title, detail, category, parentId, tracked }) })
+    res.json({ gig: createGig({ title, detail, category, parentId, tracked }) })
   } catch (err) {
-    fail(res, err, 'failed to create quest')
+    fail(res, err, 'failed to create gig')
   }
 })
 
-router.patch('/quests/:id', (req, res) => {
+router.patch('/gigs/:id', (req, res) => {
   try {
     const { title, detail, category, status, tracked, sort } = req.body ?? {}
-    res.json({ quest: updateQuest(req.params.id, { title, detail, category, status, tracked, sort }) })
+    res.json({ gig: updateGig(req.params.id, { title, detail, category, status, tracked, sort }) })
   } catch (err) {
-    fail(res, err, 'failed to update quest')
+    fail(res, err, 'failed to update gig')
   }
 })
 
-router.delete('/quests/:id', (req, res) => {
+router.delete('/gigs/:id', (req, res) => {
   try {
-    deleteQuest(req.params.id)
+    deleteGig(req.params.id)
     res.json({ ok: true })
   } catch (err) {
-    fail(res, err, 'failed to delete quest')
+    fail(res, err, 'failed to delete gig')
   }
 })
 
-router.post('/quests/:id/links', (req, res) => {
+router.post('/gigs/:id/links', (req, res) => {
   try {
     const { kind, ref, label } = req.body ?? {}
     res.json({ link: addLink(req.params.id, { kind, ref, label }) })
@@ -56,7 +56,7 @@ router.post('/quests/:id/links', (req, res) => {
   }
 })
 
-router.delete('/quests/:id/links/:linkId', (req, res) => {
+router.delete('/gigs/:id/links/:linkId', (req, res) => {
   try {
     deleteLink(req.params.id, Number(req.params.linkId))
     res.json({ ok: true })

@@ -1,6 +1,6 @@
 {
   "version": "0.3.17",
-  "notes": "feat(quests): agent knows the open quest",
+  "notes": "feat(gigs): agent knows the open gig",
   "pub_date": "2026-07-17T05:19:20Z",
   "platforms": {
     "windows-x86_64": {

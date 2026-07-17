@@ -13,7 +13,7 @@ import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
 import Dashboard from './pages/Dashboard'
 
-const Quests = lazy(() => import('./pages/Quests'))
+const Gigs = lazy(() => import('./pages/Gigs'))
 const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
@@ -41,7 +41,7 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/quests', label: 'quests', icon: ScrollText },
+  { to: '/gigs', label: 'gigs', icon: ScrollText },
   { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -212,9 +212,9 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            {/* Quests is a wide two-pane journal; it manages its own max width
+            {/* Gigs is a wide two-pane journal; it manages its own max width
                 instead of CenterPage's narrow reading column. */}
-            <Route path="/quests" element={<Quests />} />
+            <Route path="/gigs" element={<Gigs />} />
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />

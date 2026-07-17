@@ -3,13 +3,13 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import fs from 'node:fs'
 import { homedir } from 'node:os'
-import { createQuest, addLink, getQuest } from '../quests/store.js'
+import { createGig, addLink, getGig } from '../gigs/store.js'
 
 // Email intake queue. The email-assistant script on the server classifies each
 // new email and writes an intake suggestion row (work → Autotask ticket
-// candidates, personal → quest match / new-quest suggestion) into mail.sqlite.
+// candidates, personal → gig match / new-gig suggestion) into mail.sqlite.
 // This route serves that queue and applies the user's decision: connect the
-// email to a ticket, connect it to a quest (existing or new), or dismiss it.
+// email to a ticket, connect it to a gig (existing or new), or dismiss it.
 
 const router = Router()
 const DB_PATH = path.join(homedir(), 'email-assistant', 'data', 'mail.sqlite')
@@ -20,9 +20,9 @@ type IntakeRow = {
   is_work: number
   summary: string
   ticket_matches: string | null
-  quest_match_id: string | null
-  quest_match_title: string | null
-  suggested_quest_title: string | null
+  gig_match_id: string | null
+  gig_match_title: string | null
+  suggested_gig_title: string | null
   status: string
   linked_kind: string | null
   linked_ref: string | null
@@ -59,8 +59,8 @@ function serialize(r: IntakeRow) {
     isWork: Boolean(r.is_work),
     summary: r.summary,
     ticketMatches: parseTicketMatches(r.ticket_matches),
-    questMatch: r.quest_match_id ? { id: r.quest_match_id, title: r.quest_match_title ?? '' } : null,
-    suggestedQuestTitle: r.suggested_quest_title,
+    gigMatch: r.gig_match_id ? { id: r.gig_match_id, title: r.gig_match_title ?? '' } : null,
+    suggestedGigTitle: r.suggested_gig_title,
     status: r.status,
     linkedKind: r.linked_kind,
     linkedRef: r.linked_ref,
@@ -116,9 +116,9 @@ function markIntake(account: string, uid: string, status: 'linked' | 'dismissed'
   }
 }
 
-// The intake row lives in mail.sqlite and the quest lives in quests.sqlite, so
+// The intake row lives in mail.sqlite and the gig lives in gigs.sqlite, so
 // the two writes cannot share a transaction. Checking existence up front means
-// the only way markIntake can fail after a quest write is a transient lock,
+// the only way markIntake can fail after a gig write is a transient lock,
 // and addLink is idempotent, so a retry converges instead of duplicating.
 function intakeExists(account: string, uid: string): boolean {
   const db = getDb(true)
@@ -145,10 +145,10 @@ function emailLabel(account: string, uid: string): string {
 }
 
 // Apply a decision for one intake item.
-// body: { kind: 'ticket' | 'quest' | 'new-quest', ref?, title? }
+// body: { kind: 'ticket' | 'gig' | 'new-gig', ref?, title? }
 //  - ticket:    ref = Autotask ticket number (records the connection)
-//  - quest:     ref = quest id (adds an email link on that quest)
-//  - new-quest: title = quest title (creates the quest, then links the email)
+//  - gig:     ref = gig id (adds an email link on that gig)
+//  - new-gig: title = gig title (creates the gig, then links the email)
 router.post('/emails/intake/:account/:uid/link', (req, res) => {
   try {
     const { account, uid } = req.params
@@ -160,20 +160,20 @@ router.post('/emails/intake/:account/:uid/link', (req, res) => {
       markIntake(account, uid, 'linked', 'ticket', ticketRef, 'user')
       return res.json({ ok: true, linked: { kind: 'ticket', ref: ticketRef } })
     }
-    if (kind === 'quest') {
-      const questId = String(ref ?? '').trim()
-      if (!questId || !getQuest(questId)) return res.status(400).json({ error: 'quest not found' })
-      addLink(questId, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'quest', questId, 'user')
-      return res.json({ ok: true, linked: { kind: 'quest', ref: questId } })
+    if (kind === 'gig') {
+      const gigId = String(ref ?? '').trim()
+      if (!gigId || !getGig(gigId)) return res.status(400).json({ error: 'gig not found' })
+      addLink(gigId, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
+      markIntake(account, uid, 'linked', 'gig', gigId, 'user')
+      return res.json({ ok: true, linked: { kind: 'gig', ref: gigId } })
     }
-    if (kind === 'new-quest') {
-      const questTitle = String(title ?? '').trim()
-      if (!questTitle) return res.status(400).json({ error: 'title required for new-quest link' })
-      const quest = createQuest({ title: questTitle, category: 'side' })
-      addLink(quest.id, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'quest', quest.id, 'user')
-      return res.json({ ok: true, linked: { kind: 'quest', ref: quest.id }, quest })
+    if (kind === 'new-gig') {
+      const gigTitle = String(title ?? '').trim()
+      if (!gigTitle) return res.status(400).json({ error: 'title required for new-gig link' })
+      const gig = createGig({ title: gigTitle, category: 'side' })
+      addLink(gig.id, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
+      markIntake(account, uid, 'linked', 'gig', gig.id, 'user')
+      return res.json({ ok: true, linked: { kind: 'gig', ref: gig.id }, gig })
     }
     res.status(400).json({ error: 'invalid link kind' })
   } catch (err) {
@@ -260,10 +260,10 @@ router.post('/emails/feedback', (req, res) => {
       } else if (correction === 'flip_side') {
         db.prepare('UPDATE intake SET is_work = CASE is_work WHEN 1 THEN 0 ELSE 1 END WHERE account = ? AND uid = ?')
           .run(account, uid)
-        // A row flipped to personal needs a quest-title suggestion for the UI's
-        // "new quest" button; fall back to the email subject.
-        db.prepare(`UPDATE intake SET suggested_quest_title = COALESCE(
-            suggested_quest_title,
+        // A row flipped to personal needs a gig-title suggestion for the UI's
+        // "new gig" button; fall back to the email subject.
+        db.prepare(`UPDATE intake SET suggested_gig_title = COALESCE(
+            suggested_gig_title,
             (SELECT substr(subject, 1, 60) FROM messages WHERE messages.account = intake.account AND messages.uid = intake.uid)
           ) WHERE account = ? AND uid = ? AND is_work = 0`)
           .run(account, uid)

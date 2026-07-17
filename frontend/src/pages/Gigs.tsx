@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from 'lucide-react'
-import { QuestProgressBar } from '../components/QuestProgressBar'
-import { QuestChat } from '../components/QuestChat'
-import { questColor } from '../lib/questColor'
+import { GigProgressBar } from '../components/GigProgressBar'
+import { GigChat } from '../components/GigChat'
+import { gigColor } from '../lib/gigColor'
 import {
-  fetchQuests, createQuest, updateQuest, deleteQuest, deleteQuestLink,
-  type Quest, type QuestRow, type QuestCategory, type QuestStatus,
+  fetchGigs, createGig, updateGig, deleteGig, deleteGigLink,
+  type Gig, type GigRow, type GigCategory, type GigStatus,
 } from '../lib/api'
 
 // Backend detail (e.g. "invalid category") beats axios's generic message.
@@ -16,33 +16,33 @@ const errMsg = (e: unknown) => {
   return err?.detail || err?.message || 'request failed'
 }
 
-// KCD2-style quest journal: category tabs up top, grouped quest list on the
-// left, and a journal pane on the right for the selected quest. Every quest
+// KCD2-style gig journal: category tabs up top, grouped gig list on the
+// left, and a journal pane on the right for the selected gig. Every gig
 // has its own stable identity color (hashed from its id) used for its marker,
 // selection highlight, and journal heading. The list pane is resizable (drag
 // the divider) and collapsible (button, or drag it closed).
 
-const CATEGORY_LABEL: Record<QuestCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY', work: 'WORK' }
+const CATEGORY_LABEL: Record<GigCategory, string> = { main: 'MAIN', side: 'SIDE', daily: 'DAILY', work: 'WORK' }
 // Work (Autotask tickets) and personal (main/side/daily) are separate worlds;
 // the tabs split them and the group banners keep them sorted within a tab.
-const GROUP_ORDER: QuestCategory[] = ['work', 'main', 'side', 'daily']
-const GROUP_TITLE: Record<QuestCategory, string> = {
-  main: 'main quests', work: 'work orders', side: 'side quests', daily: 'dailies',
+const GROUP_ORDER: GigCategory[] = ['work', 'main', 'side', 'daily']
+const GROUP_TITLE: Record<GigCategory, string> = {
+  main: 'main gigs', work: 'work orders', side: 'side gigs', daily: 'dailies',
 }
 
-const STATUS_GLYPH: Record<QuestStatus, { glyph: string; tone: string; label: string }> = {
+const STATUS_GLYPH: Record<GigStatus, { glyph: string; tone: string; label: string }> = {
   active: { glyph: '◆', tone: 'text-[var(--color-accent)]', label: 'active' },
   completed: { glyph: '✓', tone: 'text-[var(--color-success)]', label: 'done' },
   failed: { glyph: '✗', tone: 'text-[var(--color-danger)]', label: 'failed' },
   // Paused, not alarming: steel blue (yellow stays for real warnings).
   // Literal class (not template) so Tailwind's JIT sees it; keep in sync
-  // with HOLD_COLOR in lib/questColor.ts.
+  // with HOLD_COLOR in lib/gigColor.ts.
   on_hold: { glyph: '◼', tone: 'text-[#7c9cc4]', label: 'on hold' },
 }
 
 // Sort: tracked first, then by status urgency, then newest first.
-const STATUS_ORDER: Record<QuestStatus, number> = { active: 0, on_hold: 1, completed: 2, failed: 3 }
-function questSort(a: Quest, b: Quest): number {
+const STATUS_ORDER: Record<GigStatus, number> = { active: 0, on_hold: 1, completed: 2, failed: 3 }
+function gigSort(a: Gig, b: Gig): number {
   if (a.tracked !== b.tracked) return a.tracked ? -1 : 1
   if (STATUS_ORDER[a.status] !== STATUS_ORDER[b.status]) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
   return b.createdAt.localeCompare(a.createdAt)
@@ -50,7 +50,7 @@ function questSort(a: Quest, b: Quest): number {
 
 // The ticket sync manages a "[Autotask] <status> · due <date> · client:<name>"
 // first line in the detail; split it into the status chip, the client (used to
-// group work quests), and the journal body.
+// group work gigs), and the journal body.
 function splitDetail(detail: string): { autotask: string | null; client: string | null; body: string } {
   const lines = (detail || '').split('\n')
   const m = lines[0]?.match(/^\[Autotask\] (.+)$/)
@@ -63,7 +63,7 @@ function splitDetail(detail: string): { autotask: string | null; client: string 
   return { autotask: auto, client, body }
 }
 
-const questClient = (q: Quest): string | null => splitDetail(q.detail).client
+const gigClient = (q: Gig): string | null => splitDetail(q.detail).client
 const UNASSIGNED = 'Unassigned'
 
 // The ticket sync writes notes as '[Jul 16, 21:23] Author\ntext' blocks
@@ -99,18 +99,18 @@ function parseJournal(body: string): JournalEntry[] {
 type Tab = 'all' | 'work' | 'personal' | 'done'
 const TABS: Tab[] = ['all', 'work', 'personal', 'done']
 
-type Group = { key: string; title: string; quests: Quest[] }
+type Group = { key: string; title: string; gigs: Gig[] }
 
-// A quest is "waiting on others" when it's on hold (the ticket sync parks
+// A gig is "waiting on others" when it's on hold (the ticket sync parks
 // waiting-customer/vendor/materials tickets there); nothing for you to do.
-const isWaiting = (q: Quest) => q.status === 'on_hold'
+const isWaiting = (q: Gig) => q.status === 'on_hold'
 
-// Work quests group by client (from the Autotask companyID); personal quests
+// Work gigs group by client (from the Autotask companyID); personal gigs
 // group by category. In the "all"/"done" tabs work-client groups lead, then
-// the personal category groups. When hideWaiting is set, on-hold quests are
+// the personal category groups. When hideWaiting is set, on-hold gigs are
 // dropped entirely.
-function buildGroups(all: Quest[], tab: Tab, hideWaiting: boolean): Group[] {
-  const isDone = (q: Quest) => q.status === 'completed' || q.status === 'failed'
+function buildGroups(all: Gig[], tab: Tab, hideWaiting: boolean): Group[] {
+  const isDone = (q: Gig) => q.status === 'completed' || q.status === 'failed'
   const visible = all.filter((q) => {
     if (tab === 'done') return isDone(q)
     if (isDone(q)) return false
@@ -120,47 +120,47 @@ function buildGroups(all: Quest[], tab: Tab, hideWaiting: boolean): Group[] {
     return true
   })
 
-  const byClient = new Map<string, Quest[]>()
+  const byClient = new Map<string, Gig[]>()
   for (const q of visible.filter((q) => q.category === 'work')) {
-    const c = questClient(q) || UNASSIGNED
+    const c = gigClient(q) || UNASSIGNED
     ;(byClient.get(c) ?? byClient.set(c, []).get(c)!).push(q)
   }
   const workGroups: Group[] = [...byClient.entries()]
     .sort((a, b) =>
       a[0] === UNASSIGNED ? 1 : b[0] === UNASSIGNED ? -1 : a[0].localeCompare(b[0]))
-    .map(([client, qs]) => ({ key: `client:${client}`, title: client, quests: qs.sort(questSort) }))
+    .map(([client, qs]) => ({ key: `client:${client}`, title: client, gigs: qs.sort(gigSort) }))
 
   const personalGroups: Group[] = GROUP_ORDER
     .filter((cat) => cat !== 'work')
-    .map((cat) => ({ key: cat, title: GROUP_TITLE[cat], quests: visible.filter((q) => q.category === cat).sort(questSort) }))
+    .map((cat) => ({ key: cat, title: GROUP_TITLE[cat], gigs: visible.filter((q) => q.category === cat).sort(gigSort) }))
 
   const out = tab === 'work' ? workGroups
     : tab === 'personal' ? personalGroups
     : [...workGroups, ...personalGroups]
-  return out.filter((g) => g.quests.length > 0)
+  return out.filter((g) => g.gigs.length > 0)
 }
 
 // Split-pane sizing (wide mode only; persisted across sessions).
-const LIST_W_KEY = 'valkyrie-quests-listw'
-const COLLAPSED_KEY = 'valkyrie-quests-collapsed'
-const GROUPS_KEY = 'valkyrie-quests-collapsed-groups'
-const HIDE_WAITING_KEY = 'valkyrie-quests-hide-waiting'
+const LIST_W_KEY = 'valkyrie-gigs-listw'
+const COLLAPSED_KEY = 'valkyrie-gigs-collapsed'
+const GROUPS_KEY = 'valkyrie-gigs-collapsed-groups'
+const HIDE_WAITING_KEY = 'valkyrie-gigs-hide-waiting'
 const MIN_LIST_W = 280
 const COLLAPSE_AT = 160
 const DEFAULT_LIST_W = 480
 
 // ── left pane ────────────────────────────────────────────────────────────────
 
-function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: boolean; onSelect: () => void }) {
-  const s = STATUS_GLYPH[quest.status]
-  const dimmed = quest.status === 'completed' || quest.status === 'failed'
-  const { autotask } = splitDetail(quest.detail)
-  const nextSub = quest.subquests.find((x) => x.status !== 'completed')
-  // Identity color marks TRACKED (workable) quests only; waiting/untracked
+function GigListRow({ gig, selected, onSelect }: { gig: Gig; selected: boolean; onSelect: () => void }) {
+  const s = STATUS_GLYPH[gig.status]
+  const dimmed = gig.status === 'completed' || gig.status === 'failed'
+  const { autotask } = splitDetail(gig.detail)
+  const nextSub = gig.subgigs.find((x) => x.status !== 'completed')
+  // Identity color marks TRACKED (workable) gigs only; waiting/untracked
   // rows go quiet grey so the list reads as "colored = act on this".
-  const tracked = quest.tracked && !dimmed
-  const color = tracked ? questColor(quest.id) : undefined
-  const neutral = quest.status === 'on_hold' ? 'rgba(124,156,196,0.75)' : 'var(--color-text-faint)'
+  const tracked = gig.tracked && !dimmed
+  const color = tracked ? gigColor(gig.id) : undefined
+  const neutral = gig.status === 'on_hold' ? 'rgba(124,156,196,0.75)' : 'var(--color-text-faint)'
   return (
     <button
       type="button"
@@ -170,14 +170,14 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
       } ${dimmed ? 'opacity-55' : ''}`}
       style={selected ? {
         borderLeftColor: color ?? neutral,
-        backgroundColor: color ? questColor(quest.id, 0.08) : 'rgba(255,255,255,0.04)',
+        backgroundColor: color ? gigColor(gig.id, 0.08) : 'rgba(255,255,255,0.04)',
       } : undefined}
     >
       <div className="flex items-center gap-2.5">
         <span
           className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px]"
           style={color
-            ? { color, borderColor: questColor(quest.id, selected ? 0.6 : 0.3) }
+            ? { color, borderColor: gigColor(gig.id, selected ? 0.6 : 0.3) }
             : { color: neutral, borderColor: 'var(--color-border)' }}
           title={s.label}
         >
@@ -189,38 +189,38 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
           }`}
           style={selected ? { color: color ?? 'var(--color-text)' } : undefined}
         >
-          {quest.title}
+          {gig.title}
         </span>
-        {quest.tracked && !dimmed && (
+        {gig.tracked && !dimmed && (
           <Eye size={13} className="shrink-0 text-[var(--color-accent)]" aria-label="Tracked" />
         )}
       </div>
-      {/* KCD2 shows the objective under the highlighted quest, and a red note
+      {/* KCD2 shows the objective under the highlighted gig, and a red note
           on unavailable ones; here that note is the Autotask waiting status
           (steel = paused, not a warning). */}
-      {quest.status === 'on_hold' && autotask ? (
+      {gig.status === 'on_hold' && autotask ? (
         <div className="mt-1 pl-[34px] text-[11px] uppercase tracking-[0.1em] text-[#7c9cc4]">{autotask}</div>
-      ) : (selected || quest.tracked) && nextSub && quest.status === 'active' ? (
+      ) : (selected || gig.tracked) && nextSub && gig.status === 'active' ? (
         <div className="mt-1 truncate pl-[34px] text-xs italic text-[var(--color-text-dim)]">{nextSub.title}</div>
       ) : null}
-      {quest.progress.total > 0 && !dimmed && (
+      {gig.progress.total > 0 && !dimmed && (
         <div className="mt-1 max-w-[240px] pl-[34px]">
-          <QuestProgressBar done={quest.progress.done} total={quest.progress.total} status={quest.status} />
+          <GigProgressBar done={gig.progress.done} total={gig.progress.total} status={gig.status} />
         </div>
       )}
     </button>
   )
 }
 
-function NewQuestRow({ onCreated }: { onCreated: (q: QuestRow) => void }) {
+function NewGigRow({ onCreated }: { onCreated: (q: GigRow) => void }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
-  const [category, setCategory] = useState<QuestCategory>('side')
+  const [category, setCategory] = useState<GigCategory>('side')
   const create = useMutation({
-    mutationFn: (input: { title: string; category: QuestCategory }) => createQuest(input),
+    mutationFn: (input: { title: string; category: GigCategory }) => createGig(input),
     onSuccess: (q) => { setTitle(''); setOpen(false); onCreated(q) },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['quests'] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['gigs'] }),
   })
 
   if (!open) {
@@ -230,7 +230,7 @@ function NewQuestRow({ onCreated }: { onCreated: (q: QuestRow) => void }) {
         onClick={() => setOpen(true)}
         className="block w-full border border-dashed border-[var(--color-border)] px-3 py-2.5 text-left text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-faint)] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
       >
-        + accept new quest
+        + accept new gig
       </button>
     )
   }
@@ -247,13 +247,13 @@ function NewQuestRow({ onCreated }: { onCreated: (q: QuestRow) => void }) {
         autoFocus
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="quest title…"
+        placeholder="gig title…"
         className="w-full border border-[var(--color-border)] bg-transparent px-3 py-2 text-[15px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-border-strong)]"
       />
       <div className="flex items-center gap-2">
         <select
           value={category}
-          onChange={(e) => setCategory(e.target.value as QuestCategory)}
+          onChange={(e) => setCategory(e.target.value as GigCategory)}
           aria-label="Category"
           className="border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] outline-none"
         >
@@ -287,66 +287,66 @@ function NewQuestRow({ onCreated }: { onCreated: (q: QuestRow) => void }) {
 
 // ── right pane: the journal ──────────────────────────────────────────────────
 
-function QuestJournal({ quest }: { quest: Quest }) {
+function GigJournal({ gig }: { gig: Gig }) {
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['quests'] })
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['gigs'] })
   const patch = useMutation({
-    mutationFn: (input: { id: string; patch: Parameters<typeof updateQuest>[1] }) => updateQuest(input.id, input.patch),
+    mutationFn: (input: { id: string; patch: Parameters<typeof updateGig>[1] }) => updateGig(input.id, input.patch),
     onSettled: invalidate,
   })
   const addSub = useMutation({
-    mutationFn: (title: string) => createQuest({ title, parentId: quest.id }),
+    mutationFn: (title: string) => createGig({ title, parentId: gig.id }),
     onSuccess: () => setSubTitle(''),
     onSettled: invalidate,
   })
   const remove = useMutation({
-    mutationFn: (id: string) => deleteQuest(id),
+    mutationFn: (id: string) => deleteGig(id),
     onSettled: invalidate,
   })
   const removeLink = useMutation({
-    mutationFn: (linkId: number) => deleteQuestLink(quest.id, linkId),
+    mutationFn: (linkId: number) => deleteGigLink(gig.id, linkId),
     onSettled: invalidate,
   })
 
-  const s = STATUS_GLYPH[quest.status]
-  const { autotask, client, body } = splitDetail(quest.detail)
+  const s = STATUS_GLYPH[gig.status]
+  const { autotask, client, body } = splitDetail(gig.detail)
   const mutationError = patch.error ?? addSub.error ?? remove.error ?? removeLink.error
   // Identity color only while tracked (workable); untracked reads neutral.
-  const tracked = quest.tracked && quest.status !== 'completed' && quest.status !== 'failed'
-  const color = tracked ? questColor(quest.id) : 'var(--color-text)'
+  const tracked = gig.tracked && gig.status !== 'completed' && gig.status !== 'failed'
+  const color = tracked ? gigColor(gig.id) : 'var(--color-text)'
 
   return (
     <div className="border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-      {/* title + meta in the quest's own identity color */}
+      {/* title + meta in the gig's own identity color */}
       <div className="flex items-start justify-between gap-3">
         <h2
           className="min-w-0 text-xl font-bold leading-snug tracking-[0.04em]"
-          style={{ color, textShadow: tracked ? `0 0 14px ${questColor(quest.id, 0.4)}` : undefined }}
+          style={{ color, textShadow: tracked ? `0 0 14px ${gigColor(gig.id, 0.4)}` : undefined }}
         >
-          {quest.title}
+          {gig.title}
         </h2>
         <div className="flex shrink-0 items-center gap-2 pt-0.5">
           <button
             type="button"
-            onClick={() => patch.mutate({ id: quest.id, patch: { tracked: !quest.tracked } })}
-            title={quest.tracked ? 'Untrack: remove this quest from the dashboard HUD.' : 'Track: pin this quest to the dashboard HUD.'}
-            aria-label={quest.tracked ? 'Untrack quest' : 'Track quest'}
+            onClick={() => patch.mutate({ id: gig.id, patch: { tracked: !gig.tracked } })}
+            title={gig.tracked ? 'Untrack: remove this gig from the dashboard HUD.' : 'Track: pin this gig to the dashboard HUD.'}
+            aria-label={gig.tracked ? 'Untrack gig' : 'Track gig'}
             className={`border p-2 transition ${
-              quest.tracked
+              gig.tracked
                 ? 'border-[var(--color-accent)]/70 text-[var(--color-accent)]'
                 : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-dim)]'
             }`}
           >
-            {quest.tracked ? <Eye size={17} /> : <EyeOff size={17} />}
+            {gig.tracked ? <Eye size={17} /> : <EyeOff size={17} />}
           </button>
           {confirmDelete ? (
             <span className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => remove.mutate(quest.id)}
+                onClick={() => remove.mutate(gig.id)}
                 className="border border-[var(--color-danger)] px-2.5 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-danger)]"
               >
                 confirm
@@ -363,8 +363,8 @@ function QuestJournal({ quest }: { quest: Quest }) {
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              aria-label="Delete quest"
-              title="Delete this quest permanently (removes it entirely; use abandon to just shelve it)."
+              aria-label="Delete gig"
+              title="Delete this gig permanently (removes it entirely; use abandon to just shelve it)."
               className="border border-[var(--color-border)] p-2 text-[var(--color-text-faint)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
             >
               <Trash2 size={16} />
@@ -375,7 +375,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
         <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
-          {CATEGORY_LABEL[quest.category]}
+          {CATEGORY_LABEL[gig.category]}
         </span>
         {client && (
           <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color }}>
@@ -426,17 +426,17 @@ function QuestJournal({ quest }: { quest: Quest }) {
       <div className="mt-5">
         <div className="mb-2 flex items-center gap-3">
           <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">objectives</span>
-          {quest.progress.total > 0 && (
+          {gig.progress.total > 0 && (
             <div className="max-w-[240px] flex-1">
-              <QuestProgressBar done={quest.progress.done} total={quest.progress.total} status={quest.status} />
+              <GigProgressBar done={gig.progress.done} total={gig.progress.total} status={gig.status} />
             </div>
           )}
         </div>
-        {quest.subquests.length === 0 && (
+        {gig.subgigs.length === 0 && (
           <div className="text-xs text-[var(--color-text-faint)]">no objectives yet</div>
         )}
         <div className="space-y-2">
-          {quest.subquests.map((sub) => {
+          {gig.subgigs.map((sub) => {
             const done = sub.status === 'completed'
             return (
               <div key={sub.id} className="group flex items-start gap-2.5">
@@ -489,7 +489,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
             type="submit"
             disabled={!subTitle.trim() || addSub.isPending}
             aria-label="Add objective"
-            title="Add this objective (a checklist step) to the quest."
+            title="Add this objective (a checklist step) to the gig."
             className="border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
           >
             <Plus size={14} />
@@ -498,16 +498,16 @@ function QuestJournal({ quest }: { quest: Quest }) {
       </div>
 
       {/* connected emails / tickets / urls */}
-      {quest.links.length > 0 && (
+      {gig.links.length > 0 && (
         <div className="mt-5">
           <div className="mb-1.5 text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">connected</div>
           <div className="space-y-1.5">
-            {quest.links.map((l) => (
+            {gig.links.map((l) => (
               <div key={l.id} className="group flex items-center gap-2 text-xs text-[var(--color-text-dim)]">
                 <Link2 size={13} className="shrink-0 text-[var(--color-text-faint)]" />
                 <span className="shrink-0 uppercase tracking-[0.1em] text-[var(--color-text-faint)]">[{l.kind}]</span>
                 {/* Tickets show their number (the useful identifier); the
-                    title already is the quest heading. Others show the label. */}
+                    title already is the gig heading. Others show the label. */}
                 <span className="min-w-0 truncate">{l.kind === 'ticket' ? l.ref : (l.label || l.ref)}</span>
                 <button
                   type="button"
@@ -525,51 +525,51 @@ function QuestJournal({ quest }: { quest: Quest }) {
 
       {/* status controls */}
       <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
-        {quest.status !== 'completed' && (
+        {gig.status !== 'completed' && (
           <button
             type="button"
-            title="Mark this quest done and move it to the Done tab."
-            onClick={() => patch.mutate({ id: quest.id, patch: { status: 'completed' } })}
+            title="Mark this gig done and move it to the Done tab."
+            onClick={() => patch.mutate({ id: gig.id, patch: { status: 'completed' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-success)] hover:text-[var(--color-success)]"
           >
             ✓ complete
           </button>
         )}
-        {quest.status === 'active' && (
+        {gig.status === 'active' && (
           <button
             type="button"
-            title="Pause this quest as on-hold (a work quest returns to active if its Autotask ticket is still actionable)."
-            onClick={() => patch.mutate({ id: quest.id, patch: { status: 'on_hold' } })}
+            title="Pause this gig as on-hold (a work gig returns to active if its Autotask ticket is still actionable)."
+            onClick={() => patch.mutate({ id: gig.id, patch: { status: 'on_hold' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[#7c9cc4] hover:text-[#7c9cc4]"
           >
             ◼ hold
           </button>
         )}
-        {quest.status !== 'active' && (
+        {gig.status !== 'active' && (
           <button
             type="button"
-            title="Reopen this quest as active."
-            onClick={() => patch.mutate({ id: quest.id, patch: { status: 'active' } })}
+            title="Reopen this gig as active."
+            onClick={() => patch.mutate({ id: gig.id, patch: { status: 'active' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             ◆ reactivate
           </button>
         )}
-        {quest.status === 'active' && (
+        {gig.status === 'active' && (
           <button
             type="button"
-            title="Abandon this quest: marks it failed and moves it to the Done tab. It stays there (the sync won't reopen it and the Autotask ticket is untouched)."
-            onClick={() => patch.mutate({ id: quest.id, patch: { status: 'failed' } })}
+            title="Abandon this gig: marks it failed and moves it to the Done tab. It stays there (the sync won't reopen it and the Autotask ticket is untouched)."
+            onClick={() => patch.mutate({ id: gig.id, patch: { status: 'failed' } })}
             className="border border-[var(--color-border)] px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
           >
             ✗ abandon
           </button>
         )}
         <select
-          value={quest.category}
-          onChange={(e) => patch.mutate({ id: quest.id, patch: { category: e.target.value as QuestCategory } })}
-          aria-label="Quest category"
-          title="Change this quest's category (moves it between the work and personal tabs)."
+          value={gig.category}
+          onChange={(e) => patch.mutate({ id: gig.id, patch: { category: e.target.value as GigCategory } })}
+          aria-label="Gig category"
+          title="Change this gig's category (moves it between the work and personal tabs)."
           className="ml-auto border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs uppercase tracking-[0.1em] text-[var(--color-text-dim)] outline-none"
         >
           <option value="main">main</option>
@@ -584,8 +584,8 @@ function QuestJournal({ quest }: { quest: Quest }) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
-export default function Quests() {
-  const quests = useQuery({ queryKey: ['quests'], queryFn: fetchQuests, refetchInterval: 30_000 })
+export default function Gigs() {
+  const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, refetchInterval: 30_000 })
   const [tab, setTab] = useState<Tab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -635,14 +635,14 @@ export default function Quests() {
   const [hideWaiting, setHideWaiting] = useState(() => localStorage.getItem(HIDE_WAITING_KEY) === '1')
   useEffect(() => { localStorage.setItem(HIDE_WAITING_KEY, hideWaiting ? '1' : '0') }, [hideWaiting])
 
-  const groups = useMemo(() => buildGroups(quests.data ?? [], tab, hideWaiting), [quests.data, tab, hideWaiting])
-  const flat = useMemo(() => groups.flatMap((g) => g.quests), [groups])
+  const groups = useMemo(() => buildGroups(gigs.data ?? [], tab, hideWaiting), [gigs.data, tab, hideWaiting])
+  const flat = useMemo(() => groups.flatMap((g) => g.gigs), [groups])
   const selected = flat.find((q) => q.id === selectedId) ?? flat[0] ?? null
 
   // When the container is too narrow for two panes, the journal stacks under
   // the list; bring it into view. Measured from the actual layout (works at
   // any zoom level) rather than a viewport media query.
-  const selectQuest = (id: string) => {
+  const selectGig = (id: string) => {
     setSelectedId(id)
     setTimeout(() => {
       const list = listRef.current
@@ -654,13 +654,13 @@ export default function Quests() {
   }
 
   const counts = useMemo(() => {
-    const all = quests.data ?? []
+    const all = gigs.data ?? []
     return {
       active: all.filter((q) => q.status === 'active').length,
       waiting: all.filter((q) => q.status === 'on_hold').length,
       done: all.filter((q) => q.status === 'completed').length,
     }
-  }, [quests.data])
+  }, [gigs.data])
 
   return (
     // @container: the pane split below reacts to the space this page actually
@@ -670,9 +670,9 @@ export default function Quests() {
     <div className="@container w-full space-y-5">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// quest log</div>
+          <div className="text-[10px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// gig log</div>
           <h1 className="mt-1 whitespace-nowrap text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
-            quests<span className="cursor-blink">_</span>
+            gigs<span className="cursor-blink">_</span>
           </h1>
         </div>
         <div className="text-[13px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
@@ -697,11 +697,11 @@ export default function Quests() {
             {t}
           </button>
         ))}
-        {/* Hide everything that's waiting on someone else (on-hold quests). */}
+        {/* Hide everything that's waiting on someone else (on-hold gigs). */}
         <button
           type="button"
           onClick={() => setHideWaiting((v) => !v)}
-          title={hideWaiting ? 'Show quests that are waiting on others' : 'Hide quests that are waiting on others'}
+          title={hideWaiting ? 'Show gigs that are waiting on others' : 'Hide gigs that are waiting on others'}
           aria-pressed={hideWaiting}
           className={`ml-auto border px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition ${
             hideWaiting
@@ -713,10 +713,10 @@ export default function Quests() {
         </button>
       </div>
 
-      {quests.isLoading ? (
+      {gigs.isLoading ? (
         <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-      ) : quests.error ? (
-        <div className="text-sm text-[var(--color-danger)]">quest log unavailable</div>
+      ) : gigs.error ? (
+        <div className="text-sm text-[var(--color-danger)]">gig log unavailable</div>
       ) : (
         <div
           ref={splitRef}
@@ -728,31 +728,31 @@ export default function Quests() {
             <button
               type="button"
               onClick={() => setCollapsed(false)}
-              title="Expand quest list"
-              aria-label="Expand quest list"
+              title="Expand gig list"
+              aria-label="Expand gig list"
               className="hidden self-stretch @2xl:mr-4 @2xl:flex @2xl:w-9 @2xl:shrink-0 @2xl:flex-col @2xl:items-center @2xl:gap-2 border border-[var(--color-border)] pt-2.5 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
             >
               <ChevronsRight size={16} />
               <span className="text-[10px] uppercase tracking-[0.2em]" style={{ writingMode: 'vertical-rl' }}>
-                quest list ({flat.length})
+                gig list ({flat.length})
               </span>
             </button>
           )}
 
-          {/* left: the quest list */}
+          {/* left: the gig list */}
           <div
             ref={listRef}
             className={`space-y-2 @2xl:w-[var(--listw)] @2xl:shrink-0 @2xl:max-h-[calc(100vh-230px)] @2xl:overflow-y-auto @2xl:pr-1 ${collapsed ? '@2xl:hidden' : ''}`}
           >
             <div className="flex gap-2">
               <div className="min-w-0 flex-1">
-                <NewQuestRow onCreated={(q) => setSelectedId(q.id)} />
+                <NewGigRow onCreated={(q) => setSelectedId(q.id)} />
               </div>
               <button
                 type="button"
                 onClick={() => setCollapsed(true)}
-                title="Collapse quest list"
-                aria-label="Collapse quest list"
+                title="Collapse gig list"
+                aria-label="Collapse gig list"
                 className="hidden shrink-0 items-center border border-[var(--color-border)] px-2 text-[var(--color-text-faint)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] @2xl:flex"
               >
                 <ChevronsLeft size={16} />
@@ -760,14 +760,14 @@ export default function Quests() {
             </div>
             {flat.length === 0 && (
               <div className="px-1 py-4 text-sm text-[var(--color-text-dim)]">
-                &gt; no quests{tab !== 'all' ? ` (${tab})` : ''}. accept one above.
+                &gt; no gigs{tab !== 'all' ? ` (${tab})` : ''}. accept one above.
               </div>
             )}
             {groups.map((g) => {
               const groupCollapsed = collapsedGroups.has(g.key)
-              // Nothing to do here if every quest in the group is waiting on
+              // Nothing to do here if every gig in the group is waiting on
               // someone else: grey the header (steel) so it recedes.
-              const allWaiting = g.quests.length > 0 && g.quests.every(isWaiting)
+              const allWaiting = g.gigs.length > 0 && g.gigs.every(isWaiting)
               return (
                 <div key={g.key}>
                   <button
@@ -786,12 +786,12 @@ export default function Quests() {
                     {groupCollapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
                     <span className="min-w-0 flex-1 truncate text-left">{g.title}</span>
                     {allWaiting && <span className="shrink-0 text-[9px] tracking-[0.14em] text-[#7c9cc4]/70">waiting</span>}
-                    <span className="shrink-0 text-[var(--color-text-faint)]">{g.quests.length}</span>
+                    <span className="shrink-0 text-[var(--color-text-faint)]">{g.gigs.length}</span>
                   </button>
                   {!groupCollapsed && (
                     <div className="space-y-0.5">
-                      {g.quests.map((q) => (
-                        <QuestListRow key={q.id} quest={q} selected={selected?.id === q.id} onSelect={() => selectQuest(q.id)} />
+                      {g.gigs.map((q) => (
+                        <GigListRow key={q.id} gig={q} selected={selected?.id === q.id} onSelect={() => selectGig(q.id)} />
                       ))}
                     </div>
                   )}
@@ -819,16 +819,16 @@ export default function Quests() {
           {/* right: the journal */}
           <div ref={journalRef} className="min-w-0 flex-1">
             {selected ? (
-              <QuestJournal key={selected.id} quest={selected} />
+              <GigJournal key={selected.id} gig={selected} />
             ) : (
               <div className="border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center text-sm text-[var(--color-text-faint)]">
-                &gt; select a quest to open its journal
+                &gt; select a gig to open its journal
               </div>
             )}
           </div>
         </div>
       )}
-      <QuestChat openQuest={selected ? { id: selected.id, title: selected.title } : null} />
+      <GigChat openGig={selected ? { id: selected.id, title: selected.title } : null} />
     </div>
   )
 }

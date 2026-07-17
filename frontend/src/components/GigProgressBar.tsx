@@ -1,9 +1,9 @@
-import type { QuestStatus } from '../lib/api'
+import type { GigStatus } from '../lib/api'
 
-// Objectives progress bar shared by the Quests page and the dashboard's
-// tracked-quests HUD. Lives in components/ so the eagerly-loaded Dashboard
-// doesn't drag the whole lazy Quests page into the initial bundle.
-export function QuestProgressBar({ done, total, status }: { done: number; total: number; status: QuestStatus }) {
+// Objectives progress bar shared by the Gigs page and the dashboard's
+// tracked-gigs HUD. Lives in components/ so the eagerly-loaded Dashboard
+// doesn't drag the whole lazy Gigs page into the initial bundle.
+export function GigProgressBar({ done, total, status }: { done: number; total: number; status: GigStatus }) {
   if (total === 0) return null
   const pct = Math.round((done / total) * 100)
   const color = status === 'completed' ? 'var(--color-success)' : status === 'failed' ? 'var(--color-danger)' : 'var(--color-accent)'
