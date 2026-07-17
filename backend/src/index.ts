@@ -19,6 +19,7 @@ import launcherRoute from './routes/launcher.js'
 import emailsRoute from './routes/emails.js'
 import emailSignalsRoute from './routes/emailSignals.js'
 import questsRoute from './routes/quests.js'
+import questChatRoute from './routes/questChat.js'
 import intakeRoute from './routes/intake.js'
 import { startAlerts } from './alerts.js'
 
@@ -98,6 +99,7 @@ app.use('/api', launcherRoute)
 app.use('/api', emailsRoute)
 app.use('/api', emailSignalsRoute)
 app.use('/api', questsRoute)
+app.use('/api', questChatRoute)
 app.use('/api', intakeRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from 'lucide-react'
 import { QuestProgressBar } from '../components/QuestProgressBar'
+import { QuestChat } from '../components/QuestChat'
 import { questColor } from '../lib/questColor'
 import {
   fetchQuests, createQuest, updateQuest, deleteQuest, deleteQuestLink,
@@ -827,6 +828,7 @@ export default function Quests() {
           </div>
         </div>
       )}
+      <QuestChat />
     </div>
   )
 }
