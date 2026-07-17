@@ -11,3 +11,4 @@ build/
 backend/data/
 
 .code-deck/
+backend/tsconfig.tsbuildinfo
