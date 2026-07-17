@@ -398,8 +398,10 @@ function QuestJournal({ quest }: { quest: Quest }) {
             ) : (
               <p
                 key={i}
-                className={`whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-dim)] ${
-                  i === 0 ? 'first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--qc)]' : ''
+                className={`whitespace-pre-wrap text-sm leading-relaxed ${
+                  i === 0
+                    ? 'text-[var(--color-text)] first-letter:pr-0.5 first-letter:text-2xl first-letter:font-bold first-letter:text-[var(--qc)]'
+                    : 'text-[var(--color-text-dim)]'
                 }`}
                 style={{ '--qc': color } as CSSProperties}
               >
