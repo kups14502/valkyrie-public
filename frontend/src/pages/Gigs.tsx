@@ -105,10 +105,10 @@ type Group = { key: string; title: string; gigs: Gig[] }
 // waiting-customer/vendor/materials tickets there); nothing for you to do.
 const isWaiting = (q: Gig) => q.status === 'on_hold'
 
-// Work gigs group by client (from the Autotask companyID); personal gigs
-// group by category. In the "all"/"done" tabs work-client groups lead, then
-// the personal category groups. When hideWaiting is set, on-hold gigs are
-// dropped entirely.
+// Named groups lead the list: work gigs under their Autotask client, other
+// gigs under their custom section (if set). Sectionless personal gigs fall
+// back to category groups. When hideWaiting is set, on-hold gigs are dropped
+// entirely.
 function buildGroups(all: Gig[], tab: Tab, hideWaiting: boolean): Group[] {
   const isDone = (q: Gig) => q.status === 'completed' || q.status === 'failed'
   const visible = all.filter((q) => {
@@ -120,23 +120,28 @@ function buildGroups(all: Gig[], tab: Tab, hideWaiting: boolean): Group[] {
     return true
   })
 
-  const byClient = new Map<string, Gig[]>()
-  for (const q of visible.filter((q) => q.category === 'work')) {
-    const c = gigClient(q) || UNASSIGNED
-    ;(byClient.get(c) ?? byClient.set(c, []).get(c)!).push(q)
+  const byName = new Map<string, Gig[]>()
+  for (const q of visible) {
+    const name = q.category === 'work' ? (gigClient(q) || UNASSIGNED) : (q.section || null)
+    if (!name) continue
+    ;(byName.get(name) ?? byName.set(name, []).get(name)!).push(q)
   }
-  const workGroups: Group[] = [...byClient.entries()]
+  const namedGroups: Group[] = [...byName.entries()]
     .sort((a, b) =>
       a[0] === UNASSIGNED ? 1 : b[0] === UNASSIGNED ? -1 : a[0].localeCompare(b[0]))
-    .map(([client, qs]) => ({ key: `client:${client}`, title: client, gigs: qs.sort(gigSort) }))
+    .map(([name, qs]) => ({ key: `named:${name}`, title: name, gigs: qs.sort(gigSort) }))
 
-  const personalGroups: Group[] = GROUP_ORDER
+  const categoryGroups: Group[] = GROUP_ORDER
     .filter((cat) => cat !== 'work')
-    .map((cat) => ({ key: cat, title: GROUP_TITLE[cat], gigs: visible.filter((q) => q.category === cat).sort(gigSort) }))
+    .map((cat) => ({
+      key: cat,
+      title: GROUP_TITLE[cat],
+      gigs: visible.filter((q) => q.category === cat && !q.section).sort(gigSort),
+    }))
 
-  const out = tab === 'work' ? workGroups
-    : tab === 'personal' ? personalGroups
-    : [...workGroups, ...personalGroups]
+  // `visible` is already tab-filtered, so named groups only ever contain
+  // gigs belonging to the current tab.
+  const out = tab === 'work' ? namedGroups : [...namedGroups, ...categoryGroups]
   return out.filter((g) => g.gigs.length > 0)
 }
 
@@ -380,6 +385,11 @@ function GigJournal({ gig }: { gig: Gig }) {
         {client && (
           <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color }}>
             {client}
+          </span>
+        )}
+        {!client && gig.section && (
+          <span className="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color }}>
+            {gig.section}
           </span>
         )}
         <span className={`text-xs uppercase tracking-[0.14em] ${s.tone}`}>{s.glyph} {s.label}</span>

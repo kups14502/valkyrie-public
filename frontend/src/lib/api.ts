@@ -446,6 +446,7 @@ export type GigRow = {
   title: string
   detail: string
   category: GigCategory
+  section: string
   status: GigStatus
   tracked: boolean
   sort: number
@@ -466,13 +467,13 @@ export const fetchGigs = async () => {
   return (r.data as { gigs: Gig[] }).gigs
 }
 
-export const createGig = async (input: { title: string; detail?: string; category?: GigCategory; parentId?: string; tracked?: boolean }) => {
+export const createGig = async (input: { title: string; detail?: string; category?: GigCategory; section?: string; parentId?: string; tracked?: boolean }) => {
   const r = await api.post<{ gig: GigRow; error?: string; detail?: string }>('/gigs', input)
   if (!r.data.gig) throw new Error(r.data.detail || r.data.error || 'Failed to create gig')
   return r.data.gig
 }
 
-export const updateGig = async (id: string, patch: { title?: string; detail?: string; category?: GigCategory; status?: GigStatus; tracked?: boolean; sort?: number }) => {
+export const updateGig = async (id: string, patch: { title?: string; detail?: string; category?: GigCategory; section?: string; status?: GigStatus; tracked?: boolean; sort?: number }) => {
   const r = await api.patch<{ gig: GigRow; error?: string; detail?: string }>(`/gigs/${id}`, patch)
   if (!r.data.gig) throw new Error(r.data.detail || r.data.error || 'Failed to update gig')
   return r.data.gig

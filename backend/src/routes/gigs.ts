@@ -22,8 +22,8 @@ router.get('/gigs', (_req, res) => {
 
 router.post('/gigs', (req, res) => {
   try {
-    const { title, detail, category, parentId, tracked } = req.body ?? {}
-    res.json({ gig: createGig({ title, detail, category, parentId, tracked }) })
+    const { title, detail, category, section, parentId, tracked } = req.body ?? {}
+    res.json({ gig: createGig({ title, detail, category, section, parentId, tracked }) })
   } catch (err) {
     fail(res, err, 'failed to create gig')
   }
@@ -31,8 +31,8 @@ router.post('/gigs', (req, res) => {
 
 router.patch('/gigs/:id', (req, res) => {
   try {
-    const { title, detail, category, status, tracked, sort } = req.body ?? {}
-    res.json({ gig: updateGig(req.params.id, { title, detail, category, status, tracked, sort }) })
+    const { title, detail, category, section, status, tracked, sort } = req.body ?? {}
+    res.json({ gig: updateGig(req.params.id, { title, detail, category, section, status, tracked, sort }) })
   } catch (err) {
     fail(res, err, 'failed to update gig')
   }
