@@ -192,7 +192,9 @@ export function createQuest(input: {
     detail: String(input.detail ?? '').slice(0, 4000),
     category,
     status: 'active',
-    tracked: input.tracked ? 1 : 0,
+    // Quests are born active, so they're born tracked (tracking follows
+    // workability); subquests never track.
+    tracked: (input.tracked ?? !parentId) ? 1 : 0,
     sort: 0,
     created_at: now,
     updated_at: now,
@@ -228,6 +230,11 @@ export function updateQuest(id: string, patch: {
     if (!STATUSES.includes(patch.status as QuestStatus)) throw new Error('invalid status')
     next.status = patch.status as QuestStatus
     next.completedAt = patch.status === 'completed' ? new Date().toISOString() : null
+    // Tracking follows workability: becoming active tracks the quest, leaving
+    // active (hold/done/failed) untracks it. A patch that sets tracked
+    // explicitly wins, and the eye toggle (tracked-only patch) still pins a
+    // manual choice until the next status transition.
+    if (patch.tracked === undefined && !existing.parentId) next.tracked = patch.status === 'active'
   }
   if (patch.tracked !== undefined) next.tracked = Boolean(patch.tracked)
   if (patch.sort !== undefined && Number.isFinite(patch.sort)) next.sort = Number(patch.sort)

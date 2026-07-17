@@ -155,9 +155,11 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
   const dimmed = quest.status === 'completed' || quest.status === 'failed'
   const { autotask } = splitDetail(quest.detail)
   const nextSub = quest.subquests.find((x) => x.status !== 'completed')
-  // Every quest carries its own identity color: the marker box, and the
-  // selection stripe/highlight/title when it's open in the journal.
-  const color = questColor(quest.id)
+  // Identity color marks TRACKED (workable) quests only; waiting/untracked
+  // rows go quiet grey so the list reads as "colored = act on this".
+  const tracked = quest.tracked && !dimmed
+  const color = tracked ? questColor(quest.id) : undefined
+  const neutral = quest.status === 'on_hold' ? 'rgba(124,156,196,0.75)' : 'var(--color-text-faint)'
   return (
     <button
       type="button"
@@ -165,21 +167,26 @@ function QuestListRow({ quest, selected, onSelect }: { quest: Quest; selected: b
       className={`block w-full border-l-2 px-3 py-2.5 text-left transition ${
         selected ? '' : 'border-transparent hover:bg-[rgba(var(--color-accent-rgb),0.04)]'
       } ${dimmed ? 'opacity-55' : ''}`}
-      style={selected ? { borderLeftColor: color, backgroundColor: questColor(quest.id, 0.08) } : undefined}
+      style={selected ? {
+        borderLeftColor: color ?? neutral,
+        backgroundColor: color ? questColor(quest.id, 0.08) : 'rgba(255,255,255,0.04)',
+      } : undefined}
     >
       <div className="flex items-center gap-2.5">
         <span
           className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px]"
-          style={{ color, borderColor: selected ? questColor(quest.id, 0.6) : questColor(quest.id, 0.3) }}
+          style={color
+            ? { color, borderColor: questColor(quest.id, selected ? 0.6 : 0.3) }
+            : { color: neutral, borderColor: 'var(--color-border)' }}
           title={s.label}
         >
           {s.glyph}
         </span>
         <span
           className={`min-w-0 flex-1 truncate text-[15px] ${
-            selected ? 'font-semibold' : dimmed ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'
+            selected ? 'font-semibold' : dimmed ? 'text-[var(--color-text-dim)]' : tracked ? 'text-[var(--color-text)]' : 'text-[var(--color-text-dim)]'
           }`}
-          style={selected ? { color } : undefined}
+          style={selected ? { color: color ?? 'var(--color-text)' } : undefined}
         >
           {quest.title}
         </span>
@@ -306,7 +313,9 @@ function QuestJournal({ quest }: { quest: Quest }) {
   const s = STATUS_GLYPH[quest.status]
   const { autotask, client, body } = splitDetail(quest.detail)
   const mutationError = patch.error ?? addSub.error ?? remove.error ?? removeLink.error
-  const color = questColor(quest.id)
+  // Identity color only while tracked (workable); untracked reads neutral.
+  const tracked = quest.tracked && quest.status !== 'completed' && quest.status !== 'failed'
+  const color = tracked ? questColor(quest.id) : 'var(--color-text)'
 
   return (
     <div className="border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
@@ -314,7 +323,7 @@ function QuestJournal({ quest }: { quest: Quest }) {
       <div className="flex items-start justify-between gap-3">
         <h2
           className="min-w-0 text-xl font-bold leading-snug tracking-[0.04em]"
-          style={{ color, textShadow: `0 0 14px ${questColor(quest.id, 0.4)}` }}
+          style={{ color, textShadow: tracked ? `0 0 14px ${questColor(quest.id, 0.4)}` : undefined }}
         >
           {quest.title}
         </h2>
