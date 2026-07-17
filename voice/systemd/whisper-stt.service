@@ -1,0 +1,12 @@
+[Unit]
+Description=Valkyrie assistant STT (whisper.cpp server) on 127.0.0.1:8378
+After=network.target
+
+[Service]
+ExecStart=%h/whisper.cpp/build/bin/whisper-server -m %h/whisper.cpp/models/ggml-small.en-q5_1.bin --host 127.0.0.1 --port 8378 -t 4
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target

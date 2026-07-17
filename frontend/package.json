@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:kiosk": "vite build --mode kiosk --base=/kiosk/ --outDir dist-kiosk --emptyOutDir",
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",

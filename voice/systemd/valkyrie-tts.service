@@ -1,0 +1,16 @@
+[Unit]
+Description=Valkyrie assistant TTS (kokoro-onnx) on 127.0.0.1:8379
+After=network.target
+
+[Service]
+WorkingDirectory=%h/valkyrie/voice
+ExecStart=%h/valkyrie/voice/venv/bin/python %h/valkyrie/voice/kokoro_server.py
+Environment=KOKORO_MODEL=%h/valkyrie/voice/models/kokoro-v1.0.int8.onnx
+Environment=KOKORO_VOICES=%h/valkyrie/voice/models/voices-v1.0.bin
+Environment=PORT=8379
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target
