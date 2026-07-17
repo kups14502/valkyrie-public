@@ -1,15 +1,15 @@
 {
-  "version": "0.3.19",
-  "notes": "feat(gigs): custom sections; agent acts immediately",
-  "pub_date": "2026-07-17T06:05:28Z",
+  "version": "0.3.20",
+  "notes": "merge: feature/assistant — Jarvis voice+touch kiosk for odin",
+  "pub_date": "2026-07-17T15:50:48Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWNpRmlydzZmUStXZGNhT2tSRW5WNVE5cW13YkduVEV5VXRicllNemhqSGZ0N1QwUFJjSFdkbGZ2MDJDNTA0VUxocjhob29pM2E4V0JaYjBPR0h5MlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MjY4MzI4CWZpbGU6VmFsa3lyaWVfMC4zLjE5X3g2NC1zZXR1cC5leGUKK3NLcEl0M0tRcmhqeWttTVpvb3RsU0dtbDZqcHpNMm9UY2RheVJkR1RkR0dvSEFlM3QyOXJUVlVYYmE0SUdOU3VjSnJQdUVtYnh3NE9pZ3RqbzdyQlE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.19/Valkyrie_0.3.19_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZpS2M0VTZUU0JxQnRUd0dsNDdIdDVxMHNIcnlCZlh4Yi9GSEtqNi9LSHp3UXd5dXF5RXZ3bHh6Ujh4SzF1YjB5TUdYandGZDZKazlYNHRDSDl4blFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzAzNDQ4CWZpbGU6VmFsa3lyaWVfMC4zLjIwX3g2NC1zZXR1cC5leGUKV1l5WGxNMVNwM3VYTGVFOXBQMnRDYlhMQmVpUDVpZFpZV1BxNmpQUURDNjFRS2J0akMzNnBmZWpka2dOVmhkSENsczJCMXlPQjM0UDB6TWIwNmRlREE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.20/Valkyrie_0.3.20_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVovTjZ3a1MwM3JLVFlRc2tJVTUrU2NCT0RVTWlyLzlJVVBSRVkzdnlkSWR3ci9Id3ZnNjl6QU5VVlY2N2JCaDArV3ozcnBXa3BPVnZBQVJjLzVNZkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MjY4MjY2CWZpbGU6VmFsa3lyaWVfMC4zLjE5X2FtZDY0LkFwcEltYWdlClZsSjlsbW9iOStlL0trOHhGRmEycExuMmRjbEdpbU9vNzZYQzNpMjB5T1lCbzdCRFZlV0RycXlneWJYSUtSb2paa3RsenhkT2pJWG8zM2xMa3g0eEJ3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.19/Valkyrie_0.3.19_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpVN3hnRVNZMFV2aTM3U3lveHdOOGtUSlFoNDc1bitNY0ZWcVJ0MWFIbllKL2E0cG0zU3Rza1lJWTFaUVJ6aVp3SXpQZmxrKzc0aE5jdHBoZ0tER3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzAzMzU3CWZpbGU6VmFsa3lyaWVfMC4zLjIwX2FtZDY0LkFwcEltYWdlCnB3RTYwSWZKZnFWaXdNQWRuSDVyVXhWS2d2Rmt4K1RQZ09SU1hQVW9hS292UmNiNkRBWm1UVDBOaXQrOVZHUlFOMFhBSXREc0V5bFE2S2JqY1R0d0NBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.20/Valkyrie_0.3.20_amd64.AppImage"
     }
   }
 }
