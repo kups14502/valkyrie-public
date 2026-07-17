@@ -20,6 +20,7 @@ const TradeBot = lazy(() => import('./pages/TradeBot'))
 const Services = lazy(() => import('./pages/Services'))
 const Emails = lazy(() => import('./pages/Emails'))
 const Activity = lazy(() => import('./pages/Activity'))
+const Jarvis = lazy(() => import('./pages/Jarvis'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -246,8 +247,25 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>
-        <BrowserRouter>
-          <Shell />
+        {/* basename follows vite's base so the kiosk build (served by the
+            backend under /kiosk/) routes correctly; the web/app build keeps
+            base '/' and nothing changes. */}
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
+          <Routes>
+            {/* Jarvis is chrome-free (no Shell header): a fullscreen
+                voice/touch assistant for the odin touchscreen kiosk. */}
+            <Route
+              path="/jarvis"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <ErrorBoundary compact>
+                    <Jarvis />
+                  </ErrorBoundary>
+                </Suspense>
+              }
+            />
+            <Route path="*" element={<Shell />} />
+          </Routes>
         </BrowserRouter>
       </AuthGate>
     </QueryClientProvider>

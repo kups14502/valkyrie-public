@@ -40,23 +40,25 @@ const gigTools = [
   tool('list_gigs', 'List all gigs with ids, status, objectives, and Autotask info. Call this before referencing or modifying existing gigs — never guess ids.', {}, async () => {
     try { return ok(listGigs().map(gigBrief)) } catch (e) { return fail(e) }
   }),
-  tool('create_gig', 'Create a new gig, optionally with objectives (checklist steps). Category: main/side/daily for personal, work for job tasks. New gigs start active and tracked.', {
+  tool('create_gig', 'Create a new gig, optionally with objectives (checklist steps) and a section (a named group in the gig list, e.g. "Org C"). Category: main/side/daily for personal, work for job tasks. New gigs start active and tracked.', {
     title: z.string().min(1).max(200),
     category: z.enum(['main', 'side', 'daily', 'work']).optional(),
+    section: z.string().max(100).optional(),
     detail: z.string().max(4000).optional(),
     objectives: z.array(z.string().min(1).max(200)).max(20).optional(),
   }, async (args) => {
     try {
-      const gig = createGig({ title: args.title, category: args.category ?? 'side', detail: args.detail })
+      const gig = createGig({ title: args.title, category: args.category ?? 'side', section: args.section, detail: args.detail })
       for (const t of args.objectives ?? []) createGig({ title: t, parentId: gig.id })
-      return ok({ created: gig.id, title: gig.title })
+      return ok({ created: gig.id, title: gig.title, section: gig.section || null })
     } catch (e) { return fail(e) }
   }),
-  tool('update_gig', 'Update a gig: rename, change status (active/completed/failed/on_hold), category, detail, or pin/unpin from the dashboard (tracked). Also completes/reopens objectives when given an objective id.', {
+  tool('update_gig', 'Update a gig: rename, change status (active/completed/failed/on_hold), category, section (named group; empty string clears it), detail, or pin/unpin from the dashboard (tracked). Also completes/reopens objectives when given an objective id.', {
     id: z.string().min(1),
     title: z.string().min(1).max(200).optional(),
     detail: z.string().max(4000).optional(),
     category: z.enum(['main', 'side', 'daily', 'work']).optional(),
+    section: z.string().max(100).optional(),
     status: z.enum(['active', 'completed', 'failed', 'on_hold']).optional(),
     tracked: z.boolean().optional(),
   }, async (args) => {
@@ -98,17 +100,22 @@ const gigTools = [
   }),
 ]
 
-const gigServer = createSdkMcpServer({ name: 'gigs', version: '1.0.0', tools: gigTools })
-const ALLOWED = gigTools.map((t) => `mcp__gigs__${t.name}`)
+// Exported so the general assistant (assistantChat.ts) can mount the same
+// gig tools alongside its own — one implementation, two agents.
+export const gigServer = createSdkMcpServer({ name: 'gigs', version: '1.0.0', tools: gigTools })
+export const GIG_ALLOWED = gigTools.map((t) => `mcp__gigs__${t.name}`)
+const ALLOWED = GIG_ALLOWED
 
 const SYSTEM_PROMPT = `You are the Valkyrie gig agent: a terse, game-flavored assistant managing the user's gig log (a KCD2-style task tracker). The user is kups (Brendon), an MSP tech.
 
 Rules:
+- ACT IMMEDIATELY. Execute the user's request in this turn without asking permission or "should I proceed?" — the ONLY exception is delete_gig, which needs their explicit confirmation. If a detail is unspecified, pick the sensible default and state it; only ask when the request is truly uninterpretable, and then exactly one question.
 - Call list_gigs before referencing or changing existing gigs; match by title fuzzily but never guess ids.
 - Gigs: category work = mirrors an Autotask ticket; main/side/daily = personal. Status: active, on_hold (waiting on someone/something), completed, failed (abandoned). Tracking auto-follows status (active=tracked); only set tracked to override that.
+- SECTIONS: a section is a named group in the gig list (like a client bucket, e.g. "Org C"). "add a gig in/under section X" or "make a section X with gigs A, B" = create top-level gigs with section=X — NOT objectives on some other gig. Work gigs group by their Autotask client automatically; section is for everything else.
 - WORK gigs sync FROM Autotask every ~10 minutes: the ticket is the source of truth for status/title/notes. Flipping a work gig between active/on_hold here will be reverted by the sync if the ticket disagrees; completing one here does NOT close the real ticket (warn the user, do it only if they insist).
 - Deleting is permanent: ask for explicit confirmation first, then call delete_gig with confirm=true.
-- Style: answer in 1-3 short lines, terminal flavor, no fluff. After acting, state exactly what changed ("✓ gig accepted: …", "✓ completed: …"). If ambiguous, ask one sharp question.
+- Style: answer in 1-3 short lines, terminal flavor, no fluff. After acting, state exactly what changed ("✓ gig accepted: …", "✓ completed: …").
 - A <ui_context> tag may precede the user's message: it is UI state (not user words) naming the gig currently open in their journal pane. When they say "this gig" / "it" or give no gig name, act on that open gig. An explicit gig name in their message always beats the open one.
 - Today is {{DATE}}.`
 

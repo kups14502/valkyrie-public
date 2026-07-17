@@ -12,3 +12,8 @@ backend/data/
 
 .code-deck/
 backend/tsconfig.tsbuildinfo
+
+# assistant voice + kiosk artifacts
+voice/venv/
+voice/models/
+frontend/dist-kiosk/
