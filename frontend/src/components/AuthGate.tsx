@@ -10,12 +10,6 @@ import { hasToken, setToken, isAuthSkipped, setAuthSkipped, onAuthChange, isTaur
 
 type Phase = 'loading' | 'setup' | 'enroll' | 'login' | 'authed'
 
-// The odin kiosk loads the app from the backend itself (http://127.0.0.1:3001
-// /kiosk/...), where the API's loopback bypass authorizes every call — so the
-// touchscreen never needs a login form. Any non-loopback origin still gates.
-const isLoopback = typeof window !== 'undefined'
-  && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
-
 export function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
@@ -38,7 +32,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   useEffect(() => { if (!authed) void loadStatus() }, [authed, loadStatus])
 
-  if (authed || isLoopback) return <>{children}</>
+  if (authed) return <>{children}</>
   if (phase === 'loading') {
     return (
       <Centered>

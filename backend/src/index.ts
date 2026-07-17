@@ -1,9 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
 import { createServer } from 'node:http'
-import { existsSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
@@ -24,7 +21,6 @@ import emailSignalsRoute from './routes/emailSignals.js'
 import gigsRoute from './routes/gigs.js'
 import gigChatRoute from './routes/gigChat.js'
 import intakeRoute from './routes/intake.js'
-import assistantRoute from './assistant/index.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -84,29 +80,6 @@ app.use((req, _res, next) => {
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
-// Kiosk build of the frontend (vite --base=/kiosk/ --outDir dist-kiosk),
-// served by the backend itself so the odin touchscreen browser hits
-// http://127.0.0.1:3001/kiosk/jarvis — same origin as the API, which makes the
-// loopback auth bypass and mic capture (localhost = secure context) both work.
-// Static assets only; all data still goes through /api and its auth.
-const KIOSK_DIR = process.env.KIOSK_DIR
-  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../frontend/dist-kiosk')
-const kioskCsp: express.RequestHandler = (_req, res, next) => {
-  // Looser CSP than helmet's default: poster images come from TMDB et al.,
-  // and TTS audio plays from blob: URLs.
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' https: data:; media-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'",
-  )
-  next()
-}
-app.use('/kiosk', kioskCsp, express.static(KIOSK_DIR, { index: 'index.html' }))
-app.use('/kiosk', kioskCsp, (_req, res) => {
-  const index = path.join(KIOSK_DIR, 'index.html')
-  if (existsSync(index)) return res.sendFile(index)
-  res.status(404).send('kiosk build missing — run: cd frontend && npm run build:kiosk')
-})
-
 // Public endpoints (no token required): auth (login/setup/status) and the
 // desktop app's auto-update mirror.
 app.use('/api', authRoute)
@@ -128,7 +101,6 @@ app.use('/api', emailSignalsRoute)
 app.use('/api', gigsRoute)
 app.use('/api', gigChatRoute)
 app.use('/api', intakeRoute)
-app.use('/api', assistantRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
