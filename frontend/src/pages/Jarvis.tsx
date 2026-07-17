@@ -82,7 +82,7 @@ export default function Jarvis() {
   mutedRef.current = muted
 
   const { data: config } = useQuery({ queryKey: ['assistant-config'], queryFn: fetchAssistantConfig, refetchInterval: 60_000 })
-  const name = (config?.name ?? 'Huginn').toUpperCase()
+  const name = (config?.name ?? 'Jarvis').toUpperCase()
 
   // ---- speech output queue --------------------------------------------------
   const speech = useRef<{ queue: Promise<Blob | null>[]; playing: HTMLAudioElement | null; running: boolean }>({

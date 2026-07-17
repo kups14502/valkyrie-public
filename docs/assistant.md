@@ -1,4 +1,4 @@
-# Huginn — the Valkyrie assistant (Jarvis mode)
+# Jarvis — the Valkyrie assistant
 
 Voice + touch natural-language control of odin, Echo-Show style: an ambient
 clock/HUD on the laptop's touchscreen that wakes into a chat when tapped,

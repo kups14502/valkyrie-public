@@ -37,6 +37,6 @@ Smoke test:
 ```bash
 curl -s http://127.0.0.1:8379/healthz
 curl -s -X POST http://127.0.0.1:8379/speak -H 'Content-Type: application/json' \
-  -d '{"text":"Huginn online."}' -o /tmp/tts.wav && aplay /tmp/tts.wav
+  -d '{"text":"Jarvis online."}' -o /tmp/tts.wav && aplay /tmp/tts.wav
 curl -s http://127.0.0.1:8378/inference -F file=@/tmp/tts.wav -F response_format=json
 ```
