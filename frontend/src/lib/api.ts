@@ -467,6 +467,20 @@ export const fetchGigs = async () => {
   return (r.data as { gigs: Gig[] }).gigs
 }
 
+export type GigStats = {
+  xp: number
+  level: number
+  levelXp: number
+  nextLevelXp: number
+  completed: number
+  breakdown: { work: number; personal: number; objectives: number }
+}
+
+export const fetchGigStats = async () => {
+  const r = await api.get<GigStats>('/gigs/stats')
+  return r.data
+}
+
 export const createGig = async (input: { title: string; detail?: string; category?: GigCategory; section?: string; parentId?: string; tracked?: boolean }) => {
   const r = await api.post<{ gig: GigRow; error?: string; detail?: string }>('/gigs', input)
   if (!r.data.gig) throw new Error(r.data.detail || r.data.error || 'Failed to create gig')

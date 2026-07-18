@@ -170,6 +170,48 @@ export function listGigs(): Gig[] {
     })
 }
 
+// XP / level: completing gigs earns XP by weight (work tickets are worth the
+// most, dailies the least), plus a small bonus per completed objective. Levels
+// follow a gently rising curve so early levels come fast and later ones take a
+// steady grind. Derived live from the gig data — no separate XP table to drift.
+export type GigStats = {
+  xp: number
+  level: number
+  levelXp: number      // xp at the start of the current level
+  nextLevelXp: number  // xp needed to reach the next level
+  completed: number
+  breakdown: { work: number; personal: number; objectives: number }
+}
+
+const XP_WEIGHT: Record<GigCategory, number> = { work: 100, main: 60, side: 40, daily: 20 }
+const OBJECTIVE_XP = 10
+// Cumulative XP to reach level L: 50 * L * (L+1)  (L1=100, L2=300, L3=600, …).
+const xpForLevel = (level: number) => 50 * level * (level + 1)
+
+export function gigStats(): GigStats {
+  const d = getDb()
+  const gigRows = d.prepare("SELECT category, parent_id FROM gigs WHERE status = 'completed'").all() as { category: string; parent_id: string | null }[]
+  let work = 0, personal = 0, objectives = 0, completed = 0
+  for (const g of gigRows) {
+    if (g.parent_id) { objectives += OBJECTIVE_XP; continue }  // a completed objective
+    completed++
+    const w = XP_WEIGHT[(CATEGORIES.includes(g.category as GigCategory) ? g.category : 'side') as GigCategory]
+    if (g.category === 'work') work += w
+    else personal += w
+  }
+  const xp = work + personal + objectives
+  let level = 0
+  while (xpForLevel(level + 1) <= xp) level++
+  return {
+    xp,
+    level,
+    levelXp: xpForLevel(level),
+    nextLevelXp: xpForLevel(level + 1),
+    completed,
+    breakdown: { work, personal, objectives },
+  }
+}
+
 export function getGig(id: string): GigRow | undefined {
   const r = getDb().prepare('SELECT * FROM gigs WHERE id = ?').get(id) as DbGigRow | undefined
   return r ? toRow(r) : undefined

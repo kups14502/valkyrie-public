@@ -7,7 +7,7 @@ import { GigProgressBar } from '../components/GigProgressBar'
 import { GigChat } from '../components/GigChat'
 import { gigColor } from '../lib/gigColor'
 import {
-  fetchGigs, createGig, updateGig, deleteGig, deleteGigLink,
+  fetchGigs, fetchGigStats, createGig, updateGig, deleteGig, deleteGigLink,
   type Gig, type GigRow, type GigCategory, type GigStatus,
 } from '../lib/api'
 
@@ -625,6 +625,37 @@ function GigJournal({ gig }: { gig: Gig }) {
   )
 }
 
+// ── XP / level ───────────────────────────────────────────────────────────────
+
+function XpBar() {
+  const stats = useQuery({ queryKey: ['gig-stats'], queryFn: fetchGigStats, refetchInterval: 60_000 })
+  const s = stats.data
+  if (!s) return null
+  const span = Math.max(1, s.nextLevelXp - s.levelXp)
+  const pct = Math.min(100, Math.round(((s.xp - s.levelXp) / span) * 100))
+  const toNext = s.nextLevelXp - s.xp
+  return (
+    <div
+      className="flex items-center gap-3 border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
+      title={`${s.completed} gigs completed · ${s.xp} XP total (work ${s.breakdown.work} · personal ${s.breakdown.personal} · objectives ${s.breakdown.objectives}) · ${toNext} XP to level ${s.level + 1}`}
+    >
+      <span
+        className="shrink-0 text-sm font-bold tracking-[0.1em] text-[var(--color-accent)]"
+        style={{ textShadow: '0 0 10px var(--color-accent)' }}
+      >
+        LVL {s.level}
+      </span>
+      <div className="h-1.5 min-w-0 flex-1 bg-[var(--color-surface-2)]">
+        <div
+          className="h-full transition-all duration-500"
+          style={{ width: `${pct}%`, backgroundColor: 'var(--color-accent)', boxShadow: '0 0 8px var(--color-accent)' }}
+        />
+      </div>
+      <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-faint)]">{s.xp - s.levelXp}/{span} xp</span>
+    </div>
+  )
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function Gigs() {
@@ -736,11 +767,14 @@ export default function Gigs() {
             gigs<span className="cursor-blink">_</span>
           </h1>
         </div>
-        <div className="text-[13px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          [{counts.active} active · {counts.waiting} waiting · {counts.done} done]
-          {counts.overdue > 0 && (
-            <span className="ml-2 font-bold text-[var(--color-danger)]">{counts.overdue} overdue</span>
-          )}
+        <div className="flex items-center gap-3">
+          <div className="hidden w-[220px] sm:block"><XpBar /></div>
+          <div className="text-[13px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            [{counts.active} active · {counts.waiting} waiting · {counts.done} done]
+            {counts.overdue > 0 && (
+              <span className="ml-2 font-bold text-[var(--color-danger)]">{counts.overdue} overdue</span>
+            )}
+          </div>
         </div>
       </div>
 

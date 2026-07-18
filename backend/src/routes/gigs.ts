@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { listGigs, createGig, updateGig, deleteGig, addLink, deleteLink } from '../gigs/store.js'
+import { listGigs, createGig, updateGig, deleteGig, addLink, deleteLink, gigStats } from '../gigs/store.js'
 
 const router = Router()
 
@@ -17,6 +17,14 @@ router.get('/gigs', (_req, res) => {
     res.json({ gigs: listGigs() })
   } catch (err) {
     fail(res, err, 'failed to list gigs')
+  }
+})
+
+router.get('/gigs/stats', (_req, res) => {
+  try {
+    res.json(gigStats())
+  } catch (err) {
+    fail(res, err, 'failed to compute gig stats')
   }
 })
 
