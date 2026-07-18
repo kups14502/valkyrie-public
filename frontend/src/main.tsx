@@ -46,3 +46,16 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// The desktop window starts hidden (tauri.conf.json) and Rust only reveals it
+// as a last resort, so reveal it here the moment the app has actually mounted.
+// This guarantees the user never sees the WebView2 cold-start error page: a
+// failed first navigation stays hidden and Rust retries it off-screen; only a
+// real mount shows the window.
+if (isTauri()) {
+  requestAnimationFrame(() => {
+    void import('@tauri-apps/api/webviewWindow')
+      .then(({ getCurrentWebviewWindow }) => getCurrentWebviewWindow().show())
+      .catch(() => {})
+  })
+}

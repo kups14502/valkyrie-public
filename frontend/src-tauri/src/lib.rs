@@ -5,20 +5,17 @@ use tauri_plugin_window_state::StateFlags;
 pub fn run() {
   tauri::Builder::default()
     // Remember window size/position/maximized across launches — but NOT
-    // visibility. The window starts hidden (see tauri.conf.json) and we reveal
-    // it only once content has loaded, so the WebView2 cold-start navigation to
-    // tauri.localhost can't flash its "can't reach this page" error at the user.
+    // visibility. The window starts hidden (see tauri.conf.json) and is
+    // revealed only when the React app actually mounts (main.tsx calls
+    // window.show()). The WebView2 cold-start navigation to tauri.localhost can
+    // fail with ERR_FAILED ("can't reach this page") on the first try; because
+    // the window is hidden and we only reveal on a real mount, that error is
+    // never seen — and the retry below recovers it off-screen.
     .plugin(
       tauri_plugin_window_state::Builder::default()
         .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
         .build(),
     )
-    // Fast path: reveal the window the moment a page finishes loading.
-    .on_page_load(|webview, payload| {
-      if payload.event() == tauri::webview::PageLoadEvent::Finished {
-        let _ = webview.window().show();
-      }
-    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -34,39 +31,40 @@ pub fn run() {
         app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
         app.handle().plugin(tauri_plugin_process::init())?;
       }
-      // Self-heal the stale-service-worker trap. Older app builds registered a
-      // PWA service worker that precached the frontend. It lives in the webview
-      // data dir, survives binary auto-updates, and keeps serving the OLD UI —
-      // so the updated app shows stale screens and the JS-side unregister never
-      // runs (the cached page is served instead of the fresh bundle). We can't
-      // fix this from JS that never loads, so do it natively: unregister any SW
-      // and delete CacheStorage, then reload to pull the fresh assets from the
-      // Tauri protocol. A no-op (no reload) once clean, so it's safe every
-      // launch; localStorage (auth/theme/unread state) is preserved.
-      // Safety net: reveal the window after a short delay no matter what, so a
-      // failed or slow first load can never leave it hidden forever. Showing an
-      // already-visible window is a no-op.
+
       if let Some(win) = app.get_webview_window("main") {
+        // Recover a failed cold-start navigation without showing the error.
+        // The window stays hidden until the app mounts and calls show(); if it
+        // hasn't shown after 1.8s the first navigation likely ERR_FAILED, so
+        // reload once (WebView2's custom-protocol handler is ready by then).
+        // A last-resort reveal at ~4s guarantees the window can never stay
+        // hidden, even if every load fails.
         let w = win.clone();
         std::thread::spawn(move || {
-          std::thread::sleep(std::time::Duration::from_millis(1500));
-          let _ = w.show();
+          std::thread::sleep(std::time::Duration::from_millis(1800));
+          if !w.is_visible().unwrap_or(false) {
+            let _ = w.eval("location.reload()");
+          }
+          std::thread::sleep(std::time::Duration::from_millis(2200));
+          if !w.is_visible().unwrap_or(false) {
+            let _ = w.show();
+          }
         });
-      }
-      if let Some(win) = app.get_webview_window("main") {
+
+        // Self-heal the stale-service-worker trap from older app builds (which
+        // shipped a PWA service worker; new builds ship none — see
+        // vite.config.ts). Unregister any leftover SW and clear caches so the
+        // next load isn't intercepted. No reload here: the retry above owns
+        // recovery, and localStorage (auth/theme) is preserved.
         let _ = win.eval(
           r#"(async () => {
             try {
-              let purged = false;
               if (navigator.serviceWorker) {
-                for (const r of await navigator.serviceWorker.getRegistrations()) { await r.unregister(); purged = true; }
+                for (const r of await navigator.serviceWorker.getRegistrations()) { await r.unregister(); }
               }
               if (window.caches) {
-                const keys = await caches.keys();
-                for (const k of keys) { await caches.delete(k); }
-                if (keys.length) purged = true;
+                for (const k of await caches.keys()) { await caches.delete(k); }
               }
-              if (purged) location.reload();
             } catch (e) {}
           })();"#,
         );
