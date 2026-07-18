@@ -4,6 +4,11 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { homedir } from 'node:os'
 import { createGig, addLink, getGig } from '../gigs/store.js'
+import { autotaskConfigured, findContactByEmail, createTicket } from '../lib/autotask.js'
+
+// Only these mailboxes hold real client work email, so only they may spawn
+// Autotask tickets — never the personal/internal accounts.
+const TICKET_ACCOUNTS = new Set(['work', 'work-support'])
 
 // Email intake queue. The email-assistant script on the server classifies each
 // new email and writes an intake suggestion row (work → Autotask ticket
@@ -143,6 +148,49 @@ function emailLabel(account: string, uid: string): string {
   } catch { /* label is best-effort */ }
   return `${account}:${uid}`
 }
+
+function emailFull(account: string, uid: string): { sender: string; subject: string; snippet: string } | null {
+  const db = getDb(true)
+  try {
+    return db.prepare('SELECT sender, subject, snippet FROM messages WHERE account = ? AND uid = ?').get(account, uid) as
+      | { sender: string; subject: string; snippet: string } | undefined ?? null
+  } finally {
+    db.close()
+  }
+}
+
+// Create a new Autotask ticket from a work email, attribute it to the sender's
+// client (via their Autotask contact), and link the intake item to it. Work
+// mailboxes only; refuses when the sender can't be resolved to a client
+// (e.g. internal senders) so it never misfiles a ticket.
+router.post('/emails/intake/:account/:uid/create-ticket', async (req, res) => {
+  const { account, uid } = req.params
+  try {
+    if (!TICKET_ACCOUNTS.has(account)) return res.status(400).json({ error: 'failed to create ticket', detail: 'this mailbox cannot spawn tickets' })
+    if (!autotaskConfigured()) return res.status(400).json({ error: 'failed to create ticket', detail: 'Autotask not configured' })
+    if (!intakeExists(account, uid)) return res.status(400).json({ error: 'failed to create ticket', detail: 'intake item not found' })
+    const m = emailFull(account, uid)
+    if (!m) return res.status(400).json({ error: 'failed to create ticket', detail: 'email not found' })
+
+    const contact = await findContactByEmail(m.sender)
+    if (!contact) return res.status(422).json({ error: 'failed to create ticket', detail: 'could not match the sender to an Autotask client — link manually' })
+
+    const ticket = await createTicket({
+      companyID: contact.companyID,
+      contactID: contact.contactID,
+      title: (m.subject || '(no subject)').slice(0, 200),
+      description: `Created from email (${m.sender}).\n\n${m.snippet || ''}`,
+    })
+
+    // Link the intake item to the freshly created ticket.
+    markIntake(account, uid, 'linked', 'ticket', ticket.ticketNumber, 'user')
+    res.json({ ok: true, ticket: { id: ticket.id, ref: ticket.ticketNumber } })
+  } catch (err) {
+    const message = (err as Error).message || 'unknown error'
+    console.error('[500] failed to create ticket:', err)
+    res.status(500).json({ error: 'failed to create ticket', detail: message })
+  }
+})
 
 // Apply a decision for one intake item.
 // body: { kind: 'ticket' | 'gig' | 'new-gig', ref?, title? }

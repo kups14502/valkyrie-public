@@ -577,6 +577,14 @@ export const dismissIntakeItem = async (account: string, uid: string) => {
   return r.data
 }
 
+// Create a new Autotask ticket from a work email and link the intake item.
+export const createTicketFromIntake = async (account: string, uid: string) => {
+  const r = await api.post<{ ok?: boolean; ticket?: { id: number; ref: string }; error?: string; detail?: string }>(
+    `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/create-ticket`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to create ticket')
+  return r.data.ticket!
+}
+
 // Undo a link (auto or manual): the item returns to the pending queue.
 export const unlinkIntakeItem = async (account: string, uid: string) => {
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(

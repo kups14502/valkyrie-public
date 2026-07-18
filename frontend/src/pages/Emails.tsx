@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Inbox, FileText, ListChecks, Link2, Activity, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Card } from '../components/Card'
 import {
-  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, unlinkIntakeItem, sendEmailFeedback, skipEmailSignal,
+  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, unlinkIntakeItem, createTicketFromIntake, sendEmailFeedback, skipEmailSignal,
   type EmailSignalItem, type EmailCorrection, type IntakeItem,
 } from '../lib/api'
 
@@ -128,8 +129,14 @@ function IntakeRow({ item }: { item: IntakeItem }) {
     mutationFn: () => dismissIntakeItem(item.account, item.uid),
     onSettled: invalidate,
   })
+  const createTicket = useMutation({
+    mutationFn: () => createTicketFromIntake(item.account, item.uid),
+    onSettled: invalidate,
+  })
   const feedback = useEmailFeedback(item.account, item.uid)
-  const busy = link.isPending || dismiss.isPending || feedback.isPending
+  const busy = link.isPending || dismiss.isPending || feedback.isPending || createTicket.isPending
+  // Only the Work client mailboxes hold real work email that can spawn tickets.
+  const canCreateTicket = item.isWork && (item.account === 'work' || item.account === 'work-support')
   // No ticket candidates and no gig suggestion: nothing to connect to, so
   // this needs a decision (new gig, spam, block, or dismiss).
   const unknown = item.isWork
@@ -211,6 +218,22 @@ function IntakeRow({ item }: { item: IntakeItem }) {
                 link
               </button>
             </form>
+            {canCreateTicket && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => createTicket.mutate()}
+                title="Create a new Autotask ticket from this email, attributed to the sender's client"
+                className="border border-[var(--color-accent)]/60 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] disabled:opacity-40"
+              >
+                {createTicket.isPending ? 'creating…' : '+ create ticket'}
+              </button>
+            )}
+            {createTicket.error != null && (
+              <span className="text-[10px] text-[var(--color-danger)]">
+                {((createTicket.error as { detail?: string; message?: string }).detail || (createTicket.error as Error).message)}
+              </span>
+            )}
             {unknown && (
               <button
                 type="button"
@@ -259,22 +282,84 @@ function IntakeRow({ item }: { item: IntakeItem }) {
   )
 }
 
-function IntakeCard() {
+// ── shared sub-page frame ────────────────────────────────────────────────────
+
+function useSignals() {
+  return useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 60_000 })
+}
+
+function SubPage({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <Link to="/emails" className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]">
+          <ChevronLeft size={13} /> email
+        </Link>
+        <div className="mt-1 flex items-baseline gap-3">
+          <h1 className="text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
+            {title}<span className="cursor-blink">_</span>
+          </h1>
+          {sub && <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">{sub}</span>}
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ── sub-pages ────────────────────────────────────────────────────────────────
+
+export function EmailInboxPage() {
+  const signals = useSignals()
+  const d = signals.data
+  return (
+    <SubPage title="action inbox" sub={`${d?.items.length ?? 0} to handle`}>
+      {signals.isLoading ? (
+        <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+      ) : (d?.items.length ?? 0) === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {d!.items.map((item) => (
+            <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
+          ))}
+        </div>
+      )}
+    </SubPage>
+  )
+}
+
+export function EmailDraftsPage() {
+  const signals = useSignals()
+  const drafts = signals.data?.drafts ?? []
+  return (
+    <SubPage title="draft replies" sub={`${drafts.length} waiting`}>
+      {signals.isLoading ? (
+        <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+      ) : drafts.length === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; no drafts waiting.</div>
+      ) : (
+        <div className="space-y-2">
+          {drafts.map((draft) => (
+            <div key={draft.filename} className="border border-[var(--color-border)] px-4 py-3 space-y-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-[var(--color-text)]">{draft.filename}</span>
+                <span className="text-[10px] text-[var(--color-text-faint)]">{fmtRelative(draft.mtime)}</span>
+              </div>
+              {draft.preview && <div className="text-xs text-[var(--color-text-dim)]">{draft.preview}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </SubPage>
+  )
+}
+
+export function EmailIntakePage() {
   const intake = useQuery({ queryKey: ['email-intake'], queryFn: () => fetchEmailIntake('pending'), refetchInterval: 60_000 })
   const d = intake.data
   return (
-    <Card
-      title={`Intake Queue (${d?.counts.pending ?? 0})`}
-      collapsible
-      storageKey="email-intake"
-      action={
-        d && (
-          <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
-            {d.counts.linked} connected · {d.counts.dismissed} dismissed
-          </span>
-        )
-      }
-    >
+    <SubPage title="intake queue" sub={d ? `${d.counts.pending} pending · ${d.counts.linked} connected` : undefined}>
       {intake.isLoading ? (
         <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
       ) : intake.error ? (
@@ -286,13 +371,11 @@ function IntakeCard() {
           {d!.items.map((item) => <IntakeRow key={`${item.account}-${item.uid}`} item={item} />)}
         </div>
       )}
-    </Card>
+    </SubPage>
   )
 }
 
-// Feed of what the scanner connected on its own (exact ticket-number matches).
-// Every entry has an undo that returns it to the pending queue.
-function AutoLinkedFeed() {
+export function EmailAutoLinkedPage() {
   const queryClient = useQueryClient()
   const linked = useQuery({ queryKey: ['email-intake-linked'], queryFn: () => fetchEmailIntake('linked'), refetchInterval: 60_000 })
   const undo = useMutation({
@@ -302,148 +385,142 @@ function AutoLinkedFeed() {
       void queryClient.invalidateQueries({ queryKey: ['email-intake-linked'] })
     },
   })
-  const items = (linked.data?.items ?? []).filter((i) => i.linkedBy === 'auto').slice(0, 12)
-  if (items.length === 0) return null
+  const items = (linked.data?.items ?? []).filter((i) => i.linkedBy === 'auto')
   return (
-    <Card title={`Auto-Linked (${items.length})`} collapsible defaultCollapsed storageKey="email-autolinked">
-      <div className="space-y-1.5">
-        {items.map((i) => (
-          <div key={`${i.account}-${i.uid}`} className="group flex items-center gap-2 text-[11px]">
-            <span className="shrink-0 font-bold text-[var(--color-accent)]">→ {i.linkedRef}</span>
-            <span className="min-w-0 flex-1 truncate text-[var(--color-text-dim)]" title={i.subject}>{i.subject}</span>
-            <span className="hidden shrink-0 text-[9px] text-[var(--color-text-faint)] sm:inline">{fmtDate(i.processedAt)}</span>
-            <button
-              type="button"
-              disabled={undo.isPending}
-              onClick={() => undo.mutate(i)}
-              className="shrink-0 border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] opacity-0 transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
-            >
-              undo
-            </button>
-          </div>
-        ))}
-      </div>
-      {undo.error != null && (
-        <div className="mt-2 text-[10px] text-[var(--color-danger)]">undo failed, try again</div>
+    <SubPage title="auto-linked" sub={`${items.length} auto-connected`}>
+      {items.length === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">&gt; nothing auto-linked yet.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((i) => (
+            <div key={`${i.account}-${i.uid}`} className="group flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs">
+              <span className="shrink-0 font-bold text-[var(--color-accent)]">→ {i.linkedRef}</span>
+              <span className="min-w-0 flex-1 truncate text-[var(--color-text-dim)]" title={i.subject}>{i.subject}</span>
+              <span className="hidden shrink-0 text-[9px] text-[var(--color-text-faint)] sm:inline">{fmtDate(i.processedAt)}</span>
+              <button
+                type="button"
+                disabled={undo.isPending}
+                onClick={() => undo.mutate(i)}
+                className="shrink-0 border border-[var(--color-border)] px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40"
+              >
+                undo
+              </button>
+            </div>
+          ))}
+        </div>
       )}
-    </Card>
+      {undo.error != null && <div className="text-[10px] text-[var(--color-danger)]">undo failed, try again</div>}
+    </SubPage>
+  )
+}
+
+export function EmailServicePage() {
+  const signals = useSignals()
+  const d = signals.data
+  const timerOk = d?.timer.active === 'active'
+  return (
+    <SubPage title="service">
+      {signals.isLoading ? (
+        <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">timer</div>
+              <div className={`mt-1 text-sm font-bold ${timerOk ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>{d?.timer.active ?? '—'}</div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">last svc</div>
+              <div className={`mt-1 text-sm font-bold ${d?.service.result === 'success' ? 'text-[var(--color-success)]' : d?.service.result ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-dim)]'}`}>{d?.service.result ?? '—'}</div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">important 24h</div>
+              <div className={`mt-1 text-2xl font-bold ${(d?.counts.important24h ?? 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{d?.counts.important24h ?? 0}</div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">drafts waiting</div>
+              <div className={`mt-1 text-2xl font-bold ${(d?.drafts.length ?? 0) > 0 ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-dim)]'}`}>{d?.drafts.length ?? 0}</div>
+            </div>
+          </div>
+          <div className="border-t border-[var(--color-border)] pt-3">
+            <div className="mb-2 text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">accounts</div>
+            <div className="flex flex-wrap gap-2">
+              {d?.accounts.map((a) => (
+                <span key={a.id} className={`border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${a.enabled ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-faint)]'}`}>
+                  {a.enabled ? '' : '○ '}{a.address.split('@')[0]}
+                </span>
+              ))}
+            </div>
+          </div>
+          {d && <div className="text-[10px] text-[var(--color-text-faint)]">{d.counts.ignoredTotal} ignored · {d.counts.total} total indexed</div>}
+          {(d?.recentErrors.length ?? 0) > 0 && (
+            <div className="border-t border-[var(--color-border)] pt-3">
+              <div className="mb-2 text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">recent errors</div>
+              <div className="space-y-1">
+                {d!.recentErrors.map((e, i) => <div key={i} className="text-xs text-[var(--color-danger)]">{e}</div>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </SubPage>
+  )
+}
+
+// ── hub: large buttons, each opening its own page ────────────────────────────
+
+function HubButton({ to, icon, label, count, tone, sub }: {
+  to: string; icon: React.ReactNode; label: string; count?: number; tone?: 'alert' | 'accent' | 'dim'; sub?: string
+}) {
+  const countColor = tone === 'alert' ? 'text-[var(--color-danger)]' : tone === 'dim' ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-accent)]'
+  return (
+    <Link
+      to={to}
+      className="group flex items-center gap-4 border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-5 transition hover:border-[var(--color-accent)]/60 hover:bg-[rgba(var(--color-accent-rgb),0.04)]"
+    >
+      <span className="shrink-0 text-[var(--color-text-dim)] transition group-hover:text-[var(--color-accent)]">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-bold uppercase tracking-[0.14em] text-[var(--color-text)] transition group-hover:text-[var(--color-accent)]">{label}</div>
+        {sub && <div className="mt-0.5 text-[11px] text-[var(--color-text-faint)]">{sub}</div>}
+      </div>
+      {count != null && <span className={`shrink-0 text-2xl font-bold ${countColor}`}>{count}</span>}
+      <ChevronRight size={18} className="shrink-0 text-[var(--color-text-faint)] transition group-hover:text-[var(--color-accent)]" />
+    </Link>
   )
 }
 
 export default function Emails() {
-  const signals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 60_000 })
+  const signals = useSignals()
+  const intake = useQuery({ queryKey: ['email-intake'], queryFn: () => fetchEmailIntake('pending'), refetchInterval: 60_000 })
   const d = signals.data
-
+  const linked = useQuery({ queryKey: ['email-intake-linked'], queryFn: () => fetchEmailIntake('linked'), refetchInterval: 120_000 })
+  const autoCount = (linked.data?.items ?? []).filter((i) => i.linkedBy === 'auto').length
   const enabledAccounts = d?.accounts.filter((a) => a.enabled) ?? []
-  const timerOk = d?.timer.active === 'active'
-  const importantCount = d?.counts.important24h ?? 0
-  const draftsCount = d?.drafts.length ?? 0
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// signals</div>
-          <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
-            email<span className="cursor-blink">_</span>
-          </h1>
-        </div>
+      <div>
+        <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// signals</div>
+        <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
+          email<span className="cursor-blink">_</span>
+        </h1>
       </div>
 
-      {/* Important email leads the page — no scrolling past the queue to find
-          what actually needs you. */}
-      <Card title={`Action Inbox (${d?.items.length ?? 0})`} collapsible storageKey="email-inbox">
-        {signals.isLoading ? (
-          <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-        ) : (d?.items.length ?? 0) === 0 ? (
-          <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
-        ) : (
-          <div className="space-y-1">
-            {d!.items.map((item) => (
-              <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {(d?.drafts.length ?? 0) > 0 && (
-        <Card title={`Draft Replies (${d!.drafts.length})`} collapsible storageKey="email-drafts">
-          <div className="space-y-2">
-            {d!.drafts.map((draft) => (
-              <div key={draft.filename} className="border border-[var(--color-border)] px-3 py-2 space-y-1">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-[var(--color-text)]">{draft.filename}</span>
-                  <span className="text-[10px] text-[var(--color-text-faint)]">{fmtRelative(draft.mtime)}</span>
-                </div>
-                {draft.preview && (
-                  <div className="text-[11px] text-[var(--color-text-dim)] truncate">{draft.preview}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <IntakeCard />
-      <AutoLinkedFeed />
-
-      {/* Service health + account status: reference, so it lives at the bottom
-          and starts collapsed. */}
-      <Card title="Service" collapsible defaultCollapsed storageKey="email-service">
-        {signals.isLoading ? (
-          <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-        ) : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">timer</div>
-                <div className={`mt-1 text-sm font-bold ${timerOk ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>
-                  {d?.timer.active ?? '—'}
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">last svc</div>
-                <div className={`mt-1 text-sm font-bold ${d?.service.result === 'success' ? 'text-[var(--color-success)]' : d?.service.result ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-dim)]'}`}>
-                  {d?.service.result ?? '—'}
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">important 24h</div>
-                <div className={`mt-1 text-2xl font-bold ${importantCount > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>{importantCount}</div>
-              </div>
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">drafts waiting</div>
-                <div className={`mt-1 text-2xl font-bold ${draftsCount > 0 ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-dim)]'}`}>{draftsCount}</div>
-              </div>
-            </div>
-            <div className="border-t border-[var(--color-border)] pt-3">
-              <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)] mb-2">accounts</div>
-              <div className="flex flex-wrap gap-2">
-                {d?.accounts.map((a) => (
-                  <span key={a.id} className={`text-[10px] uppercase tracking-[0.12em] border px-2 py-0.5 ${a.enabled ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-faint)]'}`}>
-                    {a.enabled ? '' : '○ '}{a.address.split('@')[0]}
-                  </span>
-                ))}
-              </div>
-            </div>
-            {d && (
-              <div className="text-[10px] text-[var(--color-text-faint)]">
-                {d.counts.ignoredTotal} ignored · {d.counts.total} total indexed
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {(d?.recentErrors.length ?? 0) > 0 && (
-        <Card title="Recent Errors">
-          <div className="space-y-1">
-            {d!.recentErrors.map((e, i) => (
-              <div key={i} className="text-xs text-[var(--color-danger)]">{e}</div>
-            ))}
-          </div>
-        </Card>
-      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <HubButton to="/emails/inbox" icon={<Inbox size={22} />} label="action inbox"
+          sub="important email that needs you" count={d?.items.length ?? 0}
+          tone={(d?.items.length ?? 0) > 0 ? 'alert' : 'dim'} />
+        <HubButton to="/emails/intake" icon={<ListChecks size={22} />} label="intake queue"
+          sub="connect email to gigs & tickets" count={intake.data?.counts.pending ?? 0}
+          tone={(intake.data?.counts.pending ?? 0) > 0 ? 'accent' : 'dim'} />
+        <HubButton to="/emails/drafts" icon={<FileText size={22} />} label="draft replies"
+          sub="ready-to-send drafts" count={d?.drafts.length ?? 0}
+          tone={(d?.drafts.length ?? 0) > 0 ? 'accent' : 'dim'} />
+        <HubButton to="/emails/auto-linked" icon={<Link2 size={22} />} label="auto-linked"
+          sub="what the scanner connected" count={autoCount} tone="dim" />
+        <HubButton to="/emails/service" icon={<Activity size={22} />} label="service"
+          sub="scanner health & accounts" />
+      </div>
 
       {enabledAccounts.length === 0 && !signals.isLoading && (
         <div className="border border-[var(--color-warning)]/40 px-3 py-2 text-xs text-[var(--color-warning)]">
