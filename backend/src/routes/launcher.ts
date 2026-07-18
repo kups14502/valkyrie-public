@@ -18,7 +18,6 @@ type Service = {
 // systemd units and Docker containers are inventoried separately by /api/services.
 const SERVICES: Service[] = [
   { id: 'valkyrie', name: 'Valkyrie', url: 'https://valkyrie.brendonkupsch.com', pingUrl: 'http://127.0.0.1:3001/healthz', category: 'self', owner: 'valkyrie-api.service' },
-  { id: 'trading-dashboard', name: 'Trading Dashboard', url: 'http://100.96.237.89:7734', pingUrl: 'http://127.0.0.1:7734', category: 'trading', owner: 'trading-dashboard.service' },
   { id: 'vaultwarden', name: 'Vaultwarden', url: 'https://100.96.237.89:8443', category: 'storage', owner: 'vaultwarden + vaultwarden-caddy' },
   { id: 'homeassistant', name: 'Home Assistant', url: 'http://100.96.237.89:8123', pingUrl: 'http://127.0.0.1:8123', category: 'home', owner: 'homeassistant' },
   { id: 'plex', name: 'Plex', url: 'http://100.96.237.89:32400/web', pingUrl: 'http://127.0.0.1:32400/identity', category: 'media', owner: 'plex' },
