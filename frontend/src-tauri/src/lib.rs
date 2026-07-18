@@ -1,10 +1,24 @@
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    // Remember window size/position/maximized state across launches.
-    .plugin(tauri_plugin_window_state::Builder::default().build())
+    // Remember window size/position/maximized across launches — but NOT
+    // visibility. The window starts hidden (see tauri.conf.json) and we reveal
+    // it only once content has loaded, so the WebView2 cold-start navigation to
+    // tauri.localhost can't flash its "can't reach this page" error at the user.
+    .plugin(
+      tauri_plugin_window_state::Builder::default()
+        .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+        .build(),
+    )
+    // Fast path: reveal the window the moment a page finishes loading.
+    .on_page_load(|webview, payload| {
+      if payload.event() == tauri::webview::PageLoadEvent::Finished {
+        let _ = webview.window().show();
+      }
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -29,6 +43,16 @@ pub fn run() {
       // and delete CacheStorage, then reload to pull the fresh assets from the
       // Tauri protocol. A no-op (no reload) once clean, so it's safe every
       // launch; localStorage (auth/theme/unread state) is preserved.
+      // Safety net: reveal the window after a short delay no matter what, so a
+      // failed or slow first load can never leave it hidden forever. Showing an
+      // already-visible window is a no-op.
+      if let Some(win) = app.get_webview_window("main") {
+        let w = win.clone();
+        std::thread::spawn(move || {
+          std::thread::sleep(std::time::Duration::from_millis(1500));
+          let _ = w.show();
+        });
+      }
       if let Some(win) = app.get_webview_window("main") {
         let _ = win.eval(
           r#"(async () => {
