@@ -1,14 +1,14 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, ScrollText } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, ScrollText, Search } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
 import { TitleBar } from './components/TitleBar'
 import { WindowControls } from './components/TauriTitleBar'
 import { UpdateAlarm } from './components/UpdateAlarm'
-import { CommandPalette } from './components/CommandPalette'
+import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
@@ -98,7 +98,15 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
           })}
         </div>
         <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3">
-          <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">accent color</span>
+          <button
+            type="button"
+            onClick={() => { onClose(); openCommandPalette() }}
+            title="Search — jump to any page or gig (Ctrl+K)"
+            className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
+          >
+            <Search size={12} /> search
+            <kbd className="ml-1 border border-[var(--color-border)] px-1 py-0.5 text-[8px] tracking-[0.1em] text-[var(--color-text-faint)]">ctrl k</kbd>
+          </button>
           <div className="flex items-center gap-2">
             <ThemePicker />
             <button

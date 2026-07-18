@@ -8,6 +8,11 @@ import { fetchGigs } from '../lib/api'
 // by name. Opens over everything, keyboard-driven, closes on Esc / outside
 // click / after acting. Mounted once in the app shell.
 
+// Let anything (e.g. the menu's Search button) open the palette without
+// prop-drilling: fire this event and the mounted palette opens.
+const OPEN_EVENT = 'valkyrie:command-palette'
+export function openCommandPalette() { window.dispatchEvent(new Event(OPEN_EVENT)) }
+
 type Cmd = { id: string; label: string; hint?: string; icon: React.ReactNode; run: () => void }
 
 const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
@@ -40,8 +45,13 @@ export function CommandPalette() {
         setOpen(false)
       }
     }
+    const onOpen = () => setOpen(true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener(OPEN_EVENT, onOpen)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener(OPEN_EVENT, onOpen)
+    }
   }, [open])
 
   useEffect(() => {
