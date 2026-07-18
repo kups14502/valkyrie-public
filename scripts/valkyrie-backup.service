@@ -1,0 +1,8 @@
+[Unit]
+Description=Valkyrie SQLite backup (gigs, email intake, auth)
+
+[Service]
+Type=oneshot
+ExecStart=%h/valkyrie/scripts/backup-valkyrie.sh
+Nice=10
+IOSchedulingClass=idle

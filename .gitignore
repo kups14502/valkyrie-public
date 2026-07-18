@@ -12,3 +12,4 @@ backend/data/
 
 .code-deck/
 backend/tsconfig.tsbuildinfo
+backups/
