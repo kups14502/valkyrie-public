@@ -1,15 +1,15 @@
 {
-  "version": "0.3.28",
-  "notes": "feat(emails): hub of pages + one-click create-ticket",
-  "pub_date": "2026-07-18T07:18:07Z",
+  "version": "0.3.29",
+  "notes": "fix(app): no service worker in the desktop build (kills the launch flash)",
+  "pub_date": "2026-07-18T23:16:15Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZsQm95ME5hMGZBZ2wrc0FLQW1JTUJnbGxyVFltdDBhaTVGK3hTZ0VGYmFCcFZJOVk1MGUzTERlZUZBY2Q0OEIzOElRODJrbHM0NENBdlYrSTZLMmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzU5MDg3CWZpbGU6VmFsa3lyaWVfMC4zLjI4X3g2NC1zZXR1cC5leGUKdVJlVzFsdmlYWW02RFMxOC9KTzlCSDZaVDRsNENtSTFiUGM5bXlJb3RTY2d1enNZVjdsVVUwNzF3OXA1NGtkUUVKMDJrMllJZDlOallQN3lkVHY3Q0E9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.28/Valkyrie_0.3.28_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVV2OE5oemJFbjA0MjhqNWxTVmlvYnRLcU8zWTk3cU9SSThzTnk4MnBWYjhKV2huSU5ON2RBQzdTWVJPY3pKNUZ6NDAzbUIxNDlZVFJIN01uZHQwbEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NDE2NTc0CWZpbGU6VmFsa3lyaWVfMC4zLjI5X3g2NC1zZXR1cC5leGUKbElOVUJNMXg5OVphV0lESTMva09wOUM1OWIxbUhUOXJhYm9yOW1oYWc1MVVQa3RZTGkxdUtrdk5ndFdZdmlaUUI3RFd1WXAvdHpQejNwNko2Q2RDQnc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.29/Valkyrie_0.3.29_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVYyWUsyTVRwS090cWFnVnowaVFueTNTb2doeHBmeStLSmwzRGczTS8rRG9HajRTVWppSFBKN2Z1Y1FoNjR2VkpEcm9kK0xtY1drbXNyZ2dzQXRadmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzU4OTkyCWZpbGU6VmFsa3lyaWVfMC4zLjI4X2FtZDY0LkFwcEltYWdlCmxDcEh3aG5LTmI0eUN5S3NOaWY4OStlQWxrWFh0QjIvNEhJVzFDZVRweGEyUHlyRkJiZVVmU2ViVnRTTWROU29MV0J0bktCWGxXZTZJWllYSGVRSEFBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.28/Valkyrie_0.3.28_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJZYTFCSDNFWkVaQ1BaNm9jYjBJdjF1V2oxTktnTjlEODlQcmxvWE1XQWhYT3Vxb0pPcEYxYXpsYlk0azRIRmZqak4yTkNWZ2x6d2ZZOVZUSEFRQ2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NDE2NTE2CWZpbGU6VmFsa3lyaWVfMC4zLjI5X2FtZDY0LkFwcEltYWdlCks3M3doMElLVlMzTXpwT2xMcEZkTk1Od0pPREd1RzdRQVBBK25jZFMydkNjeFFPN3ExUTJFbThXd2J3dTR6eHVQUjJqVGd2UkhmUVU5K2I1VUxTeUJBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.29/Valkyrie_0.3.29_amd64.AppImage"
     }
   }
 }
