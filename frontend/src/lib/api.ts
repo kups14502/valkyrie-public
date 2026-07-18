@@ -562,6 +562,14 @@ export const sendEmailFeedback = async (account: string, uid: string, correction
   return r.data
 }
 
+// Skip: drop an email off the action inbox without training the classifier.
+export const skipEmailSignal = async (account: string, uid: string) => {
+  const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
+    `/email/signals/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/ack`)
+  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to skip email')
+  return r.data
+}
+
 export const dismissIntakeItem = async (account: string, uid: string) => {
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
     `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/dismiss`)

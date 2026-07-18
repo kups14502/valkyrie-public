@@ -1,22 +1,64 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
-export function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
+export function Card({
+  title, children, action, collapsible, defaultCollapsed, storageKey,
+}: {
+  title?: string
+  children: ReactNode
+  action?: ReactNode
+  collapsible?: boolean
+  defaultCollapsed?: boolean
+  // Persist the collapsed state across sessions when set.
+  storageKey?: string
+}) {
+  const [collapsed, setCollapsed] = useState(() => {
+    if (storageKey) {
+      const v = localStorage.getItem(`valkyrie-card-${storageKey}`)
+      if (v != null) return v === '1'
+    }
+    return Boolean(defaultCollapsed)
+  })
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c
+      if (storageKey) localStorage.setItem(`valkyrie-card-${storageKey}`, next ? '1' : '0')
+      return next
+    })
+  }
+
+  const heading = title && (
+    <h2
+      className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[0.22em]"
+      style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
+    >
+      &gt; {title}
+    </h2>
+  )
+
   return (
     <section className="panel max-w-full overflow-visible p-4 sm:p-5">
       {(title || action) && (
-        <div className="mb-4 flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
-          {title && (
-            <h2
-              className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[0.22em]"
-              style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
+        <div className={`flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2 ${collapsed ? '' : 'mb-4'}`}>
+          {collapsible ? (
+            <button
+              type="button"
+              onClick={toggle}
+              aria-expanded={!collapsed}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
             >
-              &gt; {title}
-            </h2>
+              <span className="shrink-0 text-[var(--color-accent)]">
+                {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              </span>
+              {heading}
+            </button>
+          ) : (
+            heading
           )}
           {action}
         </div>
       )}
-      {children}
+      {!collapsed && children}
     </section>
   )
 }

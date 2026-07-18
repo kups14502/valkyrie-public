@@ -20,6 +20,19 @@ type MsgRow = {
   date: string; classification: string; reason: string; snippet: string; seen_at: string
 }
 
+// The action inbox hides emails the user has "skipped" (acknowledged). The
+// flag lives on the messages table in mail.sqlite; add it once, idempotently.
+let ackColumnReady = false
+function ensureAckColumn(): void {
+  if (ackColumnReady) return
+  try {
+    const db = new Database(DB_PATH)
+    try { db.exec('ALTER TABLE messages ADD COLUMN acked INTEGER NOT NULL DEFAULT 0') } catch { /* exists */ }
+    finally { db.close() }
+    ackColumnReady = true
+  } catch { /* mail.sqlite not ready yet; try again next request */ }
+}
+
 function cleanSnippet(s: string): string {
   return s.slice(0, 300).replace(/\s+/g, ' ').trim()
 }
@@ -31,6 +44,7 @@ function senderDisplay(raw: string): string {
 
 router.get('/email/signals', async (_req, res) => {
   try {
+    ensureAckColumn()
     // --- service health ---
     const [timerOut, svcOut] = await Promise.allSettled([
       exec('systemctl', ['--user', 'show', 'email-assistant.timer',
@@ -70,11 +84,11 @@ router.get('/email/signals', async (_req, res) => {
       total:        countRow(`SELECT COUNT(*) as n FROM messages`),
     }
 
-    // --- actionable items ---
+    // --- actionable items (skipped/acked ones are hidden) ---
     const rows = db.prepare(
       `SELECT account, uid, sender, subject, date, classification, reason, snippet, seen_at
        FROM messages
-       WHERE classification IN ('important','routine')
+       WHERE classification IN ('important','routine') AND COALESCE(acked, 0) = 0
        ORDER BY seen_at DESC LIMIT 20`
     ).all() as MsgRow[]
 
@@ -147,6 +161,26 @@ router.get('/email/signals', async (_req, res) => {
   } catch (err) {
     console.error('[500] signals unavailable:', err)
     res.status(500).json({ error: 'signals unavailable', detail: (err as Error).message })
+  }
+})
+
+// Skip: acknowledge an email so it drops off the action inbox without any
+// training signal (unlike spam / not-important, which reclassify the sender).
+router.post('/email/signals/:account/:uid/ack', (req, res) => {
+  try {
+    ensureAckColumn()
+    const db = new Database(DB_PATH)
+    try {
+      const r = db.prepare('UPDATE messages SET acked = 1 WHERE account = ? AND uid = ?')
+        .run(req.params.account, req.params.uid)
+      if (r.changes === 0) return res.status(404).json({ error: 'message not found' })
+      res.json({ ok: true })
+    } finally {
+      db.close()
+    }
+  } catch (err) {
+    console.error('[500] failed to skip email:', err)
+    res.status(500).json({ error: 'failed to skip email', detail: (err as Error).message })
   }
 })
 

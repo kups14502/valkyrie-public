@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import {
-  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, unlinkIntakeItem, sendEmailFeedback,
+  fetchEmailSignals, fetchEmailIntake, linkIntakeItem, dismissIntakeItem, unlinkIntakeItem, sendEmailFeedback, skipEmailSignal,
   type EmailSignalItem, type EmailCorrection, type IntakeItem,
 } from '../lib/api'
 
@@ -16,6 +16,15 @@ function useEmailFeedback(account: string, uid: string) {
       void queryClient.invalidateQueries({ queryKey: ['email-signals'] })
       void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
     },
+  })
+}
+
+// Skip just clears the email from the action inbox — no training signal.
+function useSkipSignal(account: string, uid: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => skipEmailSignal(account, uid),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['email-signals'] }),
   })
 }
 
@@ -49,6 +58,7 @@ function fmtRelative(iso: string) {
 export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
   const [expanded, setExpanded] = useState(false)
   const feedback = useEmailFeedback(item.account, item.uid)
+  const skip = useSkipSignal(item.account, item.uid)
   const isImportant = item.classification === 'important'
   return (
     <div
@@ -82,6 +92,7 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
           </div>
           <div className="flex items-center justify-between gap-2 pt-1">
             <div className="flex items-center gap-1.5">
+              <FeedbackButton label="skip" title="Clear from the inbox — no training, just mark handled" disabled={skip.isPending} onClick={() => skip.mutate()} />
               {isImportant && (
                 <FeedbackButton label="not important" title="Train: downgrade this kind of email" disabled={feedback.isPending} onClick={() => feedback.mutate('not_important')} />
               )}
@@ -254,6 +265,8 @@ function IntakeCard() {
   return (
     <Card
       title={`Intake Queue (${d?.counts.pending ?? 0})`}
+      collapsible
+      storageKey="email-intake"
       action={
         d && (
           <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
@@ -292,7 +305,7 @@ function AutoLinkedFeed() {
   const items = (linked.data?.items ?? []).filter((i) => i.linkedBy === 'auto').slice(0, 12)
   if (items.length === 0) return null
   return (
-    <Card title={`Auto-Linked (${items.length})`}>
+    <Card title={`Auto-Linked (${items.length})`} collapsible defaultCollapsed storageKey="email-autolinked">
       <div className="space-y-1.5">
         {items.map((i) => (
           <div key={`${i.account}-${i.uid}`} className="group flex items-center gap-2 text-[11px]">
@@ -339,7 +352,7 @@ export default function Emails() {
 
       {/* Important email leads the page — no scrolling past the queue to find
           what actually needs you. */}
-      <Card title={`Action Inbox (${d?.items.length ?? 0})`}>
+      <Card title={`Action Inbox (${d?.items.length ?? 0})`} collapsible storageKey="email-inbox">
         {signals.isLoading ? (
           <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
         ) : (d?.items.length ?? 0) === 0 ? (
@@ -354,7 +367,7 @@ export default function Emails() {
       </Card>
 
       {(d?.drafts.length ?? 0) > 0 && (
-        <Card title={`Draft Replies (${d!.drafts.length})`}>
+        <Card title={`Draft Replies (${d!.drafts.length})`} collapsible storageKey="email-drafts">
           <div className="space-y-2">
             {d!.drafts.map((draft) => (
               <div key={draft.filename} className="border border-[var(--color-border)] px-3 py-2 space-y-1">
@@ -374,8 +387,9 @@ export default function Emails() {
       <IntakeCard />
       <AutoLinkedFeed />
 
-      {/* Service health + account status: reference, so it lives at the bottom. */}
-      <Card title="Service">
+      {/* Service health + account status: reference, so it lives at the bottom
+          and starts collapsed. */}
+      <Card title="Service" collapsible defaultCollapsed storageKey="email-service">
         {signals.isLoading ? (
           <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
         ) : (
