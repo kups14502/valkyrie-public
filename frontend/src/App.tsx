@@ -8,6 +8,7 @@ import { setupZoom } from './lib/zoom'
 import { TitleBar } from './components/TitleBar'
 import { WindowControls } from './components/TauriTitleBar'
 import { UpdateAlarm } from './components/UpdateAlarm'
+import { CommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
@@ -225,6 +226,7 @@ function Shell() {
           </ErrorBoundary>
         </Suspense>
       </main>
+      <CommandPalette />
     </div>
   )
 }

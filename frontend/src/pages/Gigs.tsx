@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, EyeOff, Plus, Trash2, Link2, X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from 'lucide-react'
 import { GigProgressBar } from '../components/GigProgressBar'
@@ -630,6 +631,13 @@ export default function Gigs() {
   const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, refetchInterval: 30_000 })
   const [tab, setTab] = useState<Tab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Deep link: /gigs?gig=<id> (from the command palette or a shared link)
+  // preselects that gig, then the param is cleared so it doesn't stick.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const g = searchParams.get('gig')
+    if (g) { setSelectedId(g); setTab('all'); setSearchParams({}, { replace: true }) }
+  }, [searchParams, setSearchParams])
   const listRef = useRef<HTMLDivElement>(null)
   const journalRef = useRef<HTMLDivElement>(null)
 
