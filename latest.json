@@ -1,15 +1,15 @@
 {
-  "version": "0.3.23",
-  "notes": "feat(app): Ctrl+K command palette",
-  "pub_date": "2026-07-18T05:53:24Z",
+  "version": "0.3.24",
+  "notes": "feat(gigs): XP / level system",
+  "pub_date": "2026-07-18T05:57:09Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVo2bXRRbGNHSzdVcTRJVmVBV2FjM3NLYkN3ZTZtWHZ5ZC9McDNQTDA4UWtnRlk0OUQ3N0JVb1plSS9sRWFOT1Uzc3dEQVZrZGIvcEU5Q0tOU0ZMRGdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzU0MDA0CWZpbGU6VmFsa3lyaWVfMC4zLjIzX3g2NC1zZXR1cC5leGUKWXM2U3FqZUFuelhhekY2NDAvU1dxVzlwc0o2eDhvVVdlSnhiL3Z2b0RGUUVrcE9PSVVrbWFiK2NZYjFPU3BVeWxELzVzMHd0U3RBbzd4bitEcFY5QUE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.23/Valkyrie_0.3.23_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlvRmNGbzJKelJ4ZmZQcW9Fc25EOWczSHZYK1RNYUVyOS9Na3BGOEZHUFRObk9yc3pJWS9xQS84NmUxc2k0cXVjSyt4K3JMK3M0NnZEOFp6ak1NZ2dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzU0MjI5CWZpbGU6VmFsa3lyaWVfMC4zLjI0X3g2NC1zZXR1cC5leGUKK3VicFlqanloRmlVYmNjUHNhZWtYYjNqQldqSk80ZUI2T2piTjZQVWdDdk0vS09pVDRmZ0U2SWVodUx0QkdvWWxFN3JReTVlOG96c3d5N1U0ZzlTREE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.24/Valkyrie_0.3.24_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVXd2ZFU0U4NlByZms2NHdMZ1I5R0krQ3FENUYxdFpvZkNMb3BBNjczczZIQ0tIeWlaczRBL29UbkRPc0Y3Si80N0V5cUp3UVR4ajVlaFJFS3c1ZlE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzUzOTI3CWZpbGU6VmFsa3lyaWVfMC4zLjIzX2FtZDY0LkFwcEltYWdlClVZNkx5TlhRakZMZEVzWEhSRUpJUTFnK3RZZ1RyWG83dE9RQ1RGVFd0RWtwWFc1cGI4N1FoWGFRdm85SW84aVRVK0k5UlZRTjZibW9WRlN3ODlidUJBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.23/Valkyrie_0.3.23_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZCb3ZBMXNDZWxLTGdxeld3YkZhL1VmRERGbjQ1enh4bGpQSXEyaFkwMU9tb0h2UURVVVhSdnplck1BZGNPdHYveElmQm1mUzR0SlYyaUFpb080endzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MzU0MTU0CWZpbGU6VmFsa3lyaWVfMC4zLjI0X2FtZDY0LkFwcEltYWdlCkhKK2lMOTdUOGZiay9ucjFFNzJzN2tOSHVtL3R5ZmRCOCtlclU1a2pGZWMrNzJvcGRxb2J6ZXQxSjBPcU1DNmxFMXNGcWJXbFVMNzJmbU1lZnZ3MkNBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.24/Valkyrie_0.3.24_amd64.AppImage"
     }
   }
 }
