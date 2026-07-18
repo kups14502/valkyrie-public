@@ -337,9 +337,44 @@ export default function Emails() {
         </div>
       </div>
 
+      {/* Important email leads the page — no scrolling past the queue to find
+          what actually needs you. */}
+      <Card title={`Action Inbox (${d?.items.length ?? 0})`}>
+        {signals.isLoading ? (
+          <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
+        ) : (d?.items.length ?? 0) === 0 ? (
+          <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
+        ) : (
+          <div className="space-y-1">
+            {d!.items.map((item) => (
+              <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {(d?.drafts.length ?? 0) > 0 && (
+        <Card title={`Draft Replies (${d!.drafts.length})`}>
+          <div className="space-y-2">
+            {d!.drafts.map((draft) => (
+              <div key={draft.filename} className="border border-[var(--color-border)] px-3 py-2 space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-[var(--color-text)]">{draft.filename}</span>
+                  <span className="text-[10px] text-[var(--color-text-faint)]">{fmtRelative(draft.mtime)}</span>
+                </div>
+                {draft.preview && (
+                  <div className="text-[11px] text-[var(--color-text-dim)] truncate">{draft.preview}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <IntakeCard />
       <AutoLinkedFeed />
 
+      {/* Service health + account status: reference, so it lives at the bottom. */}
       <Card title="Service">
         {signals.isLoading ? (
           <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
@@ -385,38 +420,6 @@ export default function Emails() {
           </div>
         )}
       </Card>
-
-      <Card title={`Action Inbox (${d?.items.length ?? 0})`}>
-        {signals.isLoading ? (
-          <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-        ) : (d?.items.length ?? 0) === 0 ? (
-          <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
-        ) : (
-          <div className="space-y-1">
-            {d!.items.map((item) => (
-              <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {(d?.drafts.length ?? 0) > 0 && (
-        <Card title={`Draft Replies (${d!.drafts.length})`}>
-          <div className="space-y-2">
-            {d!.drafts.map((draft) => (
-              <div key={draft.filename} className="border border-[var(--color-border)] px-3 py-2 space-y-1">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-[var(--color-text)]">{draft.filename}</span>
-                  <span className="text-[10px] text-[var(--color-text-faint)]">{fmtRelative(draft.mtime)}</span>
-                </div>
-                {draft.preview && (
-                  <div className="text-[11px] text-[var(--color-text-dim)] truncate">{draft.preview}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
 
       {(d?.recentErrors.length ?? 0) > 0 && (
         <Card title="Recent Errors">
