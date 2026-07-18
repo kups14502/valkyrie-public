@@ -16,6 +16,14 @@ const appVersion = JSON.parse(
 // commit as CF_PAGES_COMMIT_SHA; fall back to an explicit VITE_BUILD_ID or dev.
 const buildId = process.env.VITE_BUILD_ID || process.env.CF_PAGES_COMMIT_SHA || 'dev'
 
+// The PWA service worker is for the web/PWA deployment only. Inside the Tauri
+// desktop app it's pure liability: it intercepts the cold-start navigation to
+// tauri.localhost and fails (the "can't reach this page" flash), and it caused
+// the stale-UI trap the native purge in lib.rs cleans up. Tauri sets
+// TAURI_ENV_PLATFORM during beforeBuildCommand, so disable the SW for that
+// build (virtual:pwa-register still resolves to a no-op, keeping imports valid).
+const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM || process.env.VITE_TAURI === '1'
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
@@ -25,6 +33,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // No service worker in the desktop app build (see isTauriBuild above).
+      disable: isTauriBuild,
       // Prompt mode (not autoUpdate): a freshly deployed build waits until the
       // user clicks "reload to update" in the header alarm. autoUpdate's silent
       // swap is unreliable on iOS Safari / home-screen PWAs and gave no way to
