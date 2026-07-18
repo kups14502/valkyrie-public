@@ -49,18 +49,48 @@ function gigSort(a: Gig, b: Gig): number {
 }
 
 // The ticket sync manages a "[Autotask] <status> · due <date> · client:<name>"
-// first line in the detail; split it into the status chip, the client (used to
-// group work gigs), and the journal body.
-function splitDetail(detail: string): { autotask: string | null; client: string | null; body: string } {
+// first line in the detail; split it into the status chip, the due date, the
+// client (used to group work gigs), and the journal body.
+function splitDetail(detail: string): { autotask: string | null; due: string | null; client: string | null; body: string } {
   const lines = (detail || '').split('\n')
   const m = lines[0]?.match(/^\[Autotask\] (.+)$/)
   const body = lines.slice(1).join('\n').trim()
-  if (!m) return { autotask: null, client: null, body: (detail || '').trim() }
+  if (!m) return { autotask: null, due: null, client: null, body: (detail || '').trim() }
   let auto = m[1]
   let client: string | null = null
   const cm = auto.match(/ · client:(.+)$/)
   if (cm) { client = cm[1].trim(); auto = auto.slice(0, cm.index).trim() }
-  return { autotask: auto, client, body }
+  const dm = auto.match(/ · due (\d{4}-\d{2}-\d{2})/)
+  const due = dm ? dm[1] : null
+  return { autotask: auto, due, client, body }
+}
+
+// Due-date urgency, but only for gigs you can actually act on now: a gig
+// waiting on someone else (on hold) or already done isn't "overdue" on you.
+type DueUrgency = 'overdue' | 'today' | 'soon' | null
+function dueUrgency(due: string | null, status: GigStatus): DueUrgency {
+  if (!due || status !== 'active') return null
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(due + 'T00:00:00'); d.setHours(0, 0, 0, 0)
+  const days = Math.round((d.getTime() - today.getTime()) / 86_400_000)
+  if (days < 0) return 'overdue'
+  if (days === 0) return 'today'
+  if (days <= 3) return 'soon'
+  return null
+}
+const DUE_STYLE: Record<Exclude<DueUrgency, null>, { label: string; cls: string }> = {
+  overdue: { label: 'overdue', cls: 'border-[var(--color-danger)] text-[var(--color-danger)]' },
+  today: { label: 'due today', cls: 'border-[var(--color-warning)] text-[var(--color-warning)]' },
+  soon: { label: 'due soon', cls: 'border-[var(--color-warning)]/50 text-[var(--color-warning)]/80' },
+}
+function DueChip({ due, status }: { due: string | null; status: GigStatus }) {
+  const u = dueUrgency(due, status)
+  if (!u) return null
+  return (
+    <span className={`shrink-0 border px-1.5 py-px text-[9px] font-bold uppercase tracking-[0.1em] ${DUE_STYLE[u].cls}`}>
+      {DUE_STYLE[u].label}
+    </span>
+  )
 }
 
 const gigClient = (q: Gig): string | null => splitDetail(q.detail).client
@@ -159,7 +189,7 @@ const DEFAULT_LIST_W = 480
 function GigListRow({ gig, selected, onSelect }: { gig: Gig; selected: boolean; onSelect: () => void }) {
   const s = STATUS_GLYPH[gig.status]
   const dimmed = gig.status === 'completed' || gig.status === 'failed'
-  const { autotask } = splitDetail(gig.detail)
+  const { autotask, due } = splitDetail(gig.detail)
   const nextSub = gig.subgigs.find((x) => x.status !== 'completed')
   // Identity color marks TRACKED (workable) gigs only; waiting/untracked
   // rows go quiet grey so the list reads as "colored = act on this".
@@ -196,6 +226,7 @@ function GigListRow({ gig, selected, onSelect }: { gig: Gig; selected: boolean; 
         >
           {gig.title}
         </span>
+        <DueChip due={due} status={gig.status} />
         {gig.tracked && !dimmed && (
           <Eye size={13} className="shrink-0 text-[var(--color-accent)]" aria-label="Tracked" />
         )}
@@ -317,7 +348,7 @@ function GigJournal({ gig }: { gig: Gig }) {
   })
 
   const s = STATUS_GLYPH[gig.status]
-  const { autotask, client, body } = splitDetail(gig.detail)
+  const { autotask, due, client, body } = splitDetail(gig.detail)
   const mutationError = patch.error ?? addSub.error ?? remove.error ?? removeLink.error
   // Identity color only while tracked (workable); untracked reads neutral.
   const tracked = gig.tracked && gig.status !== 'completed' && gig.status !== 'failed'
@@ -393,6 +424,7 @@ function GigJournal({ gig }: { gig: Gig }) {
           </span>
         )}
         <span className={`text-xs uppercase tracking-[0.14em] ${s.tone}`}>{s.glyph} {s.label}</span>
+        <DueChip due={due} status={gig.status} />
         {autotask && (
           <span className="border border-[#7c9cc4]/50 px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[#7c9cc4]">
             autotask: {autotask}
@@ -644,8 +676,17 @@ export default function Gigs() {
 
   const [hideWaiting, setHideWaiting] = useState(() => localStorage.getItem(HIDE_WAITING_KEY) === '1')
   useEffect(() => { localStorage.setItem(HIDE_WAITING_KEY, hideWaiting ? '1' : '0') }, [hideWaiting])
+  const [search, setSearch] = useState('')
 
-  const groups = useMemo(() => buildGroups(gigs.data ?? [], tab, hideWaiting), [gigs.data, tab, hideWaiting])
+  const groups = useMemo(() => {
+    const built = buildGroups(gigs.data ?? [], tab, hideWaiting)
+    const q = search.trim().toLowerCase()
+    if (!q) return built
+    // Filter within groups by title/section/client; drop groups left empty.
+    return built
+      .map((g) => ({ ...g, gigs: g.gigs.filter((x) => (x.title + ' ' + (x.section || '') + ' ' + g.title).toLowerCase().includes(q)) }))
+      .filter((g) => g.gigs.length > 0)
+  }, [gigs.data, tab, hideWaiting, search])
   const flat = useMemo(() => groups.flatMap((g) => g.gigs), [groups])
   const selected = flat.find((q) => q.id === selectedId) ?? flat[0] ?? null
 
@@ -665,10 +706,12 @@ export default function Gigs() {
 
   const counts = useMemo(() => {
     const all = gigs.data ?? []
+    const overdue = all.filter((q) => dueUrgency(splitDetail(q.detail).due, q.status) === 'overdue').length
     return {
       active: all.filter((q) => q.status === 'active').length,
       waiting: all.filter((q) => q.status === 'on_hold').length,
       done: all.filter((q) => q.status === 'completed').length,
+      overdue,
     }
   }, [gigs.data])
 
@@ -687,6 +730,9 @@ export default function Gigs() {
         </div>
         <div className="text-[13px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
           [{counts.active} active · {counts.waiting} waiting · {counts.done} done]
+          {counts.overdue > 0 && (
+            <span className="ml-2 font-bold text-[var(--color-danger)]">{counts.overdue} overdue</span>
+          )}
         </div>
       </div>
 
@@ -767,6 +813,24 @@ export default function Gigs() {
               >
                 <ChevronsLeft size={16} />
               </button>
+            </div>
+            <div className="relative">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="filter gigs…"
+                className="w-full border border-[var(--color-border)] bg-transparent px-2.5 py-1.5 pr-7 text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-border-strong)]"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear filter"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)] transition hover:text-[var(--color-text)]"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
             {flat.length === 0 && (
               <div className="px-1 py-4 text-sm text-[var(--color-text-dim)]">
