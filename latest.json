@@ -1,15 +1,15 @@
 {
-  "version": "0.3.31",
-  "notes": "fix(app): reveal window on real mount, retry failed nav off-screen",
-  "pub_date": "2026-07-18T23:32:27Z",
+  "version": "0.3.32",
+  "notes": "fix(dashboard): show \"sign-in expired\" when an account quota is unreadable",
+  "pub_date": "2026-07-31T15:02:15Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVIreXI5S2hGc1BXYWkyRFVxbDBkNjVOQXZleStEem1lQ2twcVRPbS9zZEhieUd4dmpjMG82dGMyM0Zub01JRzYxbjVnRmY5TEpDYTdsd2xiSksvcndNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NDE3NTQ2CWZpbGU6VmFsa3lyaWVfMC4zLjMxX3g2NC1zZXR1cC5leGUKL1FGVUJvSE9rNzFhdDRVWDBIYnNGRWswbE5Vc242akI3QkQxc2tFNHByMjV1YThTSHJ0OVM1aDlXeGFHUGdXaU80T1hjWXhRUXNYS3B4YjJxTkh0Qmc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.31/Valkyrie_0.3.31_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVhia1BVb2tTQ0QzMkxraGF0UytIUng2dnQyTkhIWkZIbnprS3NFM1lwbkhJZ081cGlHcFd2WDRDT000R01Iengzemlxb1QwaEo0czlBZndwc2JsNVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTEwMTM1CWZpbGU6VmFsa3lyaWVfMC4zLjMyX3g2NC1zZXR1cC5leGUKaWxDOFBYdU5Wb1kvMkswTWVxVytqcWNEZmVwRjdoamRHZ3dTeURZdzlkbmJiQ1VqOUlDQ3VUWmZnblpnbE5ETmVMQ0VFRVJwRUorL3o0eWJSOXFaQkE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.32/Valkyrie_0.3.32_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWRLNGhkZWdVM0NCcnVObHdKWHVZT3FMQ3hvOUZ4VkphYzdkQWl6TWEvOVBMeUtHcjEzcG5jRDZMbkFqaVVLZXV5MTZPRVhiRDBINjNzZDNlbm5aaEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NDE3NTAzCWZpbGU6VmFsa3lyaWVfMC4zLjMxX2FtZDY0LkFwcEltYWdlCjAzOXg4TGp5VzJEaUpwSSs1VU16bHZSd005ek1pZG5USTF3NkdrdjRKQjc2UkRYbVlSdFl2YjBlQm50Wm9Ba2x5QWZoVG01bGtBTXV6UkxSOGdRMkRnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.31/Valkyrie_0.3.31_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJVWmpETS95OEZWQ3pXc1ZtcE84VzBKdEZsNFQ4OTNpVUlOQXNVYnNiR2tTSC9Ia3ozNjF6WENDaG9obTNiS2pFYzUydGJWa3RuOEVCaU4xZFJYVFFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTEwMDk3CWZpbGU6VmFsa3lyaWVfMC4zLjMyX2FtZDY0LkFwcEltYWdlCnhUT0M4Qlowd1oyWnE4UjhDMmYxTnpCbGJlRlJSS1h4ZnZwSEZPc2c2dlQrM013bnlXNXl2b0JaRHhpRngrd0pVaDhDYUJ6cEl3aUZUdzNiSjM4eERnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.32/Valkyrie_0.3.32_amd64.AppImage"
     }
   }
 }
