@@ -152,10 +152,16 @@ async function getClaudeOAuthAccessToken(configDir: string): Promise<string | nu
   return oauth.accessToken
 }
 
-async function readClaudeOAuthQuota(configDir: string): Promise<ClaudeQuota | null> {
+// A null quota has two very different causes: the probe came back without
+// rate-limit headers (transient, nothing to do), or the account's stored
+// sign-in is dead (needs `claude /login` against its config dir). Report the
+// second one so the dashboard can say so instead of rendering an empty card.
+type QuotaRead = { quota: ClaudeQuota | null; authError: string | null }
+
+async function readClaudeOAuthQuota(configDir: string, label: string): Promise<QuotaRead> {
   try {
     const accessToken = await getClaudeOAuthAccessToken(configDir)
-    if (!accessToken) return null
+    if (!accessToken) return { quota: null, authError: 'not signed in' }
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -171,12 +177,19 @@ async function readClaudeOAuthQuota(configDir: string): Promise<ClaudeQuota | nu
       }),
     })
     const quota = parseClaudeRateLimitHeaders(resp.headers)
-    if (quota) return quota
-    if (!resp.ok) return null
-    return null
+    if (quota) return { quota, authError: null }
+    if (resp.status === 401 || resp.status === 403) {
+      console.error(`[ai-usage] claude oauth rejected (${label}): ${resp.status}`)
+      return { quota: null, authError: 'sign-in expired' }
+    }
+    return { quota: null, authError: null }
   } catch (err) {
-    console.error('[ai-usage] claude oauth quota failed', (err as Error).message)
-    return null
+    const msg = (err as Error).message
+    console.error(`[ai-usage] claude oauth quota failed (${label})`, msg)
+    if (msg.includes('ENOENT')) return { quota: null, authError: 'not signed in' }
+    // a 400 from the token endpoint means the stored refresh token is spent or revoked
+    if (/refresh failed|no access token/.test(msg)) return { quota: null, authError: 'sign-in expired' }
+    return { quota: null, authError: null }
   }
 }
 
@@ -283,14 +296,14 @@ async function refreshAIUsage(): Promise<void> {
         const [blocks, usage, quota] = await Promise.all([
           readClaudeBlocks(env),
           readClaudeUsage(env),
-          readClaudeOAuthQuota(acct.configDir),
+          readClaudeOAuthQuota(acct.configDir, acct.label),
         ])
-        return { acct, blocks, usage, quota }
+        return { acct, blocks, usage, quota: quota.quota, authError: quota.authError }
       }))
 
-      const claudeClients = claudeResults.map(({ acct, blocks, usage, quota }) => ({
+      const claudeClients = claudeResults.map(({ acct, blocks, usage, quota, authError }) => ({
         id: acct.id, kind: 'claude', label: acct.label, subscription: acct.subscription,
-        ...usage, session: blocks.activeBlock, quota,
+        ...usage, session: blocks.activeBlock, quota, authError,
       }))
 
       // legacy `claude` field kept for alerts / older deployed frontends: first listed account

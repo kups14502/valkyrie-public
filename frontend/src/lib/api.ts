@@ -96,6 +96,8 @@ export type ClaudeUsageClient = ProviderUsage & {
   byModel: Record<string, UsageBucket>
   session: ClaudeSession | null
   quota: ClaudeQuota | null
+  // set when the account's stored sign-in is dead, so quota can't be read at all
+  authError?: string | null
 }
 export type AIClientUsage = ClaudeUsageClient
 

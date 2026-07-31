@@ -312,6 +312,15 @@ function AIClientCard({ client }: { client: AIClientUsage }) {
             sub={fmtResetAt(client.quota.weeklyResetsAt)}
           />
         </div>
+      ) : client.authError ? (
+        <div className="flex flex-col gap-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-warning)]">
+            {client.authError}
+          </div>
+          <div className="text-[10px] leading-relaxed text-[var(--color-text-faint)]">
+            quota unreadable · run claude /login for this account
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-3 gap-2">
           {([
