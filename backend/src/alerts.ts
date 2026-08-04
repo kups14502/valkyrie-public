@@ -3,7 +3,6 @@ import path from 'node:path'
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
 const POLL_MS = 60_000
-const SOON_WINDOW_MS = 30 * 60_000
 const RESETSAT_JITTER_MS = 30 * 60_000
 const DISK_THRESHOLD = 90
 const CLAUDE_THRESHOLD = 90
@@ -118,19 +117,11 @@ async function tick(state: AlertState): Promise<AlertState> {
 
     const isNewWindow = Number.isFinite(prevResetsAtMs) && resetsAtMs - prevResetsAtMs > RESETSAT_JITTER_MS
     if (isNewWindow) {
-      await postDiscord(`🟢 **Claude session reset** — fresh 5h window. Next reset at ${fmtClock(resetsAt)} ET.`)
       next.soonAlertedFor = null
     }
     next.sessionResetsAt = resetsAt
 
     const untilReset = resetsAtMs - now
-    const soonAlertedMs = state.soonAlertedFor ? Date.parse(state.soonAlertedFor) : NaN
-    const alreadySoonAlerted = Number.isFinite(soonAlertedMs) && Math.abs(resetsAtMs - soonAlertedMs) <= RESETSAT_JITTER_MS
-    if (untilReset > 0 && untilReset <= SOON_WINDOW_MS && !alreadySoonAlerted) {
-      const usage = quota ? ` Usage: ${quota.sessionPct}%.` : ''
-      await postDiscord(`⏳ **Claude session resets in ~${fmtMins(untilReset)}** — at ${fmtClock(resetsAt)} ET.${usage}`)
-      next.soonAlertedFor = resetsAt
-    }
 
     if (quota) {
       const over = quota.sessionPct >= CLAUDE_THRESHOLD

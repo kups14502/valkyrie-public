@@ -13,3 +13,6 @@ backend/data/
 .code-deck/
 backend/tsconfig.tsbuildinfo
 backups/
+
+# rotated api logs
+api.log.*.gz
