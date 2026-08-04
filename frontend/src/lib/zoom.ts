@@ -22,8 +22,15 @@ export function getZoom(): number {
 
 export function applyZoom(z: number) {
   const level = clamp(z)
+  const root = document.documentElement
+  // Publish the level to CSS *before* applying it, so layout never sees a
+  // mismatched pair. index.css sizes the shell with calc(100dvh / --ui-zoom)
+  // because viewport units ignore `zoom`: without the division the shell paints
+  // zoom x 100dvh tall, and everything past the window bottom is unreachable
+  // (html has overflow:hidden). See the --ui-zoom comment in index.css.
+  root.style.setProperty('--ui-zoom', String(level))
   // `zoom` isn't in the typed CSSStyleDeclaration but is honored at runtime.
-  ;(document.documentElement.style as unknown as Record<string, string>).zoom = String(level)
+  ;(root.style as unknown as Record<string, string>).zoom = String(level)
   localStorage.setItem(KEY, String(level))
   // Let layout-measuring listeners (e.g. Code Deck's viewport-fit pane) recompute,
   // since `zoom` changes don't fire a native resize event on their own.

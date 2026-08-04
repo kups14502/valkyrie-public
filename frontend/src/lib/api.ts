@@ -122,71 +122,10 @@ export type ProjectStatus = {
   commitsToday: number
 }
 
-export type TradingPosition = {
-  symbol: string
-  quantity: number
-  avgBuyPrice: number
-  currentPrice: number
-  pnlPct: number
-  locked: boolean
-}
-
-export type TradingSignal = {
-  symbol: string
-  direction: string
-  conviction: string
-  reasoning: string
-  suggestedInstrument: string | null
-  timeHorizon: string | null
-}
-
-export type ExecutedTrade = {
-  symbol: string
-  action: string
-  assetType: string
-  status: string
-  timestamp: string
-}
-
-export type PlannedTrade = {
-  action: string
-  assetType: string
-  symbol: string
-  quantity: number | null
-  dollarAmount: number | null
-  optionType: string | null
-  strikePrice: number | null
-  expirationDate: string | null
-  notes: string | null
-}
-
-export type TradingStatus = {
-  lastUpdated: string | null
-  marketRegime: string | null
-  marketSummary: string | null
-  signals: TradingSignal[]
-  portfolio: {
-    equity: number
-    buyingPower: number
-    stockPositions: TradingPosition[]
-    cryptoPositions: TradingPosition[]
-    optionsPositions: TradingPosition[]
-  } | null
-  latestRun: {
-    timestamp: string
-    sonnetSummary: string | null
-    plan: { reasoning: string; riskAssessment: string; trades: PlannedTrade[] } | null
-  } | null
-  runsToday: number
-  executedToday: ExecutedTrade[]
-  executedRecent: ExecutedTrade[]
-  equityHistory: { date: string; equity: number }[]
-  realized: {
-    totalUSD: number
-    closedTrades: number
-    bySymbol: Record<string, { realizedUSD: number; trades: number }>
-  }
-}
+// The v1 ~/trading bot's types (TradingStatus and friends) lived here and are
+// gone as of 2026-08-04: the only reader was the dashboard's stale "Trading"
+// card, and the /api/trading route it fed from stopped being written 2026-07-31.
+// The backend route still exists but now has no frontend client.
 
 // v2 trade bot (~/trade-bot): passthrough of the status.json its status.py
 // generator writes, plus the backend's `stale` flag.
@@ -444,12 +383,6 @@ export const fetchAIUsage = async () => {
   const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')
   return r.data as AIUsage
-}
-
-export const fetchTrading = async () => {
-  const r = await api.get<TradingStatus | { error?: string; detail?: string }>('/trading')
-  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid trading response')
-  return r.data as TradingStatus
 }
 
 export const fetchTradeBotStatus = async () => {

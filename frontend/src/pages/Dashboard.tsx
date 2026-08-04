@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchTrading, fetchTradeBotStatus, type AIClientUsage } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchTradeBotStatus, type AIClientUsage } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -283,79 +282,11 @@ function AIUsageHero() {
   )
 }
 
-function TradeQuickView() {
-  const trading = useQuery({ queryKey: ['trading'], queryFn: fetchTrading, refetchInterval: 60_000 })
-  const data = trading.data
-  const allPositions = data?.portfolio
-    ? [...data.portfolio.stockPositions, ...data.portfolio.cryptoPositions, ...data.portfolio.optionsPositions]
-    : []
-  const tradeable = allPositions.filter((p) => !p.locked)
-  const totalValue = tradeable.reduce((acc, p) => acc + p.quantity * p.currentPrice, 0)
-  const totalCost = tradeable.reduce((acc, p) => acc + p.quantity * p.avgBuyPrice, 0)
-  const totalPnlPct = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0
-  const unrealizedUSD = totalValue - totalCost
-  const realizedUSD = data?.realized?.totalUSD ?? 0
-  const fmtUSD = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const updatedAgo = data?.lastUpdated ? fmtAgo(new Date(data.lastUpdated).getTime()) : null
-  return (
-    <Card
-      title="Trading"
-      action={
-        <Link to="/trade" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
-          open →
-        </Link>
-      }
-    >
-      {trading.isLoading && !data ? (
-        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-      ) : trading.error || !data ? (
-        <div className="text-sm text-[var(--color-danger)]">Trade bot status unavailable</div>
-      ) : !data.portfolio ? (
-        <div className="text-sm text-[var(--color-text-dim)]">No portfolio snapshot yet</div>
-      ) : (
-        <div className="space-y-4">
-          <Stat
-            label="Equity"
-            value={fmtUSD(data.portfolio.equity)}
-            sub={`buying power ${fmtUSD(data.portfolio.buyingPower)}`}
-            chart={data.equityHistory.length > 1
-              ? <Sparkline
-                  values={data.equityHistory.map((p) => p.equity)}
-                  color={unrealizedUSD + realizedUSD < 0 ? 'var(--color-danger)' : 'var(--color-success)'}
-                />
-              : undefined}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Unrealized</div>
-              <div className={`mt-1 text-sm font-semibold ${totalPnlPct > 0 ? 'text-[var(--color-success)]' : totalPnlPct < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
-                {totalPnlPct > 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%
-              </div>
-              <div className="text-[11px] text-[var(--color-text-faint)]">{fmtUSD(unrealizedUSD)}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Realized</div>
-              <div className={`mt-1 text-sm font-semibold ${realizedUSD > 0 ? 'text-[var(--color-success)]' : realizedUSD < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}>
-                {realizedUSD >= 0 ? '+' : ''}{fmtUSD(realizedUSD)}
-              </div>
-              <div className="text-[11px] text-[var(--color-text-faint)]">{data.realized?.closedTrades ?? 0} closed</div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-text-dim)]">
-            <span>{tradeable.length} position{tradeable.length === 1 ? '' : 's'}</span>
-            {data.marketRegime && <span className="uppercase tracking-[0.12em]">[{data.marketRegime}]</span>}
-            {data.executedToday.length > 0 && <span>{data.executedToday.length} trade{data.executedToday.length === 1 ? '' : 's'} today</span>}
-            {updatedAgo && <span className="text-[var(--color-text-faint)]">{updatedAgo}</span>}
-          </div>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-// Status card for the v2 trade bot (~/trade-bot): reads the status.json its
-// status.py generator writes, surfaced through /api/tradebot/status. Distinct
-// from TradeQuickView, which covers the legacy ~/trading bot.
+// The one trade-bot card on the dashboard: the v2 bot (~/trade-bot), reading the
+// status.json its status.py generator writes, surfaced through
+// /api/tradebot/status. The old v1 "Trading" card that sat under this one was
+// removed 2026-08-04: it read the dead /api/trading route (last written
+// 2026-07-31) and contradicted this card's broker truth with stale figures.
 function TradeBotCard() {
   const status = useQuery({ queryKey: ['tradebot-status'], queryFn: fetchTradeBotStatus, refetchInterval: 60_000 })
   const s = status.data
@@ -445,7 +376,6 @@ function TradeBotCard() {
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
-  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
   const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
 
@@ -459,10 +389,15 @@ export default function Dashboard() {
   const sysBackendUnavailable = Boolean(sysError?.isBackendUnavailable)
   const sysValid = hasSystemShape(sys.data)
   const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
-  const projectsList = Array.isArray(projects.data) ? projects.data : []
 
   return (
-    <div className="min-w-0 space-y-8 overflow-hidden">
+    // overflow-x-clip, not overflow-hidden: `hidden` makes this a scroll
+    // container in *both* axes, which silently swallows any vertical overflow
+    // instead of letting it grow <main>'s scrollHeight (so it would never show a
+    // scrollbar anywhere), and it also steals the sticky columns' scrollport
+    // from <main>, making their `xl:sticky` dead. `clip` clips the horizontal
+    // axis without creating a scroll container.
+    <div className="min-w-0 space-y-8 overflow-x-clip">
       <div className="space-y-4">
         <div className="flex items-end justify-between gap-4">
           <div>
@@ -483,7 +418,6 @@ export default function Dashboard() {
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
           <TradeBotCard />
-          <TradeQuickView />
         </div>
 
         <div className="order-3 min-w-0 space-y-6 xl:order-2">
@@ -519,89 +453,46 @@ export default function Dashboard() {
             )}
           </Card>
 
-              <Card title={`Sessions (${sessionsList.length})`} >
-                {sessionsList.length > 0 ? (
-                  <div className="space-y-2">
-                    {sessionsList.map((s) => (
-                      <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-baseline gap-x-2">
-                            <span className="font-semibold">{s.model}</span>
-                            {s.project && (
-                              <span className="text-[var(--color-text-dim)]">· {s.project}</span>
-                            )}
-                            {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
-                              <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
-                                [{s.gitBranch}]
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                            pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
-                          <div>{s.cpu.toFixed(2)}% cpu</div>
-                          <div className="mt-0.5">
-                            {fmtBytes(s.memory)}
-                            {sys.data?.memory?.total
-                              ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
-                              : null}
-                          </div>
-                          {s.lastActivity != null && (
-                            <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
-                              {fmtAgo(s.lastActivity)}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
-                )}
-              </Card>
-
-          <Card title="Projects / Feeds">
-            {projectsList.length > 0 ? (
-              <div className="divide-y divide-[var(--color-border)]">
-                {projectsList.map((p) => (
-                  <div key={p.path} className="flex items-center justify-between gap-3 py-3 text-sm">
+          <Card title={`Sessions (${sessionsList.length})`}>
+            {sessionsList.length > 0 ? (
+              <div className="space-y-2">
+                {sessionsList.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2">
-                        <span className="font-semibold">{p.name}</span>
-                        {p.dirty && (
-                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-warning)]">
-                            [●{p.dirtyCount} uncommitted]
-                          </span>
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-semibold">{s.model}</span>
+                        {s.project && (
+                          <span className="text-[var(--color-text-dim)]">· {s.project}</span>
                         )}
-                        {p.commitsToday > 0 && (
-                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-success)]">
-                            [{p.commitsToday} today]
+                        {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
+                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
+                            [{s.gitBranch}]
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
-                        {p.lastCommit ? (
-                          <span><span className="text-[var(--color-text-faint)]">{p.lastCommit.sha}</span> {p.lastCommit.subject}</span>
-                        ) : (
-                          <span>{p.path}</span>
-                        )}
+                      <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+                        pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className={`text-xs ${
-                        p.status === 'active' ? 'text-[var(--color-success)]' :
-                        p.status === 'paused' ? 'text-[var(--color-warning)]' :
-                        'text-[var(--color-text-dim)]'
-                      }`}>[{p.status}]</span>
-                      <span className="text-xs text-[var(--color-text-dim)]">{p.lastTouched}</span>
+                    <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
+                      <div>{s.cpu.toFixed(2)}% cpu</div>
+                      <div className="mt-0.5">
+                        {fmtBytes(s.memory)}
+                        {sys.data?.memory?.total
+                          ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
+                          : null}
+                      </div>
+                      {s.lastActivity != null && (
+                        <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
+                          {fmtAgo(s.lastActivity)}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-sm text-[var(--color-text-dim)]">{projects.isLoading ? 'Loading…' : projects.data ? 'Project data shape was invalid.' : 'No projects tracked'}</div>
+              <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
             )}
           </Card>
         </div>
