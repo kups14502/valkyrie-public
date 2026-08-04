@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, ScrollText, Mail, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft } from 'lucide-react'
-import { fetchGigs } from '../lib/api'
+import { LayoutDashboard, Mail, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft } from 'lucide-react'
 
-// Global command palette (Ctrl/Cmd+K): jump to any page or straight to a gig
-// by name. Opens over everything, keyboard-driven, closes on Esc / outside
-// click / after acting. Mounted once in the app shell.
+// Global command palette (Ctrl/Cmd+K): jump to any page by name. Opens over
+// everything, keyboard-driven, closes on Esc / outside click / after acting.
+// Mounted once in the app shell.
 
 // Let anything (e.g. the menu's Search button) open the palette without
 // prop-drilling: fire this event and the mounted palette opens.
@@ -17,7 +15,6 @@ type Cmd = { id: string; label: string; hint?: string; icon: React.ReactNode; ru
 
 const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} /> },
-  { to: '/gigs', label: 'Gigs', icon: <ScrollText size={15} /> },
   { to: '/emails', label: 'Emails', icon: <Mail size={15} /> },
   { to: '/lights', label: 'Lights', icon: <Lightbulb size={15} /> },
   { to: '/trade', label: 'Trades', icon: <TrendingUp size={15} /> },
@@ -32,9 +29,6 @@ export function CommandPalette() {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  // Only fetch gigs while the palette is open (and reuse the shared cache).
-  const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, enabled: open })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -63,21 +57,8 @@ export function CommandPalette() {
     const pageCmds: Cmd[] = PAGES
       .filter((p) => !q || p.label.toLowerCase().includes(q))
       .map((p) => ({ id: `page:${p.to}`, label: p.label, hint: 'page', icon: p.icon, run: () => navigate(p.to) }))
-    // Gig jumps only once you've typed (otherwise it's just the page list).
-    const gigCmds: Cmd[] = q
-      ? (gigs.data ?? [])
-          .filter((g) => g.title.toLowerCase().includes(q))
-          .slice(0, 8)
-          .map((g) => ({
-            id: `gig:${g.id}`,
-            label: g.title,
-            hint: g.category === 'work' ? 'work gig' : 'gig',
-            icon: <ScrollText size={15} className="text-[var(--color-text-faint)]" />,
-            run: () => navigate(`/gigs?gig=${g.id}`),
-          }))
-      : []
-    return [...pageCmds, ...gigCmds]
-  }, [query, gigs.data, navigate])
+    return pageCmds
+  }, [query, navigate])
 
   useEffect(() => { setActive((a) => Math.min(a, Math.max(0, commands.length - 1))) }, [commands.length])
 
@@ -106,7 +87,7 @@ export function CommandPalette() {
             ref={inputRef}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActive(0) }}
-            placeholder="jump to a page or gig…"
+            placeholder="jump to a page…"
             className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)]"
           />
           <kbd className="shrink-0 border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-faint)]">esc</kbd>

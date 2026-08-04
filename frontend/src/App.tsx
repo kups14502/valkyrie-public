@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, ScrollText, Search } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, Search } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -14,7 +14,6 @@ import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
 import Dashboard from './pages/Dashboard'
 
-const Gigs = lazy(() => import('./pages/Gigs'))
 const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
@@ -47,7 +46,6 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/gigs', label: 'gigs', icon: ScrollText },
   { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -106,7 +104,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() => { onClose(); openCommandPalette() }}
-            title="Search — jump to any page or gig (Ctrl+K)"
+            title="Search — jump to any page (Ctrl+K)"
             className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
           >
             <Search size={12} /> search
@@ -226,9 +224,6 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            {/* Gigs is a wide two-pane journal; it manages its own max width
-                instead of CenterPage's narrow reading column. */}
-            <Route path="/gigs" element={<Gigs />} />
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />

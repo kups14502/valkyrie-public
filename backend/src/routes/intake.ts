@@ -3,7 +3,6 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import fs from 'node:fs'
 import { homedir } from 'node:os'
-import { createGig, addLink, getGig } from '../gigs/store.js'
 import { autotaskConfigured, findContactByEmail, createTicket } from '../lib/autotask.js'
 
 // Only these mailboxes hold real client work email, so only they may spawn
@@ -12,9 +11,8 @@ const TICKET_ACCOUNTS = new Set(['work', 'work-support'])
 
 // Email intake queue. The email-assistant script on the server classifies each
 // new email and writes an intake suggestion row (work → Autotask ticket
-// candidates, personal → gig match / new-gig suggestion) into mail.sqlite.
-// This route serves that queue and applies the user's decision: connect the
-// email to a ticket, connect it to a gig (existing or new), or dismiss it.
+// candidates) into mail.sqlite. This route serves that queue and applies the
+// user's decision: connect the email to a ticket, or dismiss it.
 
 const router = Router()
 const DB_PATH = path.join(homedir(), 'email-assistant', 'data', 'mail.sqlite')
@@ -25,9 +23,6 @@ type IntakeRow = {
   is_work: number
   summary: string
   ticket_matches: string | null
-  gig_match_id: string | null
-  gig_match_title: string | null
-  suggested_gig_title: string | null
   status: string
   linked_kind: string | null
   linked_ref: string | null
@@ -64,8 +59,6 @@ function serialize(r: IntakeRow) {
     isWork: Boolean(r.is_work),
     summary: r.summary,
     ticketMatches: parseTicketMatches(r.ticket_matches),
-    gigMatch: r.gig_match_id ? { id: r.gig_match_id, title: r.gig_match_title ?? '' } : null,
-    suggestedGigTitle: r.suggested_gig_title,
     status: r.status,
     linkedKind: r.linked_kind,
     linkedRef: r.linked_ref,
@@ -121,10 +114,9 @@ function markIntake(account: string, uid: string, status: 'linked' | 'dismissed'
   }
 }
 
-// The intake row lives in mail.sqlite and the gig lives in gigs.sqlite, so
-// the two writes cannot share a transaction. Checking existence up front means
-// the only way markIntake can fail after a gig write is a transient lock,
-// and addLink is idempotent, so a retry converges instead of duplicating.
+// Check the row exists before doing any outside work (e.g. opening an Autotask
+// ticket), so the only way markIntake can fail afterwards is a transient lock —
+// which a retry converges on instead of duplicating the outside effect.
 function intakeExists(account: string, uid: string): boolean {
   const db = getDb(true)
   try {
@@ -132,21 +124,6 @@ function intakeExists(account: string, uid: string): boolean {
   } finally {
     db.close()
   }
-}
-
-function emailLabel(account: string, uid: string): string {
-  try {
-    const db = getDb(true)
-    try {
-      const m = db.prepare('SELECT sender, subject FROM messages WHERE account = ? AND uid = ?').get(account, uid) as
-        | { sender: string; subject: string }
-        | undefined
-      if (m) return `${m.subject}`.slice(0, 200)
-    } finally {
-      db.close()
-    }
-  } catch { /* label is best-effort */ }
-  return `${account}:${uid}`
 }
 
 function emailFull(account: string, uid: string): { sender: string; subject: string; snippet: string } | null {
@@ -193,35 +170,18 @@ router.post('/emails/intake/:account/:uid/create-ticket', async (req, res) => {
 })
 
 // Apply a decision for one intake item.
-// body: { kind: 'ticket' | 'gig' | 'new-gig', ref?, title? }
-//  - ticket:    ref = Autotask ticket number (records the connection)
-//  - gig:     ref = gig id (adds an email link on that gig)
-//  - new-gig: title = gig title (creates the gig, then links the email)
+// body: { kind: 'ticket', ref }
+//  - ticket: ref = Autotask ticket number (records the connection)
 router.post('/emails/intake/:account/:uid/link', (req, res) => {
   try {
     const { account, uid } = req.params
-    const { kind, ref, title } = (req.body ?? {}) as { kind?: string; ref?: string; title?: string }
+    const { kind, ref } = (req.body ?? {}) as { kind?: string; ref?: string }
     if (!intakeExists(account, uid)) return res.status(400).json({ error: 'failed to link intake item', detail: 'intake item not found' })
     if (kind === 'ticket') {
       const ticketRef = String(ref ?? '').trim()
       if (!ticketRef) return res.status(400).json({ error: 'ref required for ticket link' })
       markIntake(account, uid, 'linked', 'ticket', ticketRef, 'user')
       return res.json({ ok: true, linked: { kind: 'ticket', ref: ticketRef } })
-    }
-    if (kind === 'gig') {
-      const gigId = String(ref ?? '').trim()
-      if (!gigId || !getGig(gigId)) return res.status(400).json({ error: 'gig not found' })
-      addLink(gigId, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'gig', gigId, 'user')
-      return res.json({ ok: true, linked: { kind: 'gig', ref: gigId } })
-    }
-    if (kind === 'new-gig') {
-      const gigTitle = String(title ?? '').trim()
-      if (!gigTitle) return res.status(400).json({ error: 'title required for new-gig link' })
-      const gig = createGig({ title: gigTitle, category: 'side' })
-      addLink(gig.id, { kind: 'email', ref: `${account}:${uid}`, label: emailLabel(account, uid) })
-      markIntake(account, uid, 'linked', 'gig', gig.id, 'user')
-      return res.json({ ok: true, linked: { kind: 'gig', ref: gig.id }, gig })
     }
     res.status(400).json({ error: 'invalid link kind' })
   } catch (err) {
@@ -307,13 +267,6 @@ router.post('/emails/feedback', (req, res) => {
           .run('important', 'Upgraded by user', account, uid)
       } else if (correction === 'flip_side') {
         db.prepare('UPDATE intake SET is_work = CASE is_work WHEN 1 THEN 0 ELSE 1 END WHERE account = ? AND uid = ?')
-          .run(account, uid)
-        // A row flipped to personal needs a gig-title suggestion for the UI's
-        // "new gig" button; fall back to the email subject.
-        db.prepare(`UPDATE intake SET suggested_gig_title = COALESCE(
-            suggested_gig_title,
-            (SELECT substr(subject, 1, 60) FROM messages WHERE messages.account = intake.account AND messages.uid = intake.uid)
-          ) WHERE account = ? AND uid = ? AND is_work = 0`)
           .run(account, uid)
       }
     } finally {

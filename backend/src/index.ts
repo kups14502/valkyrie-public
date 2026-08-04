@@ -19,8 +19,6 @@ import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
 import emailsRoute from './routes/emails.js'
 import emailSignalsRoute from './routes/emailSignals.js'
-import gigsRoute from './routes/gigs.js'
-import gigChatRoute from './routes/gigChat.js'
 import intakeRoute from './routes/intake.js'
 import { startAlerts } from './alerts.js'
 
@@ -100,8 +98,6 @@ app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
 app.use('/api', emailsRoute)
 app.use('/api', emailSignalsRoute)
-app.use('/api', gigsRoute)
-app.use('/api', gigChatRoute)
 app.use('/api', intakeRoute)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

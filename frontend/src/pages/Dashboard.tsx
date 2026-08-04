@@ -2,71 +2,30 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchTradeBotStatus, fetchGigs, fetchEmailIntake, type AIClientUsage, type Gig } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchTradeBotStatus, fetchEmailIntake, type AIClientUsage } from '../lib/api'
 import { EmailSignalCard } from './Emails'
-import { GigProgressBar } from '../components/GigProgressBar'
-import { gigColor } from '../lib/gigColor'
 
-// Parse the "· due YYYY-MM-DD" the ticket sync stamps into a gig's detail and
-// bucket it. Only active gigs count as overdue/due-on-you (waiting/done don't).
-function gigDue(gig: Gig): 'overdue' | 'today' | null {
-  if (gig.status !== 'active') return null
-  const m = (gig.detail || '').split('\n')[0].match(/· due (\d{4}-\d{2}-\d{2})/)
-  if (!m) return null
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const d = new Date(m[1] + 'T00:00:00'); d.setHours(0, 0, 0, 0)
-  const days = Math.round((d.getTime() - today.getTime()) / 86_400_000)
-  return days < 0 ? 'overdue' : days === 0 ? 'today' : null
-}
-
-// Morning glance: what needs you today. Overdue + due-today gigs, plus the
-// email queues awaiting action. Everything here is a one-click jump to act.
+// Morning glance: what needs you today — the email queues awaiting action.
+// Everything here is a one-click jump to act.
 function TodayPanel() {
-  const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, refetchInterval: 60_000 })
   const intake = useQuery({ queryKey: ['email-intake', 'pending'], queryFn: () => fetchEmailIntake('pending'), refetchInterval: 120_000 })
   const signals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 120_000 })
 
-  const all = gigs.data ?? []
-  const overdue = all.filter((g) => gigDue(g) === 'overdue')
-  const dueToday = all.filter((g) => gigDue(g) === 'today')
   const pendingIntake = intake.data?.counts.pending ?? 0
   const important = signals.data?.counts.important24h ?? 0
 
-  const nothing = overdue.length === 0 && dueToday.length === 0 && pendingIntake === 0 && important === 0
-
-  const GigLine = ({ g, tone }: { g: Gig; tone: string }) => (
-    <Link to="/gigs" className="flex items-baseline gap-2 truncate text-[13px] hover:underline">
-      <span className={`shrink-0 text-[9px] font-bold uppercase tracking-[0.1em] ${tone}`}>{gigDue(g) === 'overdue' ? 'overdue' : 'today'}</span>
-      <span className="min-w-0 truncate text-[var(--color-text)]">{g.title}</span>
-    </Link>
-  )
+  const nothing = pendingIntake === 0 && important === 0
 
   return (
-    <Card
-      title="Today"
-      action={
-        <Link to="/gigs" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">gigs →</Link>
-      }
-    >
-      {gigs.isLoading && !gigs.data ? (
+    <Card title="Today">
+      {intake.isLoading && !intake.data ? (
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : nothing ? (
         <div className="text-sm text-[var(--color-text-dim)]">&gt; nothing due, queues clear. carry on.</div>
       ) : (
         <div className="space-y-3">
-          {overdue.length > 0 && (
-            <div className="space-y-1">
-              {overdue.slice(0, 5).map((g) => <GigLine key={g.id} g={g} tone="text-[var(--color-danger)]" />)}
-              {overdue.length > 5 && <div className="text-[10px] text-[var(--color-text-faint)]">+{overdue.length - 5} more overdue</div>}
-            </div>
-          )}
-          {dueToday.length > 0 && (
-            <div className="space-y-1">
-              {dueToday.slice(0, 5).map((g) => <GigLine key={g.id} g={g} tone="text-[var(--color-warning)]" />)}
-            </div>
-          )}
           {(pendingIntake > 0 || important > 0) && (
-            <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-2.5">
+            <div className="flex flex-wrap gap-2">
               {pendingIntake > 0 && (
                 <Link to="/emails" className="border border-[var(--color-border)] px-2 py-1 text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
                   {pendingIntake} intake to review
@@ -517,62 +476,6 @@ function TradeBotCard() {
   )
 }
 
-// HUD-style tracked-gigs widget: the gigs marked "tracked" in the gig
-// log, with progress and the next open objective — like a game's gig HUD.
-// With nothing explicitly tracked, fall back to the active gigs so the HUD
-// is never empty (eye-toggling a gig in the log takes over the slots).
-function GigTracker() {
-  const gigs = useQuery({ queryKey: ['gigs'], queryFn: fetchGigs, refetchInterval: 60_000 })
-  const explicit = (gigs.data ?? []).filter((q) => q.tracked && (q.status === 'active' || q.status === 'on_hold'))
-  const auto = explicit.length === 0
-  const tracked = auto
-    ? (gigs.data ?? []).filter((q) => q.status === 'active').sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    : explicit
-  return (
-    <Card
-      title={auto && tracked.length > 0 ? 'Active Gigs' : 'Tracked Gigs'}
-      action={
-        <Link to="/gigs" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline">
-          gig log →
-        </Link>
-      }
-    >
-      {gigs.isLoading && !gigs.data ? (
-        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-      ) : gigs.error ? (
-        <div className="text-sm text-[var(--color-danger)]">Gig log unavailable</div>
-      ) : tracked.length === 0 ? (
-        <div className="text-sm text-[var(--color-text-dim)]">&gt; no active gigs. accept one in the gig log.</div>
-      ) : (
-        <div className="space-y-3">
-          {tracked.slice(0, 6).map((q) => {
-            const next = q.subgigs.find((s) => s.status !== 'completed')
-            return (
-              <div key={q.id} className="border-l-2 pl-2.5" style={{ borderLeftColor: gigColor(q.id, 0.75) }}>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{q.title}</span>
-                  {q.status === 'on_hold' && (
-                    <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[#7c9cc4]">[hold]</span>
-                  )}
-                </div>
-                {q.progress.total > 0 && (
-                  <div className="mt-1">
-                    <GigProgressBar done={q.progress.done} total={q.progress.total} status={q.status} />
-                  </div>
-                )}
-                {next && <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">▸ {next.title}</div>}
-              </div>
-            )
-          })}
-          {tracked.length > 6 && (
-            <div className="text-[10px] text-[var(--color-text-faint)]">+{tracked.length - 6} more tracked</div>
-          )}
-        </div>
-      )}
-    </Card>
-  )
-}
-
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
@@ -615,7 +518,6 @@ export default function Dashboard() {
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
           <TodayPanel />
-          <GigTracker />
           <TradeBotCard />
           <TradeQuickView />
         </div>

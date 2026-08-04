@@ -457,89 +457,6 @@ export const fetchEmailStatus = async () => {
   return r.data
 }
 
-export type GigStatus = 'active' | 'completed' | 'failed' | 'on_hold'
-export type GigCategory = 'main' | 'side' | 'daily' | 'work'
-
-export type GigLink = {
-  id: number
-  gigId: string
-  kind: 'email' | 'ticket' | 'url'
-  ref: string
-  label: string
-  createdAt: string
-}
-
-export type GigRow = {
-  id: string
-  parentId: string | null
-  title: string
-  detail: string
-  category: GigCategory
-  section: string
-  status: GigStatus
-  tracked: boolean
-  sort: number
-  createdAt: string
-  updatedAt: string
-  completedAt: string | null
-}
-
-export type Gig = GigRow & {
-  subgigs: GigRow[]
-  links: GigLink[]
-  progress: { done: number; total: number }
-}
-
-export const fetchGigs = async () => {
-  const r = await api.get<{ gigs: Gig[] } | { error?: string; detail?: string }>('/gigs')
-  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid gigs response')
-  return (r.data as { gigs: Gig[] }).gigs
-}
-
-export type GigStats = {
-  xp: number
-  level: number
-  levelXp: number
-  nextLevelXp: number
-  completed: number
-  breakdown: { work: number; personal: number; objectives: number }
-}
-
-export const fetchGigStats = async () => {
-  const r = await api.get<GigStats>('/gigs/stats')
-  return r.data
-}
-
-export const createGig = async (input: { title: string; detail?: string; category?: GigCategory; section?: string; parentId?: string; tracked?: boolean }) => {
-  const r = await api.post<{ gig: GigRow; error?: string; detail?: string }>('/gigs', input)
-  if (!r.data.gig) throw new Error(r.data.detail || r.data.error || 'Failed to create gig')
-  return r.data.gig
-}
-
-export const updateGig = async (id: string, patch: { title?: string; detail?: string; category?: GigCategory; section?: string; status?: GigStatus; tracked?: boolean; sort?: number }) => {
-  const r = await api.patch<{ gig: GigRow; error?: string; detail?: string }>(`/gigs/${id}`, patch)
-  if (!r.data.gig) throw new Error(r.data.detail || r.data.error || 'Failed to update gig')
-  return r.data.gig
-}
-
-export const deleteGig = async (id: string) => {
-  const r = await api.delete<{ ok?: boolean; error?: string; detail?: string }>(`/gigs/${id}`)
-  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to delete gig')
-  return r.data
-}
-
-export const addGigLink = async (gigId: string, input: { kind: 'email' | 'ticket' | 'url'; ref: string; label?: string }) => {
-  const r = await api.post<{ link: GigLink; error?: string; detail?: string }>(`/gigs/${gigId}/links`, input)
-  if (!r.data.link) throw new Error(r.data.detail || r.data.error || 'Failed to add link')
-  return r.data.link
-}
-
-export const deleteGigLink = async (gigId: string, linkId: number) => {
-  const r = await api.delete<{ ok?: boolean; error?: string; detail?: string }>(`/gigs/${gigId}/links/${linkId}`)
-  if (!r.data.ok) throw new Error(r.data.detail || r.data.error || 'Failed to delete link')
-  return r.data
-}
-
 export type IntakeTicketMatch = { id: number; ticketNumber: string; title: string; score: number }
 
 export type IntakeItem = {
@@ -548,8 +465,6 @@ export type IntakeItem = {
   isWork: boolean
   summary: string
   ticketMatches: IntakeTicketMatch[]
-  gigMatch: { id: string; title: string } | null
-  suggestedGigTitle: string | null
   status: 'pending' | 'linked' | 'dismissed'
   linkedKind: string | null
   linkedRef: string | null
@@ -575,7 +490,7 @@ export const fetchEmailIntake = async (status: 'pending' | 'linked' | 'dismissed
 export const linkIntakeItem = async (
   account: string,
   uid: string,
-  input: { kind: 'ticket' | 'gig' | 'new-gig'; ref?: string; title?: string },
+  input: { kind: 'ticket'; ref: string },
 ) => {
   const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(
     `/emails/intake/${encodeURIComponent(account)}/${encodeURIComponent(uid)}/link`, input)

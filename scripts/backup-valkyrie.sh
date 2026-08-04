@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily online backup of Valkyrie's SQLite databases (gigs, email intake, auth).
+# Daily online backup of Valkyrie's SQLite databases (email intake, auth).
 # Uses `sqlite3 .backup`, which takes a consistent snapshot while the apps hold
 # their WAL open — safe to run against the live services, unlike a plain cp.
 # Snapshots are gzipped and rotated (keep the newest KEEP per database).

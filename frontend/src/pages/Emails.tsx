@@ -111,17 +111,16 @@ export function EmailSignalCard({ item }: { item: EmailSignalItem }) {
   )
 }
 
-// One pending intake suggestion: connect the email to an Autotask ticket
-// (work) or a gig (personal), or dismiss it.
+// One pending intake suggestion: connect the email to an Autotask ticket,
+// or dismiss it.
 function IntakeRow({ item }: { item: IntakeItem }) {
   const queryClient = useQueryClient()
   const [manualTicket, setManualTicket] = useState('')
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['email-intake'] })
-    void queryClient.invalidateQueries({ queryKey: ['gigs'] })
   }
   const link = useMutation({
-    mutationFn: (input: { kind: 'ticket' | 'gig' | 'new-gig'; ref?: string; title?: string }) =>
+    mutationFn: (input: { kind: 'ticket'; ref: string }) =>
       linkIntakeItem(item.account, item.uid, input),
     onSettled: invalidate,
   })
@@ -137,11 +136,9 @@ function IntakeRow({ item }: { item: IntakeItem }) {
   const busy = link.isPending || dismiss.isPending || feedback.isPending || createTicket.isPending
   // Only the Work client mailboxes hold real work email that can spawn tickets.
   const canCreateTicket = item.isWork && (item.account === 'work' || item.account === 'work-support')
-  // No ticket candidates and no gig suggestion: nothing to connect to, so
-  // this needs a decision (new gig, spam, block, or dismiss).
-  const unknown = item.isWork
-    ? item.ticketMatches.length === 0
-    : !item.gigMatch && !item.suggestedGigTitle
+  // A work email with no ticket candidate has nothing to connect to yet, so it
+  // needs a decision (link a ticket by number, create one, spam, or dismiss).
+  const unknown = item.isWork && item.ticketMatches.length === 0
 
   return (
     <div className="space-y-2 border border-[var(--color-border)] px-3 py-2.5">
@@ -234,41 +231,8 @@ function IntakeRow({ item }: { item: IntakeItem }) {
                 {((createTicket.error as { detail?: string; message?: string }).detail || (createTicket.error as Error).message)}
               </span>
             )}
-            {unknown && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => link.mutate({ kind: 'new-gig', title: item.subject.slice(0, 60) })}
-                className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
-              >
-                + new gig: {item.subject.slice(0, 32)}
-              </button>
-            )}
           </>
-        ) : (
-          <>
-            {item.gigMatch && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => link.mutate({ kind: 'gig', ref: item.gigMatch!.id })}
-                className="border border-[var(--color-accent)]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.08)] disabled:opacity-40"
-              >
-                → gig: {item.gigMatch.title.slice(0, 40)}
-              </button>
-            )}
-            {item.suggestedGigTitle && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => link.mutate({ kind: 'new-gig', title: item.suggestedGigTitle! })}
-                className="border border-[#48e3ce]/50 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[#48e3ce] transition hover:bg-[rgba(72,227,206,0.08)] disabled:opacity-40"
-              >
-                + new gig: {item.suggestedGigTitle.slice(0, 40)}
-              </button>
-            )}
-          </>
-        )}
+        ) : null}
         {(link.error || dismiss.error) && (
           <span className="text-[10px] text-[var(--color-danger)]">
             {(() => {
@@ -511,7 +475,7 @@ export default function Emails() {
           sub="important email that needs you" count={d?.items.length ?? 0}
           tone={(d?.items.length ?? 0) > 0 ? 'alert' : 'dim'} />
         <HubButton to="/emails/intake" icon={<ListChecks size={22} />} label="intake queue"
-          sub="connect email to gigs & tickets" count={intake.data?.counts.pending ?? 0}
+          sub="connect email to tickets" count={intake.data?.counts.pending ?? 0}
           tone={(intake.data?.counts.pending ?? 0) > 0 ? 'accent' : 'dim'} />
         <HubButton to="/emails/drafts" icon={<FileText size={22} />} label="draft replies"
           sub="ready-to-send drafts" count={d?.drafts.length ?? 0}
