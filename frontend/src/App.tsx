@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Mail, Activity as ActivityIcon, Menu, X, TrendingUp, Search } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -18,12 +18,6 @@ const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
 const Services = lazy(() => import('./pages/Services'))
-const Emails = lazy(() => import('./pages/Emails'))
-const EmailInboxPage = lazy(() => import('./pages/Emails').then((m) => ({ default: m.EmailInboxPage })))
-const EmailDraftsPage = lazy(() => import('./pages/Emails').then((m) => ({ default: m.EmailDraftsPage })))
-const EmailIntakePage = lazy(() => import('./pages/Emails').then((m) => ({ default: m.EmailIntakePage })))
-const EmailAutoLinkedPage = lazy(() => import('./pages/Emails').then((m) => ({ default: m.EmailAutoLinkedPage })))
-const EmailServicePage = lazy(() => import('./pages/Emails').then((m) => ({ default: m.EmailServicePage })))
 const Activity = lazy(() => import('./pages/Activity'))
 
 const queryClient = new QueryClient({
@@ -46,7 +40,6 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/emails', label: 'emails', icon: Mail },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/vault', label: 'vault', icon: KeyRound },
@@ -228,12 +221,6 @@ function Shell() {
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
             <Route path="/trade" element={<TradeBot />} />
-            <Route path="/emails" element={<CenterPage><Emails /></CenterPage>} />
-            <Route path="/emails/inbox" element={<CenterPage><EmailInboxPage /></CenterPage>} />
-            <Route path="/emails/drafts" element={<CenterPage><EmailDraftsPage /></CenterPage>} />
-            <Route path="/emails/intake" element={<CenterPage><EmailIntakePage /></CenterPage>} />
-            <Route path="/emails/auto-linked" element={<CenterPage><EmailAutoLinkedPage /></CenterPage>} />
-            <Route path="/emails/service" element={<CenterPage><EmailServicePage /></CenterPage>} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
           </Routes>
           </ErrorBoundary>

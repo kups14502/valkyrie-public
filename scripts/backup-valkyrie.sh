@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily online backup of Valkyrie's SQLite databases (email intake, auth).
+# Daily online backup of Valkyrie's SQLite databases (auth, code-deck).
 # Uses `sqlite3 .backup`, which takes a consistent snapshot while the apps hold
 # their WAL open — safe to run against the live services, unlike a plain cp.
 # Snapshots are gzipped and rotated (keep the newest KEEP per database).
@@ -13,7 +13,6 @@ mkdir -p "$DEST"
 # Discover the databases rather than hardcoding, so new DBs are covered too.
 mapfile -t DBS < <(find \
   "$HOME/valkyrie/backend/data" \
-  "$HOME/email-assistant/data" \
   -maxdepth 1 -type f -name '*.sqlite' 2>/dev/null | sort)
 
 if [[ ${#DBS[@]} -eq 0 ]]; then

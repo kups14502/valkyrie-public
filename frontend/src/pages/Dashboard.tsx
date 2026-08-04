@@ -2,47 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchTradeBotStatus, fetchEmailIntake, type AIClientUsage } from '../lib/api'
-import { EmailSignalCard } from './Emails'
-
-// Morning glance: what needs you today — the email queues awaiting action.
-// Everything here is a one-click jump to act.
-function TodayPanel() {
-  const intake = useQuery({ queryKey: ['email-intake', 'pending'], queryFn: () => fetchEmailIntake('pending'), refetchInterval: 120_000 })
-  const signals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 120_000 })
-
-  const pendingIntake = intake.data?.counts.pending ?? 0
-  const important = signals.data?.counts.important24h ?? 0
-
-  const nothing = pendingIntake === 0 && important === 0
-
-  return (
-    <Card title="Today">
-      {intake.isLoading && !intake.data ? (
-        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-      ) : nothing ? (
-        <div className="text-sm text-[var(--color-text-dim)]">&gt; nothing due, queues clear. carry on.</div>
-      ) : (
-        <div className="space-y-3">
-          {(pendingIntake > 0 || important > 0) && (
-            <div className="flex flex-wrap gap-2">
-              {pendingIntake > 0 && (
-                <Link to="/emails" className="border border-[var(--color-border)] px-2 py-1 text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
-                  {pendingIntake} intake to review
-                </Link>
-              )}
-              {important > 0 && (
-                <Link to="/emails" className="border border-[var(--color-danger)]/50 px-2 py-1 text-[11px] uppercase tracking-[0.1em] text-[var(--color-danger)] transition hover:bg-[rgba(255,23,68,0.08)]">
-                  {important} important email{important === 1 ? '' : 's'}
-                </Link>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  )
-}
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchTrading, fetchTradeBotStatus, type AIClientUsage } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -482,7 +442,6 @@ export default function Dashboard() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
   const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
-  const emailSignals = useQuery({ queryKey: ['email-signals'], queryFn: fetchEmailSignals, refetchInterval: 120_000 })
 
   const samples = history.data?.samples ?? []
   const cpuSeries = samples.map((s) => s.cpu)
@@ -517,7 +476,6 @@ export default function Dashboard() {
 
       <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
         <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
-          <TodayPanel />
           <TradeBotCard />
           <TradeQuickView />
         </div>
@@ -597,65 +555,6 @@ export default function Dashboard() {
                   <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
                 )}
               </Card>
-
-          {(() => {
-            const es = emailSignals.data
-            const importantItems = es?.items.filter((i) => i.classification === 'important') ?? []
-            const routineItems = es?.items.filter((i) => i.classification === 'routine') ?? []
-            const draftsCount = es?.drafts.length ?? 0
-            const hasAction = importantItems.length > 0 || draftsCount > 0
-            const timerOk = es?.timer.active === 'active'
-            return (
-              <Card
-                title="Email Signals"
-                action={
-                  es && (
-                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em]">
-                      {importantItems.length > 0 && (
-                        <span className="text-[var(--color-danger)]">{importantItems.length} important</span>
-                      )}
-                      {draftsCount > 0 && (
-                        <span className="text-[var(--color-warning)]">{draftsCount} drafts</span>
-                      )}
-                      <span className={timerOk ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-danger)]'}>
-                        {timerOk ? '● timer ok' : '○ timer down'}
-                      </span>
-                    </div>
-                  )
-                }
-              >
-                {emailSignals.isLoading && !es ? (
-                  <div className="text-sm text-[var(--color-text-dim)]">loading…</div>
-                ) : !hasAction ? (
-                  <div className="text-sm text-[var(--color-text-dim)]">&gt; no email needs attention.</div>
-                ) : (
-                  <div className="space-y-3">
-                    {importantItems.length > 0 && (
-                      <div className="space-y-1">
-                        {importantItems.slice(0, 5).map((item) => (
-                          <EmailSignalCard key={`${item.account}-${item.uid}`} item={item} />
-                        ))}
-                        {importantItems.length > 5 && (
-                          <div className="text-[10px] text-[var(--color-text-faint)] pl-1">+{importantItems.length - 5} more — see emails tab</div>
-                        )}
-                      </div>
-                    )}
-                    {routineItems.length > 0 && draftsCount > 0 && (
-                      <div>
-                        <div className="mb-1 text-[9px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">drafts waiting</div>
-                        {es!.drafts.slice(0, 3).map((d) => (
-                          <div key={d.filename} className="border border-[var(--color-border)] px-3 py-1.5 text-[11px]">
-                            <span className="text-[var(--color-warning)]">{d.filename}</span>
-                            {d.preview && <span className="ml-2 text-[var(--color-text-faint)] truncate">{d.preview.slice(0, 80)}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            )
-          })()}
 
           <Card title="Projects / Feeds">
             {projectsList.length > 0 ? (

@@ -1,5 +1,5 @@
 [Unit]
-Description=Valkyrie SQLite backup (email intake, auth)
+Description=Valkyrie SQLite backup (auth, code-deck)
 
 [Service]
 Type=oneshot
