@@ -13,6 +13,7 @@ import projectsRoute from './routes/projects.js'
 import vaultRoute from './routes/vault.js'
 import lightsRoute from './routes/lights.js'
 import tradingRoute from './routes/trading.js'
+import tradebotRoute from './routes/tradebot.js'
 import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
@@ -93,6 +94,7 @@ app.use('/api', projectsRoute)
 app.use('/api', vaultRoute)
 app.use('/api', lightsRoute)
 app.use('/api', tradingRoute)
+app.use('/api', tradebotRoute)
 app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)

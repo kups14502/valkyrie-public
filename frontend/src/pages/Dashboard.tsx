@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Card, Stat } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchGigs, fetchEmailIntake, type AIClientUsage, type Gig } from '../lib/api'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchEmailSignals, fetchTrading, fetchTradeBotStatus, fetchGigs, fetchEmailIntake, type AIClientUsage, type Gig } from '../lib/api'
 import { EmailSignalCard } from './Emails'
 import { GigProgressBar } from '../components/GigProgressBar'
 import { gigColor } from '../lib/gigColor'
@@ -434,6 +434,89 @@ function TradeQuickView() {
   )
 }
 
+// Status card for the v2 trade bot (~/trade-bot): reads the status.json its
+// status.py generator writes, surfaced through /api/tradebot/status. Distinct
+// from TradeQuickView, which covers the legacy ~/trading bot.
+function TradeBotCard() {
+  const status = useQuery({ queryKey: ['tradebot-status'], queryFn: fetchTradeBotStatus, refetchInterval: 60_000 })
+  const s = status.data
+  const fmtUSD = (n: number | null | undefined) =>
+    n == null ? '—' : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const pill = s
+    ? s.stale
+      ? { label: 'stale', color: 'var(--color-warning)' }
+      : s.up
+      ? { label: 'up', color: 'var(--color-success)' }
+      : { label: 'down', color: 'var(--color-danger)' }
+    : null
+  const err = status.error as { detail?: string; message?: string } | null
+  const trips = s?.experiment.paper_trips ?? 0
+  const target = s?.experiment.target_trips ?? 100
+  const tripPct = target > 0 ? Math.min(100, Math.round((trips / target) * 100)) : 0
+  const generatedAgo = s ? fmtAgo(new Date(s.generated_at).getTime()) : null
+  return (
+    <Card
+      title="Trade Bot v2"
+      action={pill && (
+        <span
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
+          style={{ color: pill.color, borderColor: pill.color, textShadow: `0 0 6px ${pill.color}` }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: pill.color, boxShadow: `0 0 6px ${pill.color}` }} aria-hidden />
+          {pill.label}
+        </span>
+      )}
+    >
+      {status.isLoading && !s ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : status.error || !s ? (
+        <div className="space-y-1 text-sm">
+          <div className="text-[var(--color-danger)]">Trade bot status unavailable</div>
+          {(err?.detail || err?.message) && <div className="text-xs text-[var(--color-text-dim)]">{err.detail || err.message}</div>}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="text-sm text-[var(--color-text-dim)]">&gt; {s.up_detail}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Live Equity</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.live_equity)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Paper Equity</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.paper_equity)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Spend Total</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.spend.total_usd)}</div>
+              <div className="text-[11px] text-[var(--color-text-faint)]">{s.spend.calls_total} call{s.spend.calls_total === 1 ? '' : 's'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Spend Today</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.spend.today_usd)}</div>
+              <div className="text-[11px] text-[var(--color-text-faint)]">{s.spend.calls_today} call{s.spend.calls_today === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+          <div>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Experiment</span>
+              <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{trips}/{target} trips</span>
+            </div>
+            <div className="mt-1.5 h-1 w-full bg-[var(--color-surface-2)]">
+              <div className="h-full transition-all duration-300" style={{ width: `${tripPct}%`, backgroundColor: 'var(--color-accent)', boxShadow: '0 0 6px var(--color-accent)' }} />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-text-dim)]">
+            <span className="uppercase tracking-[0.12em]">[market {s.market.is_open ? 'open' : 'closed'}]</span>
+            {s.experiment.rules_ok === false && <span className="font-semibold uppercase tracking-[0.12em] text-[var(--color-danger)]">rules drift</span>}
+            {generatedAgo && <span className="text-[var(--color-text-faint)]">{generatedAgo}</span>}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // HUD-style tracked-gigs widget: the gigs marked "tracked" in the gig
 // log, with progress and the next open objective — like a game's gig HUD.
 // With nothing explicitly tracked, fall back to the active gigs so the HUD
@@ -533,6 +616,7 @@ export default function Dashboard() {
         <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
           <TodayPanel />
           <GigTracker />
+          <TradeBotCard />
           <TradeQuickView />
         </div>
 

@@ -188,6 +188,27 @@ export type TradingStatus = {
   }
 }
 
+// v2 trade bot (~/trade-bot): passthrough of the status.json its status.py
+// generator writes, plus the backend's `stale` flag.
+export type TradeBotArm = { last_run: string | null; ok: boolean; detail: string }
+
+export type TradeBotStatus = {
+  generated_at: string
+  market: { is_open: boolean; reason: string }
+  up: boolean
+  up_detail: string
+  arms: {
+    live_scan: TradeBotArm
+    paper: TradeBotArm
+    guard: TradeBotArm
+    v1_legacy?: { scheduled: boolean; note: string }
+  }
+  spend: { total_usd: number; today_usd: number; calls_total: number; calls_today: number; since: string | null }
+  portfolio: { live_equity: number | null; live_cash: number | null; paper_equity: number | null; paper_cash: number | null }
+  experiment: { target_trips: number; paper_trips: number; live_trips: number | null; preregistered: string | null; rules_ok: boolean | null }
+  stale: boolean
+}
+
 export type LightState = {
   entity_id: string
   name: string
@@ -339,6 +360,12 @@ export const fetchTrading = async () => {
   const r = await api.get<TradingStatus | { error?: string; detail?: string }>('/trading')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid trading response')
   return r.data as TradingStatus
+}
+
+export const fetchTradeBotStatus = async () => {
+  const r = await api.get<TradeBotStatus | { error?: string; detail?: string }>('/tradebot/status')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid trade bot response')
+  return r.data as TradeBotStatus
 }
 
 export const fetchLights = async () => {
