@@ -197,18 +197,19 @@ export type TradeBotDoc = {
   market: { is_open: boolean; reason: string }
   up: boolean
   up_detail: string
+  // The paper arm was retired 2026-08-04, so status.py no longer emits
+  // arms.paper, portfolio.paper_*, or experiment.paper_trips.
   arms: {
     live_scan: TradeBotArm
-    paper: TradeBotArm
     guard: TradeBotArm
     v1_legacy?: { scheduled: boolean; note: string }
   }
+  // Every judge call the bot makes is priced into logs/cost_v2.jsonl, so this
+  // is recorded spend end to end: nothing here is modelled from token counts.
   spend: { total_usd: number; today_usd: number; calls_total: number; calls_today: number; since: string | null }
   portfolio: {
     live_equity: number | null
     live_cash: number | null
-    paper_equity: number | null
-    paper_cash: number | null
     // "sample" = a real broker read; "day_open" = the 09:40 fallback, which is
     // NOT a live figure and must be labelled as stale wherever it is shown.
     live_equity_source?: string | null
@@ -226,16 +227,19 @@ export type TradeBotDoc = {
     net_flows_usd: number | null
     flows_detected: number | null
   }
-  experiment: { target_trips: number; paper_trips: number; live_trips: number | null; preregistered: string | null; rules_ok: boolean | null }
+  // live_trips: distinct closing sell orders since preregistered, counted by
+  // status.py from logs/broker_snapshot.json. null = not knowable yet (no
+  // snapshot or no pre-registration), which is not the same as zero.
+  experiment: { target_trips: number; live_trips: number | null; preregistered: string | null; rules_ok: boolean | null }
 }
 
 export type TradeBotStatus = TradeBotDoc & { stale: boolean }
 
-// One decision the judge made, from scan_v2.log (live) or paper/runs.jsonl.
+// One decision the judge made, from scan_v2.log.
 // gate: null = nothing proposed, "executed" = orders placed, otherwise why not.
 export type TradeBotDecision = {
   ts: string
-  arm: 'live' | 'paper'
+  arm: 'live'
   regime: string | null
   confidence: number | null
   trade_needed: boolean | null

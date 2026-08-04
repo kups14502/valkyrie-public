@@ -369,9 +369,13 @@ function TradeBotCard() {
       : { label: 'down', color: 'var(--color-danger)' }
     : null
   const err = status.error as { detail?: string; message?: string } | null
-  const trips = s?.experiment.paper_trips ?? 0
+  // LIVE round trips since pre-registration: the paper arm was retired
+  // 2026-08-04 and the funded account is the whole experiment now. null means
+  // status.py could not count them yet, so the bar reads empty rather than
+  // claiming a confident zero.
+  const trips = s?.experiment.live_trips ?? null
   const target = s?.experiment.target_trips ?? 100
-  const tripPct = target > 0 ? Math.min(100, Math.round((trips / target) * 100)) : 0
+  const tripPct = trips != null && target > 0 ? Math.min(100, Math.round((trips / target) * 100)) : 0
   const generatedAgo = s ? fmtAgo(new Date(s.generated_at).getTime()) : null
   return (
     <Card
@@ -401,9 +405,11 @@ function TradeBotCard() {
               <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Live Equity</div>
               <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.live_equity)}</div>
             </div>
+            {/* Took the slot the retired paper arm used to occupy. Cash against
+                equity says whether the bot is deployed or sitting flat. */}
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Paper Equity</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.paper_equity)}</div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Live Cash</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.live_cash)}</div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Spend Total</div>
@@ -419,7 +425,7 @@ function TradeBotCard() {
           <div>
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Experiment</span>
-              <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{trips}/{target} trips</span>
+              <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{trips ?? '—'}/{target} live trips</span>
             </div>
             <div className="mt-1.5 h-1 w-full bg-[var(--color-surface-2)]">
               <div className="h-full transition-all duration-300" style={{ width: `${tripPct}%`, backgroundColor: 'var(--color-accent)', boxShadow: '0 0 6px var(--color-accent)' }} />

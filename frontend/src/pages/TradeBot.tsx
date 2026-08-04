@@ -260,7 +260,7 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
         <span className={`shrink-0 text-[11px] tabular-nums ${FAINT}`}>
           {fmtDate(d.ts)} {fmtClock(d.ts)}
         </span>
-        <Tag faint={d.arm === 'paper'}>{d.arm}</Tag>
+        <Tag>{d.arm}</Tag>
         <span className={`shrink-0 text-[11px] uppercase tracking-[0.14em] ${DIM}`}>
           {d.regime ?? 'regime unknown'}
         </span>
@@ -555,8 +555,8 @@ function Body({ page }: { page: TradeBotPage }) {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <Card title={`Decision feed · ${page.decisions.length} scan${page.decisions.length === 1 ? '' : 's'}`}>
           <div className={`mb-3 text-[11px] leading-relaxed ${DIM}`}>
-            Every judged scan, live and paper: the regime it read, its confidence, whether it wanted to trade and
-            what the gate did about it.
+            Every judged scan: the regime it read, its confidence, whether it wanted to trade and what the gate did
+            about it.
           </div>
           {page.decisions.length === 0 ? (
             <Empty>
@@ -580,7 +580,6 @@ function Body({ page }: { page: TradeBotPage }) {
             <div className="divide-y divide-[var(--color-border)]">
               <ArmRow name="live scan" arm={s.arms?.live_scan} />
               <ArmRow name="guard" arm={s.arms?.guard} />
-              <ArmRow name="paper" arm={s.arms?.paper} />
             </div>
             <div className={`mt-3 border-t border-[var(--color-border)] pt-2`}>
               <div className={LABEL}>guard thresholds</div>
@@ -708,11 +707,6 @@ function PortfolioPanel({
                 : (brokerError ?? (broker ? 'not in the snapshot' : 'snapshot unavailable'))
             }
           />
-          <Field
-            label="Paper arm"
-            value={usd(p?.paper_equity, 0)}
-            sub={`${usd(p?.paper_cash, 0)} cash · simulated`}
-          />
         </div>
       </div>
     </Card>
@@ -722,32 +716,36 @@ function PortfolioPanel({
 function ExperimentPanel({ status, broker }: { status: TradeBotDoc; broker: TradeBotSnapshot | null }) {
   const e = status.experiment
   const target = num(e?.target_trips) ?? 100
-  const paper = num(e?.paper_trips) ?? 0
   const lifetime = num(broker?.realized?.round_trips)
   const preregAt = e?.preregistered ? Date.parse(e.preregistered) : NaN
 
-  // Live progress is counted from the pre-registration instant, not lifetime:
-  // the broker's round trips include the v1 era, which is not this experiment.
-  // A round trip is one closing SELL order, so distinct sell order ids after
-  // that instant is the same L2 count, date-restricted.
+  // LIVE round trips are the whole experiment now: the paper arm was retired
+  // 2026-08-04. Progress is counted from the pre-registration instant, not
+  // lifetime, because the broker's round trips include the v1 era, which is not
+  // this experiment. A round trip is one closing SELL order, so distinct sell
+  // order ids after that instant is the same L2 count, date-restricted.
+  //
+  // status.py counts this from logs/broker_snapshot.json and is the source of
+  // truth. The client-side count below is only a fallback for a status.json
+  // written before that landed; it applies the same rule to the same data.
   let live = num(e?.live_trips)
   let note: string
   if (live != null) {
-    note = 'from status.json'
+    note =
+      lifetime != null
+        ? `closing sells since pre-registration · ${lifetime} lifetime round trips predate it`
+        : 'closing sells since pre-registration'
   } else if (broker && Number.isFinite(preregAt)) {
     const ids = new Set(
       broker.fills
-        .filter((f) => f.side === 'sell' && Number.isFinite(Date.parse(f.ts)) && Date.parse(f.ts) >= preregAt)
+        .filter((f) => f.side === 'sell' && Number.isFinite(Date.parse(f.ts)) && Date.parse(f.ts) > preregAt)
         // A fill with no order_id cannot be proven to be a distinct round trip;
         // counting '' once would overstate pre-registered progress.
         .map((f) => f.order_id)
         .filter((id): id is string => Boolean(id)),
     )
     live = ids.size
-    note =
-      lifetime != null
-        ? `closing sells since pre-registration, from the newest ${broker.fills.length} fills · ${lifetime} lifetime round trips predate it`
-        : 'closing sells since pre-registration'
+    note = `counted here from the newest ${broker.fills.length} fills, not from status.json`
   } else {
     live = 0
     note = 'snapshot unavailable — shown as zero, not estimated'
@@ -764,7 +762,6 @@ function ExperimentPanel({ status, broker }: { status: TradeBotDoc; broker: Trad
       )}
       <div className="space-y-3">
         <Progress label="live round trips" value={live} target={target} note={note} />
-        <Progress label="paper round trips" value={paper} target={target} note="from logs/paper/ledger.jsonl" />
       </div>
       <div className={`mt-3 space-y-1 border-t border-[var(--color-border)] pt-2 text-[11px] ${DIM}`}>
         <div className="flex items-baseline justify-between gap-2">
@@ -794,9 +791,9 @@ function SpendPanel({ status }: { status: TradeBotDoc }) {
   const calls = num(sp?.calls_total) ?? 0
   const total = num(sp?.total_usd)
   const perCall = total != null && calls > 0 ? total / calls : null
-  // The live arm writes its own cost rows; the paper arm only records token
-  // counts, so status.py prices those at list rates. Say so rather than
-  // presenting a partly-modeled figure as if the bot had logged every cent.
+  // Every judge call is priced into logs/cost_v2.jsonl by the bot itself, so
+  // there is nothing modelled left to caveat. The old footnote about paper-arm
+  // cost being derived from token counts went with the paper arm.
   return (
     <Card title="Judge spend">
       <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -806,8 +803,7 @@ function SpendPanel({ status }: { status: TradeBotDoc }) {
         <Field label="Per call" value={perCall != null ? usd(perCall, 4) : '—'} sub="mean cost" />
       </div>
       <div className={`mt-3 border-t border-[var(--color-border)] pt-2 text-[10px] leading-relaxed ${FAINT}`}>
-        live-arm cost is recorded by the bot; paper-arm cost is priced from logged
-        token counts at claude-opus-5 list rates, not recorded
+        every cent is recorded by the bot in logs/cost_v2.jsonl — nothing here is estimated from token counts
       </div>
     </Card>
   )

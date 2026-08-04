@@ -5,14 +5,13 @@ import path from 'node:path'
 const router = Router()
 
 // Everything here is FILE-ONLY and read-only. The trade bot's own cron jobs are
-// the writers: status.py every 5 min, equity_sampler.py every 10 min, scan_v2 /
-// paper_trade per cycle. This route never touches the broker, holds no
-// credentials, and does no work a request should wait on.
+// the writers: status.py every 5 min, equity_sampler.py every 10 min, scan_v2
+// per cycle. This route never touches the broker, holds no credentials, and
+// does no work a request should wait on.
 const BOT_DIR = '/home/brendon/trade-bot'
 const STATUS_FILE = path.join(BOT_DIR, 'logs', 'status.json')
 const SNAPSHOT_FILE = path.join(BOT_DIR, 'logs', 'broker_snapshot.json')
 const SCAN_LOG = path.join(BOT_DIR, 'logs', 'scan_v2.log')
-const PAPER_RUNS = path.join(BOT_DIR, 'logs', 'paper', 'runs.jsonl')
 const CONFIG_FILE = path.join(BOT_DIR, 'config_v2.json')
 
 const STALE_AFTER_MS = 10 * 60_000
@@ -57,7 +56,7 @@ type BrokerSnapshot = {
 // reason it was stopped.
 type Decision = {
   ts: string
-  arm: 'live' | 'paper'
+  arm: 'live'
   regime: string | null
   confidence: number | null
   trade_needed: boolean | null
@@ -395,79 +394,17 @@ function parseScanLog(text: string): Decision[] {
   return runs.map((r) => r.decision).reverse()
 }
 
-/**
- * logs/paper/runs.jsonl -> paper decisions, newest first.
- *
- * Rows with a null verdict are runs that never reached the judge (market closed,
- * --offline); they carry no decision and are left out rather than rendered as a
- * scan with no opinion.
- */
-function parsePaperRuns(text: string): Decision[] {
-  const out: Decision[] = []
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let row: unknown
-    try {
-      row = JSON.parse(trimmed)
-    } catch {
-      continue // torn tail or hand-edited line
-    }
-    if (!isObj(row)) continue
-    const verdict = row.verdict
-    if (!isObj(verdict)) continue
-    const ts = fstr(row.ts)
-    if (!ts || !Number.isFinite(Date.parse(ts))) continue
-
-    const notes = Array.isArray(row.gate_notes)
-      ? row.gate_notes.filter((n): n is string => typeof n === 'string')
-      : []
-    const fills = fnum(row.judge_fills) ?? 0
-    let gate: string | null = null
-    if (notes.length > 0) {
-      // paper_trade.py writes "GATE confidence 0.60 below ..." (no colon).
-      gate = gateLabel(notes[0].replace(/^GATE:?\s*/i, ''))
-    } else if (fills > 0) {
-      gate = 'executed'
-    }
-
-    out.push({
-      ts,
-      arm: 'paper',
-      regime: fstr(verdict.regime),
-      confidence: fnum(verdict.confidence),
-      trade_needed: typeof verdict.trade_needed === 'boolean' ? verdict.trade_needed : null,
-      trades_proposed: fnum(verdict.trades_proposed),
-      summary: fstr(verdict.summary),
-      gate,
-      // paper runs record token usage but not a dollar cost; showing a derived
-      // one would be inventing a number the bot never wrote down.
-      cost_usd: null,
-    })
-  }
-  return out.reverse()
-}
-
+// The paper arm was retired 2026-08-04, so scan_v2.log is the only decision
+// source left; logs/paper/runs.jsonl and its parser are gone with it.
 async function readDecisions(): Promise<Decision[]> {
-  const [scanText, paperText] = await Promise.all([
-    readTail(SCAN_LOG, TAIL_BYTES),
-    readTail(PAPER_RUNS, TAIL_BYTES),
-  ])
+  const scanText = await readTail(SCAN_LOG, TAIL_BYTES)
   let live: Decision[] = []
-  let paper: Decision[] = []
   try {
     live = scanText ? parseScanLog(scanText) : []
   } catch {
     live = []
   }
-  try {
-    paper = paperText ? parsePaperRuns(paperText) : []
-  } catch {
-    paper = []
-  }
-  return [...live.slice(0, MAX_DECISIONS), ...paper.slice(0, MAX_DECISIONS)]
-    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
-    .slice(0, MAX_DECISIONS)
+  return live.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts)).slice(0, MAX_DECISIONS)
 }
 
 // ---------- status ----------
