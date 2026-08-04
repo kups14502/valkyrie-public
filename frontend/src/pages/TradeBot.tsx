@@ -23,10 +23,19 @@ import {
 //  2. Nothing is invented. Zero positions and zero v2 trades render as an
 //     explicit empty state, never as a placeholder row or an approximation.
 //
-// Colour: --color-accent is recoloured by the user's hue picker, so "green =
-// good" is not available and is not implied. --color-danger marks bad/blocked
-// only, and every coloured mark is paired with a bracketed word, so colour is
-// never the sole encoding.
+// Colour, and it is a contract:
+//  * --color-danger is ONLY for something that is actually wrong and wants a
+//    human: bot down, an arm failing, rules_ok false, a stale equity figure, an
+//    endpoint or snapshot failure. Routine operation never gets it. In
+//    particular the confidence gate refusing a trade is this bot's own risk
+//    control doing its job, so it reads in the neutral palette, not in red.
+//  * --color-accent is EMPHASIS, never "good" — the user's hue picker recolours
+//    it at runtime, so "green = good" is not available and is not implied. It
+//    marks the rare event worth a human's eye: a scan that cleared the gate, or
+//    one that actually reached the broker.
+//  * everything else is --color-text / -dim / -faint / --color-border.
+// Every coloured mark is still paired with a bracketed word, so colour is never
+// the sole encoding.
 
 // ---------- formatting ----------
 
@@ -116,9 +125,11 @@ const qty = (v: unknown): string => {
 
 const DIM = 'text-[var(--color-text-dim)]'
 const FAINT = 'text-[var(--color-text-faint)]'
+/** Reserved. See the colour contract at the top of the file: real faults only. */
 const BAD = 'text-[var(--color-danger)]'
 const LABEL = `text-[10px] uppercase tracking-[0.28em] ${FAINT}`
 
+/** `bad` is for a real fault (down, failing, tampered). Accent is emphasis. */
 function Tag({ children, bad, faint }: { children: string; bad?: boolean; faint?: boolean }) {
   const tone = bad ? BAD : faint ? FAINT : 'text-[var(--color-accent)]'
   return (
@@ -126,15 +137,16 @@ function Tag({ children, bad, faint }: { children: string; bad?: boolean; faint?
   )
 }
 
-function Field({ label, value, sub, bad }: { label: string; value: string; sub?: string; bad?: boolean }) {
+/**
+ * A figure. Deliberately has no "bad" tone: a number being negative is a market
+ * outcome, not a fault, and red here would compete with the marks that mean
+ * something is broken. The sign is already in the value (-$12.34 / -1.20%).
+ */
+function Field({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="min-w-0">
       <div className={LABEL}>{label}</div>
-      <div
-        className={`mt-1.5 truncate text-xl font-semibold tracking-tight ${bad ? BAD : 'text-[var(--color-text)]'}`}
-      >
-        {value}
-      </div>
+      <div className="mt-1.5 truncate text-xl font-semibold tracking-tight text-[var(--color-text)]">{value}</div>
       {sub && <div className={`mt-1 text-[11px] leading-snug ${DIM}`}>{sub}</div>}
     </div>
   )
@@ -224,20 +236,34 @@ function EquityChart({ points }: { points: { ts: string; total: number }[] }) {
 
 // ---------- 3. decision feed ----------
 
-/** Per-row confidence bar with the gate threshold marked in place. */
-function ConfMeter({ confidence, threshold }: { confidence: number | null; threshold: number | null }) {
+/**
+ * Per-row confidence bar with the gate threshold marked in place. The gate mark
+ * is a neutral reference tick — it is a number out of config, and landing under
+ * it is the ordinary outcome, not a fault. Only a bar that reached the gate
+ * takes the accent, so the rare row is the one that lights up. The tick is taller
+ * than the bar, so it stays readable even where a cleared fill runs past it.
+ */
+function ConfMeter({
+  confidence,
+  threshold,
+  emphasis,
+}: {
+  confidence: number | null
+  threshold: number | null
+  emphasis: boolean
+}) {
   const c = num(confidence)
   if (c == null) return null
   const t = num(threshold)
   return (
     <div className="relative h-1.5 w-full min-w-[56px] bg-[var(--color-border)]">
       <div
-        className="absolute inset-y-0 left-0 bg-[var(--color-accent)]"
+        className={`absolute inset-y-0 left-0 ${emphasis ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-dim)]'}`}
         style={{ width: `${Math.max(0, Math.min(1, c)) * 100}%` }}
       />
       {t != null && (
         <div
-          className="absolute -inset-y-1 w-0.5 bg-[var(--color-danger)]"
+          className="absolute -inset-y-1 w-0.5 bg-[var(--color-text)]"
           style={{ left: `${Math.max(0, Math.min(1, t)) * 100}%` }}
         />
       )}
@@ -245,22 +271,41 @@ function ConfMeter({ confidence, threshold }: { confidence: number | null; thres
   )
 }
 
+/**
+ * One judged scan.
+ *
+ * The gate refusing a trade is the risk control Brendon wrote doing exactly its
+ * job, so a held row is drawn in the neutral palette — no red, no alarm. The
+ * emphasis goes on the rare row instead: a scan that reached
+ * min_confidence_to_trade (or one that actually reached the broker) takes the
+ * accent border and an accent tag, because that is the row worth reading.
+ */
 function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number | null }) {
   const executed = d.gate === 'executed'
-  const blocked = d.gate != null && !executed
+  // "held", not "blocked by gate": nothing failed, a rule declined to trade. The
+  // wording must not imply an error, and must not imply a trade happened either.
+  const held = d.gate != null && !executed
+  const conf = num(d.confidence)
+  const t = num(threshold)
+  // Cleared on confidence. Reported even when a later rule still held the trade,
+  // since clearing the gate is the notable half. A scan that proposed nothing is
+  // not credited with clearing anything — the gate was never the operative check.
+  const cleared = conf != null && t != null && conf >= t
+  const notable = executed || (held && cleared)
   const wanted = num(d.trades_proposed) ?? 0
-  const border = blocked
-    ? 'border-[var(--color-danger)]'
-    : executed
-      ? 'border-[var(--color-accent)]'
-      : 'border-[var(--color-border)]'
   return (
-    <div className={`border-l-2 py-2.5 pl-3 ${border}`}>
+    <div
+      className={`border-l-2 py-2.5 pl-3 ${
+        notable ? 'border-[var(--color-accent)]' : 'border-[var(--color-border)]'
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <span className={`shrink-0 text-[11px] tabular-nums ${FAINT}`}>
           {fmtDate(d.ts)} {fmtClock(d.ts)}
         </span>
-        <Tag>{d.arm}</Tag>
+        {/* one arm exists, so the label is a constant: it stays out of the way
+            rather than spending the accent on every row */}
+        <Tag faint>{d.arm}</Tag>
         <span className={`shrink-0 text-[11px] uppercase tracking-[0.14em] ${DIM}`}>
           {d.regime ?? 'regime unknown'}
         </span>
@@ -268,9 +313,22 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
           <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--color-text)]">
             {num(d.confidence) != null ? (d.confidence as number).toFixed(2) : '—'}
           </span>
-          <ConfMeter confidence={d.confidence} threshold={threshold} />
+          <ConfMeter confidence={d.confidence} threshold={threshold} emphasis={notable} />
         </div>
-        {blocked ? <Tag bad>blocked by gate</Tag> : executed ? <Tag>executed</Tag> : <Tag faint>no trade wanted</Tag>}
+        {executed ? (
+          <Tag>executed</Tag>
+        ) : !held ? (
+          <Tag faint>no trade wanted</Tag>
+        ) : cleared ? (
+          <>
+            <Tag>cleared gate</Tag>
+            <Tag faint>held</Tag>
+          </>
+        ) : conf != null && t != null ? (
+          <Tag faint>below gate</Tag>
+        ) : (
+          <Tag faint>held</Tag>
+        )}
       </div>
       <div className={`mt-1 flex flex-wrap items-baseline gap-x-3 text-[11px] tabular-nums ${FAINT}`}>
         <span>
@@ -280,7 +338,8 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
         {num(d.cost_usd) != null && <span>judge {usd(d.cost_usd, 4)}</span>}
       </div>
       {d.summary && <div className={`mt-1 text-xs leading-relaxed ${DIM}`}>{d.summary}</div>}
-      {blocked && <div className={`mt-1 text-[11px] leading-snug ${BAD}`}>{d.gate}</div>}
+      {/* the reason, verbatim from the log — a fact, printed quietly */}
+      {held && <div className={`mt-1 text-[11px] leading-snug ${FAINT}`}>{d.gate}</div>}
     </div>
   )
 }
@@ -288,9 +347,11 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
 // ---------- 4. confidence vs gate ----------
 
 /**
- * Confidence per scan against min_confidence_to_trade. One series, one hue: the
- * reading is positional (above or below the rule) so nothing depends on colour,
- * and the rule is directly labelled. The decision feed is this chart's table
+ * Confidence per scan against min_confidence_to_trade. One series: the reading is
+ * positional (above or below the rule) so nothing depends on colour, and the rule
+ * is directly labelled. Colour only sets emphasis — a scan that reached the rule
+ * takes the accent, the ordinary ones stay dim — and the rule itself is a dashed
+ * neutral reference, not a warning line. The decision feed is this chart's table
  * view — every plotted value is also printed there.
  */
 function ConfidenceChart({
@@ -322,14 +383,21 @@ function ConfidenceChart({
         ))}
         {t != null && (
           <>
-            {/* the band under the bar is where every trade gets dropped */}
+            {/* the band under the rule is where a scan does not get to trade.
+                That is a reference region and the normal one, so it is a neutral
+                wash rather than a red zone. */}
             <div
-              className="absolute inset-x-0 bottom-0 bg-[var(--color-danger)] opacity-[0.07]"
+              className="absolute inset-x-0 bottom-0 bg-[var(--color-text-faint)] opacity-[0.10]"
               style={{ height: `${t * 100}%` }}
             />
-            <div className="absolute inset-x-0 h-0.5 bg-[var(--color-danger)]" style={{ bottom: `${t * 100}%` }} />
+            {/* dashed reads as "threshold" in this app's chart language — which is
+                why the equity chart deliberately keeps its own rules solid */}
             <div
-              className={`absolute right-0 text-[9px] uppercase tracking-[0.18em] ${BAD}`}
+              className="absolute inset-x-0 border-t border-dashed border-[var(--color-text-dim)]"
+              style={{ bottom: `${t * 100}%` }}
+            />
+            <div
+              className={`absolute right-0 text-[9px] uppercase tracking-[0.18em] ${DIM}`}
               style={{ bottom: `calc(${t * 100}% + 5px)` }}
             >
               gate {t.toFixed(2)}
@@ -346,15 +414,19 @@ function ConfidenceChart({
               key={`${d.arm}-${d.ts}`}
               className="absolute bottom-0 h-full"
               style={{ left: `${x}%` }}
-              title={`${fmtDate(d.ts)} ${fmtClock(d.ts)} · ${d.arm} · confidence ${c.toFixed(2)} · ${below ? 'below the gate, dropped' : 'cleared the gate'}`}
+              title={`${fmtDate(d.ts)} ${fmtClock(d.ts)} · ${d.arm} · confidence ${c.toFixed(2)} · ${below ? 'below the gate, held' : 'cleared the gate'}`}
             >
               {/* stem: makes a dense run read as a distribution, not a scribble */}
               <div
                 className="absolute bottom-0 w-px -translate-x-1/2 bg-[var(--color-border)]"
                 style={{ height: `${y}%` }}
               />
+              {/* same size for every scan — only the accent moves, and it moves
+                  to the scan that reached the rule */}
               <div
-                className="absolute h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full bg-[var(--color-accent)]"
+                className={`absolute h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full ${
+                  below ? 'bg-[var(--color-text-dim)]' : 'bg-[var(--color-accent)]'
+                }`}
                 style={{ bottom: `${y}%`, boxShadow: '0 0 0 2px var(--color-surface)' }}
               />
             </div>
@@ -371,9 +443,9 @@ function ConfidenceChart({
           'min_confidence_to_trade is not readable from config_v2.json.'
         ) : cleared === 0 ? (
           <>
-            <span className={BAD}>[NEVER CLEARED]</span> all {pts.length} scored scans sit below the {t.toFixed(2)}{' '}
-            gate (range {Math.min(...confs).toFixed(2)}–{Math.max(...confs).toFixed(2)}). That is why the bot has
-            not traded.
+            <span className="text-[var(--color-text)]">[NEVER CLEARED]</span> all {pts.length} scored scans sit below
+            the {t.toFixed(2)} gate (range {Math.min(...confs).toFixed(2)}–{Math.max(...confs).toFixed(2)}). That is
+            why the bot has not traded.
           </>
         ) : (
           <>
@@ -683,7 +755,6 @@ function PortfolioPanel({
           <Field
             label={`Trading P&L · ${h?.window_days ?? '?'}d`}
             value={change != null ? signedUsd(change) : '—'}
-            bad={(change ?? 0) < 0}
             sub={change == null ? 'no history yet' : `${signedPct(h?.change_pct)} · transfers excluded`}
           />
           <Field
@@ -700,7 +771,6 @@ function PortfolioPanel({
           <Field
             label="Lifetime realized"
             value={realized != null ? signedUsd(realized) : '—'}
-            bad={(realized ?? 0) < 0}
             sub={
               realized != null
                 ? `${trips ?? 0} round trips · broker fills, FIFO`
