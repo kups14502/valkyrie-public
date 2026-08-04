@@ -25,8 +25,11 @@ import {
 //
 // Colour, and it is a contract:
 //  * --color-danger is ONLY for something that is actually wrong and wants a
-//    human: bot down, an arm failing, rules_ok false, a stale equity figure, an
-//    endpoint or snapshot failure. Routine operation never gets it. In
+//    human. In practice that is exactly three things: the page endpoint failing
+//    to load, a stale (fallback) equity figure, and rules_ok false. A missing
+//    broker snapshot degrades to a neutral empty state instead, because the rest
+//    of the page is still true and unknown-positions is not an alarm.
+//    Routine operation never gets red. In
 //    particular the confidence gate refusing a trade is this bot's own risk
 //    control doing its job, so it reads in the neutral palette, not in red.
 //  * --color-accent is EMPHASIS, never "good" — the user's hue picker recolours
@@ -339,7 +342,10 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
       </div>
       {d.summary && <div className={`mt-1 text-xs leading-relaxed ${DIM}`}>{d.summary}</div>}
       {/* the reason, verbatim from the log — a fact, printed quietly */}
-      {held && <div className={`mt-1 text-[11px] leading-snug ${FAINT}`}>{d.gate}</div>}
+      {/* Routine, so not danger-coloured - but this is the operative fact of
+          the row, so DIM rather than FAINT: quieter than the headline,
+          still plainly readable. */}
+      {held && <div className={`mt-1 text-[11px] leading-snug ${DIM}`}>{d.gate}</div>}
     </div>
   )
 }

@@ -391,12 +391,13 @@ export default function Dashboard() {
   const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
 
   return (
-    // overflow-x-clip, not overflow-hidden: `hidden` makes this a scroll
-    // container in *both* axes, which silently swallows any vertical overflow
-    // instead of letting it grow <main>'s scrollHeight (so it would never show a
-    // scrollbar anywhere), and it also steals the sticky columns' scrollport
-    // from <main>, making their `xl:sticky` dead. `clip` clips the horizontal
-    // axis without creating a scroll container.
+    // overflow-x-clip rather than overflow-hidden. `hidden` makes this element a
+    // scroll container in BOTH axes; `clip` clips the horizontal axis without
+    // creating one, which is all this needs. Measured, so the record is honest:
+    // the old `hidden` was NOT clipping the page (clientHeight == scrollHeight at
+    // every viewport tested) and was NOT the scroll bug - that was the shell
+    // being taller than the window under CSS zoom, fixed in index.css. This is a
+    // correctness tidy-up, not the fix.
     <div className="min-w-0 space-y-8 overflow-x-clip">
       <div className="space-y-4">
         <div className="flex items-end justify-between gap-4">
