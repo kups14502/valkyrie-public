@@ -600,7 +600,7 @@ function Body({ page }: { page: TradeBotPage }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <PositionsPanel broker={broker} brokerError={page.broker_error} />
+        <PositionsPanel broker={broker} brokerError={page.broker_error} status={page.status} />
         <FillsPanel broker={broker} brokerError={page.broker_error} />
       </div>
 
@@ -738,7 +738,10 @@ function ExperimentPanel({ status, broker }: { status: TradeBotDoc; broker: Trad
     const ids = new Set(
       broker.fills
         .filter((f) => f.side === 'sell' && Number.isFinite(Date.parse(f.ts)) && Date.parse(f.ts) >= preregAt)
-        .map((f) => f.order_id ?? ''),
+        // A fill with no order_id cannot be proven to be a distinct round trip;
+        // counting '' once would overstate pre-registered progress.
+        .map((f) => f.order_id)
+        .filter((id): id is string => Boolean(id)),
     )
     live = ids.size
     note =
@@ -777,11 +780,23 @@ function ExperimentPanel({ status, broker }: { status: TradeBotDoc; broker: Trad
   )
 }
 
+// Both figures come from the same equity sample, so equality is a real check
+// rather than two unrelated reads that happen to agree.
+function allCashProvable(status: TradeBotDoc | null | undefined): boolean {
+  const cash = num(status?.portfolio?.live_cash)
+  const total = num(status?.portfolio?.live_equity)
+  if (cash == null || total == null || total <= 0) return false
+  return Math.abs(cash - total) < 0.01
+}
+
 function SpendPanel({ status }: { status: TradeBotDoc }) {
   const sp = status.spend
   const calls = num(sp?.calls_total) ?? 0
   const total = num(sp?.total_usd)
   const perCall = total != null && calls > 0 ? total / calls : null
+  // The live arm writes its own cost rows; the paper arm only records token
+  // counts, so status.py prices those at list rates. Say so rather than
+  // presenting a partly-modeled figure as if the bot had logged every cent.
   return (
     <Card title="Judge spend">
       <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -789,6 +804,10 @@ function SpendPanel({ status }: { status: TradeBotDoc }) {
         <Field label="Today" value={usd(sp?.today_usd, 4)} sub={`${num(sp?.calls_today) ?? 0} calls today`} />
         <Field label="Calls" value={String(calls)} sub="judge invocations" />
         <Field label="Per call" value={perCall != null ? usd(perCall, 4) : '—'} sub="mean cost" />
+      </div>
+      <div className={`mt-3 border-t border-[var(--color-border)] pt-2 text-[10px] leading-relaxed ${FAINT}`}>
+        live-arm cost is recorded by the bot; paper-arm cost is priced from logged
+        token counts at claude-opus-5 list rates, not recorded
       </div>
     </Card>
   )
@@ -836,9 +855,11 @@ function JudgePanel({ caps }: { caps: TradeBotCaps }) {
 function PositionsPanel({
   broker,
   brokerError,
+  status,
 }: {
   broker: TradeBotSnapshot | null
   brokerError: string | null
+  status: TradeBotDoc | null | undefined
 }) {
   return (
     <Card title={`Positions · ${broker ? broker.positions.length : '—'}`}>
@@ -846,8 +867,11 @@ function PositionsPanel({
         <Empty>[SNAPSHOT UNAVAILABLE] {brokerError ?? 'broker_snapshot.json could not be read'}</Empty>
       ) : broker.positions.length === 0 ? (
         <Empty>
-          NO OPEN POSITIONS — the agentic account was 100% cash at {fmtClock(broker.generated_at)} (
-          {fmtAge(broker.generated_at)}).
+          NO OPEN EQUITY POSITIONS as of {fmtClock(broker.generated_at)} ({fmtAge(broker.generated_at)})
+          {allCashProvable(status)
+            ? ' — sampled cash equals total account value, so the account is all cash'
+            : ' — this snapshot covers equity only; non-equity value is not shown'}
+          .
         </Empty>
       ) : (
         <div className="divide-y divide-[var(--color-border)]">
