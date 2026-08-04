@@ -235,6 +235,9 @@ export type TradeBotPage = {
   broker: TradeBotSnapshot | null
   broker_error: string | null
   decisions: TradeBotDecision[]
+  /** Log verdicts with no recorded judge call behind them (selftest fixtures),
+   *  withheld from `decisions`. Reported so the feed is never silently filtered. */
+  decisions_unverified?: number
   config: TradeBotCaps
 }
 

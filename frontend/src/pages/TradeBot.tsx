@@ -632,6 +632,13 @@ function Body({ page }: { page: TradeBotPage }) {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <Card title={`Decision feed · ${page.decisions.length} scan${page.decisions.length === 1 ? '' : 's'}`}>
+          {(page.decisions_unverified ?? 0) > 0 && (
+            <div className={`mb-3 border-l-2 border-[var(--color-border)] pl-2 text-[10px] leading-relaxed ${FAINT}`}>
+              {page.decisions_unverified} log entr{page.decisions_unverified === 1 ? 'y' : 'ies'} withheld:
+              no recorded judge call, so they are selftest output rather than real scans.
+              Only scans the bot recorded paying for are shown.
+            </div>
+          )}
           <div className={`mb-3 text-[11px] leading-relaxed ${DIM}`}>
             Every judged scan: the regime it read, its confidence, whether it wanted to trade and what the gate did
             about it.

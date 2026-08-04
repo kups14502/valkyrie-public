@@ -12,6 +12,11 @@ const BOT_DIR = '/home/brendon/trade-bot'
 const STATUS_FILE = path.join(BOT_DIR, 'logs', 'status.json')
 const SNAPSHOT_FILE = path.join(BOT_DIR, 'logs', 'broker_snapshot.json')
 const SCAN_LOG = path.join(BOT_DIR, 'logs', 'scan_v2.log')
+// The ledger of real judge calls. scan_v2 writes a row here only when it
+// actually paid an API bill, and only into the real logs dir - a --selftest
+// run uses a temp root, so its fixture output never lands here. That makes
+// this the proof that a parsed verdict came from a real scan.
+const COST_LOG = path.join(BOT_DIR, 'logs', 'cost_v2.jsonl')
 const CONFIG_FILE = path.join(BOT_DIR, 'config_v2.json')
 
 const STALE_AFTER_MS = 10 * 60_000
@@ -86,6 +91,7 @@ type PagePayload = {
   broker: BrokerSnapshot | null
   broker_error: string | null
   decisions: Decision[]
+  decisions_unverified: number
   config: Caps
 }
 
@@ -394,9 +400,31 @@ function parseScanLog(text: string): Decision[] {
   return runs.map((r) => r.decision).reverse()
 }
 
+// Timestamps (whole seconds) of every judge call the bot recorded paying for.
+// Empty set => we cannot verify anything, so the feed shows nothing rather than
+// risk presenting fixtures as real decisions.
+async function readJudgedSeconds(): Promise<Set<number>> {
+  const out = new Set<number>()
+  const raw = await readTail(COST_LOG, TAIL_BYTES)
+  if (!raw) return out
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t.startsWith('{')) continue
+    try {
+      const row = JSON.parse(t) as unknown
+      if (!isObj(row)) continue
+      const ms = Date.parse(String((row as { ts?: unknown }).ts ?? ''))
+      if (Number.isFinite(ms)) out.add(Math.floor(ms / 1000))
+    } catch {
+      // A torn trailing line is expected when reading a tail; skip it.
+    }
+  }
+  return out
+}
+
 // The paper arm was retired 2026-08-04, so scan_v2.log is the only decision
 // source left; logs/paper/runs.jsonl and its parser are gone with it.
-async function readDecisions(): Promise<Decision[]> {
+async function readDecisions(): Promise<{ decisions: Decision[]; unverified: number }> {
   const scanText = await readTail(SCAN_LOG, TAIL_BYTES)
   let live: Decision[] = []
   try {
@@ -404,7 +432,23 @@ async function readDecisions(): Promise<Decision[]> {
   } catch {
     live = []
   }
-  return live.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts)).slice(0, MAX_DECISIONS)
+
+  // Keep only verdicts backed by a recorded judge call. --selftest exercises the
+  // same logging path, so without this the feed shows fixture runs as [LIVE]
+  // decisions. Matched to the second, with one second of slack because the cost
+  // row is written just after the verdict line.
+  const judged = await readJudgedSeconds()
+  const verified = live.filter((d) => {
+    const ms = Date.parse(d.ts)
+    if (!Number.isFinite(ms)) return false
+    const sec = Math.floor(ms / 1000)
+    return judged.has(sec) || judged.has(sec - 1) || judged.has(sec + 1)
+  })
+
+  return {
+    decisions: verified.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts)).slice(0, MAX_DECISIONS),
+    unverified: live.length - verified.length,
+  }
 }
 
 // ---------- status ----------
@@ -451,7 +495,7 @@ router.get('/tradebot/page', async (_req, res) => {
   // Same contract as /tradebot/status: without status.json there is no page.
   if (!status.ok) return res.status(503).json({ error: 'status unavailable', detail: status.detail })
 
-  const [[broker, brokerError], decisions, config] = await Promise.all([
+  const [[broker, brokerError], decisionResult, config] = await Promise.all([
     readSnapshot(), readDecisions(), readCaps(),
   ])
 
@@ -461,7 +505,11 @@ router.get('/tradebot/page', async (_req, res) => {
     stale: status.stale,
     broker,
     broker_error: brokerError,
-    decisions,
+    decisions: decisionResult.decisions,
+    // Verdicts parsed out of the log with no recorded judge call behind them
+    // (selftest fixtures). Surfaced rather than silently dropped so the feed
+    // never looks complete when it is filtered.
+    decisions_unverified: decisionResult.unverified,
     config,
   }
   pageCache = { at: Date.now(), data }
