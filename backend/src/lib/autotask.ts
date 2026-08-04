@@ -2,12 +2,16 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { homedir } from 'node:os'
 
-// Minimal Autotask REST client for the one thing the Valkyrie backend does
-// with write access: create a ticket from a work email (user-triggered, one
-// click, Work mailboxes only). Reuses the same API creds the email-assistant
-// scanner uses — read from its env file so there's a single source of truth.
-
-const ENV_PATH = path.join(homedir(), 'email-assistant', 'config', 'email-assistant.env')
+// Minimal Autotask REST client. Its only caller (the email-intake
+// create-ticket button) was removed with the email assistant on 2026-08-04,
+// so nothing calls this today. Kept deliberately: it is a working Autotask
+// REST integration against live PSA credentials. Wire it to a tickets route
+// to use it again.
+//
+// Creds live in Valkyrie's own config dir. They were previously read from
+// ~/email-assistant/config/, which no longer exists - the env file was moved
+// out rather than left inside a backup of a deleted feature.
+const ENV_PATH = path.join(homedir(), '.config', 'valkyrie', 'autotask.env')
 
 type AutotaskCreds = { zone: string; code: string; user: string; secret: string }
 

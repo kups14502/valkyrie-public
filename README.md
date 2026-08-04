@@ -1,6 +1,6 @@
 # Valkyrie
 
-Personal server control dashboard. Single pane for server health, AI usage, active sessions, projects, plus dedicated tabs for email intake, Home Assistant lights, Vaultwarden, and the trade bot.
+Personal server control dashboard. Single pane for server health, AI usage, active sessions, projects, plus dedicated tabs for Home Assistant lights, Vaultwarden, and the trade bot.
 
 ## Architecture
 
