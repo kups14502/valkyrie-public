@@ -1,15 +1,15 @@
 {
-  "version": "0.3.34",
-  "notes": "fix(trade): only claim provable figures on the trade page",
-  "pub_date": "2026-08-04T17:55:29Z",
+  "version": "0.3.35",
+  "notes": "fix: move Autotask creds out of the deleted email-assistant tree",
+  "pub_date": "2026-08-04T18:19:53Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNUUk9mQ094NkdYZTNaMXJIbUptWEJVV0NrZTAxS3ZTd08rNkp0YkpSWWs4UCtkeldsN01lMm1JL21sdmF4NU5wcTA4V3pOdVFXSnhNZ3hyV2tSdVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1ODY2MTI5CWZpbGU6VmFsa3lyaWVfMC4zLjM0X3g2NC1zZXR1cC5leGUKN2xUNE5jbHJtT3ZZd0RMWTBJUWhMMzZkNmduVTh6WEF5UDhqelJyOUk5UFBDcDlxcXhTVnZGZGpUQlZZQ09kL1RGTWwvRkxmSFN0cHhUVkdQRnpBQXc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.34/Valkyrie_0.3.34_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJQUGQ3RUI5ZkNIV1JCWGJvcDJ3L3ZySmJmd0ViamN4TGgvWXlWSXlJbmVocVF0MGUwRzhaaGtwdjhNSkRXMVNpakFRNWdSNnlBRHV6Ry8yTU8yN2dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1ODY3NTkzCWZpbGU6VmFsa3lyaWVfMC4zLjM1X3g2NC1zZXR1cC5leGUKME4rRGFpUzA5V05SWGhpNEFhN25qWnZuZHNYU0MxR3pETHE5NUxWYkRiMWhKT1p6QzlaU3NZMEVIcTNWRVVrZkRDK1d3M1FOOXora1V2YTRUSHYyRHc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.35/Valkyrie_0.3.35_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNkZS9FcHJ6YVc1NTdRM1pCSk4vNExZaGh0Qkl3a3JuN3hFcEdWQlJWaVcyVnBwNUIybUhWNG5MaWl5VFg1WnlYVmgxb2Q5VnhhV2VybThZc1hWQkFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1ODY2MDg4CWZpbGU6VmFsa3lyaWVfMC4zLjM0X2FtZDY0LkFwcEltYWdlCklnaWNWWlIvOTh0bmVPMys2K3hOMXg5V0huOFk5dmRDZ1hBcERNUEhRSVZ2emdqdGNjMm1ud1RwSEoybUxabk0vVnVPWU00ZzBJU1Q1L1F5YWxoNEN3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.34/Valkyrie_0.3.34_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZNL1RvOW9iRUJZcTRmc0hOVXhWK1JYampqekp6TjhPTDc5LzhsNnRqaUVnMzdRRG9CcURDQ01ScFVTVUl1ZStDVUZqeE9XNWYvVFJUdDU3Q0FwYVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1ODY3NTUzCWZpbGU6VmFsa3lyaWVfMC4zLjM1X2FtZDY0LkFwcEltYWdlCjRWRjZyeXl4cTh5UkxYVXNON2N3cGVwN0IvWUtDOUVITmlFdnM2UE9iWFhqeTIvMzFDclcwcjZQalBJM0M3K1piMWNIdnFRNTZtQU1yRWlZemVvZUJnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.35/Valkyrie_0.3.35_amd64.AppImage"
     }
   }
 }
