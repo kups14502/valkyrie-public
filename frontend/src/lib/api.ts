@@ -192,7 +192,7 @@ export type TradingStatus = {
 // generator writes, plus the backend's `stale` flag.
 export type TradeBotArm = { last_run: string | null; ok: boolean; detail: string }
 
-export type TradeBotStatus = {
+export type TradeBotDoc = {
   generated_at: string
   market: { is_open: boolean; reason: string }
   up: boolean
@@ -204,9 +204,95 @@ export type TradeBotStatus = {
     v1_legacy?: { scheduled: boolean; note: string }
   }
   spend: { total_usd: number; today_usd: number; calls_total: number; calls_today: number; since: string | null }
-  portfolio: { live_equity: number | null; live_cash: number | null; paper_equity: number | null; paper_cash: number | null }
+  portfolio: {
+    live_equity: number | null
+    live_cash: number | null
+    paper_equity: number | null
+    paper_cash: number | null
+    // "sample" = a real broker read; "day_open" = the 09:40 fallback, which is
+    // NOT a live figure and must be labelled as stale wherever it is shown.
+    live_equity_source?: string | null
+    live_equity_age_min?: number | null
+  }
+  history?: {
+    window_days: number
+    points: { ts: string; total: number }[]
+    first_total: number | null
+    last_total: number | null
+    // change_usd/pct are deposit-adjusted TRADING P&L. net_flows_usd is
+    // transfers in/out and is never performance.
+    change_usd: number | null
+    change_pct: number | null
+    net_flows_usd: number | null
+    flows_detected: number | null
+  }
   experiment: { target_trips: number; paper_trips: number; live_trips: number | null; preregistered: string | null; rules_ok: boolean | null }
+}
+
+export type TradeBotStatus = TradeBotDoc & { stale: boolean }
+
+// One decision the judge made, from scan_v2.log (live) or paper/runs.jsonl.
+// gate: null = nothing proposed, "executed" = orders placed, otherwise why not.
+export type TradeBotDecision = {
+  ts: string
+  arm: 'live' | 'paper'
+  regime: string | null
+  confidence: number | null
+  trade_needed: boolean | null
+  trades_proposed: number | null
+  summary: string | null
+  gate: string | null
+  cost_usd: number | null
+}
+
+export type TradeBotPosition = {
+  symbol: string
+  quantity: number | null
+  shares_available_for_sells: number | null
+  average_buy_price: number | null
+}
+
+export type TradeBotFill = {
+  ts: string
+  symbol: string
+  side: string
+  quantity: number | null
+  price: number | null
+  state: string | null
+  placed_agent: string | null
+  order_id: string | null
+}
+
+// broker_snapshot.json, exported read-only by equity_sampler.py. `realized` is
+// computed by the same FIFO/L2 engine stats.py uses, so the two cannot disagree.
+export type TradeBotSnapshot = {
+  generated_at: string | null
+  positions: TradeBotPosition[]
+  fills: TradeBotFill[]
+  realized: { pnl_usd: number | null; round_trips: number | null }
+}
+
+export type TradeBotCaps = {
+  min_confidence_to_trade: number | null
+  max_position_pct: number | null
+  max_single_trade_pct: number | null
+  max_trades_per_day: number | null
+  daily_loss_limit_pct: number | null
+  stop_loss_pct: number | null
+  gain_trim_pct: number | null
+  gain_trim_partial_pct: number | null
+  model: string | null
+  watchlist: string[]
+}
+
+export type TradeBotPage = {
+  generated_at: string
+  status: TradeBotDoc
   stale: boolean
+  broker: TradeBotSnapshot | null
+  broker_error: string | null
+  decisions: TradeBotDecision[]
+  config: TradeBotCaps
 }
 
 export type LightState = {
@@ -366,6 +452,14 @@ export const fetchTradeBotStatus = async () => {
   const r = await api.get<TradeBotStatus | { error?: string; detail?: string }>('/tradebot/status')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid trade bot response')
   return r.data as TradeBotStatus
+}
+
+export const fetchTradeBotPage = async () => {
+  const r = await api.get<TradeBotPage | { error?: string; detail?: string }>('/tradebot/page')
+  if (!r.data || typeof r.data !== 'object' || 'error' in r.data || !('status' in r.data)) {
+    throw new Error((r.data as { detail?: string }).detail || 'Invalid trade bot page response')
+  }
+  return r.data as TradeBotPage
 }
 
 export const fetchLights = async () => {
