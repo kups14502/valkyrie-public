@@ -1,25 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#05090d"/>
-      <stop offset="1" stop-color="#03060a"/>
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="14" result="b"/>
-      <feMerge>
-        <feMergeNode in="b"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
+  <!-- terminal tile: rounded outline + bold letter + prompt bar -->
+  <rect x="72" y="72" width="880" height="880" rx="170" fill="#0a0e12" stroke="#00ffe5" stroke-width="36"/>
 
-  <!-- backdrop -->
-  <rect width="1024" height="1024" rx="208" fill="url(#bg)"/>
-  <rect x="40" y="40" width="944" height="944" rx="176" fill="none" stroke="#00ffe5" stroke-opacity="0.22" stroke-width="4"/>
+  <!-- V -->
+  <path d="M357 207 L433 207 L512 378 L591 207 L667 207 L512 543 Z" fill="#00ffe5"/>
 
-  <!-- terminal "V" + cursor underscore -->
-  <g filter="url(#glow)" fill="none" stroke="#00ffe5" stroke-width="66" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="257,338 432,690 607,338"/>
-    <line x1="649" y1="690" x2="767" y2="690"/>
-  </g>
+  <!-- prompt bar -->
+  <rect x="357" y="776" width="310" height="72" rx="36" fill="#2ee6c6"/>
 </svg>
