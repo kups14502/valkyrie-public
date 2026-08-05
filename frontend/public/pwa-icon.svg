@@ -1,10 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1024 1024">
-  <!-- terminal tile: rounded outline + bold letter + prompt bar -->
-  <rect x="72" y="72" width="880" height="880" rx="170" fill="#0a0e12" stroke="#00ffe5" stroke-width="36"/>
-
-  <!-- V -->
-  <path d="M357 207 L433 207 L512 378 L591 207 L667 207 L512 543 Z" fill="#00ffe5"/>
-
-  <!-- prompt bar -->
-  <rect x="357" y="776" width="310" height="72" rx="36" fill="#2ee6c6"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256">
+  <!-- terminal tile -->
+  <rect x="13.5" y="13.5" width="230.0" height="230.0" rx="49.0" fill="#a5f3fc"/>
+  <rect x="24.0" y="24.0" width="209.0" height="209.0" rx="38.5" fill="#0a0e12"/>
+  <!-- Cascadia Mono Bold 'V', centred on its ink box -->
+  <path d="M114.94 143.48 90.66 49.52H108.72L127.90 127.79H129.10L148.28 49.52H166.34L142.06 143.48Z" fill="#a5f3fc"/>
+  <!-- cursor bar -->
+  <rect x="92.5" y="192.5" width="72.0" height="14.0" fill="#2ee6c6"/>
 </svg>
