@@ -100,9 +100,12 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
 const DEFAULT_CLAUDE_DIR = '/home/brendon/.claude'
 
 const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
-  { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: DEFAULT_CLAUDE_DIR },
+  { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-a' },
   { id: 'claude-acct-b', label: 'Account B', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-b' },
-  { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-c' },
+  // acct-c signs in at the DEFAULT dir on odin (~/.claude, 292M of transcripts). The
+  // .claude-accounts/acct-c profile is the same account but effectively unused (8K, last
+  // written 2026-07-16), so this card reads the default dir instead.
+  { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: DEFAULT_CLAUDE_DIR },
   { id: 'claude-acct-d', label: 'Account D', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-d' },
   { id: 'claude-acct-e', label: 'Account E', email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude-accounts/acct-e' },
 ]
