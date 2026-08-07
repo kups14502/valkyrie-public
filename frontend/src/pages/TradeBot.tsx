@@ -904,7 +904,30 @@ function JudgePanel({ caps }: { caps: TradeBotCaps }) {
     <Card title="Judge & caps">
       <div className={LABEL}>model</div>
       <div className="mt-1 truncate text-sm text-[var(--color-text)]">{caps.model ?? '—'}</div>
-      <div className={`mt-3 ${LABEL}`}>watchlist</div>
+      <div className={`mt-3 ${LABEL}`}>universe</div>
+      <div className="mt-1 text-[11px] text-[var(--color-text)]">
+        {caps.screener?.enabled ? (
+          <>
+            whole market, top {caps.screener.shortlist_size ?? '—'} movers
+            {caps.screener.min_abs_change_pct != null
+              ? ` past ±${caps.screener.min_abs_change_pct}%`
+              : ''}
+          </>
+        ) : (
+          <span className={FAINT}>pinned names only (screen off)</span>
+        )}
+      </div>
+      {caps.screener?.enabled && (
+        <div className={`mt-0.5 text-[10px] ${DIM}`}>
+          {caps.screener.min_market_cap != null
+            ? `over $${(caps.screener.min_market_cap / 1e9).toFixed(0)}B cap`
+            : ''}
+          {caps.screener.min_relative_volume != null
+            ? `, rel vol over ${caps.screener.min_relative_volume}`
+            : ''}
+        </div>
+      )}
+      <div className={`mt-2 ${LABEL}`}>always shown</div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {caps.watchlist.length === 0 ? (
           <span className={`text-xs ${FAINT}`}>—</span>

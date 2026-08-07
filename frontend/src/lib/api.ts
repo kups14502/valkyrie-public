@@ -226,6 +226,13 @@ export type TradeBotCaps = {
   gain_trim_partial_pct: number | null
   model: string | null
   watchlist: string[]
+  screener: {
+    enabled: boolean
+    shortlist_size: number | null
+    min_abs_change_pct: number | null
+    min_market_cap: number | null
+    min_relative_volume: number | null
+  } | null
 }
 
 export type TradeBotPage = {
@@ -454,4 +461,61 @@ export const fetchProjects = async () => {
   const r = await api.get<ProjectStatus[] | { error?: string; detail?: string }>('/projects')
   if (!Array.isArray(r.data)) throw new Error((r.data as { detail?: string }).detail || 'Invalid projects response')
   return r.data as ProjectStatus[]
+}
+
+// ---------- slop factory ----------
+// Mirrors backend/src/routes/slopfactory.ts, which mirrors `run.py stats --json`
+// on Odin. The envelope is always HTTP 200: a failing CLI is a fact about the
+// pipeline, not a broken dashboard, so the tab draws the diagnostic itself.
+export type SlopStats = {
+  generated_at: string
+  footage: {
+    episodes_ingested: number
+    episodes_awaiting_clip: number
+    source_seconds: number
+    clips_total: number
+    clips_awaiting_render: number
+  }
+  shorts: {
+    total: number
+    pending: number
+    approved: number
+    rejected: number
+    posted: number
+    seconds_total: number
+  }
+  gameplay: {
+    files: { name: string; seconds: number }[]
+    seconds_available: number
+    seconds_consumed: number
+    seconds_remaining: number
+    shorts_supported_remaining: number
+    seconds_needed_for_backlog: number
+    short_on_gameplay: boolean
+  }
+  pipeline: {
+    last_render_at: string | null
+    failing_sources: number
+    failing_clips: number
+    budget_blocked: boolean
+  }
+}
+
+export type SlopStatsEnvelope = {
+  ok: boolean
+  generated_at: string
+  stats: SlopStats | null
+  stale: boolean
+  error: {
+    kind: string
+    message: string
+    exit_code: number | null
+    signal: string | null
+    stderr_tail: string | null
+  } | null
+}
+
+export const fetchSlopFactoryStats = async () => {
+  const r = await api.get<SlopStatsEnvelope>('/slopfactory/stats')
+  return r.data
 }

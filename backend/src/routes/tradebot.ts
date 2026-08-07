@@ -82,6 +82,21 @@ type Caps = {
   gain_trim_partial_pct: number | null
   model: string | null
   watchlist: string[]
+  screener: Screener | null
+}
+
+/**
+ * The screener half of the universe. `watchlist` above is now only the pinned
+ * names that are shown every cycle; the bot may also buy anything this screen
+ * shortlisted on the run in question, so drawing the watchlist alone
+ * understates what it is allowed to touch.
+ */
+type Screener = {
+  enabled: boolean
+  shortlist_size: number | null
+  min_abs_change_pct: number | null
+  min_market_cap: number | null
+  min_relative_volume: number | null
 }
 
 type PagePayload = {
@@ -213,6 +228,7 @@ const EMPTY_CAPS: Caps = {
   gain_trim_partial_pct: null,
   model: null,
   watchlist: [],
+  screener: null,
 }
 
 /**
@@ -243,6 +259,23 @@ async function readCaps(): Promise<Caps> {
     watchlist: Array.isArray(doc.stock_watchlist)
       ? doc.stock_watchlist.filter((s): s is string => typeof s === 'string')
       : [],
+    screener: readScreener(doc.screener),
+  }
+}
+
+/**
+ * A missing or malformed screener block reads as absent rather than as a screen
+ * with default thresholds: the page must not claim a market-wide universe the
+ * bot is not actually configured for.
+ */
+function readScreener(raw: unknown): Screener | null {
+  if (!isObj(raw) || raw.enabled !== true) return null
+  return {
+    enabled: true,
+    shortlist_size: fnum(raw.shortlist_size),
+    min_abs_change_pct: fnum(raw.min_abs_change_pct),
+    min_market_cap: fnum(raw.min_market_cap),
+    min_relative_volume: fnum(raw.min_relative_volume),
   }
 }
 
