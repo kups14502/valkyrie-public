@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
+  Film,
+} from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -17,6 +19,7 @@ import Dashboard from './pages/Dashboard'
 const Lights = lazy(() => import('./pages/Lights'))
 const Vault = lazy(() => import('./pages/Vault'))
 const TradeBot = lazy(() => import('./pages/TradeBot'))
+const SlopFactory = lazy(() => import('./pages/SlopFactory'))
 const Services = lazy(() => import('./pages/Services'))
 const Activity = lazy(() => import('./pages/Activity'))
 
@@ -43,6 +46,7 @@ const navItems = [
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/vault', label: 'vault', icon: KeyRound },
+  { to: '/slop', label: 'slop', icon: Film },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
 ]
@@ -221,6 +225,7 @@ function Shell() {
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
             <Route path="/trade" element={<TradeBot />} />
+            <Route path="/slop" element={<SlopFactory />} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
           </Routes>
           </ErrorBoundary>

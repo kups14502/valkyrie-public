@@ -1,0 +1,267 @@
+import { useQuery } from '@tanstack/react-query'
+import { Card } from '../components/Card'
+import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
+
+// Slop factory page. Every figure comes from `run.py stats --json` on Odin via
+// /api/slopfactory/stats. The pipeline turns long video into vertical shorts and
+// stops at a review gate; it has no upload code, so "posted" here is a flag the
+// operator sets by hand after putting something out themselves. Nothing on this
+// page can publish anything.
+//
+// The question this tab exists to answer, in one glance: do I need to record
+// more gameplay? Every short lays a slice of filler underneath it and the pool
+// is finite, so past a point the same footage repeats under different shorts.
+// That is why gameplay is the headline and everything else is below it.
+//
+// Colour follows the same contract as the trade bot page:
+//  * --color-danger ONLY when something actually wants a human. Here that is
+//    exactly three things: the endpoint failing, gameplay running short, and a
+//    render queue that stalled (budget_blocked or non-zero failures). A queue of
+//    shorts waiting to be reviewed is routine and never red.
+//  * --color-accent is EMPHASIS, not "good" (the hue is user-picked at runtime,
+//    so green-means-good is not available).
+//  * everything else is --color-text / -dim / -faint / --color-border.
+// Coloured marks are always paired with a word, so colour alone never carries
+// meaning.
+
+const minutes = (seconds: number) => seconds / 60
+
+const fmtMin = (seconds: number) => {
+  const m = minutes(seconds)
+  if (m >= 10) return `${Math.round(m)} min`
+  if (m >= 1) return `${m.toFixed(1)} min`
+  return `${Math.round(seconds)} s`
+}
+
+function Figure({
+  label,
+  value,
+  sub,
+  tone = 'normal',
+}: {
+  label: string
+  value: string
+  sub?: string
+  tone?: 'normal' | 'emphasis' | 'danger'
+}) {
+  const colour =
+    tone === 'danger'
+      ? 'var(--color-danger)'
+      : tone === 'emphasis'
+        ? 'var(--color-accent)'
+        : 'var(--color-text)'
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--color-faint)' }}>
+        {label}
+      </span>
+      <span className="text-2xl font-semibold tabular-nums" style={{ color: colour }}>
+        {value}
+      </span>
+      {sub ? (
+        <span className="text-xs" style={{ color: 'var(--color-dim)' }}>
+          {sub}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+function Row({ label, value, tone }: { label: string; value: string; tone?: 'danger' }) {
+  return (
+    <div
+      className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0"
+      style={{ borderColor: 'var(--color-border)' }}
+    >
+      <span className="text-sm" style={{ color: 'var(--color-dim)' }}>
+        {label}
+      </span>
+      <span
+        className="text-sm tabular-nums"
+        style={{ color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)' }}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+export default function SlopFactory() {
+  const { data, isLoading, error } = useQuery<SlopStatsEnvelope>({
+    queryKey: ['slopfactory', 'stats'],
+    queryFn: fetchSlopFactoryStats,
+    refetchInterval: 15_000,
+  })
+
+  if (isLoading) {
+    return (
+      <div className="p-4">
+        <Card title="slop factory">
+          <span style={{ color: 'var(--color-dim)' }}>loading…</span>
+        </Card>
+      </div>
+    )
+  }
+
+  // A transport failure and a CLI failure are different facts, but both mean the
+  // numbers on screen cannot be trusted, so both say so rather than drawing zeros.
+  if (error || !data) {
+    return (
+      <div className="p-4">
+        <Card title="slop factory">
+          <p style={{ color: 'var(--color-danger)' }}>
+            [unreachable] could not load the slop factory endpoint.
+          </p>
+          <p className="mt-1 text-sm" style={{ color: 'var(--color-dim)' }}>
+            The Valkyrie backend may be down, or it could not reach Odin.
+          </p>
+        </Card>
+      </div>
+    )
+  }
+
+  const { stats, error: cliError, stale } = data
+
+  if (!stats) {
+    return (
+      <div className="p-4">
+        <Card title="slop factory">
+          <p style={{ color: 'var(--color-danger)' }}>
+            [cli failed] {cliError?.message ?? 'the pipeline CLI did not return stats'}
+          </p>
+          {cliError?.stderr_tail ? (
+            <pre
+              className="mt-2 overflow-x-auto rounded p-2 text-xs"
+              style={{ background: 'var(--color-border)', color: 'var(--color-dim)' }}
+            >
+              {cliError.stderr_tail}
+            </pre>
+          ) : null}
+        </Card>
+      </div>
+    )
+  }
+
+  const g = stats.gameplay
+  const s = stats.shorts
+  const f = stats.footage
+  const p = stats.pipeline
+  const stalled = p.budget_blocked || p.failing_sources > 0 || p.failing_clips > 0
+
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      {stale ? (
+        <Card title="stale">
+          <p style={{ color: 'var(--color-danger)' }}>
+            [stale] showing the last good figures. {cliError?.message ?? 'the CLI is failing'}
+          </p>
+        </Card>
+      ) : null}
+
+      {/* Headline: the only question that decides whether the operator has to act. */}
+      <Card title="gameplay">
+        <div className="flex flex-wrap gap-8">
+          <Figure
+            label="footage left"
+            value={fmtMin(g.seconds_remaining)}
+            sub={`of ${fmtMin(g.seconds_available)} across ${g.files.length} file(s)`}
+            tone={g.short_on_gameplay ? 'danger' : 'normal'}
+          />
+          <Figure
+            label="covers"
+            value={`${g.shorts_supported_remaining}`}
+            sub="more short(s) before footage repeats"
+            tone={g.shorts_supported_remaining === 0 ? 'danger' : 'emphasis'}
+          />
+          <Figure label="spent" value={fmtMin(g.seconds_consumed)} sub="under existing shorts" />
+        </div>
+
+        {g.short_on_gameplay ? (
+          <p className="mt-4 text-sm" style={{ color: 'var(--color-danger)' }}>
+            [record more] about {fmtMin(g.seconds_needed_for_backlog)} of extra gameplay is
+            needed to cover the {f.clips_awaiting_render} clip(s) waiting to render. Drop
+            recordings into the filler directory on Odin and run render again.
+          </p>
+        ) : (
+          <p className="mt-4 text-sm" style={{ color: 'var(--color-dim)' }}>
+            Enough footage for the current queue.
+          </p>
+        )}
+
+        <div className="mt-4">
+          {g.files.map((file) => (
+            <Row key={file.name} label={file.name} value={fmtMin(file.seconds)} />
+          ))}
+          {g.files.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--color-danger)' }}>
+              [empty] no filler videos found. Every short would render without gameplay.
+            </p>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card title="shorts">
+        <div className="flex flex-wrap gap-8">
+          <Figure label="made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
+          <Figure label="posted" value={`${s.posted}`} sub="marked by hand" tone="emphasis" />
+          <Figure label="awaiting review" value={`${s.pending}`} />
+        </div>
+        <div className="mt-4">
+          <Row label="pending" value={`${s.pending}`} />
+          <Row label="approved, not yet posted" value={`${s.approved}`} />
+          <Row label="posted" value={`${s.posted}`} />
+          <Row label="rejected (gameplay returned)" value={`${s.rejected}`} />
+        </div>
+      </Card>
+
+      <Card title="footage">
+        <div className="flex flex-wrap gap-8">
+          <Figure
+            label="episodes"
+            value={`${f.episodes_ingested}`}
+            sub={`${fmtMin(f.source_seconds)} ingested`}
+          />
+          <Figure label="clips cut" value={`${f.clips_total}`} />
+          <Figure
+            label="awaiting render"
+            value={`${f.clips_awaiting_render}`}
+            tone={p.budget_blocked ? 'danger' : 'normal'}
+          />
+        </div>
+        {f.episodes_awaiting_clip > 0 ? (
+          <p className="mt-3 text-sm" style={{ color: 'var(--color-dim)' }}>
+            {f.episodes_awaiting_clip} episode(s) ingested but not yet cut into clips.
+          </p>
+        ) : null}
+      </Card>
+
+      {/* Only drawn when something is actually wrong: a silently stalled pipeline is
+          the failure the operator would otherwise not notice, especially on a timer. */}
+      {stalled ? (
+        <Card title="needs attention">
+          {p.budget_blocked ? (
+            <Row
+              label="render stopped early"
+              value="out of gameplay"
+              tone="danger"
+            />
+          ) : null}
+          {p.failing_sources > 0 ? (
+            <Row label="episodes failing" value={`${p.failing_sources}`} tone="danger" />
+          ) : null}
+          {p.failing_clips > 0 ? (
+            <Row label="clips failing" value={`${p.failing_clips}`} tone="danger" />
+          ) : null}
+          <p className="mt-3 text-xs" style={{ color: 'var(--color-faint)' }}>
+            On Odin: run.py failures shows why, run.py retry &lt;id&gt; puts an item back.
+          </p>
+        </Card>
+      ) : null}
+
+      <p className="text-xs" style={{ color: 'var(--color-faint)' }}>
+        last render {p.last_render_at ? new Date(p.last_render_at).toLocaleString() : 'never'} ·
+        stats generated {new Date(stats.generated_at).toLocaleTimeString()}
+      </p>
+    </div>
+  )
+}
