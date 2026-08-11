@@ -54,8 +54,8 @@ export function resolveProfile(mode: DeviceMode = getDeviceMode()): Profile {
   return {
     mode,
     resolved,
-    // The phone gets the quick-launch screen too, just not oversized.
-    home: resolved === 'desktop' ? '/dashboard' : '/pad',
+    // Each form factor has its own home screen; the desktop keeps the full one.
+    home: resolved === 'desktop' ? '/dashboard' : resolved === 'ipad' ? '/pad' : '/phone',
     size: resolved === 'ipad' ? 'pad' : 'normal',
   }
 }

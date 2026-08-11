@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft, Clapperboard, Tablet } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft, Clapperboard, Tablet, Smartphone, Settings as SettingsIcon } from 'lucide-react'
+import { useProfile } from '../lib/deviceMode'
 
 // Global command palette (Ctrl/Cmd+K): jump to any page by name. Opens over
 // everything, keyboard-driven, closes on Esc / outside click / after acting.
@@ -21,11 +22,18 @@ const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/vault', label: 'Vault', icon: <KeyRound size={15} /> },
   { to: '/services', label: 'Services', icon: <Server size={15} /> },
   { to: '/activity', label: 'Activity', icon: <ActivityIcon size={15} /> },
-  { to: '/pad', label: 'Pad mode', icon: <Tablet size={15} /> },
+  { to: '/settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
 ]
+
+// Only this device's own home screen is offered (see navFor in App.tsx).
+const HOME_PAGES = {
+  ipad: { to: '/pad', label: 'iPad home', icon: <Tablet size={15} /> },
+  iphone: { to: '/phone', label: 'Phone home', icon: <Smartphone size={15} /> },
+} as const
 
 export function CommandPalette() {
   const navigate = useNavigate()
+  const { resolved } = useProfile()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -55,11 +63,12 @@ export function CommandPalette() {
 
   const commands = useMemo<Cmd[]>(() => {
     const q = query.trim().toLowerCase()
-    const pageCmds: Cmd[] = PAGES
+    const home = resolved === 'ipad' ? HOME_PAGES.ipad : resolved === 'iphone' ? HOME_PAGES.iphone : null
+    const pageCmds: Cmd[] = [...PAGES, ...(home ? [home] : [])]
       .filter((p) => !q || p.label.toLowerCase().includes(q))
       .map((p) => ({ id: `page:${p.to}`, label: p.label, hint: 'page', icon: p.icon, run: () => navigate(p.to) }))
     return pageCmds
-  }, [query, navigate])
+  }, [query, navigate, resolved])
 
   useEffect(() => { setActive((a) => Math.min(a, Math.max(0, commands.length - 1))) }, [commands.length])
 

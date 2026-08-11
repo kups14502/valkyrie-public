@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
-  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon,
+  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -26,6 +26,7 @@ const Activity = lazy(() => import('./pages/Activity'))
 const Plex = lazy(() => import('./pages/Plex'))
 const Pad = lazy(() => import('./pages/Pad'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Phone = lazy(() => import('./pages/Phone'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,9 +55,17 @@ const navItems = [
   { to: '/slop', label: 'slop', icon: Film },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
-  { to: '/pad', label: 'pad', icon: Tablet },
   { to: '/settings', label: 'settings', icon: SettingsIcon },
 ]
+
+// The home screens are per form factor, so only show the one that belongs to
+// this device: an iPad has no use for the phone dashboard, and a desktop has no
+// use for either.
+function navFor(resolved: 'desktop' | 'iphone' | 'ipad') {
+  if (resolved === 'ipad') return [...navItems, { to: '/pad', label: 'ipad home', icon: Tablet }]
+  if (resolved === 'iphone') return [...navItems, { to: '/phone', label: 'phone home', icon: Smartphone }]
+  return navItems
+}
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
 
@@ -80,11 +89,12 @@ function useAppVersion(): string {
 
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
+  const items = navFor(useProfile().resolved)
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-          {navItems.map(({ to, label, icon: Icon }) => {
+          {items.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
             return (
               <NavLink
@@ -160,7 +170,7 @@ function Shell() {
   const profile = useProfile()
   const home = profile.home
   const atHome = location.pathname === home
-  const padHome = home === '/pad'
+  const onHomeScreen = home !== '/dashboard'
 
   // The dashboard opens with the nav menu already down (as a launcher); it
   // stays closeable, and closing it while on the dashboard sticks because this
@@ -212,11 +222,11 @@ function Shell() {
                 {!atHome && (
                   <NavLink
                     to={home}
-                    aria-label={padHome ? 'Home screen' : 'Dashboard'}
-                    title={padHome ? 'Go to your home screen' : 'Go to dashboard'}
+                    aria-label={onHomeScreen ? 'Home screen' : 'Dashboard'}
+                    title={onHomeScreen ? 'Go to your home screen' : 'Go to dashboard'}
                     className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-accent)]"
                   >
-                    {padHome ? <Tablet size={16} /> : <LayoutDashboard size={16} />}
+                    {onHomeScreen ? (profile.resolved === 'ipad' ? <Tablet size={16} /> : <Smartphone size={16} />) : <LayoutDashboard size={16} />}
                   </NavLink>
                 )}
                 {/* Pages live in the menu at every width — one consistent layout.
@@ -258,6 +268,7 @@ function Shell() {
             <Route path="/plex" element={<Plex />} />
             <Route path="/pad" element={<Pad />} />
             <Route path="/settings" element={<CenterPage><Settings /></CenterPage>} />
+            <Route path="/phone" element={<Phone />} />
           </Routes>
           </ErrorBoundary>
         </Suspense>
