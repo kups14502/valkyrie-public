@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getToken, clearToken } from './auth'
+import { getToken, clearToken, isTauri } from './auth'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL
 
@@ -613,29 +613,53 @@ export const fetchPlexServer = async () => (await api.get<PlexServer>('/plex/ser
 // Web. The native app registers the plex:// scheme instead, so Apple touch
 // devices get that and everything else gets the web app. Same split, and the
 // same URL shapes, that Overseerr uses.
-const isAppleTouchDevice = () =>
-  typeof navigator !== 'undefined' && (
-    /iPad|iPhone|iPod/.test(navigator.userAgent)
-    // iPadOS 13+ reports itself as a Mac; touch points give it away.
-    || (navigator.userAgent === 'MacIntel' && navigator.maxTouchPoints > 1)
-  )
-
 const metadataKey = (ratingKey: string) => `%2Flibrary%2Fmetadata%2F${ratingKey}`
 
+// The native app (iOS, Android, desktop) registers the plex:// scheme.
+export const plexAppItemLink = (machineIdentifier: string, ratingKey: string): string =>
+  `plex://preplay/?metadataKey=${metadataKey(ratingKey)}&server=${machineIdentifier}`
+
+export const plexAppHomeLink = (): string => 'plex://'
+
+// Plex Web. A bare #!/server/<id> is not a route, so "home" is the app root.
 export const plexWebItemLink = (machineIdentifier: string, ratingKey: string): string =>
   `https://app.plex.tv/desktop#!/server/${machineIdentifier}/details?key=${metadataKey(ratingKey)}`
 
-export const plexItemLink = (machineIdentifier: string, ratingKey: string): string =>
-  isAppleTouchDevice()
-    ? `plex://preplay/?metadataKey=${metadataKey(ratingKey)}&server=${machineIdentifier}`
-    : plexWebItemLink(machineIdentifier, ratingKey)
-
-// Opening Plex itself rather than one item. A bare #!/server/<id> is not a Plex
-// Web route, so non-Apple clients get the web app's real entry point.
-export const plexHomeLink = (): string =>
-  isAppleTouchDevice() ? 'plex://' : 'https://app.plex.tv/desktop'
-
 export const plexWebHomeLink = (): string => 'https://app.plex.tv/desktop'
+
+// Always try the Plex app, and only fall back to the web player if nothing took
+// over the page.
+//
+// Deciding by user agent (what this used to do) is wrong in both directions: a
+// device we didn't recognize got the website even with Plex installed, and a
+// phone without Plex got a dead tap. Firing the scheme and watching for the page
+// to be backgrounded works everywhere, because the app taking focus is the
+// signal, not a UA string.
+// True when the click should be left to the browser: the desktop app (where
+// navigating the top-level webview to an external URL would replace Valkyrie's
+// own UI with a web page and strand the window), or a modified/middle click the
+// user meant to open in a new tab.
+export function shouldDeferPlexClick(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; button: number }): boolean {
+  return isTauri() || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0
+}
+
+export function openInPlexApp(appUrl: string, webUrl: string): void {
+  let handedOff = false
+  const mark = () => { handedOff = true }
+  document.addEventListener('visibilitychange', mark, { once: true })
+  window.addEventListener('pagehide', mark, { once: true })
+  window.addEventListener('blur', mark, { once: true })
+
+  window.location.href = appUrl
+
+  window.setTimeout(() => {
+    document.removeEventListener('visibilitychange', mark)
+    window.removeEventListener('pagehide', mark)
+    window.removeEventListener('blur', mark)
+    // Still here and still visible means the scheme went nowhere.
+    if (!handedOff && !document.hidden) window.location.href = webUrl
+  }, 1500)
+}
 
 export const fetchPlexSections = async () => (await api.get<PlexSection[]>('/plex/sections')).data
 export const fetchPlexLibrary = async (section: string, offset: number, opts: { search?: string; sort?: string } = {}) => {

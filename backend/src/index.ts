@@ -147,10 +147,14 @@ if (FRONTEND_DIST) {
       }
     },
   }))
-  // SPA fallback: any non-API GET that accepts HTML gets the app shell.
+  // SPA fallback: a real page navigation gets the app shell. Matched on the
+  // Accept header containing text/html explicitly, NOT req.accepts('html'):
+  // asset fetches send Accept: */* which req.accepts() happily matches, so a
+  // missing file (e.g. manifest.webmanifest) came back as 200 index.html and
+  // masked its own absence. Anything that isn't a navigation now 404s honestly.
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api') || req.path === '/healthz') return next()
-    if (!req.accepts('html')) return next()
+    if (!String(req.headers.accept || '').includes('text/html')) return next()
     res.setHeader('Cache-Control', 'no-cache')
     res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
   })

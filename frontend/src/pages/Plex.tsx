@@ -4,8 +4,9 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { Cast, Clapperboard, Download, Loader2, MessageSquare, Search, Send, Star, X } from 'lucide-react'
 import {
   addMediaRequest, fetchImgToken, fetchMediaDownloads, fetchMediaRequests, fetchPlexLibrary,
-  fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, plexImg, plexItemLink,
-  plexWebItemLink, searchMediaRequests, sendMediaMessage, type PlexItem, type PlexSection,
+  fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, openInPlexApp, plexAppItemLink,
+  plexImg, plexWebItemLink, searchMediaRequests, sendMediaMessage, shouldDeferPlexClick,
+  type PlexItem, type PlexSection,
 } from '../lib/api'
 
 // Plex library browser + media requests. Tabs: one per Plex section (movies /
@@ -314,16 +315,24 @@ function PlayInPlex({ ratingKey }: { ratingKey: string }) {
   const server = useQuery({ queryKey: ['plex-server'], queryFn: fetchPlexServer, staleTime: Infinity, retry: 1 })
   if (!server.data) return null
   const { machineIdentifier } = server.data
+  const web = plexWebItemLink(machineIdentifier, ratingKey)
   return (
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <a
-        href={plexItemLink(machineIdentifier, ratingKey)}
+        href={web}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => {
+          if (shouldDeferPlexClick(e)) return
+          e.preventDefault()
+          openInPlexApp(plexAppItemLink(machineIdentifier, ratingKey), web)
+        }}
         className="inline-flex min-h-12 items-center gap-2 border border-[var(--color-accent)] px-5 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] hover:bg-[rgba(var(--color-accent-rgb),0.08)] active:bg-[rgba(var(--color-accent-rgb),0.14)]"
       >
         <Cast size={15} /> play in plex
       </a>
       <a
-        href={plexWebItemLink(machineIdentifier, ratingKey)}
+        href={web}
         target="_blank"
         rel="noreferrer"
         className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)] underline hover:text-[var(--color-text-dim)]"

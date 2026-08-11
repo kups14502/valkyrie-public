@@ -1,6 +1,7 @@
 import { Download, RefreshCw } from 'lucide-react'
 import { useDesktopUpdate } from '../lib/updater'
 import { useWebUpdate } from '../lib/pwaUpdate'
+import { useBuildUpdate } from '../lib/buildCheck'
 
 // Header update control, styled to match Valkyrie (no native Windows installer
 // dialog — the install runs silently and all UX lives here).
@@ -10,11 +11,14 @@ import { useWebUpdate } from '../lib/pwaUpdate'
 export function UpdateAlarm() {
   const { status, version, progress, restart } = useDesktopUpdate()
   const { needRefresh, reload } = useWebUpdate()
+  // Service-worker-free deploy detection, which is the only signal that works
+  // on the plain-http tailnet origin the phone and iPad use.
+  const buildStale = useBuildUpdate()
 
   const downloading = status === 'downloading'
   const installing = status === 'installing'
   const desktopReady = status === 'ready'
-  if (!(downloading || installing || desktopReady || needRefresh)) return null
+  if (!(downloading || installing || desktopReady || needRefresh || buildStale)) return null
 
   if (downloading || installing) {
     const pct = Math.round(progress * 100)
@@ -31,8 +35,13 @@ export function UpdateAlarm() {
     )
   }
 
-  // Ready: one click installs + relaunches (desktop) or reloads (web).
-  const onAct = desktopReady ? () => { void restart() } : () => reload()
+  // Ready: one click installs + relaunches (desktop), activates the waiting
+  // service worker (web/PWA), or just reloads (tailnet, where there is no SW).
+  const onAct = desktopReady
+    ? () => { void restart() }
+    : needRefresh
+      ? () => reload()
+      : () => window.location.reload()
   return (
     <button
       type="button"

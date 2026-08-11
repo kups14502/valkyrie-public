@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
-  Film, Clapperboard, Tablet,
+  Film, Clapperboard, Tablet, RefreshCw,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -114,6 +114,17 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
           </button>
           <div className="flex items-center gap-2">
             <ThemePicker />
+            {/* Added to the home screen, iOS gives no address bar, and the shell
+                sets html{overflow:hidden} so pull-to-refresh can't fire either —
+                this is the only way to force the newest build in that mode. */}
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              title="Reload to get the latest build"
+              className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] active:border-[var(--color-accent)]"
+            >
+              <RefreshCw size={12} /> reload
+            </button>
             <button
               type="button"
               onClick={() => { onClose(); logout() }}

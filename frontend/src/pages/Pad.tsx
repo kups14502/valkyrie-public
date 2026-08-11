@@ -2,30 +2,28 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity as ActivityIcon, Cast, Clapperboard, Download, KeyRound, LayoutDashboard,
-  Power, Server, TrendingUp,
+  Activity as ActivityIcon, Cast, Clapperboard, Download, LayoutDashboard, Server, TrendingUp,
 } from 'lucide-react'
 import {
   fetchImgToken, fetchMediaDownloads, fetchPlexRecent, fetchPlexServer, fetchSystem, onTailnet,
-  plexHomeLink, plexImg, plexItemLink, plexWebHomeLink, type LightState,
+  openInPlexApp, plexAppHomeLink, plexAppItemLink, plexImg, plexWebHomeLink, plexWebItemLink,
+  shouldDeferPlexClick,
 } from '../lib/api'
-import {
-  PRESETS, brightnessFromPct, hexToRgb, pctFromBrightness, presetSwatchStyle, rgbToHex,
-  useBrightnessThrottle, useLightsControl, useSliderSync, type LightPatch,
-} from '../lib/lights'
+import { pctFromBrightness, useLightsControl } from '../lib/lights'
+import { AllLightsControl, LightControl } from '../components/LightControl'
 import { isPadMode, setPadMode } from '../lib/padMode'
 
-// iPad mode: a big-touch dashboard for the wall/coffee-table iPad. Everything
-// is a large target, nothing depends on hover or the keyboard. Lights are
-// controlled in full here (no drilling into the Lights page), and Plex hands
-// off to the real Plex app so it can AirPlay to the TV.
+// iPad mode: a big-touch dashboard for the wall/coffee-table iPad. Everything is
+// a large target, nothing depends on hover or a keyboard. Lights are controlled
+// in full here, and Plex hands off to the Plex app so it can AirPlay to the TV.
 
+// Six tiles in a three-wide grid: two even rows at every width.
 const TILES = [
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
-  { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
+  { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
 ]
 
 function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
@@ -77,150 +75,19 @@ function SystemChips() {
   )
 }
 
-// ---------- lights (full control, pad-sized) ----------
-
-const PadPresetRow = ({ onPick, onCustom, customHex }: {
-  onPick: (rgb: [number, number, number] | null, kelvin: number | null) => void
-  onCustom: (rgb: [number, number, number]) => void
-  customHex: string
-}) => (
-  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-    {PRESETS.map((p) => (
-      <button
-        key={p.label}
-        type="button"
-        onClick={() => onPick(p.rgb, p.kelvin)}
-        className="flex min-h-14 items-center justify-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] text-sm text-[var(--color-text-dim)] active:border-[var(--color-accent)] active:text-[var(--color-text)]"
-      >
-        <span className="h-4 w-4 shrink-0 border border-[var(--color-border)]" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
-        {p.label}
-      </button>
-    ))}
-    <label className="flex min-h-14 cursor-pointer items-center justify-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] text-sm uppercase tracking-[0.1em] text-[var(--color-text-dim)] active:border-[var(--color-accent)]">
-      <span className="h-4 w-4 shrink-0 border border-[var(--color-border-strong)]" style={{ backgroundColor: customHex }} aria-hidden />
-      custom
-      <input
-        type="color"
-        value={customHex}
-        onChange={(e) => { const rgb = hexToRgb(e.target.value); if (rgb) onCustom(rgb) }}
-        className="sr-only"
-      />
-    </label>
-  </div>
-)
-
-function BrightnessRow({ label, pct, syncTo, onDrag, onCommit }: {
-  label: string
-  pct: number | null
-  // Authoritative value to push into the thumb; null while a drag owns it.
-  syncTo: number | null
-  onDrag: (pct: number) => void
-  onCommit: (pct: number) => void
-}) {
-  const inputRef = useSliderSync(syncTo)
-  return (
-    <div>
-      <div className="mb-2 flex items-baseline justify-between text-sm">
-        <span className="uppercase tracking-[0.14em] text-[var(--color-text-dim)]">{label}</span>
-        <span className="text-lg font-semibold tabular-nums text-[var(--color-text)]">{pct != null ? `${pct}%` : '—'}</span>
-      </div>
-      <input
-        ref={inputRef}
-        type="range"
-        min={1}
-        max={100}
-        defaultValue={pct ?? 100}
-        onInput={(e) => onDrag(Number((e.target as HTMLInputElement).value))}
-        onPointerUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        onTouchEnd={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        className="brightness-slider"
-      />
-    </div>
-  )
-}
-
-function PadLightCard({ light, onUpdate }: { light: LightState; onUpdate: (id: string, u: LightPatch) => void }) {
-  const [pendingPct, setPendingPct] = useState<number | null>(null)
-  const externalPct = pctFromBrightness(light.brightness)
-  const displayPct = pendingPct ?? externalPct
-  const swatch = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : light.on ? '#ffd9a0' : '#1a1f2b'
-
-  const { push, commit } = useBrightnessThrottle(
-    (pct) => onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) }),
-    150,
-  )
-
-  // Safety net for changes that never fire pointerup/touchend (arrow keys):
-  // once the light reports the value we're holding, stop overriding it.
-  useEffect(() => {
-    if (pendingPct !== null && externalPct === pendingPct) setPendingPct(null)
-  }, [externalPct, pendingPct])
-
-  return (
-    <div className={`panel p-4 ${light.on ? 'border-[var(--color-warning)]' : ''} ${light.unavailable ? 'opacity-50' : ''}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="inline-block h-8 w-8 shrink-0 border border-[var(--color-border-strong)]" style={{ backgroundColor: swatch }} aria-hidden />
-          <div className="min-w-0">
-            <div className="truncate text-lg text-[var(--color-text)]">{light.name}</div>
-            <div className="text-xs uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
-              {light.unavailable ? 'unavailable' : light.on ? 'on' : 'off'}
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          disabled={light.unavailable}
-          onClick={() => onUpdate(light.entity_id, { state: light.on ? 'off' : 'on' })}
-          className={`min-h-14 shrink-0 border px-6 text-sm font-semibold uppercase tracking-[0.16em] active:border-[var(--color-accent)] disabled:opacity-40 ${
-            light.on
-              ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
-              : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
-          }`}
-        >
-          {light.on ? 'on' : 'off'}
-        </button>
-      </div>
-
-      {light.on && !light.unavailable && (
-        <div className="mt-4 space-y-4">
-          {/* pendingPct drives the % label mid-drag and suppresses the thumb
-              sync; it clears on release, and the effect above covers inputs
-              that never fire pointerup (arrow keys). */}
-          <BrightnessRow
-            label="brightness"
-            pct={displayPct}
-            syncTo={pendingPct === null ? externalPct : null}
-            onDrag={(pct) => { setPendingPct(pct); push(pct) }}
-            onCommit={(pct) => { commit(pct); setPendingPct(null) }}
-          />
-          <PadPresetRow
-            customHex={rgbToHex(light.rgb_color)}
-            onPick={(rgb, kelvin) => onUpdate(light.entity_id, {
-              state: 'on',
-              ...(rgb ? { rgb_color: rgb } : {}),
-              ...(kelvin ? { color_temp_kelvin: kelvin } : {}),
-            })}
-            onCustom={(rgb) => onUpdate(light.entity_id, { state: 'on', rgb_color: rgb })}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
 function LightsPanel() {
   const { lights, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
-  const [bulkPct, setBulkPct] = useState<number | null>(null)
-  const [bulkHex, setBulkHex] = useState('#ffb87a')
-  const { push: bulkPush, commit: bulkCommit } = useBrightnessThrottle(bulkBrightness, 200)
 
-  const bulkDisplayPct = useMemo(() => {
-    if (bulkPct !== null) return bulkPct
+  const avgPct = useMemo(() => {
     const on = all.filter((l) => !l.unavailable && l.on && l.brightness != null)
     if (!on.length) return null
     return Math.round(on.reduce((sum, l) => sum + pctFromBrightness(l.brightness), 0) / on.length)
-  }, [bulkPct, all])
+  }, [all])
+
+  const ordered = useMemo(
+    () => [...all].sort((a, b) => Number(a.unavailable) - Number(b.unavailable)),
+    [all],
+  )
 
   if (lights.isLoading && !lights.data) return null
   if (lights.error) {
@@ -235,52 +102,28 @@ function LightsPanel() {
 
   return (
     <section>
-      <SectionTitle
-        action={
-          <button
-            type="button"
-            disabled={!availableTargets.length}
-            onClick={() => bulk(anyOn ? 'off' : 'on')}
-            className="flex min-h-14 items-center gap-2 border border-[var(--color-border)] px-6 text-sm uppercase tracking-[0.14em] text-[var(--color-text-dim)] active:border-[var(--color-accent)] active:text-[var(--color-accent)] disabled:opacity-40"
-          >
-            <Power size={18} /> all {anyOn ? 'off' : 'on'}
-          </button>
-        }
-      >
-        lights
-      </SectionTitle>
-
+      <SectionTitle>lights</SectionTitle>
       {availableTargets.length === 0 ? (
         <div className="panel p-4 text-sm text-[var(--color-warning)]">
           All lights unavailable. Home Assistant can't reach any bulb.
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Bulk row first: on the pad, "set the whole room" is the common move. */}
-          <div className="panel p-4">
-            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
-              all {availableTargets.length} lights
-            </div>
-            <div className="space-y-4">
-              <BrightnessRow
-                label="brightness"
-                pct={bulkDisplayPct}
-                syncTo={bulkPct === null ? bulkDisplayPct : null}
-                onDrag={(pct) => { setBulkPct(pct); bulkPush(pct) }}
-                onCommit={(pct) => { bulkCommit(pct); setBulkPct(null) }}
-              />
-              <PadPresetRow
-                customHex={bulkHex}
-                onPick={bulkPreset}
-                onCustom={(rgb) => { setBulkHex(rgbToHex(rgb)); bulkPreset(rgb, null) }}
-              />
-            </div>
-          </div>
-
+          {availableTargets.length > 1 && (
+            <AllLightsControl
+              size="pad"
+              count={availableTargets.length}
+              anyOn={anyOn}
+              avgPct={avgPct}
+              onToggleAll={bulk}
+              onBrightness={bulkBrightness}
+              onPreset={bulkPreset}
+            />
+          )}
           <div className="grid gap-4 lg:grid-cols-2">
-            {[...all]
-              .sort((a, b) => Number(a.unavailable) - Number(b.unavailable))
-              .map((l) => <PadLightCard key={l.entity_id} light={l} onUpdate={updateOne} />)}
+            {ordered.map((l) => (
+              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size="pad" />
+            ))}
           </div>
         </div>
       )}
@@ -288,9 +131,7 @@ function LightsPanel() {
   )
 }
 
-// ---------- plex ----------
-
-function usePlexImgToken() {
+function usePlexImagesReady() {
   const imgTok = useQuery({
     queryKey: ['plex-img-token'],
     queryFn: fetchImgToken,
@@ -303,7 +144,8 @@ function usePlexImgToken() {
 }
 
 function RecentStrip() {
-  const imagesReady = usePlexImgToken()
+  const navigate = useNavigate()
+  const imagesReady = usePlexImagesReady()
   const server = useQuery({ queryKey: ['plex-server'], queryFn: fetchPlexServer, staleTime: Infinity, retry: 1 })
   const recent = useQuery({
     queryKey: ['plex-recent-pad'],
@@ -317,11 +159,10 @@ function RecentStrip() {
 
   return (
     <section>
-      <SectionTitle>recently added{machineId ? ' · tap to open in plex' : ''}</SectionTitle>
+      <SectionTitle>recently added{machineId ? ' · tap to play in plex' : ''}</SectionTitle>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {recent.data.map((item) => {
-          const href = machineId ? plexItemLink(machineId, item.ratingKey) : undefined
-          const Inner = (
+          const inner = (
             <>
               <div className="aspect-[2/3] w-full overflow-hidden bg-[var(--color-surface-2)]">
                 {item.thumb && <img src={plexImg(item.thumb, 220)} alt={item.title} loading="lazy" className="h-full w-full object-cover" />}
@@ -330,24 +171,35 @@ function RecentStrip() {
             </>
           )
           const cls = 'w-32 shrink-0 border border-[var(--color-border)] bg-[var(--color-surface)] text-left active:border-[var(--color-accent)]'
-          // With a known server, go straight to Plex (that's the AirPlay path).
-          // No target=_blank: a plex:// scheme link must navigate in place, or
-          // iOS opens a blank tab behind the app.
-          // Otherwise fall back to browsing inside Valkyrie.
-          return href ? (
-            <a key={item.ratingKey} href={href} className={cls}>{Inner}</a>
-          ) : (
-            <PadBrowseFallback key={item.ratingKey} className={cls}>{Inner}</PadBrowseFallback>
+          if (!machineId) {
+            return (
+              <button key={item.ratingKey} type="button" onClick={() => navigate('/plex')} className={cls}>
+                {inner}
+              </button>
+            )
+          }
+          // href is the web player so a long-press/no-JS still goes somewhere
+          // real; the click prefers the Plex app.
+          return (
+            <a
+              key={item.ratingKey}
+              href={plexWebItemLink(machineId, item.ratingKey)}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                if (shouldDeferPlexClick(e)) return
+                e.preventDefault()
+                openInPlexApp(plexAppItemLink(machineId, item.ratingKey), plexWebItemLink(machineId, item.ratingKey))
+              }}
+              className={cls}
+            >
+              {inner}
+            </a>
           )
         })}
       </div>
     </section>
   )
-}
-
-function PadBrowseFallback({ className, children }: { className: string; children: React.ReactNode }) {
-  const navigate = useNavigate()
-  return <button type="button" onClick={() => navigate('/plex')} className={className}>{children}</button>
 }
 
 function DownloadsPanel() {
@@ -390,6 +242,8 @@ export default function Pad() {
     setPadModeState(next)
   }
 
+  const tileCls = 'flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.08)]'
+
   return (
     <div className="mx-auto max-w-5xl space-y-8 pb-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -397,46 +251,31 @@ export default function Pad() {
         <SystemChips />
       </div>
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-3 gap-3">
         {/* Watch on the TV: hands off to the Plex app, which can AirPlay.
             Valkyrie itself can't cast, so this is the honest route. */}
         <a
-          href={plexHomeLink()}
-          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+          href={plexWebHomeLink()}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => {
+            if (shouldDeferPlexClick(e)) return
+            e.preventDefault()
+            openInPlexApp(plexAppHomeLink(), plexWebHomeLink())
+          }}
+          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] transition-colors active:bg-[rgba(var(--color-accent-rgb),0.14)]"
         >
           <Cast size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
           <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">watch on tv</span>
-          <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">opens plex · airplay</span>
+          <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">opens plex</span>
         </a>
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface)] active:border-[var(--color-accent)]"
-        >
-          <LayoutDashboard size={34} className="text-[var(--color-text-dim)]" />
-          <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text-dim)]">full dashboard</span>
-        </button>
         {TILES.map(({ to, label, icon: Icon }) => (
-          <button
-            key={to}
-            type="button"
-            onClick={() => navigate(to)}
-            className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.08)]"
-          >
+          <button key={to} type="button" onClick={() => navigate(to)} className={tileCls}>
             <Icon size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
             <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">{label}</span>
           </button>
         ))}
       </section>
-
-      {/* A plex:// link silently does nothing when the app isn't installed, so
-          always leave a working way through to Plex Web. */}
-      <p className="-mt-4 text-center text-xs text-[var(--color-text-faint)]">
-        watch on tv opens the Plex app, then AirPlay from its player ·{' '}
-        <a href={plexWebHomeLink()} target="_blank" rel="noreferrer" className="underline hover:text-[var(--color-text-dim)]">
-          plex web
-        </a>
-      </p>
 
       <LightsPanel />
       <DownloadsPanel />
