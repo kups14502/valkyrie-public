@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity as ActivityIcon, Cast, Clapperboard, Download, Film, KeyRound, LayoutDashboard, Music,
+  Cast, Clapperboard, Download, Film, Music,
   Power, Server, TrendingUp, ChevronDown,
 } from 'lucide-react'
 import {
@@ -18,16 +18,13 @@ import { isPadMode, setPadMode } from '../lib/padMode'
 // a large target, nothing depends on hover or a keyboard. Lights are controlled
 // in full here, and Plex hands off to the Plex app so it can AirPlay to the TV.
 
-// Nine tiles in a three-wide grid: three even rows. Two open native apps
-// (below), these seven navigate.
+// Six tiles in a three-wide grid: two even rows. Two open native apps (below),
+// these four navigate. Everything else stays in the nav menu.
 const TILES = [
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
-  { to: '/activity', label: 'activity', icon: ActivityIcon },
-  { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/slop', label: 'slop', icon: Film },
-  { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
 ]
 
 function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
