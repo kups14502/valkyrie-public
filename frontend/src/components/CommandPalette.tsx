@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft, Clapperboard, Tablet } from 'lucide-react'
 
 // Global command palette (Ctrl/Cmd+K): jump to any page by name. Opens over
 // everything, keyboard-driven, closes on Esc / outside click / after acting.
@@ -15,11 +15,13 @@ type Cmd = { id: string; label: string; hint?: string; icon: React.ReactNode; ru
 
 const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} /> },
+  { to: '/plex', label: 'Plex', icon: <Clapperboard size={15} /> },
   { to: '/lights', label: 'Lights', icon: <Lightbulb size={15} /> },
   { to: '/trade', label: 'Trades', icon: <TrendingUp size={15} /> },
   { to: '/vault', label: 'Vault', icon: <KeyRound size={15} /> },
   { to: '/services', label: 'Services', icon: <Server size={15} /> },
   { to: '/activity', label: 'Activity', icon: <ActivityIcon size={15} /> },
+  { to: '/pad', label: 'Pad mode', icon: <Tablet size={15} /> },
 ]
 
 export function CommandPalette() {

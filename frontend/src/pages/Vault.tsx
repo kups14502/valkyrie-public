@@ -59,7 +59,7 @@ export default function Vault() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// secure</div>
           <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>vault<span className="cursor-blink">_</span></h1>

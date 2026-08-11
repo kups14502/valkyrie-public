@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { isConfigured, setupCredentials, verifyCredentials } from '../auth/store.js'
 import { signAppToken } from '../auth/token.js'
-import { isLoopbackReq, isAuthStrict } from '../middleware/auth.js'
+import { isLoopbackReq, isTailnetReq, isAuthStrict } from '../middleware/auth.js'
 
 // Public auth endpoints (mounted BEFORE requireAuth). Login/setup must be
 // reachable without a token. Everything else stays behind requireAuth.
@@ -28,9 +28,15 @@ function recordFail(ip: string | undefined) {
 }
 function recordSuccess(ip: string | undefined) { attempts.delete(clientKey(ip)) }
 
-// Whether owner credentials have been set up yet — drives the login vs. setup UI.
-router.get('/auth/status', (_req, res) => {
-  res.json({ configured: isConfigured(), strict: isAuthStrict() })
+// Whether owner credentials have been set up yet — drives the login vs. setup
+// UI. `trusted` means this request is already authorized by where it came from
+// (tailnet peer or loopback), so the client should skip the login gate.
+router.get('/auth/status', (req, res) => {
+  res.json({
+    configured: isConfigured(),
+    strict: isAuthStrict(),
+    trusted: isLoopbackReq(req) || isTailnetReq(req),
+  })
 })
 
 // Bootstrap (or recover) the owner credential. Allowed when not yet configured,

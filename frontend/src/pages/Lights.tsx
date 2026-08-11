@@ -45,7 +45,7 @@ function hexToRgb(hex: string): [number, number, number] | null {
 
 function ColorWheel({ value, onPick }: { value: string; onPick: (rgb: [number, number, number]) => void }) {
   return (
-    <label className="group flex cursor-pointer items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]">
+    <label className="group flex cursor-pointer items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]">
       <span className="h-3.5 w-3.5 border border-[var(--color-border-strong)] shadow-[0_0_8px_var(--color-accent)]" style={{ backgroundColor: value }} aria-hidden />
       custom
       <input
@@ -125,10 +125,10 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
   return (
     <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''} ${light.unavailable ? 'opacity-50' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="inline-block h-7 w-7 border border-[var(--color-border-strong)] shadow-[0_0_12px_rgba(255,255,255,0.12)]" style={{ backgroundColor: swatchColor }} aria-hidden />
-          <div>
-            <div className="text-base font-semibold text-[var(--color-text)]">{light.name}</div>
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold text-[var(--color-text)]">{light.name}</div>
             <div className="text-xs text-[var(--color-text-faint)]">{light.unavailable ? 'unplugged / unavailable' : light.on ? 'on' : 'off'}</div>
           </div>
         </div>
@@ -136,7 +136,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
           type="button"
           disabled={light.unavailable}
           onClick={() => onUpdate(light.entity_id, { state: light.on ? 'off' : 'on' })}
-          className={`border px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`border px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] transition active:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40 ${
             light.on
               ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/10 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20'
               : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'
@@ -179,7 +179,7 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
                   ...(p.rgb ? { rgb_color: p.rgb } : {}),
                   ...(p.kelvin ? { color_temp_kelvin: p.kelvin } : {}),
                 })}
-                className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)] active:border-[var(--color-accent)]"
               >
                 <span className="h-3 w-3 border border-[var(--color-border)]" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
                 {p.label}
@@ -285,7 +285,7 @@ export default function Lights() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// env</div>
           <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>lights<span className="cursor-blink">_</span></h1>
@@ -295,7 +295,7 @@ export default function Lights() {
             type="button"
             disabled={!all.length || mutation.isPending}
             onClick={() => bulk('on')}
-            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
+            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
           >
             All on
           </button>
@@ -303,7 +303,7 @@ export default function Lights() {
             type="button"
             disabled={!anyOn || mutation.isPending}
             onClick={() => bulk('off')}
-            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
+            className="border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-40"
           >
             All off
           </button>
@@ -372,7 +372,7 @@ export default function Lights() {
                       key={p.label}
                       type="button"
                       onClick={() => bulkPreset(p.rgb, p.kelvin)}
-                      className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
+                      className="flex items-center gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 text-xs text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)]/40 hover:text-[var(--color-text)]"
                     >
                       <span className="h-3 w-3 border border-[var(--color-border)]" style={{ backgroundColor: presetSwatchStyle(p) }} aria-hidden />
                       {p.label}

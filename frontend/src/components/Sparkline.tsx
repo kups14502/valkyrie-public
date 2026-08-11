@@ -18,12 +18,9 @@ export function Sparkline({ values, color, height = 18 }: { values: number[]; co
     const y = h - ((v - min) / (max - min)) * h
     return `${x.toFixed(1)},${y.toFixed(1)}`
   })
-  const last = values[values.length - 1]
-  const lastY = h - ((last - min) / (max - min)) * h
   return (
     <svg className="mt-1.5 block w-full" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={w - 1.5} cy={lastY} r={1.5} fill={color} />
+      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }

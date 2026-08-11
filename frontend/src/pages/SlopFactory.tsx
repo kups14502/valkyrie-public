@@ -52,14 +52,14 @@ function Figure({
         : 'var(--color-text)'
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--color-faint)' }}>
+      <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
         {label}
       </span>
       <span className="text-2xl font-semibold tabular-nums" style={{ color: colour }}>
         {value}
       </span>
       {sub ? (
-        <span className="text-xs" style={{ color: 'var(--color-dim)' }}>
+        <span className="text-xs" style={{ color: 'var(--color-text-dim)' }}>
           {sub}
         </span>
       ) : null}
@@ -73,11 +73,11 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'dan
       className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0"
       style={{ borderColor: 'var(--color-border)' }}
     >
-      <span className="text-sm" style={{ color: 'var(--color-dim)' }}>
+      <span className="min-w-0 truncate text-sm" style={{ color: 'var(--color-text-dim)' }}>
         {label}
       </span>
       <span
-        className="text-sm tabular-nums"
+        className="shrink-0 text-sm tabular-nums"
         style={{ color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)' }}
       >
         {value}
@@ -95,9 +95,9 @@ export default function SlopFactory() {
 
   if (isLoading) {
     return (
-      <div className="p-4">
+      <div className="p-0 sm:p-4">
         <Card title="slop factory">
-          <span style={{ color: 'var(--color-dim)' }}>loading…</span>
+          <span style={{ color: 'var(--color-text-dim)' }}>loading…</span>
         </Card>
       </div>
     )
@@ -107,12 +107,12 @@ export default function SlopFactory() {
   // numbers on screen cannot be trusted, so both say so rather than drawing zeros.
   if (error || !data) {
     return (
-      <div className="p-4">
+      <div className="p-0 sm:p-4">
         <Card title="slop factory">
           <p style={{ color: 'var(--color-danger)' }}>
             [unreachable] could not load the slop factory endpoint.
           </p>
-          <p className="mt-1 text-sm" style={{ color: 'var(--color-dim)' }}>
+          <p className="mt-1 text-sm" style={{ color: 'var(--color-text-dim)' }}>
             The Valkyrie backend may be down, or it could not reach Odin.
           </p>
         </Card>
@@ -124,7 +124,7 @@ export default function SlopFactory() {
 
   if (!stats) {
     return (
-      <div className="p-4">
+      <div className="p-0 sm:p-4">
         <Card title="slop factory">
           <p style={{ color: 'var(--color-danger)' }}>
             [cli failed] {cliError?.message ?? 'the pipeline CLI did not return stats'}
@@ -132,7 +132,7 @@ export default function SlopFactory() {
           {cliError?.stderr_tail ? (
             <pre
               className="mt-2 overflow-x-auto rounded p-2 text-xs"
-              style={{ background: 'var(--color-border)', color: 'var(--color-dim)' }}
+              style={{ background: 'var(--color-border)', color: 'var(--color-text-dim)' }}
             >
               {cliError.stderr_tail}
             </pre>
@@ -149,7 +149,7 @@ export default function SlopFactory() {
   const stalled = p.budget_blocked || p.failing_sources > 0 || p.failing_clips > 0
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-0 sm:p-4">
       {stale ? (
         <Card title="stale">
           <p style={{ color: 'var(--color-danger)' }}>
@@ -160,7 +160,7 @@ export default function SlopFactory() {
 
       {/* Headline: the only question that decides whether the operator has to act. */}
       <Card title="gameplay">
-        <div className="flex flex-wrap gap-8">
+        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
           <Figure
             label="footage left"
             value={fmtMin(g.seconds_remaining)}
@@ -183,7 +183,7 @@ export default function SlopFactory() {
             recordings into the filler directory on Odin and run render again.
           </p>
         ) : (
-          <p className="mt-4 text-sm" style={{ color: 'var(--color-dim)' }}>
+          <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
             Enough footage for the current queue.
           </p>
         )}
@@ -201,7 +201,7 @@ export default function SlopFactory() {
       </Card>
 
       <Card title="shorts">
-        <div className="flex flex-wrap gap-8">
+        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
           <Figure label="made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
           <Figure label="posted" value={`${s.posted}`} sub="marked by hand" tone="emphasis" />
           <Figure label="awaiting review" value={`${s.pending}`} />
@@ -215,7 +215,7 @@ export default function SlopFactory() {
       </Card>
 
       <Card title="footage">
-        <div className="flex flex-wrap gap-8">
+        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
           <Figure
             label="episodes"
             value={`${f.episodes_ingested}`}
@@ -229,7 +229,7 @@ export default function SlopFactory() {
           />
         </div>
         {f.episodes_awaiting_clip > 0 ? (
-          <p className="mt-3 text-sm" style={{ color: 'var(--color-dim)' }}>
+          <p className="mt-3 text-sm" style={{ color: 'var(--color-text-dim)' }}>
             {f.episodes_awaiting_clip} episode(s) ingested but not yet cut into clips.
           </p>
         ) : null}
@@ -252,13 +252,13 @@ export default function SlopFactory() {
           {p.failing_clips > 0 ? (
             <Row label="clips failing" value={`${p.failing_clips}`} tone="danger" />
           ) : null}
-          <p className="mt-3 text-xs" style={{ color: 'var(--color-faint)' }}>
+          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
             On Odin: run.py failures shows why, run.py retry &lt;id&gt; puts an item back.
           </p>
         </Card>
       ) : null}
 
-      <p className="text-xs" style={{ color: 'var(--color-faint)' }}>
+      <p className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
         last render {p.last_render_at ? new Date(p.last_render_at).toLocaleString() : 'never'} ·
         stats generated {new Date(stats.generated_at).toLocaleTimeString()}
       </p>

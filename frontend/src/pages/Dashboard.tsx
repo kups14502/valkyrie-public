@@ -400,7 +400,7 @@ export default function Dashboard() {
     // correctness tidy-up, not the fix.
     <div className="min-w-0 space-y-8 overflow-x-clip">
       <div className="space-y-4">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
             <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
@@ -438,7 +438,7 @@ export default function Dashboard() {
                       href={s.url}
                       target="_blank"
                       rel="noreferrer"
-                      className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2 transition hover:border-[var(--color-accent)] ${tone}`}
+                      className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 transition hover:border-[var(--color-accent)] active:border-[var(--color-accent)] ${tone}`}
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />

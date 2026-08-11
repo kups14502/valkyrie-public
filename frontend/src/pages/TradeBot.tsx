@@ -130,7 +130,7 @@ const DIM = 'text-[var(--color-text-dim)]'
 const FAINT = 'text-[var(--color-text-faint)]'
 /** Reserved. See the colour contract at the top of the file: real faults only. */
 const BAD = 'text-[var(--color-danger)]'
-const LABEL = `text-[10px] uppercase tracking-[0.28em] ${FAINT}`
+const LABEL = `text-[10px] uppercase tracking-[0.14em] sm:tracking-[0.28em] ${FAINT}`
 
 /** `bad` is for a real fault (down, failing, tampered). Accent is emphasis. */
 function Tag({ children, bad, faint }: { children: string; bad?: boolean; faint?: boolean }) {
@@ -221,7 +221,7 @@ function EquityChart({ points }: { points: { ts: string; total: number }[] }) {
           <div
             key={`${rows[i].ts}-${i}`}
             title={`${fmtDay(rows[i].ts)} ${fmtClock(rows[i].ts)} · ${usd(v)} total value`}
-            className="absolute h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-[var(--color-accent)]"
+            className="absolute hidden sm:block h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-[var(--color-accent)]"
             style={{ left: `${xs[i]}%`, bottom: `${at(v)}%`, boxShadow: '0 0 0 2px var(--color-surface)' }}
           />
         ))}
@@ -403,7 +403,7 @@ function ConfidenceChart({
               style={{ bottom: `${t * 100}%` }}
             />
             <div
-              className={`absolute right-0 text-[9px] uppercase tracking-[0.18em] ${DIM}`}
+              className={`absolute right-0 bg-[var(--color-surface)] px-1 text-[9px] uppercase tracking-[0.18em] ${DIM}`}
               style={{ bottom: `calc(${t * 100}% + 5px)` }}
             >
               gate {t.toFixed(2)}
@@ -532,7 +532,7 @@ function FillRow({ f }: { f: TradeBotFill }) {
       <span className={`shrink-0 ${DIM}`}>
         {qty(f.quantity)} @ {usd(f.price, 4)}
       </span>
-      <span className={`ml-auto shrink-0 ${FAINT}`}>
+      <span className={`sm:ml-auto shrink-0 ${FAINT}`}>
         {usd(notional)} · {f.state ?? '?'}
         {f.placed_agent ? ` · ${f.placed_agent}` : ''}
       </span>
@@ -986,9 +986,9 @@ function PositionsPanel({
           {broker.positions.map((pos) => (
             <div key={pos.symbol} className="flex gap-3 py-2 text-xs tabular-nums">
               <span className="w-14 font-semibold text-[var(--color-text)]">{pos.symbol}</span>
-              <span className={`flex-1 text-right ${DIM}`}>{qty(pos.quantity)}</span>
-              <span className={`flex-1 text-right ${DIM}`}>{qty(pos.shares_available_for_sells)}</span>
-              <span className={`flex-1 text-right ${DIM}`}>{usd(pos.average_buy_price, 4)}</span>
+              <span className={`flex-1 truncate text-right ${DIM}`}>{qty(pos.quantity)}</span>
+              <span className={`flex-1 truncate text-right ${DIM}`}>{qty(pos.shares_available_for_sells)}</span>
+              <span className={`flex-1 truncate text-right ${DIM}`}>{usd(pos.average_buy_price, 4)}</span>
             </div>
           ))}
         </div>
@@ -1011,7 +1011,7 @@ function FillsPanel({ broker, brokerError }: { broker: TradeBotSnapshot | null; 
           <div className={`mb-2 text-[11px] ${FAINT}`}>
             newest fill {fmtDay(newest)} ({fmtAge(newest)}) · broker order legs, newest first
           </div>
-          <div className="max-h-[320px] divide-y divide-[var(--color-border)] overflow-y-auto">
+          <div className="max-h-none sm:max-h-[320px] divide-y divide-[var(--color-border)] overflow-y-auto">
             {fills.map((f, i) => (
               <FillRow key={`${f.order_id ?? 'x'}-${f.ts}-${i}`} f={f} />
             ))}

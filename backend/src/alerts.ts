@@ -45,7 +45,7 @@ function saveState(state: AlertState): void {
   }
 }
 
-async function postDiscord(content: string): Promise<void> {
+export async function postDiscord(content: string): Promise<void> {
   if (!WEBHOOK_URL) return
   try {
     const r = await fetch(WEBHOOK_URL, {

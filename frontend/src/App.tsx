@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
-  Film,
+  Film, Clapperboard, Tablet,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -22,6 +22,8 @@ const TradeBot = lazy(() => import('./pages/TradeBot'))
 const SlopFactory = lazy(() => import('./pages/SlopFactory'))
 const Services = lazy(() => import('./pages/Services'))
 const Activity = lazy(() => import('./pages/Activity'))
+const Plex = lazy(() => import('./pages/Plex'))
+const Pad = lazy(() => import('./pages/Pad'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,12 +45,14 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
+  { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/slop', label: 'slop', icon: Film },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
+  { to: '/pad', label: 'pad', icon: Tablet },
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
@@ -227,6 +231,8 @@ function Shell() {
             <Route path="/trade" element={<TradeBot />} />
             <Route path="/slop" element={<SlopFactory />} />
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
+            <Route path="/plex" element={<Plex />} />
+            <Route path="/pad" element={<Pad />} />
           </Routes>
           </ErrorBoundary>
         </Suspense>

@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import type { IncomingMessage } from 'node:http'
 import jwt from 'jsonwebtoken'
 import jwksClient from 'jwks-rsa'
-import { verifyAppToken } from '../auth/token.js'
+import { verifyAppToken, verifyImgToken } from '../auth/token.js'
 
 // Auth for Valkyrie. Accepted credentials, checked in order:
 //   1. Self-hosted app token (Authorization: Bearer <jwt>, or ?token= for WS) —
@@ -63,15 +63,28 @@ const getKey = (header: jwt.JwtHeader): Promise<string> =>
     })
   })
 
-// A request that originated on this host (dev), not one Cloudflare forwarded.
-export function isLoopbackReq(req: Pick<IncomingMessage, 'socket' | 'headers'> & { ip?: string }): boolean {
-  const remoteIP = req.ip || req.socket.remoteAddress || ''
+// A request that originated on this host (dev, or a local reverse proxy like
+// `tailscale serve`), not one Cloudflare forwarded. Decided on the actual
+// socket peer address only: X-Forwarded-For and req.ip are client-controlled
+// under `trust proxy` and must never grant access.
+export function isLoopbackReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
   const socketIP = req.socket.remoteAddress || ''
-  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
   const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
   const loopbacks = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
-  const isLoopback = loopbacks.includes(remoteIP) || loopbacks.includes(socketIP) || forwardedFor.includes('127.0.0.1') || forwardedFor.includes('::1')
-  return isLoopback && !fromCloudflare
+  return loopbacks.includes(socketIP) && !fromCloudflare
+}
+
+// A request from a Tailscale peer: the socket peer address is in the tailnet
+// CGNAT range 100.64.0.0/10 (Node reports v4 as ::ffff:-mapped) or Tailscale's
+// ULA v6 prefix. Devices on the tailnet are already authenticated by WireGuard
+// key, so these requests are trusted like loopback. Same socket-only rule as
+// isLoopbackReq — never derived from forwarded headers.
+const TAILNET_V4 = /^(?:::ffff:)?100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./
+const TAILNET_V6 = /^fd7a:115c:a1e0:/i
+export function isTailnetReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
+  const socketIP = req.socket.remoteAddress || ''
+  const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
+  return !fromCloudflare && (TAILNET_V4.test(socketIP) || TAILNET_V6.test(socketIP))
 }
 
 // Verify a Cloudflare Access JWT (RS256, JWKS-backed). Returns payload or null.
@@ -93,9 +106,19 @@ function bearer(req: Pick<IncomingMessage, 'headers'>): string | undefined {
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (isLoopbackReq(req)) return next()
+  if (isLoopbackReq(req) || isTailnetReq(req)) return next()
 
-  // 1. App token (Bearer).
+  // 1a. Image-scoped query token, honored ONLY for the poster proxy. <img>
+  //     tags can't set headers, so the token rides the URL — which lands in
+  //     proxy logs and browser caches. That's why it's a separate short-lived
+  //     token that grants nothing but this route (and why the full app token
+  //     is never accepted from a query string).
+  if (req.method === 'GET' && req.path === '/plex/img'
+    && typeof req.query.token === 'string' && verifyImgToken(req.query.token)) {
+    return next()
+  }
+
+  // 1b. App token (Bearer).
   const appPayload = verifyAppToken(bearer(req))
   if (appPayload) {
     ;(req as Request & { user: jwt.JwtPayload }).user = appPayload
@@ -131,7 +154,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 // Authorize a WebSocket upgrade. Accepts an app token via ?token=, a Cloudflare
 // Access JWT header (transitional), or a loopback dev connection.
 export async function authorizeUpgrade(req: IncomingMessage): Promise<boolean> {
-  if (isLoopbackReq(req)) return true
+  if (isLoopbackReq(req) || isTailnetReq(req)) return true
   try {
     const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
     if (verifyAppToken(token)) return true

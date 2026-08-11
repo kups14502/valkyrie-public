@@ -39,6 +39,16 @@ if (isTauri()) {
   })
 }
 
+// Pad mode pinned as the start screen (the iPad): rewrite the landing URL
+// before the router reads it. Done here, not in a React effect, so it happens
+// exactly once per page load and can't refire when the auth gate remounts.
+try {
+  if (localStorage.getItem('valkyrie-pad') === '1'
+    && (location.pathname === '/' || location.pathname === '/dashboard')) {
+    history.replaceState(null, '', '/pad')
+  }
+} catch { /* storage unavailable */ }
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>

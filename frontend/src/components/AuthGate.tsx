@@ -21,6 +21,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadStatus = useCallback(async () => {
     try {
       const s = await fetchAuthStatus()
+      // Trusted transport (tailnet peer or loopback): the backend authorizes
+      // these by socket address, so there is nothing to log in to — render the
+      // app. This is how iPhone/iPad on tailscale skip the gate entirely.
+      if (s.trusted) {
+        setAuthed(true)
+        return
+      }
       setStatus(s)
       setPhase((p) => (p === 'enroll' ? 'enroll' : s.configured ? 'login' : 'setup'))
     } catch {

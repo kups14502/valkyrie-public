@@ -23,7 +23,7 @@ function ActivityRow({ a, color, label }: { a: ActivityItem; color: string; labe
     <div className="flex items-baseline gap-3 py-2 text-sm">
       <span className={`shrink-0 text-[10px] uppercase tracking-[0.12em] ${color}`}>[{label}]</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[var(--color-text)]">{a.title}</div>
+        <div className="max-sm:line-clamp-2 sm:truncate text-[var(--color-text)]">{a.title}</div>
         {a.subtitle && (
           <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">{a.subtitle}</div>
         )}
@@ -39,7 +39,7 @@ export default function Activity() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// log</div>
           <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>

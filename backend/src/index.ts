@@ -1,6 +1,9 @@
 import 'dotenv/config'
 import express from 'express'
 import { createServer } from 'node:http'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
@@ -18,6 +21,7 @@ import slopfactoryRoute from './routes/slopfactory.js'
 import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
+import plexRoute from './routes/plex.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -37,16 +41,38 @@ const BIND = process.env.BIND || '127.0.0.1'
 
 app.disable('x-powered-by')
 app.set('trust proxy', true)
-app.use(helmet())
+// CSP off: this server also serves the built frontend (tailnet access), whose
+// HTML loads Google Fonts and TMDB posters; helmet's default CSP (and its
+// upgrade-insecure-requests) would break it over plain-http tailnet origins.
+// CORP cross-origin: the Plex poster proxy is embedded as <img> from the
+// Cloudflare Pages origin, which same-origin CORP would block.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}))
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []
 // The dedicated Tauri apps run the web UI from a tauri:// (or tauri.localhost)
 // origin — allow those so their API calls aren't CORS-blocked.
 const TAURI_ORIGINS = new Set(['tauri://localhost', 'https://tauri.localhost', 'http://tauri.localhost'])
+// Origins that reach us over the tailnet (the app served from this box on the
+// tailscale interface, or via `tailscale serve` at *.ts.net). The socket-level
+// tailnet/loopback check in requireAuth is what actually authorizes them; this
+// only keeps the browser's CORS preflight from rejecting the origin header.
+const isTailnetOrigin = (origin: string) => {
+  try {
+    const host = new URL(origin).hostname
+    return host === 'odin' || host.endsWith('.ts.net')
+      || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)
+  } catch {
+    return false
+  }
+}
 const isAllowedOrigin = (origin: string) => {
   if (allowedOrigins.includes(origin)) return true
   if (TAURI_ORIGINS.has(origin)) return true
   if (/^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)) return true
+  if (isTailnetOrigin(origin)) return true
   return false
 }
 app.use(cors({
@@ -95,6 +121,41 @@ app.use('/api', slopfactoryRoute)
 app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
+app.use('/api', plexRoute)
+
+// Serve the built web frontend when it's present (odin serves the app to
+// tailnet devices this way — same origin as the API, so iPhone/iPad hit
+// http://<odin tailscale ip>:8420 and everything just works with no login).
+// FRONTEND_DIST overrides; the default resolves to ../frontend/dist from
+// backend/dist/index.js as well as from backend/src via tsx.
+const distCandidates = [
+  process.env.FRONTEND_DIST,
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../frontend/dist'),
+  path.resolve(process.cwd(), '../frontend/dist'),
+].filter((p): p is string => Boolean(p))
+const FRONTEND_DIST = distCandidates.find((p) => existsSync(path.join(p, 'index.html')))
+if (FRONTEND_DIST) {
+  app.use(express.static(FRONTEND_DIST, {
+    setHeaders(res, filePath) {
+      // Hashed bundles can cache forever; index.html must always revalidate so
+      // a deploy is picked up on the next open (no service worker on plain-http
+      // tailnet origins to do it for us).
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      } else if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache')
+      }
+    },
+  }))
+  // SPA fallback: any non-API GET that accepts HTML gets the app shell.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path === '/healthz') return next()
+    if (!req.accepts('html')) return next()
+    res.setHeader('Cache-Control', 'no-cache')
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
+  })
+  console.log(`[static] serving frontend from ${FRONTEND_DIST}`)
+}
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
@@ -105,3 +166,31 @@ server.listen(PORT, BIND, () => {
   console.log(`Valkyrie API listening on ${BIND}:${PORT}`)
   startAlerts()
 })
+
+// Optional second listener on the tailscale interface: tailnet devices talk to
+// the API (and the static frontend above) directly, and requireAuth trusts
+// them by their 100.64.0.0/10 socket address — no login, no Cloudflare.
+const TAILNET_BIND = process.env.TAILNET_BIND
+if (TAILNET_BIND) {
+  const TAILNET_PORT = Number(process.env.TAILNET_PORT) || 8420
+  const RETRY_MS = 15_000
+  // At boot the tailscale interface often doesn't exist yet, so binding to its
+  // address fails with EADDRNOTAVAIL. Retry instead of giving up, or a reboot
+  // would silently leave the iPad/iPhone with no way in until a manual restart.
+  const listenTailnet = () => {
+    const tailnetServer = createServer(app)
+    tailnetServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRNOTAVAIL' || err.code === 'EADDRINUSE') {
+        console.warn(`[tailnet] ${err.code} binding ${TAILNET_BIND}:${TAILNET_PORT} — retrying in ${RETRY_MS / 1000}s`)
+      } else {
+        console.error('[tailnet] listener error', err)
+      }
+      tailnetServer.close()
+      setTimeout(listenTailnet, RETRY_MS).unref()
+    })
+    tailnetServer.listen(TAILNET_PORT, TAILNET_BIND, () => {
+      console.log(`Valkyrie tailnet listener on ${TAILNET_BIND}:${TAILNET_PORT}`)
+    })
+  }
+  listenTailnet()
+}

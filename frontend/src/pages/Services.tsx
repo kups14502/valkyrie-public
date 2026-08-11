@@ -57,12 +57,12 @@ function ContainerRow({ c, onRestart, pending }: { c: ServiceContainer; onRestar
           <span className={`text-[10px] uppercase tracking-[0.12em] ${containerToneColor(c.state)}`}>[{c.state}]</span>
           {c.project && <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">[{c.project}]</span>}
         </div>
-        <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
+        <div className="mt-0.5 text-[11px] break-all sm:truncate text-[var(--color-text-faint)]">
           {c.image} · {c.status}{c.ports.length > 0 && <span> · {c.ports.join(', ')}</span>}
         </div>
         {c.composeFile && <div className="mt-0.5 truncate text-[10px] text-[var(--color-text-faint)]">{c.composeFile}</div>}
       </div>
-      <button type="button" onClick={onRestart} disabled={pending} className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40">restart</button>
+      <button type="button" onClick={onRestart} disabled={pending} className="shrink-0 border border-[var(--color-border)] min-h-10 px-3 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] active:border-[var(--color-accent)] disabled:opacity-40">restart</button>
     </div>
   )
 }
@@ -78,7 +78,7 @@ function ServiceRow({ s, onRestart, pending, canRestart = true }: { s: ServiceUn
         </div>
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">{s.description}</div>
       </div>
-      {canRestart && onRestart && <button type="button" onClick={onRestart} disabled={pending} className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40">restart</button>}
+      {canRestart && onRestart && <button type="button" onClick={onRestart} disabled={pending} className="shrink-0 border border-[var(--color-border)] min-h-10 px-3 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] active:border-[var(--color-accent)] disabled:opacity-40">restart</button>}
     </div>
   )
 }
@@ -110,7 +110,7 @@ function PortRow({ p }: { p: ListeningPort }) {
 function TabButton({ id, active, label, count, onClick }: { id: Tab; active: Tab; label: string; count: number; onClick: (id: Tab) => void }) {
   const selected = id === active
   return (
-    <button type="button" onClick={() => onClick(id)} className={`border px-3 py-2 text-xs uppercase tracking-[0.16em] transition ${selected ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.08)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}>
+    <button type="button" onClick={() => onClick(id)} className={`border min-h-10 px-3 py-2 text-xs uppercase tracking-[0.16em] transition active:border-[var(--color-accent)] ${selected ? 'border-[var(--color-accent)] bg-[color:rgba(45,212,191,0.08)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]'}`}>
       {label} <span className="text-[var(--color-text-faint)]">{count}</span>
     </button>
   )
@@ -181,7 +181,7 @@ export default function Services() {
         <TabButton id="timers" active={tab} label="Timers" count={filtered.timers.length} onClick={setTab} />
         <TabButton id="ports" active={tab} label="Ports" count={filtered.ports.length} onClick={setTab} />
         <TabButton id="compose" active={tab} label="Compose" count={filtered.compose.length} onClick={setTab} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="search everything…" className="min-w-52 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" />
+        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="search everything…" className="min-w-52 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-base sm:text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]" />
       </div>
 
       {tab === 'apps' && <Card title={`Web apps · ${filtered.apps.length}`}>

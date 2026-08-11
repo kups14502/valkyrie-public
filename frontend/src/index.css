@@ -228,3 +228,14 @@ body::after {
   box-shadow: 0 0 10px var(--color-accent);
   cursor: ew-resize;
 }
+
+/* wider slider thumb on touch devices */
+@media (pointer: coarse) {
+  .brightness-slider::-webkit-slider-thumb {
+    width: 14px;
+    margin-top: -7px;
+  }
+  .brightness-slider::-moz-range-thumb {
+    width: 14px;
+  }
+}

@@ -3,7 +3,18 @@ import { getToken, clearToken } from './auth'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL
 
-const baseURL = configuredApiUrl
+// When the app is served from odin over the tailnet (tailscale IP, MagicDNS
+// name, or *.ts.net via `tailscale serve`), the same host serves the API — use
+// it same-origin so the backend can trust the request by its tailnet socket
+// address. The baked-in VITE_API_URL (Cloudflare) is only for the public web
+// deployment and the desktop app.
+const isTailnetHost = (h: string) =>
+  h === 'odin' || h.endsWith('.ts.net')
+  || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)
+
+export const onTailnet = typeof window !== 'undefined' && isTailnetHost(window.location.hostname)
+
+const baseURL = configuredApiUrl && !onTailnet
   ? `${configuredApiUrl}/api`
   : '/api'
 
@@ -38,7 +49,7 @@ api.interceptors.response.use(
   },
 )
 
-export type AuthStatus = { configured: boolean; strict: boolean }
+export type AuthStatus = { configured: boolean; strict: boolean; trusted?: boolean }
 export const fetchAuthStatus = async () => (await api.get<AuthStatus>('/auth/status')).data
 export const setupAuth = async (password: string) =>
   (await api.post<{ ok: boolean; otpauthUri: string; secret: string }>('/auth/setup', { password })).data
@@ -519,3 +530,96 @@ export const fetchSlopFactoryStats = async () => {
   const r = await api.get<SlopStatsEnvelope>('/slopfactory/stats')
   return r.data
 }
+
+// ---------- Plex ----------
+
+export type PlexSection = { key: string; title: string; type: 'movie' | 'show'; count: number }
+
+export type PlexItem = {
+  ratingKey: string
+  type: string
+  title: string
+  year: number | null
+  summary: string
+  thumb: string | null
+  art: string | null
+  rating: number | null
+  contentRating: string | null
+  duration: number | null
+  addedAt: number | null
+  leafCount: number | null
+  childCount: number | null
+}
+
+export type PlexLibraryPage = { total: number; offset: number; items: PlexItem[] }
+
+export type MediaSearchResult = {
+  kind: 'movie' | 'show'
+  title: string
+  year: number | null
+  overview: string
+  poster: string | null
+  tmdbId: number | null
+  tvdbId: number | null
+  inLibrary: boolean
+  downloaded: boolean
+}
+
+export type MediaRequestEntry = {
+  at: string
+  kind: 'movie' | 'show' | 'message'
+  title?: string
+  year?: number
+  message?: string
+  status?: string
+}
+
+export type MediaDownload = {
+  kind: 'movie' | 'show'
+  title: string
+  status: string
+  progress: number
+  timeleft: string | null
+}
+
+// Poster URLs need auth, but an <img> tag can't set an Authorization header —
+// so a short-lived IMAGE-SCOPED token rides the URL instead (never the 30-day
+// app token: URLs end up in proxy logs and browser caches). Tailnet clients
+// don't need it at all (trusted by socket address).
+let imgToken: { token: string; expiresAt: number } | null = null
+
+export const fetchImgToken = async () => {
+  const r = await api.get<{ token: string; expiresAt: number }>('/plex/img-token')
+  imgToken = r.data
+  return r.data
+}
+
+export const plexImg = (path: string, w = 300): string => {
+  const params = new URLSearchParams({ path, w: String(w) })
+  if (imgToken && imgToken.expiresAt > Date.now() + 60_000) params.set('token', imgToken.token)
+  return `${baseURL}/plex/img?${params.toString()}`
+}
+
+export const fetchPlexSections = async () => (await api.get<PlexSection[]>('/plex/sections')).data
+export const fetchPlexLibrary = async (section: string, offset: number, opts: { search?: string; sort?: string } = {}) => {
+  const r = await api.get<PlexLibraryPage>('/plex/library', {
+    params: { section, offset, limit: 60, search: opts.search || undefined, sort: opts.sort || undefined },
+  })
+  return r.data
+}
+export const fetchPlexRecent = async (limit = 24) =>
+  (await api.get<{ items: PlexItem[] }>('/plex/recent', { params: { limit } })).data.items
+export const searchMediaRequests = async (q: string) =>
+  (await api.get<{ results: MediaSearchResult[] }>('/plex/request/search', { params: { q } })).data.results
+export const addMediaRequest = async (r: MediaSearchResult) =>
+  (await api.post<{ ok: boolean; detail: string }>('/plex/request/add', {
+    kind: r.kind,
+    tmdbId: r.tmdbId ?? undefined,
+    tvdbId: r.tvdbId ?? undefined,
+  })).data
+export const sendMediaMessage = async (message: string) =>
+  (await api.post<{ ok: boolean; detail: string }>('/plex/request/message', { message })).data
+export const fetchMediaRequests = async () =>
+  (await api.get<{ requests: MediaRequestEntry[] }>('/plex/requests')).data.requests
+export const fetchMediaDownloads = async () =>
+  (await api.get<{ downloads: MediaDownload[] }>('/plex/downloads')).data.downloads
