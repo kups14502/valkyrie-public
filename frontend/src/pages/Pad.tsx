@@ -8,7 +8,7 @@ import {
 import {
   fetchImgToken, fetchMediaDownloads, fetchPlexRecent, fetchPlexServer, fetchSystem, onTailnet,
   openInApp, plexAppHomeLink, plexAppItemLink, plexImg, plexWebHomeLink, plexWebItemLink,
-  shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
+  plexWatchLink, shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
 import { pctFromBrightness, useLightsControl } from '../lib/lights'
 import { AllLightsControl, LightControl } from '../components/LightControl'
@@ -215,6 +215,16 @@ function RecentStrip() {
             </>
           )
           const cls = 'w-32 shrink-0 border border-[var(--color-border)] bg-[var(--color-surface)] text-left active:border-[var(--color-accent)]'
+          // A plain link tap to watch.plex.tv: iOS matches it against Plex's
+          // associated domain and opens the app on this title. Intercepting it
+          // in JS would defeat that, so there is deliberately no onClick here.
+          if (item.watchPath) {
+            return (
+              <a key={item.ratingKey} href={plexWatchLink(item.watchPath)} className={cls}>
+                {inner}
+              </a>
+            )
+          }
           if (!machineId) {
             return (
               <button key={item.ratingKey} type="button" onClick={() => navigate('/plex')} className={cls}>
@@ -222,8 +232,7 @@ function RecentStrip() {
               </button>
             )
           }
-          // href is the web player so a long-press/no-JS still goes somewhere
-          // real; the click prefers the Plex app.
+          // No catalog match (personal media): try the scheme, then Plex Web.
           return (
             <a
               key={item.ratingKey}

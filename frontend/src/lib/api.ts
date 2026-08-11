@@ -549,6 +549,8 @@ export type PlexItem = {
   addedAt: number | null
   leafCount: number | null
   childCount: number | null
+  // Path on watch.plex.tv, when Plex has a catalog match for this item.
+  watchPath: string | null
 }
 
 export type PlexLibraryPage = { total: number; offset: number; items: PlexItem[] }
@@ -614,6 +616,24 @@ export const fetchPlexServer = async () => (await api.get<PlexServer>('/plex/ser
 // devices get that and everything else gets the web app. Same split, and the
 // same URL shapes, that Overseerr uses.
 const metadataKey = (ratingKey: string) => `%2Flibrary%2Fmetadata%2F${ratingKey}`
+
+// The link that actually opens a specific title in the Plex app on iOS/iPadOS.
+//
+// watch.plex.tv publishes an apple-app-site-association listing both Plex app
+// IDs (including the rewritten tv.plex.rn.app) with /movie/* and /show/*
+// components, so iOS hands these to the app. Verified against the live AASA.
+// Two things this is NOT:
+//   - app.plex.tv, which publishes no AASA at all (404) and can only ever land
+//     in Plex Web, and whose item identity hides behind a # fragment that
+//     universal-link matching never evaluates.
+//   - plex://preplay/?metadataKey=…, which the rewritten app opens on its Home
+//     screen while ignoring the item entirely (observed on a real iPad).
+// It must be followed by a genuine link tap, not a scripted location assignment,
+// or iOS treats it as a plain navigation and universal-link matching is skipped.
+// So callers render a bare <a href> for this and do NOT route it through
+// openInApp(). It costs one extra tap to start playback, since it lands on the
+// title's details screen rather than a preplay screen.
+export const plexWatchLink = (watchPath: string): string => `https://watch.plex.tv${watchPath}`
 
 // The native app (iOS, Android, desktop) registers the plex:// scheme.
 export const plexAppItemLink = (machineIdentifier: string, ratingKey: string): string =>

@@ -5,8 +5,8 @@ import { Cast, Clapperboard, Download, Loader2, MessageSquare, Search, Send, Sta
 import {
   addMediaRequest, fetchImgToken, fetchMediaDownloads, fetchMediaRequests, fetchPlexLibrary,
   fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, openInApp, plexAppItemLink,
-  plexImg, plexWebItemLink, searchMediaRequests, sendMediaMessage, shouldDeferAppClick,
-  type PlexItem, type PlexSection,
+  plexImg, plexWatchLink, plexWebItemLink, searchMediaRequests, sendMediaMessage,
+  shouldDeferAppClick, type PlexItem, type PlexSection,
 } from '../lib/api'
 
 // Plex library browser + media requests. Tabs: one per Plex section (movies /
@@ -297,7 +297,7 @@ function DetailOverlay({ item, onClose }: { item: PlexItem; onClose: () => void 
               {item.rating != null && <span className="flex items-center gap-1 text-[var(--color-accent-2)]"><Star size={10} /> {item.rating.toFixed(1)}</span>}
             </div>
             {item.summary && <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-dim)]">{item.summary}</p>}
-            <PlayInPlex ratingKey={item.ratingKey} />
+            <PlayInPlex ratingKey={item.ratingKey} watchPath={item.watchPath} />
           </div>
         </div>
       </div>
@@ -311,8 +311,22 @@ function DetailOverlay({ item, onClose }: { item: PlexItem; onClose: () => void 
 // which offers AirPlay from its own player. On iOS that's a plex:// link, which
 // must navigate in place and does nothing when Plex isn't installed — hence the
 // web link alongside it.
-function PlayInPlex({ ratingKey }: { ratingKey: string }) {
+function PlayInPlex({ ratingKey, watchPath }: { ratingKey: string; watchPath: string | null }) {
   const server = useQuery({ queryKey: ['plex-server'], queryFn: fetchPlexServer, staleTime: Infinity, retry: 1 })
+
+  // With a catalog match, a bare link tap to watch.plex.tv opens the Plex app on
+  // this title. No JS interception: that would skip universal-link matching.
+  if (watchPath) {
+    return (
+      <a
+        href={plexWatchLink(watchPath)}
+        className="mt-4 inline-flex min-h-12 items-center gap-2 border border-[var(--color-accent)] px-5 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] hover:bg-[rgba(var(--color-accent-rgb),0.08)] active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+      >
+        <Cast size={15} /> open in plex
+      </a>
+    )
+  }
+
   if (!server.data) return null
   const { machineIdentifier } = server.data
   const web = plexWebItemLink(machineIdentifier, ratingKey)

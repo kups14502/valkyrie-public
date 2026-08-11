@@ -66,8 +66,34 @@ type PlexMetadata = {
   addedAt?: number
   leafCount?: number
   childCount?: number
+  // watch.plex.tv slugs. Present on items matched by the new Plex agents, which
+  // is what makes a universal link into the Plex app possible.
+  slug?: string
+  parentSlug?: string
+  grandparentSlug?: string
+  index?: number
+  parentIndex?: number
 }
 type PlexContainer<T> = { MediaContainer: { totalSize?: number; size?: number; Directory?: T[]; Metadata?: T[] } }
+
+// Path on watch.plex.tv for this item, or null when Plex has no catalog match
+// (personal media, home videos, unmatched files).
+//
+// This is the ONLY link shape that can open the native iOS/iPadOS Plex app:
+// watch.plex.tv publishes an apple-app-site-association naming both Plex app
+// IDs with /movie/* and /show/* components, whereas app.plex.tv publishes none
+// and the plex:// scheme is ignored by the rewritten app (it opens on Home).
+function watchPathFor(m: PlexMetadata): string | null {
+  if (m.type === 'movie' && m.slug) return `/movie/${m.slug}`
+  if (m.type === 'show' && m.slug) return `/show/${m.slug}`
+  if (m.type === 'season' && m.parentSlug && m.index != null) {
+    return `/show/${m.parentSlug}/season/${m.index}`
+  }
+  if (m.type === 'episode' && m.grandparentSlug && m.parentIndex != null && m.index != null) {
+    return `/show/${m.grandparentSlug}/season/${m.parentIndex}/episode/${m.index}`
+  }
+  return null
+}
 
 // A browsable item, normalized. Seasons/episodes from recentlyAdded roll up to
 // their show title so the grid always shows something recognizable.
@@ -90,6 +116,7 @@ function normalizeItem(m: PlexMetadata) {
     addedAt: m.addedAt ?? null,
     leafCount: m.leafCount ?? null,
     childCount: m.childCount ?? null,
+    watchPath: watchPathFor(m),
   }
 }
 export type PlexItem = ReturnType<typeof normalizeItem>
