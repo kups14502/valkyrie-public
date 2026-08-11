@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Check, Monitor, RefreshCw, Smartphone, Tablet, Wand2 } from 'lucide-react'
 import { ThemePicker } from '../components/ThemePicker'
+import { fetchPlexLibrary, fetchPlexServer } from '../lib/api'
 import {
   getDeviceMode, resolveProfile, setDeviceMode, useProfile, type DeviceMode,
 } from '../lib/deviceMode'
@@ -10,6 +13,90 @@ const OPTIONS: { mode: DeviceMode; label: string; icon: typeof Monitor; detail: 
   { mode: 'iphone', label: 'iphone', icon: Smartphone, detail: 'Opens on the quick-launch screen at normal control sizes.' },
   { mode: 'ipad', label: 'ipad', icon: Tablet, detail: 'Opens on the quick-launch screen with large, touch-first controls.' },
 ]
+
+// Temporary: which link shape lands on the item's page on OUR server (the one
+// with the Watch button) rather than Plex's catalog page.
+//
+// No Plex host publishes a server-scoped universal link (checked every AASA:
+// watch.plex.tv only declares /movie/* and /show/*, links.plex.tv only /a/*),
+// so only the plex:// scheme can name a machineIdentifier plus ratingKey, and
+// the shape the rewritten app accepts is undocumented. Each row below is a
+// candidate; tapping tells us more than any amount of further reading. Delete
+// this section once one is confirmed.
+function PlexLinkTest() {
+  const server = useQuery({ queryKey: ['plex-server'], queryFn: fetchPlexServer, staleTime: Infinity, retry: 1 })
+  const movies = useQuery({
+    queryKey: ['plex-lib', '1', '', 'added'],
+    queryFn: () => fetchPlexLibrary('1', 0, { sort: 'added' }),
+    staleTime: 300_000,
+    retry: 1,
+  })
+  const [open, setOpen] = useState(false)
+
+  const mid = server.data?.machineIdentifier
+  const item = movies.data?.items?.[0]
+  if (!mid || !item) return null
+
+  const key = `/library/metadata/${item.ratingKey}`
+  const enc = encodeURIComponent(key)
+  const watch = item.watchPath ? `https://watch.plex.tv${item.watchPath}` : null
+
+  const candidates: { id: string; note: string; url: string }[] = [
+    { id: 'A', note: 'raw key + metadataType', url: `plex://preplay/?metadataKey=${key}&metadataType=1&server=${mid}` },
+    { id: 'B', note: 'server first, raw key', url: `plex://preplay/?server=${mid}&metadataKey=${key}` },
+    { id: 'C', note: 'encoded key + metadataType', url: `plex://preplay/?metadataKey=${enc}&metadataType=1&server=${mid}` },
+    { id: 'D', note: 'play verb (starts playback)', url: `plex://play/?metadataKey=${key}&server=${mid}` },
+    { id: 'E', note: 'android-style server route', url: `plex://server://${mid}/com.plexapp.plugins.library${key}` },
+    { id: 'F', note: 'no slash after verb', url: `plex://preplay?metadataKey=${enc}&server=${mid}` },
+    ...(watch ? [
+      { id: 'G', note: 'watch link + ?source=', url: `${watch}?source=${mid}` },
+      { id: 'H', note: 'watch link + ?server=', url: `${watch}?server=${mid}` },
+    ] : []),
+  ]
+
+  return (
+    <section className="panel p-4 sm:p-5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex min-h-11 w-full items-center gap-2 text-left"
+      >
+        <span className="text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}>
+          &gt; plex link test
+        </span>
+        <span className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+          {open ? 'hide' : 'show'}
+        </span>
+      </button>
+      {open && (
+        <>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
+            Testing with <span className="text-[var(--color-text)]">{item.title}</span>. Tap each and
+            note which one lands on the page with the Watch button (your server), rather than Plex's
+            catalog page or the app's home screen. Then tell me the letter.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {candidates.map((c) => (
+              <li key={c.id}>
+                <a
+                  href={c.url}
+                  className="flex min-h-12 items-center gap-3 border border-[var(--color-border)] px-3 active:border-[var(--color-accent)]"
+                >
+                  <span className="w-5 shrink-0 text-sm font-bold text-[var(--color-accent)]">{c.id}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs text-[var(--color-text)]">{c.note}</span>
+                    <span className="block truncate font-mono text-[10px] text-[var(--color-text-faint)]">{c.url}</span>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  )
+}
 
 export default function Settings() {
   const profile = useProfile()
@@ -82,6 +169,8 @@ export default function Settings() {
           <span className="text-[11px] text-[var(--color-text-faint)]">Accent color, saved on this device.</span>
         </div>
       </section>
+
+      <PlexLinkTest />
 
       <section className="panel p-4 sm:p-5">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}>
