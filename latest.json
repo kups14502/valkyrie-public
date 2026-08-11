@@ -1,15 +1,15 @@
 {
-  "version": "0.3.43",
-  "notes": "feat(pad): full lights on the iPad screen, iPad mode, Plex hand-off for AirPlay",
-  "pub_date": "2026-08-11T06:29:35Z",
+  "version": "0.3.44",
+  "notes": "feat(lights,pad): rebuild the light UI, 6 pad tiles, open Plex in the app",
+  "pub_date": "2026-08-11T15:08:57Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJQcUhLTWttQnFPSXhKK1NQT3pwTDlSL2dxY3lsVWNETzBEanRhelJBL3o0TnBIaFhPM0VDdHJjdGU3dWo5TGRsaFJOcUREN1F4TWNUSHNjRXZ5NUFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDI5Nzc1CWZpbGU6VmFsa3lyaWVfMC4zLjQzX3g2NC1zZXR1cC5leGUKY1V2Q0NRNTZxcTFmVVdTN3VwZEUyc3dnMkdzVDQvbjBNdEhiamZtbk5qK1NadWlGQXhVaFFDeDhnbVVheXdzcys1Um5wS0ptWnFkYmZqWTBac1B1QXc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.43/Valkyrie_0.3.43_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWNwNWpVQ2tCc0hOOVRmME5GejdKaFdhdDBWYlRqM0Jtc2t1Um80MzRYTFhEaTZEekpxV2pyYlZtcGZQRTV0SWh0MnFKTTMxbU9Wd2RaTThRR2JrdWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDYwOTM3CWZpbGU6VmFsa3lyaWVfMC4zLjQ0X3g2NC1zZXR1cC5leGUKMmtNZ1RYRC9ycXNsT1N0Y1dwR3FIU2lJeDVhNGE4UEtORXNGQ04zeW5hTWdmM2k1cTBYcVlReE5qTGduVkRZeEtvazg0dFgyczk4SFdSVlZCMmlRQmc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.44/Valkyrie_0.3.44_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZ1TE42dXQxV3BFU3JIdi9RLzFXUVI0ME5iTUlJdnd6VWF0c2QrT254ZUZFdVk5dk44OHVURUo4UUhqZjJSdmFrVW1TYXFzQXhUK0ptV29yU2tjeXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDI5NzI5CWZpbGU6VmFsa3lyaWVfMC4zLjQzX2FtZDY0LkFwcEltYWdlClA4Yi9QcUE2dVZyQzJCUVFrT1grZS9lNmxwM1d0MFh3OCtNYWdtWnVGSGZ3UGhBK2F5MzJMaWZBMUtHOFVBTFBiYkUzY0VKTVdtK0dwSkFkYmlrTkFRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.43/Valkyrie_0.3.43_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJ4NUZMNHdpK3JzTTlsVENqcm9iZXVBKzE3Tm1qNlRoR3g2eGNxd01oR090dTZHTmR3eVlndk1GOSt0UkNGckFRN09uVjRPY2Z3YWcxVng2bUpPWndjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDYwODkwCWZpbGU6VmFsa3lyaWVfMC4zLjQ0X2FtZDY0LkFwcEltYWdlClRIaHRuU0RHV2Y1dnpvYjBJY0p0ajVxUFFTeTdlcHJqOWdLQmEyWEViSlJTY0kxUnZIWG5YclhROEZqOHhxMzhWMWkyTTR6NURGU0R4RjRWWVQ4VEJ3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.44/Valkyrie_0.3.44_amd64.AppImage"
     }
   }
 }
