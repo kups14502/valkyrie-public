@@ -1,15 +1,15 @@
 {
-  "version": "0.3.45",
-  "notes": "feat(pad): music tile that opens the Spotify app, nine tiles",
-  "pub_date": "2026-08-11T15:18:09Z",
+  "version": "0.3.46",
+  "notes": "feat(pad): collapsible lights section and one-row-per-bulb cards",
+  "pub_date": "2026-08-11T16:04:49Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVl2akZzdHIxUFJkOFBVQjdYTFVWVjFIZDFFUHI1OHFNUmhtTWRyTk85QzAybmFVSFUwRDE0cldmcEx4MXM0RzFPSWVZWmRUTTl1VVdlL0hscWVyNXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDYxNDg5CWZpbGU6VmFsa3lyaWVfMC4zLjQ1X3g2NC1zZXR1cC5leGUKUEZnQjg1WSt3bHJCNFpaYUJhcWloeXdIVFJWWGJSVm1UZVJJTEpzUS8vN2xhWmRyK0tHc2RTSkd0YXNyMVVFSkVFRHZjV0JLWldrb1c2UDVoOTVJQVE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.45/Valkyrie_0.3.45_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVdJaUNjYUh5MFpQdkhLcVFUYUo4Z3p4dTR5UGhOdFJOK0tLRDRTSVV0Sitnd3hROVA4L3F0cDFOdEF1NTVZRWYzaHJLUXBVOFA1V1c2UDV4dXBWYVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDY0Mjg5CWZpbGU6VmFsa3lyaWVfMC4zLjQ2X3g2NC1zZXR1cC5leGUKdmFPT3I4eXBUTEp3RkdtWVpWMmxIOWZML0Y2SFFiZmU4eGlSK0RIYWplMXQ0Wng4aEJSeWh1RDBlTjdYSUxaMnNDd1dJeGZ3WlRtRTF5M3VkeXJ4Q2c9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.46/Valkyrie_0.3.46_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVRVOUo3bmxrb2ZoQ3dtakF2dTFuR3BtRGM2MWlUdmR4dHpUVDFOUE1VNjIwcFljMS9XTitPNk01SWNEVStVcTNkemJHc3JvZXBJcXNXcThrZHBZWkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDYxNDQ0CWZpbGU6VmFsa3lyaWVfMC4zLjQ1X2FtZDY0LkFwcEltYWdlCmNlVEdNbVZmR2NtV3cwaFh5K0VBNkJWcmdvT3dNSzBwdTBYNTZvNXpZT0VSc1ZiYkc4UitYSU9rdWlnY0hhSlg3VlNQaXZOQWpkRUxKNUpSb0lZMENnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.45/Valkyrie_0.3.45_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVE3a1V3L1BsZ1hxKytRbkFnc0N1cUszSmhVMlhGRkc0Y3dUcW1KQkxKSno3OXZpbFlCb2tkOWgrNldBdWRrYUFUT0hpQjZ2QzNEaDlTU0hzOUs0VndvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDY0MjM5CWZpbGU6VmFsa3lyaWVfMC4zLjQ2X2FtZDY0LkFwcEltYWdlClNsNWxlcFZEb0kwejBacDdramNmOTJlalhZeGk3OFo3Z1pycStSZjNSS3pIalMzektneHByeHY4Y28xY2NFQVhXUmJ3TzF3Y0dYczc1bTRLeTQ0UUJBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.46/Valkyrie_0.3.46_amd64.AppImage"
     }
   }
 }
