@@ -639,11 +639,15 @@ export const plexWebHomeLink = (): string => 'https://app.plex.tv/desktop'
 // navigating the top-level webview to an external URL would replace Valkyrie's
 // own UI with a web page and strand the window), or a modified/middle click the
 // user meant to open in a new tab.
-export function shouldDeferPlexClick(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; button: number }): boolean {
+export function shouldDeferAppClick(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; button: number }): boolean {
   return isTauri() || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0
 }
 
-export function openInPlexApp(appUrl: string, webUrl: string): void {
+// Spotify: the app registers spotify://, and open.spotify.com is the web player.
+export const spotifyAppLink = (): string => 'spotify://'
+export const spotifyWebLink = (): string => 'https://open.spotify.com'
+
+export function openInApp(appUrl: string, webUrl: string): void {
   let handedOff = false
   const mark = () => { handedOff = true }
   document.addEventListener('visibilitychange', mark, { once: true })

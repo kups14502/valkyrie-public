@@ -4,8 +4,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { Cast, Clapperboard, Download, Loader2, MessageSquare, Search, Send, Star, X } from 'lucide-react'
 import {
   addMediaRequest, fetchImgToken, fetchMediaDownloads, fetchMediaRequests, fetchPlexLibrary,
-  fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, openInPlexApp, plexAppItemLink,
-  plexImg, plexWebItemLink, searchMediaRequests, sendMediaMessage, shouldDeferPlexClick,
+  fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, openInApp, plexAppItemLink,
+  plexImg, plexWebItemLink, searchMediaRequests, sendMediaMessage, shouldDeferAppClick,
   type PlexItem, type PlexSection,
 } from '../lib/api'
 
@@ -323,9 +323,9 @@ function PlayInPlex({ ratingKey }: { ratingKey: string }) {
         target="_blank"
         rel="noreferrer"
         onClick={(e) => {
-          if (shouldDeferPlexClick(e)) return
+          if (shouldDeferAppClick(e)) return
           e.preventDefault()
-          openInPlexApp(plexAppItemLink(machineIdentifier, ratingKey), web)
+          openInApp(plexAppItemLink(machineIdentifier, ratingKey), web)
         }}
         className="inline-flex min-h-12 items-center gap-2 border border-[var(--color-accent)] px-5 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] hover:bg-[rgba(var(--color-accent-rgb),0.08)] active:bg-[rgba(var(--color-accent-rgb),0.14)]"
       >

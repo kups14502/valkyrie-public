@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity as ActivityIcon, Cast, Clapperboard, Download, LayoutDashboard, Server, TrendingUp,
+  Activity as ActivityIcon, Cast, Clapperboard, Download, Film, KeyRound, LayoutDashboard, Music,
+  Server, TrendingUp,
 } from 'lucide-react'
 import {
   fetchImgToken, fetchMediaDownloads, fetchPlexRecent, fetchPlexServer, fetchSystem, onTailnet,
-  openInPlexApp, plexAppHomeLink, plexAppItemLink, plexImg, plexWebHomeLink, plexWebItemLink,
-  shouldDeferPlexClick,
+  openInApp, plexAppHomeLink, plexAppItemLink, plexImg, plexWebHomeLink, plexWebItemLink,
+  shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
 import { pctFromBrightness, useLightsControl } from '../lib/lights'
 import { AllLightsControl, LightControl } from '../components/LightControl'
@@ -17,12 +18,15 @@ import { isPadMode, setPadMode } from '../lib/padMode'
 // a large target, nothing depends on hover or a keyboard. Lights are controlled
 // in full here, and Plex hands off to the Plex app so it can AirPlay to the TV.
 
-// Six tiles in a three-wide grid: two even rows at every width.
+// Nine tiles in a three-wide grid: three even rows. Two open native apps
+// (below), these seven navigate.
 const TILES = [
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
+  { to: '/vault', label: 'vault', icon: KeyRound },
+  { to: '/slop', label: 'slop', icon: Film },
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
 ]
 
@@ -187,9 +191,9 @@ function RecentStrip() {
               target="_blank"
               rel="noreferrer"
               onClick={(e) => {
-                if (shouldDeferPlexClick(e)) return
+                if (shouldDeferAppClick(e)) return
                 e.preventDefault()
-                openInPlexApp(plexAppItemLink(machineId, item.ratingKey), plexWebItemLink(machineId, item.ratingKey))
+                openInApp(plexAppItemLink(machineId, item.ratingKey), plexWebItemLink(machineId, item.ratingKey))
               }}
               className={cls}
             >
@@ -259,15 +263,30 @@ export default function Pad() {
           target="_blank"
           rel="noreferrer"
           onClick={(e) => {
-            if (shouldDeferPlexClick(e)) return
+            if (shouldDeferAppClick(e)) return
             e.preventDefault()
-            openInPlexApp(plexAppHomeLink(), plexWebHomeLink())
+            openInApp(plexAppHomeLink(), plexWebHomeLink())
           }}
           className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] transition-colors active:bg-[rgba(var(--color-accent-rgb),0.14)]"
         >
           <Cast size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
           <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">watch on tv</span>
           <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">opens plex</span>
+        </a>
+        <a
+          href={spotifyWebLink()}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => {
+            if (shouldDeferAppClick(e)) return
+            e.preventDefault()
+            openInApp(spotifyAppLink(), spotifyWebLink())
+          }}
+          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] transition-colors active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+        >
+          <Music size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
+          <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">music</span>
+          <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">opens spotify</span>
         </a>
         {TILES.map(({ to, label, icon: Icon }) => (
           <button key={to} type="button" onClick={() => navigate(to)} className={tileCls}>
