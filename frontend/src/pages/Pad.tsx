@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity as ActivityIcon, Cast, Clapperboard, Download, Film, KeyRound, LayoutDashboard, Music,
-  Server, TrendingUp,
+  Power, Server, TrendingUp, ChevronDown,
 } from 'lucide-react'
 import {
   fetchImgToken, fetchMediaDownloads, fetchPlexRecent, fetchPlexServer, fetchSystem, onTailnet,
@@ -79,8 +79,18 @@ function SystemChips() {
   )
 }
 
+const LIGHTS_OPEN_KEY = 'valkyrie-pad-lights-open'
+
 function LightsPanel() {
   const { lights, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(LIGHTS_OPEN_KEY) !== '0' } catch { return true }
+  })
+  const toggle = () => setOpen((v) => {
+    const next = !v
+    try { localStorage.setItem(LIGHTS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
+    return next
+  })
 
   const avgPct = useMemo(() => {
     const on = all.filter((l) => !l.unavailable && l.on && l.brightness != null)
@@ -104,10 +114,41 @@ function LightsPanel() {
   }
   if (!all.length) return null
 
+  const onCount = all.filter((l) => l.on).length
   return (
     <section>
-      <SectionTitle>lights</SectionTitle>
-      {availableTargets.length === 0 ? (
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex min-h-11 items-center gap-2"
+        >
+          <ChevronDown
+            size={15}
+            className={`text-[var(--color-accent)] transition-transform ${open ? '' : '-rotate-90'}`}
+            aria-hidden
+          />
+          <span className="text-xs font-bold uppercase tracking-[0.24em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}>
+            &gt; lights
+          </span>
+          <span className="text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
+            {onCount} of {all.length} on
+          </span>
+        </button>
+        {/* All on/off stays reachable with the section collapsed. */}
+        {availableTargets.length > 0 && (
+          <button
+            type="button"
+            onClick={() => bulk(anyOn ? 'off' : 'on')}
+            className="flex min-h-11 items-center gap-2 border border-[var(--color-border)] px-5 text-xs uppercase tracking-[0.14em] text-[var(--color-text-dim)] active:border-[var(--color-accent)] active:text-[var(--color-accent)]"
+          >
+            <Power size={15} /> all {anyOn ? 'off' : 'on'}
+          </button>
+        )}
+      </div>
+
+      {open && (availableTargets.length === 0 ? (
         <div className="panel p-4 text-sm text-[var(--color-warning)]">
           All lights unavailable. Home Assistant can't reach any bulb.
         </div>
@@ -124,13 +165,15 @@ function LightsPanel() {
               onPreset={bulkPreset}
             />
           )}
-          <div className="grid gap-4 lg:grid-cols-2">
+          {/* compact: each bulb is one row until tapped, so all five are
+              visible at once instead of two expanded cards filling the screen. */}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {ordered.map((l) => (
-              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size="pad" />
+              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size="pad" compact />
             ))}
           </div>
         </div>
-      )}
+      ))}
     </section>
   )
 }

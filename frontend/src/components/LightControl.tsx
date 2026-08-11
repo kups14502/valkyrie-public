@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Lightbulb, Power } from 'lucide-react'
+import { ChevronDown, Lightbulb, Power } from 'lucide-react'
 import { type LightState } from '../lib/api'
 import {
   PRESETS, brightnessFromPct, hexToRgb, pctFromBrightness, presetSwatchStyle, rgbToHex,
@@ -129,12 +129,16 @@ function Brightness({ size, pct, syncTo, onDrag, onCommit }: {
   )
 }
 
-export function LightControl({ light, onUpdate, size = 'normal' }: {
+export function LightControl({ light, onUpdate, size = 'normal', compact = false }: {
   light: LightState
   onUpdate: (entity_id: string, update: LightPatch) => void
   size?: Size
+  // compact: brightness and colors hide behind a per-light toggle so every bulb
+  // fits on one screen. Used on the iPad, where five expanded cards don't.
+  compact?: boolean
 }) {
   const s = SZ[size]
+  const [open, setOpen] = useState(!compact)
   const externalPct = pctFromBrightness(light.brightness)
   const [pendingPct, setPendingPct] = usePendingPct(externalPct)
   const displayPct = pendingPct ?? externalPct
@@ -152,7 +156,15 @@ export function LightControl({ light, onUpdate, size = 'normal' }: {
       style={light.on ? { boxShadow: `0 0 24px -8px ${color}` } : undefined}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+        {/* When compact, the whole name block is the expand target — a much
+            bigger touch area than a chevron on its own. */}
+        <button
+          type="button"
+          onClick={compact ? () => setOpen((v) => !v) : undefined}
+          disabled={!compact}
+          aria-expanded={compact ? open : undefined}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+        >
           {/* The swatch is the status light: it carries the bulb's real color. */}
           <span
             className={`${s.dot} shrink-0 border border-[var(--color-border-strong)]`}
@@ -168,7 +180,14 @@ export function LightControl({ light, onUpdate, size = 'normal' }: {
               {light.unavailable ? 'unavailable' : light.on ? `on · ${displayPct}%` : 'off'}
             </div>
           </div>
-        </div>
+          {compact && !light.unavailable && (
+            <ChevronDown
+              size={16}
+              className={`shrink-0 text-[var(--color-text-faint)] transition-transform ${open ? 'rotate-180' : ''}`}
+              aria-hidden
+            />
+          )}
+        </button>
         <button
           type="button"
           disabled={light.unavailable}
@@ -185,7 +204,7 @@ export function LightControl({ light, onUpdate, size = 'normal' }: {
         </button>
       </div>
 
-      {!off && (
+      {!off && open && (
         <div className="mt-4 space-y-4">
           <Brightness
             size={size}
