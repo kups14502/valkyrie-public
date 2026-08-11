@@ -5,7 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
-import { isPadMode } from './lib/padMode'
+import { resolveProfile } from './lib/deviceMode'
 
 if (isTauri()) {
   // Mark the document so the custom-title-bar offset (--titlebar-h) applies.
@@ -40,11 +40,12 @@ if (isTauri()) {
   })
 }
 
-// iPad mode: this device's dashboard is the pad screen, so rewrite the landing
+// The device profile decides the landing screen, so rewrite the URL
 // URL before the router reads it. Done here, not in a React effect, so it
 // happens exactly once per page load and can't refire when the gate remounts.
-if (isPadMode() && (location.pathname === '/' || location.pathname === '/dashboard')) {
-  try { history.replaceState(null, '', '/pad') } catch { /* ignore */ }
+const startHome = resolveProfile().home
+if (startHome !== '/dashboard' && (location.pathname === '/' || location.pathname === '/dashboard')) {
+  try { history.replaceState(null, '', startHome) } catch { /* ignore */ }
 }
 
 createRoot(document.getElementById('root')!).render(

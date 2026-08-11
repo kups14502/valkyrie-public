@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
-  Film, Clapperboard, Tablet, RefreshCw,
+  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -14,7 +14,7 @@ import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
-import { padHome, usePadMode } from './lib/padMode'
+import { useProfile } from './lib/deviceMode'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -25,6 +25,7 @@ const Services = lazy(() => import('./pages/Services'))
 const Activity = lazy(() => import('./pages/Activity'))
 const Plex = lazy(() => import('./pages/Plex'))
 const Pad = lazy(() => import('./pages/Pad'))
+const Settings = lazy(() => import('./pages/Settings'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +55,7 @@ const navItems = [
   { to: '/services', label: 'services', icon: Server },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
   { to: '/pad', label: 'pad', icon: Tablet },
+  { to: '/settings', label: 'settings', icon: SettingsIcon },
 ]
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
@@ -152,11 +154,13 @@ function Shell() {
   const location = useLocation()
   const version = useAppVersion()
 
-  // In iPad mode this device's dashboard IS the pad screen, so "home" points
-  // there and the header button disappears while you're on it.
-  const padMode = usePadMode()
-  const home = padHome(padMode)
+  // The device profile decides what "home" is: the pad screen on a phone or
+  // tablet, the full dashboard on a desktop. The header button hides while
+  // you're already there.
+  const profile = useProfile()
+  const home = profile.home
   const atHome = location.pathname === home
+  const padHome = home === '/pad'
 
   // The dashboard opens with the nav menu already down (as a launcher); it
   // stays closeable, and closing it while on the dashboard sticks because this
@@ -208,11 +212,11 @@ function Shell() {
                 {!atHome && (
                   <NavLink
                     to={home}
-                    aria-label={padMode ? 'iPad dashboard' : 'Dashboard'}
-                    title={padMode ? 'Go to iPad dashboard' : 'Go to dashboard'}
+                    aria-label={padHome ? 'Home screen' : 'Dashboard'}
+                    title={padHome ? 'Go to your home screen' : 'Go to dashboard'}
                     className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-accent)]"
                   >
-                    {padMode ? <Tablet size={16} /> : <LayoutDashboard size={16} />}
+                    {padHome ? <Tablet size={16} /> : <LayoutDashboard size={16} />}
                   </NavLink>
                 )}
                 {/* Pages live in the menu at every width — one consistent layout.
@@ -253,6 +257,7 @@ function Shell() {
             <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
             <Route path="/plex" element={<Plex />} />
             <Route path="/pad" element={<Pad />} />
+            <Route path="/settings" element={<CenterPage><Settings /></CenterPage>} />
           </Routes>
           </ErrorBoundary>
         </Suspense>

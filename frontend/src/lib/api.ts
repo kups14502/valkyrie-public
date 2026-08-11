@@ -647,6 +647,8 @@ export function shouldDeferAppClick(e: { metaKey: boolean; ctrlKey: boolean; shi
 export const spotifyAppLink = (): string => 'spotify://'
 export const spotifyWebLink = (): string => 'https://open.spotify.com'
 
+const FALLBACK_DELAY_MS = 1200
+
 export function openInApp(appUrl: string, webUrl: string): void {
   let handedOff = false
   const mark = () => { handedOff = true }
@@ -654,15 +656,22 @@ export function openInApp(appUrl: string, webUrl: string): void {
   window.addEventListener('pagehide', mark, { once: true })
   window.addEventListener('blur', mark, { once: true })
 
+  const startedAt = Date.now()
   window.location.href = appUrl
 
   window.setTimeout(() => {
     document.removeEventListener('visibilitychange', mark)
     window.removeEventListener('pagehide', mark)
     window.removeEventListener('blur', mark)
-    // Still here and still visible means the scheme went nowhere.
-    if (!handedOff && !document.hidden) window.location.href = webUrl
-  }, 1500)
+    // A timer that fires much later than scheduled means the page was frozen
+    // while another app had focus, so the hand-off DID work and this is running
+    // on the way back. Navigating now would dump the user into a stray Plex Web
+    // page (and from a home-screen app, an external URL spawns Safari, which is
+    // the "browser open to plex when I came back" seen on the iPad).
+    const firedLate = Date.now() - startedAt > FALLBACK_DELAY_MS + 600
+    if (handedOff || firedLate || document.hidden) return
+    window.location.href = webUrl
+  }, FALLBACK_DELAY_MS)
 }
 
 export const fetchPlexSections = async () => (await api.get<PlexSection[]>('/plex/sections')).data

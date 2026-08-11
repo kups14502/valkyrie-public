@@ -12,7 +12,7 @@ import {
 } from '../lib/api'
 import { pctFromBrightness, useLightsControl } from '../lib/lights'
 import { AllLightsControl, LightControl } from '../components/LightControl'
-import { isPadMode, setPadMode } from '../lib/padMode'
+import { useProfile } from '../lib/deviceMode'
 
 // iPad mode: a big-touch dashboard for the wall/coffee-table iPad. Everything is
 // a large target, nothing depends on hover or a keyboard. Lights are controlled
@@ -78,7 +78,7 @@ function SystemChips() {
 
 const LIGHTS_OPEN_KEY = 'valkyrie-pad-lights-open'
 
-function LightsPanel() {
+function LightsPanel({ size }: { size: 'normal' | 'pad' }) {
   const { lights, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(LIGHTS_OPEN_KEY) !== '0' } catch { return true }
@@ -153,7 +153,7 @@ function LightsPanel() {
         <div className="space-y-4">
           {availableTargets.length > 1 && (
             <AllLightsControl
-              size="pad"
+              size={size}
               count={availableTargets.length}
               anyOn={anyOn}
               avgPct={avgPct}
@@ -166,7 +166,7 @@ function LightsPanel() {
               visible at once instead of two expanded cards filling the screen. */}
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {ordered.map((l) => (
-              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size="pad" compact />
+              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size={size} compact />
             ))}
           </div>
         </div>
@@ -278,14 +278,7 @@ function DownloadsPanel() {
 
 export default function Pad() {
   const navigate = useNavigate()
-  const [padMode, setPadModeState] = useState(isPadMode)
-
-  const toggleMode = () => {
-    const next = !padMode
-    setPadMode(next)
-    setPadModeState(next)
-  }
-
+  const profile = useProfile()
   const tileCls = 'flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.08)]'
 
   return (
@@ -307,7 +300,7 @@ export default function Pad() {
             e.preventDefault()
             openInApp(plexAppHomeLink(), plexWebHomeLink())
           }}
-          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] transition-colors active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+          className={tileCls}
         >
           <Cast size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
           <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">watch on tv</span>
@@ -322,7 +315,7 @@ export default function Pad() {
             e.preventDefault()
             openInApp(spotifyAppLink(), spotifyWebLink())
           }}
-          className="flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.06)] transition-colors active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+          className={tileCls}
         >
           <Music size={34} className="text-[var(--color-accent)]" style={{ filter: 'drop-shadow(0 0 8px var(--color-accent))' }} />
           <span className="text-sm uppercase tracking-[0.2em] text-[var(--color-text)]">music</span>
@@ -336,28 +329,10 @@ export default function Pad() {
         ))}
       </section>
 
-      <LightsPanel />
+      <LightsPanel size={profile.size} />
       <DownloadsPanel />
       <RecentStrip />
 
-      <div className="border-t border-[var(--color-border)] pt-4 text-center">
-        <button
-          type="button"
-          onClick={toggleMode}
-          className={`min-h-14 border px-6 text-sm uppercase tracking-[0.16em] ${
-            padMode
-              ? 'border-[var(--color-accent)]/70 text-[var(--color-accent)]'
-              : 'border-[var(--color-border)] text-[var(--color-text-faint)]'
-          }`}
-        >
-          {padMode ? '✓ ipad mode on — this is your dashboard' : 'turn on ipad mode for this device'}
-        </button>
-        <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-[var(--color-text-faint)]">
-          {padMode
-            ? 'Valkyrie opens here and the home button up top returns here. Only this device.'
-            : 'Makes this the screen Valkyrie opens on, and points the home button here. Only this device.'}
-        </p>
-      </div>
     </div>
   )
 }
