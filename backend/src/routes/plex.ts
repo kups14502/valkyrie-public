@@ -119,6 +119,29 @@ router.get('/plex/sections', async (_req, res) => {
   }
 })
 
+// Server identity, for building Plex deep links on the client (opening an item
+// in the real Plex app is how you get AirPlay to a TV — this app can't cast).
+let serverCache: { at: number; data: { machineIdentifier: string; friendlyName: string; version: string } } | null = null
+
+router.get('/plex/server', async (_req, res) => {
+  if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured' })
+  try {
+    if (serverCache && Date.now() - serverCache.at < 3600_000) return res.json(serverCache.data)
+    const c = await plexJSON<{ MediaContainer: { machineIdentifier?: string; friendlyName?: string; version?: string } }>('/')
+    const mc = c.MediaContainer
+    if (!mc.machineIdentifier) throw new Error('no machineIdentifier in response')
+    const data = {
+      machineIdentifier: mc.machineIdentifier,
+      friendlyName: mc.friendlyName ?? 'plex',
+      version: mc.version ?? '',
+    }
+    serverCache = { at: Date.now(), data }
+    res.json(data)
+  } catch (err) {
+    res.status(503).json({ error: 'plex unreachable', detail: (err as Error).message })
+  }
+})
+
 const SORTS: Record<string, string> = {
   added: 'addedAt:desc',
   title: 'titleSort:asc',

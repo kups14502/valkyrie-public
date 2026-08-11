@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
+import { isPadMode } from './lib/padMode'
 
 if (isTauri()) {
   // Mark the document so the custom-title-bar offset (--titlebar-h) applies.
@@ -39,15 +40,12 @@ if (isTauri()) {
   })
 }
 
-// Pad mode pinned as the start screen (the iPad): rewrite the landing URL
-// before the router reads it. Done here, not in a React effect, so it happens
-// exactly once per page load and can't refire when the auth gate remounts.
-try {
-  if (localStorage.getItem('valkyrie-pad') === '1'
-    && (location.pathname === '/' || location.pathname === '/dashboard')) {
-    history.replaceState(null, '', '/pad')
-  }
-} catch { /* storage unavailable */ }
+// iPad mode: this device's dashboard is the pad screen, so rewrite the landing
+// URL before the router reads it. Done here, not in a React effect, so it
+// happens exactly once per page load and can't refire when the gate remounts.
+if (isPadMode() && (location.pathname === '/' || location.pathname === '/dashboard')) {
+  try { history.replaceState(null, '', '/pad') } catch { /* ignore */ }
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

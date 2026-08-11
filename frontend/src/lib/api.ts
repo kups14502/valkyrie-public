@@ -600,6 +600,43 @@ export const plexImg = (path: string, w = 300): string => {
   return `${baseURL}/plex/img?${params.toString()}`
 }
 
+export type PlexServer = { machineIdentifier: string; friendlyName: string; version: string }
+
+export const fetchPlexServer = async () => (await api.get<PlexServer>('/plex/server')).data
+
+// Deep links into Plex itself. Valkyrie can't AirPlay (a page can only cast a
+// <video> it owns), so "watch on the TV" means handing off to a real Plex
+// client, which offers AirPlay from its own player.
+//
+// app.plex.tv serves no apple-app-site-association (verified: 404), so an https
+// link can never open the native iOS/iPadOS app — it only ever lands in Plex
+// Web. The native app registers the plex:// scheme instead, so Apple touch
+// devices get that and everything else gets the web app. Same split, and the
+// same URL shapes, that Overseerr uses.
+const isAppleTouchDevice = () =>
+  typeof navigator !== 'undefined' && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent)
+    // iPadOS 13+ reports itself as a Mac; touch points give it away.
+    || (navigator.userAgent === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+
+const metadataKey = (ratingKey: string) => `%2Flibrary%2Fmetadata%2F${ratingKey}`
+
+export const plexWebItemLink = (machineIdentifier: string, ratingKey: string): string =>
+  `https://app.plex.tv/desktop#!/server/${machineIdentifier}/details?key=${metadataKey(ratingKey)}`
+
+export const plexItemLink = (machineIdentifier: string, ratingKey: string): string =>
+  isAppleTouchDevice()
+    ? `plex://preplay/?metadataKey=${metadataKey(ratingKey)}&server=${machineIdentifier}`
+    : plexWebItemLink(machineIdentifier, ratingKey)
+
+// Opening Plex itself rather than one item. A bare #!/server/<id> is not a Plex
+// Web route, so non-Apple clients get the web app's real entry point.
+export const plexHomeLink = (): string =>
+  isAppleTouchDevice() ? 'plex://' : 'https://app.plex.tv/desktop'
+
+export const plexWebHomeLink = (): string => 'https://app.plex.tv/desktop'
+
 export const fetchPlexSections = async () => (await api.get<PlexSection[]>('/plex/sections')).data
 export const fetchPlexLibrary = async (section: string, offset: number, opts: { search?: string; sort?: string } = {}) => {
   const r = await api.get<PlexLibraryPage>('/plex/library', {

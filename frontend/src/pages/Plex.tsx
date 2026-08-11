@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clapperboard, Download, Loader2, MessageSquare, Search, Send, Star, X } from 'lucide-react'
+import { Cast, Clapperboard, Download, Loader2, MessageSquare, Search, Send, Star, X } from 'lucide-react'
 import {
   addMediaRequest, fetchImgToken, fetchMediaDownloads, fetchMediaRequests, fetchPlexLibrary,
-  fetchPlexRecent, fetchPlexSections, onTailnet, plexImg, searchMediaRequests, sendMediaMessage,
-  type PlexItem, type PlexSection,
+  fetchPlexRecent, fetchPlexSections, fetchPlexServer, onTailnet, plexImg, plexItemLink,
+  plexWebItemLink, searchMediaRequests, sendMediaMessage, type PlexItem, type PlexSection,
 } from '../lib/api'
 
 // Plex library browser + media requests. Tabs: one per Plex section (movies /
@@ -296,11 +296,41 @@ function DetailOverlay({ item, onClose }: { item: PlexItem; onClose: () => void 
               {item.rating != null && <span className="flex items-center gap-1 text-[var(--color-accent-2)]"><Star size={10} /> {item.rating.toFixed(1)}</span>}
             </div>
             {item.summary && <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-dim)]">{item.summary}</p>}
+            <PlayInPlex ratingKey={item.ratingKey} />
           </div>
         </div>
       </div>
     </div>,
     document.body,
+  )
+}
+
+// Hands off to Plex to actually play. Valkyrie can't AirPlay (a page can only
+// cast a <video> it owns), so watching on the TV means opening the Plex app,
+// which offers AirPlay from its own player. On iOS that's a plex:// link, which
+// must navigate in place and does nothing when Plex isn't installed — hence the
+// web link alongside it.
+function PlayInPlex({ ratingKey }: { ratingKey: string }) {
+  const server = useQuery({ queryKey: ['plex-server'], queryFn: fetchPlexServer, staleTime: Infinity, retry: 1 })
+  if (!server.data) return null
+  const { machineIdentifier } = server.data
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <a
+        href={plexItemLink(machineIdentifier, ratingKey)}
+        className="inline-flex min-h-12 items-center gap-2 border border-[var(--color-accent)] px-5 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] hover:bg-[rgba(var(--color-accent-rgb),0.08)] active:bg-[rgba(var(--color-accent-rgb),0.14)]"
+      >
+        <Cast size={15} /> play in plex
+      </a>
+      <a
+        href={plexWebItemLink(machineIdentifier, ratingKey)}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)] underline hover:text-[var(--color-text-dim)]"
+      >
+        plex web
+      </a>
+    </div>
   )
 }
 

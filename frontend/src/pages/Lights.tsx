@@ -1,47 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Card } from '../components/Card'
-import { fetchLights, setLight, type LightState, type LightUpdate } from '../lib/api'
-
-const PRESETS: { label: string; rgb: [number, number, number] | null; kelvin: number | null }[] = [
-  { label: 'Warm', rgb: null, kelvin: 2200 },
-  { label: 'Neutral', rgb: null, kelvin: 4000 },
-  { label: 'Cool', rgb: null, kelvin: 6500 },
-  { label: 'Red', rgb: [255, 60, 60], kelvin: null },
-  { label: 'Amber', rgb: [255, 140, 40], kelvin: null },
-  { label: 'Green', rgb: [80, 230, 110], kelvin: null },
-  { label: 'Blue', rgb: [70, 130, 255], kelvin: null },
-  { label: 'Purple', rgb: [180, 90, 255], kelvin: null },
-]
-
-function pctFromBrightness(b: number | null): number {
-  if (b == null) return 100
-  return Math.max(0, Math.min(100, Math.round((b / 255) * 100)))
-}
-
-function brightnessFromPct(p: number): number {
-  return Math.max(1, Math.min(255, Math.round((p / 100) * 255)))
-}
-
-function presetSwatchStyle(p: { rgb: [number, number, number] | null; kelvin: number | null }): string {
-  if (p.rgb) return `rgb(${p.rgb.join(',')})`
-  if (p.kelvin) {
-    if (p.kelvin <= 2700) return '#ffb87a'
-    if (p.kelvin <= 4000) return '#fff1d6'
-    return '#d6eaff'
-  }
-  return '#888'
-}
-
-function rgbToHex(rgb: [number, number, number] | null): string {
-  if (!rgb) return '#ffb87a'
-  return `#${rgb.map((n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0')).join('')}`
-}
-
-function hexToRgb(hex: string): [number, number, number] | null {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim())
-  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null
-}
+import { type LightState } from '../lib/api'
+import {
+  PRESETS, brightnessFromPct, hexToRgb, pctFromBrightness, presetSwatchStyle, rgbToHex,
+  useBrightnessThrottle, useLightsControl, useSliderSync, type LightPatch,
+} from '../lib/lights'
 
 function ColorWheel({ value, onPick }: { value: string; onPick: (rgb: [number, number, number]) => void }) {
   return (
@@ -61,66 +24,25 @@ function ColorWheel({ value, onPick }: { value: string; onPick: (rgb: [number, n
   )
 }
 
-type Update = Omit<LightUpdate, 'entity_id'>
-
 const DRAG_THROTTLE_MS = 150
 
-const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (entity_id: string, update: Update) => void }) {
+const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightState; onUpdate: (entity_id: string, update: LightPatch) => void }) {
   const [pendingPct, setPendingPct] = useState<number | null>(null)
   const lastExternalPct = pctFromBrightness(light.brightness)
   const displayPct = pendingPct ?? lastExternalPct
   const swatchColor = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : light.on ? '#ffd9a0' : '#1a1f2b'
   const customHex = rgbToHex(light.rgb_color)
 
-  const inputRef = useRef<HTMLInputElement>(null)
-  const lastSentRef = useRef(0)
-  const trailingRef = useRef<number | null>(null)
+  const inputRef = useSliderSync(pendingPct === null ? lastExternalPct : null)
+  const { push: sendBrightness, commit: commitFinal } = useBrightnessThrottle(
+    (pct) => onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) }),
+    DRAG_THROTTLE_MS,
+  )
 
   useEffect(() => {
     if (pendingPct === null) return
     if (lastExternalPct === pendingPct) setPendingPct(null)
   }, [lastExternalPct, pendingPct])
-
-  useEffect(() => {
-    if (pendingPct === null && inputRef.current && Number(inputRef.current.value) !== lastExternalPct) {
-      inputRef.current.value = String(lastExternalPct)
-    }
-  }, [lastExternalPct, pendingPct])
-
-  useEffect(() => () => {
-    if (trailingRef.current !== null) {
-      clearTimeout(trailingRef.current)
-      trailingRef.current = null
-    }
-  }, [])
-
-  const sendBrightness = (pct: number) => {
-    const now = Date.now()
-    const elapsed = now - lastSentRef.current
-    if (trailingRef.current !== null) {
-      clearTimeout(trailingRef.current)
-      trailingRef.current = null
-    }
-    if (elapsed >= DRAG_THROTTLE_MS) {
-      lastSentRef.current = now
-      onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
-    } else {
-      trailingRef.current = window.setTimeout(() => {
-        lastSentRef.current = Date.now()
-        trailingRef.current = null
-        onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
-      }, DRAG_THROTTLE_MS - elapsed)
-    }
-  }
-
-  const commitFinal = (pct: number) => {
-    if (trailingRef.current !== null) {
-      clearTimeout(trailingRef.current)
-      trailingRef.current = null
-    }
-    lastSentRef.current = Date.now()
-    onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) })
-  }
 
   return (
     <div className={`panel p-4 transition ${light.on ? 'border-[var(--color-warning)]' : ''} ${light.unavailable ? 'opacity-50' : ''}`} style={light.on ? { boxShadow: '0 0 12px rgba(255,229,0,0.08)' } : {}}>
@@ -194,64 +116,9 @@ const LightCard = memo(function LightCard({ light, onUpdate }: { light: LightSta
 })
 
 export default function Lights() {
-  const qc = useQueryClient()
-  const lights = useQuery({ queryKey: ['lights'], queryFn: fetchLights, refetchInterval: 10_000 })
-
-  const mutation = useMutation({
-    mutationFn: setLight,
-    onMutate: async (update: LightUpdate) => {
-      await qc.cancelQueries({ queryKey: ['lights'] })
-      const previous = qc.getQueryData<LightState[]>(['lights'])
-      const targets = new Set(Array.isArray(update.entity_id) ? update.entity_id : [update.entity_id])
-      qc.setQueryData<LightState[]>(['lights'], (old) => {
-        if (!old) return old
-        return old.map((l) => {
-          if (!targets.has(l.entity_id)) return l
-          return {
-            ...l,
-            on: update.state === 'on',
-            brightness: update.state === 'on' && typeof update.brightness === 'number' ? update.brightness : l.brightness,
-            rgb_color: update.state === 'on' && update.rgb_color ? update.rgb_color : l.rgb_color,
-            color_temp_kelvin: update.state === 'on' && typeof update.color_temp_kelvin === 'number' ? update.color_temp_kelvin : l.color_temp_kelvin,
-          }
-        })
-      })
-      return { previous }
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.previous) qc.setQueryData(['lights'], ctx.previous)
-    },
-  })
-
-  const { mutate } = mutation
-
-  const updateOne = useCallback((entity_id: string, update: Update) => {
-    mutate({ entity_id, ...update })
-  }, [mutate])
-
-  const all = lights.data ?? []
-  const anyOn = all.some((l) => l.on)
-  const availableTargets = all.filter((l) => !l.unavailable).map((l) => l.entity_id)
-
-  const bulk = (state: 'on' | 'off') => {
-    if (availableTargets.length === 0) return
-    mutate({ entity_id: availableTargets, state })
-  }
-
-  const bulkBrightness = (pct: number) => {
-    if (availableTargets.length === 0) return
-    mutate({ entity_id: availableTargets, state: 'on', brightness: brightnessFromPct(pct) })
-  }
-
-  const bulkPreset = (rgb: [number, number, number] | null, kelvin: number | null) => {
-    if (availableTargets.length === 0) return
-    mutate({
-      entity_id: availableTargets,
-      state: 'on',
-      ...(rgb ? { rgb_color: rgb } : {}),
-      ...(kelvin ? { color_temp_kelvin: kelvin } : {}),
-    })
-  }
+  const {
+    lights, mutation, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset,
+  } = useLightsControl()
 
   const [bulkPct, setBulkPct] = useState<number | null>(null)
   const [bulkCustomHex, setBulkCustomHex] = useState('#ffb87a')
@@ -262,26 +129,7 @@ export default function Lights() {
     if (!onLights.length) return null
     return Math.round(onLights.reduce((sum, l) => sum + pctFromBrightness(l.brightness), 0) / onLights.length)
   }, [bulkPct, all])
-  const bulkLastSentRef = useRef(0)
-  const bulkTrailingRef = useRef<number | null>(null)
-  const bulkSend = (pct: number) => {
-    const now = Date.now()
-    const elapsed = now - bulkLastSentRef.current
-    if (bulkTrailingRef.current !== null) {
-      clearTimeout(bulkTrailingRef.current)
-      bulkTrailingRef.current = null
-    }
-    if (elapsed >= 200) {
-      bulkLastSentRef.current = now
-      bulkBrightness(pct)
-    } else {
-      bulkTrailingRef.current = window.setTimeout(() => {
-        bulkLastSentRef.current = Date.now()
-        bulkTrailingRef.current = null
-        bulkBrightness(pct)
-      }, 200 - elapsed)
-    }
-  }
+  const { push: bulkSend, commit: bulkCommit } = useBrightnessThrottle(bulkBrightness, 200)
 
   return (
     <div className="space-y-8">
@@ -347,22 +195,8 @@ export default function Lights() {
                       setBulkPct(pct)
                       bulkSend(pct)
                     }}
-                    onPointerUp={(e) => {
-                      if (bulkTrailingRef.current !== null) {
-                        clearTimeout(bulkTrailingRef.current)
-                        bulkTrailingRef.current = null
-                      }
-                      bulkLastSentRef.current = Date.now()
-                      bulkBrightness(Number((e.target as HTMLInputElement).value))
-                    }}
-                    onTouchEnd={(e) => {
-                      if (bulkTrailingRef.current !== null) {
-                        clearTimeout(bulkTrailingRef.current)
-                        bulkTrailingRef.current = null
-                      }
-                      bulkLastSentRef.current = Date.now()
-                      bulkBrightness(Number((e.target as HTMLInputElement).value))
-                    }}
+                    onPointerUp={(e) => bulkCommit(Number((e.target as HTMLInputElement).value))}
+                    onTouchEnd={(e) => bulkCommit(Number((e.target as HTMLInputElement).value))}
                     className="brightness-slider"
                   />
                 </div>

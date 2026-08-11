@@ -14,6 +14,7 @@ import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
+import { padHome, usePadMode } from './lib/padMode'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -140,9 +141,16 @@ function Shell() {
   const location = useLocation()
   const version = useAppVersion()
 
+  // In iPad mode this device's dashboard IS the pad screen, so "home" points
+  // there and the header button disappears while you're on it.
+  const padMode = usePadMode()
+  const home = padHome(padMode)
+  const atHome = location.pathname === home
+
   // The dashboard opens with the nav menu already down (as a launcher); it
   // stays closeable, and closing it while on the dashboard sticks because this
-  // only fires when the route actually becomes /dashboard.
+  // only fires when the route actually becomes /dashboard. Pad mode has its own
+  // big tiles, so it doesn't need the menu auto-opened.
   const onDashboard = location.pathname === '/dashboard'
   useEffect(() => { if (onDashboard) setMenuOpen(true) }, [onDashboard])
 
@@ -184,15 +192,16 @@ function Shell() {
               {/* Right cluster: update alarm (app only), quick dashboard, menu. */}
               <div className="pointer-events-none ml-auto flex items-center gap-2">
                 <UpdateAlarm />
-                {/* Quick jump home, shown only when you're not already there. */}
-                {!onDashboard && (
+                {/* Quick jump home, shown only when you're not already there.
+                    In iPad mode home is the pad screen. */}
+                {!atHome && (
                   <NavLink
-                    to="/dashboard"
-                    aria-label="Dashboard"
-                    title="Go to dashboard"
+                    to={home}
+                    aria-label={padMode ? 'iPad dashboard' : 'Dashboard'}
+                    title={padMode ? 'Go to iPad dashboard' : 'Go to dashboard'}
                     className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-accent)]"
                   >
-                    <LayoutDashboard size={16} />
+                    {padMode ? <Tablet size={16} /> : <LayoutDashboard size={16} />}
                   </NavLink>
                 )}
                 {/* Pages live in the menu at every width — one consistent layout.
