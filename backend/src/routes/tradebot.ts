@@ -25,10 +25,20 @@ const MAX_DECISIONS = 50
 // scan_v2.log is append-only and rotated externally; only the tail can hold
 // anything recent enough to show, so a runaway file can never be read whole.
 const TAIL_BYTES = 512 * 1024
-// Every line a scan run emits lands within milliseconds of its `verdict:` line.
-// Anything further out belongs to a different run and must not be folded into
-// this decision (a later verdict-less run would otherwise overwrite its cost).
+// How far after its `verdict:` line a run's own output can still land. Most of it
+// is milliseconds away, but a run that actually trades spends a broker round trip
+// (review + place, per order) between the verdict and the `cost:` line, so this
+// has to cover seconds rather than milliseconds. Anything further out belongs to
+// a different run and must not be folded into this decision (a later
+// verdict-less run would otherwise overwrite its cost).
 const RUN_WINDOW_MS = 120_000
+// `screen shortlist:` is logged BEFORE the judge call, so its distance from the
+// verdict is the judge's own latency — an agentic turn with web search has been
+// measured at over two minutes, which RUN_WINDOW_MS would not reach. Scans are
+// scheduled hourly and every screening run logs its own shortlist (which
+// replaces the pending one), so reaching this far back cannot pick up a
+// neighbouring run's names.
+const SHORTLIST_REACH_MS = 20 * 60_000
 
 type StatusDoc = Record<string, unknown>
 
@@ -56,6 +66,19 @@ type BrokerSnapshot = {
   realized: Realized
 }
 
+/**
+ * One name the market screen put in front of the judge on a given run, as the
+ * bot logged it. These are the candidates the verdict was actually formed over,
+ * so they are the only honest answer to "what was it looking at" — the pinned
+ * watchlist is not. `rvol` is null when the screen logged `rvol=?` (no daily
+ * volume average for the name), which is not the same as a relative volume of 0.
+ */
+type ShortlistPick = {
+  symbol: string
+  change_pct: number | null
+  rvol: number | null
+}
+
 // gate is the answer to "did this decision reach the broker": null when the
 // model proposed nothing, "executed" when orders were placed, otherwise the
 // reason it was stopped.
@@ -69,6 +92,10 @@ type Decision = {
   summary: string | null
   gate: string | null
   cost_usd: number | null
+  // Empty when the run logged no shortlist: the screen was off, it returned
+  // nothing, or the run predates the screener. Never padded out with the
+  // watchlist, which would misreport what the judge was shown.
+  shortlist: ShortlistPick[]
 }
 
 type Caps = {
@@ -107,6 +134,7 @@ type PagePayload = {
   broker_error: string | null
   decisions: Decision[]
   decisions_unverified: number
+  decisions_truncated: number
   config: Caps
 }
 
@@ -295,7 +323,14 @@ function gateLabel(note: string): string {
 
 const LINE_RE = /^\[([^\]]+)\]\s?(.*)$/
 const VERDICT_RE = /^verdict:\s+regime=(\S+)\s+trade_needed=(\S+)\s+confidence=([\d.]+)\s+trades=(\d+)/
-const COST_RE = /^cost:\s+\$([\d.]+)\s+this run/
+// The trailing path is the ledger the cost row went to, and the bot always says
+// which one: a --selftest run names its temp file here, so this line is a direct
+// statement of whether the run's judge call is in the real ledger at all.
+const COST_RE = /^cost:\s+\$([\d.]+)\s+this run(?:\s+->\s+(\S+))?/
+const SHORTLIST_RE = /^screen shortlist:\s+(.+)$/
+// One pick out of that line: "NBIS +29.2% rvol=2.26". The symbol is required, the
+// relative volume is not — scan_v2 logs `rvol=?` when it has no volume average.
+const PICK_RE = /^([A-Z][A-Z0-9.\-]*)\s+([+-][\d.]+)%\s+rvol=(\S+)$/
 const PLACING_RE = /^LIVE:\s+placing\s+(\d+)\s+order/
 const DRYRUN_RE = /^DRY RUN:\s+reviewing\s+(\d+)\s+order/
 // Post-gate notes. A SIZING CLAMP resizes a trade and a SIZING DROP removes one,
@@ -312,6 +347,25 @@ type ScanRun = {
   placed: boolean
   reviewed: number | null
   noTrades: boolean
+  // When this run's `cost:` line named the real ledger, its timestamp; null when
+  // it named a temp one or the line never arrived. This is what a recorded judge
+  // call is matched against — see readDecisions() for why it is not decision.ts.
+  costMs: number | null
+}
+
+/**
+ * "NBIS +29.2% rvol=2.26, WRD -9.4% rvol=5.17" -> the picks it names.
+ * A fragment that does not parse is dropped rather than guessed at: a shortlist
+ * that comes up short is honest, one with an invented row in it is not.
+ */
+function parsePicks(list: string): ShortlistPick[] {
+  const picks: ShortlistPick[] = []
+  for (const part of list.split(',')) {
+    const m = PICK_RE.exec(part.trim())
+    if (!m) continue
+    picks.push({ symbol: m[1], change_pct: fnum(m[2]), rvol: fnum(m[3]) })
+  }
+  return picks
 }
 
 /**
@@ -337,18 +391,24 @@ function resolveGate(run: ScanRun): string | null {
 }
 
 /**
- * scan_v2.log -> live decisions, newest first.
+ * scan_v2.log -> parsed runs, newest first.
  *
  * The log is plain text written by an append-only process, so this parser
  * assumes nothing: a `verdict:` line opens a run, and only lines that both
  * follow it and fall inside its run window can contribute to it. Unknown lines,
  * torn lines and interleaved output from other invocations are ignored, and the
  * whole function is non-throwing — a malformed line must never 500 the page.
+ *
+ * The one line read the other way round is `screen shortlist:`, which a run emits
+ * before it has a verdict to attach it to. It is held pending and claimed by the
+ * next verdict.
  */
-function parseScanLog(text: string): Decision[] {
+function parseScanLog(text: string): ScanRun[] {
   const runs: ScanRun[] = []
   let cur: ScanRun | null = null
   let curMs = 0
+  // The most recent screen, waiting for the verdict it fed.
+  let pending: { ms: number; picks: ShortlistPick[] } | null = null
 
   for (const rawLine of text.split('\n')) {
     const m = LINE_RE.exec(rawLine)
@@ -360,6 +420,12 @@ function parseScanLog(text: string): Decision[] {
 
     const verdict = VERDICT_RE.exec(body)
     if (verdict) {
+      // Claim the pending screen only when it is near enough to be this run's
+      // own. A verdict with no screen behind it shows nothing rather than
+      // inheriting the previous run's names.
+      const screened =
+        pending && ms >= pending.ms && ms - pending.ms <= SHORTLIST_REACH_MS ? pending.picks : []
+      pending = null
       cur = {
         decision: {
           ts,
@@ -373,15 +439,26 @@ function parseScanLog(text: string): Decision[] {
           summary: null,
           gate: null,
           cost_usd: null,
+          shortlist: screened,
         },
         gateNote: null,
         notes: [],
         placed: false,
         reviewed: null,
         noTrades: false,
+        costMs: null,
       }
       curMs = ms
       runs.push(cur)
+      continue
+    }
+
+    // The screen runs before the judge, so this line belongs to the NEXT verdict,
+    // not to whatever run is still open — which is why it is matched ahead of the
+    // no-open-run guard below.
+    const screen = SHORTLIST_RE.exec(body)
+    if (screen) {
+      pending = { ms, picks: parsePicks(screen[1]) }
       continue
     }
 
@@ -405,6 +482,11 @@ function parseScanLog(text: string): Decision[] {
     const cost = COST_RE.exec(body)
     if (cost) {
       if (cur.decision.cost_usd == null) cur.decision.cost_usd = fnum(cost[1])
+      // Only a row in the real ledger proves a paid judge call. A selftest names
+      // its temp file on this line, so a path that is not COST_LOG leaves costMs
+      // null and the run stays unverified. An older line with no path at all is
+      // read as the real ledger, which is the only one that existed then.
+      if (cur.costMs == null && (cost[2] ?? COST_LOG) === COST_LOG) cur.costMs = ms
       continue
     }
     if (PLACING_RE.test(body)) {
@@ -430,7 +512,7 @@ function parseScanLog(text: string): Decision[] {
   }
 
   for (const run of runs) run.decision.gate = resolveGate(run)
-  return runs.map((r) => r.decision).reverse()
+  return runs.reverse()
 }
 
 // Timestamps (whole seconds) of every judge call the bot recorded paying for.
@@ -457,30 +539,54 @@ async function readJudgedSeconds(): Promise<Set<number>> {
 
 // The paper arm was retired 2026-08-04, so scan_v2.log is the only decision
 // source left; logs/paper/runs.jsonl and its parser are gone with it.
-async function readDecisions(): Promise<{ decisions: Decision[]; unverified: number }> {
+async function readDecisions(): Promise<{
+  decisions: Decision[]
+  unverified: number
+  truncated: number
+}> {
   const scanText = await readTail(SCAN_LOG, TAIL_BYTES)
-  let live: Decision[] = []
+  let live: ScanRun[] = []
   try {
     live = scanText ? parseScanLog(scanText) : []
   } catch {
     live = []
   }
 
-  // Keep only verdicts backed by a recorded judge call. --selftest exercises the
-  // same logging path, so without this the feed shows fixture runs as [LIVE]
-  // decisions. Matched to the second, with one second of slack because the cost
-  // row is written just after the verdict line.
   const judged = await readJudgedSeconds()
-  const verified = live.filter((d) => {
-    const ms = Date.parse(d.ts)
-    if (!Number.isFinite(ms)) return false
+  /** Was a judge call recorded at this instant? To the second, ±1s of slack. */
+  const recorded = (ms: number | null): boolean => {
+    if (ms == null || !Number.isFinite(ms)) return false
     const sec = Math.floor(ms / 1000)
     return judged.has(sec) || judged.has(sec - 1) || judged.has(sec + 1)
-  })
+  }
 
+  // Keep only verdicts backed by a recorded judge call. --selftest exercises the
+  // same logging path, so without this the feed shows fixture runs as [LIVE]
+  // decisions.
+  //
+  // The join key is the run's `cost:` line, NOT its verdict. scan_v2 logs the
+  // verdict, then checks open orders, then reviews and places every trade, and
+  // only then calls record_cost and logs `cost:`. So on a run that actually
+  // trades the cost row lands a broker round trip after the verdict (1-3s, and
+  // further with several orders), while it stays microseconds behind the `cost:`
+  // line that record_cost is immediately followed by. Matching the verdict second
+  // held only while the bot had never traded: the first real execution would have
+  // been withheld as a selftest fixture, which is the one event this feed exists
+  // to show.
+  //
+  // The verdict second stays as a fallback so a run whose `cost:` line fell
+  // outside the tail (or was torn by rotation) is not dropped either. Fixtures
+  // fail both tests: their cost rows go to a temp ledger and never reach
+  // cost_v2.jsonl, and the `cost:` line says so.
+  const verified = live.filter((r) => recorded(r.costMs) || recorded(Date.parse(r.decision.ts)))
+
+  const ordered = verified
+    .map((r) => r.decision)
+    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
   return {
-    decisions: verified.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts)).slice(0, MAX_DECISIONS),
+    decisions: ordered.slice(0, MAX_DECISIONS),
     unverified: live.length - verified.length,
+    truncated: Math.max(0, ordered.length - MAX_DECISIONS),
   }
 }
 
@@ -543,6 +649,11 @@ router.get('/tradebot/page', async (_req, res) => {
     // (selftest fixtures). Surfaced rather than silently dropped so the feed
     // never looks complete when it is filtered.
     decisions_unverified: decisionResult.unverified,
+    // Verified scans the MAX_DECISIONS slice cut off the end. Reported for the
+    // same reason: the bot runs seven scans a weekday, so the feed starts
+    // clipping inside a day, and a panel that counts "all N scans" has to be able
+    // to say that N is not the whole history.
+    decisions_truncated: decisionResult.truncated,
     config,
   }
   pageCache = { at: Date.now(), data }

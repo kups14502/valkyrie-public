@@ -9,6 +9,7 @@ import {
   type TradeBotDoc,
   type TradeBotFill,
   type TradeBotPage,
+  type TradeBotShortlistPick,
   type TradeBotSnapshot,
 } from '../lib/api'
 
@@ -183,17 +184,28 @@ function EquityChart({ points }: { points: { ts: string; total: number }[] }) {
     )
   }
   const values = rows.map((p) => p.total)
-  let min = Math.min(...values)
-  let max = Math.max(...values)
-  if (max - min < Math.max(0.01, Math.abs(max) * 0.0001)) {
-    min -= 1
-    max += 1
-  }
-  const pad = (max - min) * 0.12
-  const lo = min - pad
-  const hi = max + pad
+  // The real data range. This is what the label below reports, and it is kept
+  // apart from the axis on purpose: padding the axis and then printing the padded
+  // numbers claimed a $N–$N spread for a week that never left
+  // $N. The axis may be invented; the range may not.
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  // Axis bounds, geometry only. A flat series has no range to scale against, so
+  // it borrows a dollar either side; every series then gets 12% breathing room so
+  // the line never rides the frame.
+  const flat = max - min < Math.max(0.01, Math.abs(max) * 0.0001)
+  const axisLo = flat ? min - 1 : min
+  const axisHi = flat ? max + 1 : max
+  const pad = (axisHi - axisLo) * 0.12
+  const lo = axisLo - pad
+  const hi = axisHi + pad
   const at = (v: number) => ((v - lo) / (hi - lo)) * 100
   const xs = values.map((_, i) => (i / (values.length - 1)) * 100)
+  // Whole dollars normally, but a range narrower than a dollar rounds to the same
+  // number at both ends ("$N – $N"), which reads as a bug rather than
+  // as a quiet week. Cents appear only when they are what tells the ends apart.
+  const digits = usd(min, 0) === usd(max, 0) ? 2 : 0
+  const rangeLabel = min === max ? `${usd(min)} flat` : `${usd(min, digits)} – ${usd(max, digits)}`
 
   return (
     <div className="mt-3">
@@ -228,9 +240,7 @@ function EquityChart({ points }: { points: { ts: string; total: number }[] }) {
       </div>
       <div className={`mt-1.5 flex items-baseline justify-between gap-2 text-[10px] tabular-nums ${FAINT}`}>
         <span>{fmtDay(rows[0].ts)}</span>
-        <span className="truncate">
-          {usd(min, 0)} – {usd(max, 0)} total value (incl. transfers)
-        </span>
+        <span className="truncate">{rangeLabel} total value (incl. transfers)</span>
         <span>{fmtDay(rows[rows.length - 1].ts)}</span>
       </div>
     </div>
@@ -270,6 +280,37 @@ function ConfMeter({
           style={{ left: `${Math.max(0, Math.min(1, t)) * 100}%` }}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * The names this run's screen actually put in front of the judge, in the order it
+ * ranked them. Same chip as the pinned watchlist in "Judge & caps", because it is
+ * the same kind of fact — a symbol the bot was looking at — and the two lists are
+ * read against each other. Neutral throughout: being screened is not an outcome,
+ * so no chip takes the accent.
+ */
+function Shortlist({ picks }: { picks: TradeBotShortlistPick[] }) {
+  if (picks.length === 0) return null
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className={`text-[10px] uppercase tracking-[0.18em] ${FAINT}`}>screened</span>
+      {picks.map((p) => (
+        <span
+          key={p.symbol}
+          title={`${p.symbol} · ${signedPct(p.change_pct, 1)} on the day · relative volume ${
+            p.rvol != null ? p.rvol.toFixed(2) : 'unknown'
+          }`}
+          className="border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] tabular-nums"
+        >
+          <span className="text-[var(--color-text)]">{p.symbol}</span>{' '}
+          <span className={DIM}>{signedPct(p.change_pct, 1)}</span>
+          {/* `rvol=?` in the log means the volume average was missing, so the
+              figure is left off rather than printed as zero */}
+          {p.rvol != null && <span className={FAINT}> rvol {p.rvol.toFixed(2)}</span>}
+        </span>
+      ))}
     </div>
   )
 }
@@ -340,6 +381,9 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
         <span>trade_needed={String(d.trade_needed ?? 'null')}</span>
         {num(d.cost_usd) != null && <span>judge {usd(d.cost_usd, 4)}</span>}
       </div>
+      {/* Ahead of the summary on purpose: the summary argues about these names
+          ("NBIS +29% entry too extended"), so the reader needs them first. */}
+      <Shortlist picks={d.shortlist ?? []} />
       {d.summary && <div className={`mt-1 text-xs leading-relaxed ${DIM}`}>{d.summary}</div>}
       {/* the reason, verbatim from the log — a fact, printed quietly */}
       {/* Routine, so not danger-coloured - but this is the operative fact of
@@ -363,9 +407,13 @@ function DecisionRow({ d, threshold }: { d: TradeBotDecision; threshold: number 
 function ConfidenceChart({
   decisions,
   threshold,
+  truncated,
 }: {
   decisions: TradeBotDecision[]
   threshold: number | null
+  // Judged scans the feed's cap left out. This chart can only measure what it was
+  // handed, so it has to be told when that is not everything.
+  truncated: number
 }) {
   // Oldest -> newest so time reads left to right.
   const pts = decisions.filter((d) => num(d.confidence) != null).slice().reverse()
@@ -445,19 +493,30 @@ function ConfidenceChart({
         <span>{fmtDate(pts[pts.length - 1].ts)}</span>
       </div>
       <div className={`mt-3 border-t border-[var(--color-border)] pt-2 text-[11px] leading-relaxed ${DIM}`}>
+        {/* Scoped to the plotted scans, deliberately. This used to read "all N
+            scored scans ... that is why the bot has not traded", which are claims
+            about the bot's whole life; the chart only ever sees the decision feed,
+            and the feed is capped at MAX_DECISIONS. */}
         {t == null ? (
           'min_confidence_to_trade is not readable from config_v2.json.'
         ) : cleared === 0 ? (
           <>
-            <span className="text-[var(--color-text)]">[NEVER CLEARED]</span> all {pts.length} scored scans sit below
-            the {t.toFixed(2)} gate (range {Math.min(...confs).toFixed(2)}–{Math.max(...confs).toFixed(2)}). That is
-            why the bot has not traded.
+            <span className="text-[var(--color-text)]">[NONE CLEARED]</span> none of the {pts.length} scored scans
+            plotted here reached the {t.toFixed(2)} gate (range {Math.min(...confs).toFixed(2)}–
+            {Math.max(...confs).toFixed(2)}), so none of them traded.
           </>
         ) : (
           <>
-            {cleared} of {pts.length} scans reached the {t.toFixed(2)} gate (range{' '}
+            {cleared} of {pts.length} plotted scans reached the {t.toFixed(2)} gate (range{' '}
             {Math.min(...confs).toFixed(2)}–{Math.max(...confs).toFixed(2)}).
           </>
+        )}
+        {truncated > 0 && (
+          <span className={FAINT}>
+            {' '}
+            {truncated} older judged scan{truncated === 1 ? '' : 's'} {truncated === 1 ? 'is' : 'are'} outside the
+            feed and not counted here.
+          </span>
         )}
       </div>
     </div>
@@ -625,13 +684,21 @@ function Body({ page }: { page: TradeBotPage }) {
   const caps: TradeBotCaps = page.config
   const threshold = num(caps.min_confidence_to_trade)
   const history = s.history
+  const shown = page.decisions.length
+  const truncated = num(page.decisions_truncated) ?? 0
+  // Once the cap bites, the count in the title is a count of the feed and not of
+  // the bot's history, so the title has to say both numbers: the title is what a
+  // glance reads, and "48 scans" on its own invites the wrong conclusion.
+  const feedTitle = `Decision feed · ${shown} scan${shown === 1 ? '' : 's'}${
+    truncated > 0 ? ` of ${shown + truncated}` : ''
+  }`
 
   return (
     <>
       <PortfolioPanel status={s} broker={broker} brokerError={page.broker_error} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <Card title={`Decision feed · ${page.decisions.length} scan${page.decisions.length === 1 ? '' : 's'}`}>
+        <Card title={feedTitle}>
           {(page.decisions_unverified ?? 0) > 0 && (
             <div className={`mb-3 border-l-2 border-[var(--color-border)] pl-2 text-[10px] leading-relaxed ${FAINT}`}>
               {page.decisions_unverified} log entr{page.decisions_unverified === 1 ? 'y' : 'ies'} withheld:
@@ -639,9 +706,19 @@ function Body({ page }: { page: TradeBotPage }) {
               Only scans the bot recorded paying for are shown.
             </div>
           )}
+          {/* Same principle as the withheld-verdicts note above: a feed that is
+              filtered or clipped must say so, or every count on this page reads as
+              a count of the bot's whole history. */}
+          {truncated > 0 && (
+            <div className={`mb-3 border-l-2 border-[var(--color-border)] pl-2 text-[10px] leading-relaxed ${FAINT}`}>
+              {truncated} older judged scan{truncated === 1 ? '' : 's'} not shown: the feed keeps the newest {shown}.
+              Counts on this page are counts of the feed, not of every scan the bot has ever run — scan_v2.log holds
+              the rest.
+            </div>
+          )}
           <div className={`mb-3 text-[11px] leading-relaxed ${DIM}`}>
-            Every judged scan: the regime it read, its confidence, whether it wanted to trade and what the gate did
-            about it.
+            Every judged scan: the regime it read, the names its screen put up, its confidence, whether it wanted to
+            trade and what the gate did about it.
           </div>
           {page.decisions.length === 0 ? (
             <Empty>
@@ -658,7 +735,7 @@ function Body({ page }: { page: TradeBotPage }) {
 
         <div className="min-w-0 space-y-4">
           <Card title="Confidence vs gate">
-            <ConfidenceChart decisions={page.decisions} threshold={threshold} />
+            <ConfidenceChart decisions={page.decisions} threshold={threshold} truncated={truncated} />
           </Card>
 
           <Card title="Arms">

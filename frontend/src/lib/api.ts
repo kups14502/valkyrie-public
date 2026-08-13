@@ -185,6 +185,15 @@ export type TradeBotDoc = {
 
 export type TradeBotStatus = TradeBotDoc & { stale: boolean }
 
+// One name the run's market screen put in front of the judge, straight out of the
+// bot's `screen shortlist:` line. rvol null = the bot logged `rvol=?`, i.e. it had
+// no volume average for the name — not a relative volume of zero.
+export type TradeBotShortlistPick = {
+  symbol: string
+  change_pct: number | null
+  rvol: number | null
+}
+
 // One decision the judge made, from scan_v2.log.
 // gate: null = nothing proposed, "executed" = orders placed, otherwise why not.
 export type TradeBotDecision = {
@@ -197,6 +206,9 @@ export type TradeBotDecision = {
   summary: string | null
   gate: string | null
   cost_usd: number | null
+  /** The candidates this verdict was formed over. Empty/absent when the run
+   *  logged no screen; never backfilled from the watchlist. */
+  shortlist?: TradeBotShortlistPick[]
 }
 
 export type TradeBotPosition = {
@@ -256,6 +268,9 @@ export type TradeBotPage = {
   /** Log verdicts with no recorded judge call behind them (selftest fixtures),
    *  withheld from `decisions`. Reported so the feed is never silently filtered. */
   decisions_unverified?: number
+  /** Verified scans older than the ones in `decisions`, cut by the feed's cap.
+   *  Reported for the same reason: `decisions.length` is not the full history. */
+  decisions_truncated?: number
   config: TradeBotCaps
 }
 
