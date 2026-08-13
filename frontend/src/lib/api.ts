@@ -256,6 +256,17 @@ export type TradeBotCaps = {
     min_market_cap: number | null
     min_relative_volume: number | null
   } | null
+  /**
+   * Conviction tiers, highest threshold first, so the last entry is the floor
+   * below which nothing trades. Empty for a config predating tiers, where
+   * min_confidence_to_trade is the single gate. When populated,
+   * min_confidence_to_trade is only the bar for FULL size.
+   */
+  tiers: {
+    tier: string
+    min_confidence: number
+    max_single_trade_pct: number | null
+  }[]
 }
 
 export type TradeBotPage = {

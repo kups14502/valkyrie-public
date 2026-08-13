@@ -110,6 +110,23 @@ type Caps = {
   model: string | null
   watchlist: string[]
   screener: Screener | null
+  tiers: ConvictionTier[]
+}
+
+/**
+ * Conviction tiers, added to config_v2.json on 2026-08-13. Confidence now buys
+ * SIZE rather than bare permission, which means min_confidence_to_trade above is
+ * no longer "the gate": it is only the bar for FULL size. The real gate is the
+ * LOWEST tier's min_confidence, below which nothing trades at any size. Drawing
+ * min_confidence_to_trade alone now overstates the bar by a wide margin, so
+ * anything on the page that talks about "the gate" has to read the floor from
+ * here. An empty array means the config predates tiers, in which case
+ * min_confidence_to_trade really is the single threshold.
+ */
+type ConvictionTier = {
+  tier: string
+  min_confidence: number
+  max_single_trade_pct: number | null
 }
 
 /**
@@ -257,6 +274,30 @@ const EMPTY_CAPS: Caps = {
   model: null,
   watchlist: [],
   screener: null,
+  tiers: [],
+}
+
+/**
+ * conviction_tiers, sorted highest threshold first so `tiers[tiers.length - 1]`
+ * is always the floor. A malformed entry is dropped rather than guessed at: a
+ * tier with an unreadable threshold or size would otherwise render as a bar the
+ * bot does not actually have.
+ */
+function readTiers(value: unknown): ConvictionTier[] {
+  if (!Array.isArray(value)) return []
+  const out: ConvictionTier[] = []
+  for (const entry of value) {
+    if (!isObj(entry)) continue
+    const threshold = fnum(entry.min_confidence)
+    const name = typeof entry.tier === 'string' ? entry.tier.trim() : ''
+    if (threshold == null || !name) continue
+    out.push({
+      tier: name,
+      min_confidence: threshold,
+      max_single_trade_pct: fnum(entry.max_single_trade_pct),
+    })
+  }
+  return out.sort((a, b) => b.min_confidence - a.min_confidence)
 }
 
 /**
@@ -275,6 +316,7 @@ async function readCaps(): Promise<Caps> {
   }
   if (!isObj(doc)) return EMPTY_CAPS
   return {
+    tiers: readTiers(doc.conviction_tiers),
     min_confidence_to_trade: fnum(doc.min_confidence_to_trade),
     max_position_pct: fnum(doc.max_position_pct),
     max_single_trade_pct: fnum(doc.max_single_trade_pct),

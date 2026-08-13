@@ -682,7 +682,18 @@ function Body({ page }: { page: TradeBotPage }) {
   const s: TradeBotDoc = page.status
   const broker: TradeBotSnapshot | null = page.broker
   const caps: TradeBotCaps = page.config
-  const threshold = num(caps.min_confidence_to_trade)
+  // Since 2026-08-13 confidence buys SIZE, not bare permission: the tier table
+  // sets a full-size bar (min_confidence_to_trade, 0.75) and a reduced-size bar
+  // below it. The line that decides whether anything trades AT ALL is therefore
+  // the LOWEST tier, and that is what every confidence bar and the chart must
+  // mark; marking 0.75 would draw a gate the bot no longer has and would keep
+  // telling the reader that a 0.62 verdict traded nothing when it now trades at
+  // 4% of equity. A config with no tiers falls back to the single threshold.
+  const tiers = caps.tiers ?? []
+  const fullSizeBar = num(caps.min_confidence_to_trade)
+  const threshold = tiers.length
+    ? tiers[tiers.length - 1].min_confidence
+    : fullSizeBar
   const history = s.history
   const shown = page.decisions.length
   const truncated = num(page.decisions_truncated) ?? 0
@@ -970,8 +981,14 @@ function SpendPanel({ status }: { status: TradeBotDoc }) {
 }
 
 function JudgePanel({ caps }: { caps: TradeBotCaps }) {
+  const tiers = caps.tiers ?? []
+  // With tiers, one "min confidence" row is a lie by omission: it shows the
+  // full-size bar and hides the fact that a lower score still trades, smaller.
+  // So the row becomes the floor when tiers exist, and the tier table is drawn
+  // underneath with the size each one earns.
+  const floor = tiers.length ? tiers[tiers.length - 1].min_confidence : num(caps.min_confidence_to_trade)
   const rows: [string, string][] = [
-    ['min confidence', num(caps.min_confidence_to_trade)?.toFixed(2) ?? '—'],
+    [tiers.length ? 'min confidence (floor)' : 'min confidence', floor?.toFixed(2) ?? '—'],
     ['max single trade', unsignedCapPct(caps.max_single_trade_pct)],
     ['max position', unsignedCapPct(caps.max_position_pct)],
     ['max trades / day', num(caps.max_trades_per_day) != null ? String(caps.max_trades_per_day) : '—'],
@@ -981,6 +998,24 @@ function JudgePanel({ caps }: { caps: TradeBotCaps }) {
     <Card title="Judge & caps">
       <div className={LABEL}>model</div>
       <div className="mt-1 truncate text-sm text-[var(--color-text)]">{caps.model ?? '—'}</div>
+      {tiers.length > 0 && (
+        <>
+          <div className={`mt-3 ${LABEL}`}>conviction tiers</div>
+          <div className="mt-1 space-y-1">
+            {tiers.map((tier) => (
+              <div key={tier.tier} className="flex items-baseline gap-2 text-[11px] tabular-nums">
+                <span className="w-16 shrink-0 text-[var(--color-text)]">{tier.tier}</span>
+                <span className={DIM}>{tier.min_confidence.toFixed(2)}+</span>
+                <span className={FAINT}>→ {unsignedCapPct(tier.max_single_trade_pct)} of equity</span>
+              </div>
+            ))}
+          </div>
+          <div className={`mt-1 text-[10px] leading-relaxed ${FAINT}`}>
+            confidence buys size, not just permission. below{' '}
+            {tiers[tiers.length - 1].min_confidence.toFixed(2)} nothing trades.
+          </div>
+        </>
+      )}
       <div className={`mt-3 ${LABEL}`}>universe</div>
       <div className="mt-1 text-[11px] text-[var(--color-text)]">
         {caps.screener?.enabled ? (
