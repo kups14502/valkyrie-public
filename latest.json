@@ -1,15 +1,15 @@
 {
-  "version": "0.3.49",
-  "notes": "feat: dedicated iPhone home screen, and hide other devices dashboards",
-  "pub_date": "2026-08-11T17:46:18Z",
+  "version": "0.3.50",
+  "notes": "fix(ai-usage): degrade a dead sign-in to usage numbers, stop re-probing it",
+  "pub_date": "2026-08-18T18:34:58Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMxd3RpS3EwZFd4c3JqSHZlb1pYTWFvRUhaWXE3STNmbDlQdVBHUHI5VHZiM1RUMHZPOTFCWHM2QmZvSjJSWXVwN2h6RDJSUFBWcVhieEtrUDV4VEF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDcwMzc4CWZpbGU6VmFsa3lyaWVfMC4zLjQ5X3g2NC1zZXR1cC5leGUKUUkyWXNMck9RVG80TmVxcDkxRERiRFp5Nk5RUVZEaDlCRUFSd0RzSkRXR1JVMU4zRGQ5cHltTjR5ZWpFMHgrdTZNa284WlI2enE3dmRiR2dhU0VOQmc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.49/Valkyrie_0.3.49_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFOQUtVQkhkanpOQVFSeGFseTNGZ21ncndnTXhjanY4VGxkWWpxdksyeENUS3BqalNNVlJRZkx4N0M4RWgvRW1ZbE1iMFNqb2xmY291OGFDUThSVWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MDc4MDk4CWZpbGU6VmFsa3lyaWVfMC4zLjUwX3g2NC1zZXR1cC5leGUKODRTclB6ZXFZS0REWCtuRDdDWjR6OTdqRjdNVXJuQ0J0a2ZUbnZLbk0vOW1wUjhNK2NQYVR4OXJNSHpETmc2TkJRd0Jzei9QU1VMTGtJRldTeUZxQWc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.50/Valkyrie_0.3.50_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWYySXlxWCtNYzFSVytYN0FGR1pQckRjQnNZODUwdGpwdmttRHduMVlFTHZVUEtxNkxpc08yUHRvYmZLbzVHQWZCNS9URzIvWGxnck9Rd2M0ZVRFRmcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NDcwMzM1CWZpbGU6VmFsa3lyaWVfMC4zLjQ5X2FtZDY0LkFwcEltYWdlCndrZG1DbnRnNnIrYVBvMEljRXI1SEdWNTZmT3BnL1p1dTBGNEduYm5kendHMUxIMWczV0FXZHdNbkh5ZGVFTFIwQk0yUzRraElVeG95M1lEK1J6L0NRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.49/Valkyrie_0.3.49_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZNZW1PSGFiUytPZ2FraUluV1VkM1p1dGNQcllYT2Nzb0Z2VVYvbUJzSGNyU2FhdGxWZDVCcEhMWjhTTlZOZ0ZsQ1VOd2lycHhxTWhVZG1kcHVsQlFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MDc4MDYwCWZpbGU6VmFsa3lyaWVfMC4zLjUwX2FtZDY0LkFwcEltYWdlClBsSTk3Q2wyYnhSVDM3WVRVWkZlMWhtbzJjVUY5UzhML2Y4UEt5ZUt4UXlYNEFZeWFOSkhWa2xwUU0xb1l1NDJ2ZXY3dkVBYzlFK2hWaloweEkzMkRRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.50/Valkyrie_0.3.50_amd64.AppImage"
     }
   }
 }
