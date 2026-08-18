@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { writeFileSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
 const exec = promisify(execFile)
@@ -161,10 +161,33 @@ async function getClaudeOAuthAccessToken(configDir: string): Promise<string | nu
 // second one so the dashboard can say so instead of rendering an empty card.
 type QuotaRead = { quota: ClaudeQuota | null; authError: string | null }
 
+// A dead sign-in stays dead until someone runs `claude /login`, so re-probing
+// it every refresh cycle only burns a token-endpoint request and repeats the
+// same log line forever. Remember the hard failure and skip the probe until
+// either the cooldown lapses or .credentials.json is rewritten (a re-login).
+const AUTH_FAIL_COOLDOWN_MS = 30 * 60_000
+const authFailures = new Map<string, { at: number; error: string; credsMtimeMs: number }>()
+
+const credsMtimeMs = (configDir: string): number => {
+  try {
+    return statSync(path.join(configDir, '.credentials.json')).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
 async function readClaudeOAuthQuota(configDir: string, label: string): Promise<QuotaRead> {
+  const held = authFailures.get(configDir)
+  if (held && held.credsMtimeMs === credsMtimeMs(configDir) && Date.now() - held.at < AUTH_FAIL_COOLDOWN_MS) {
+    return { quota: null, authError: held.error }
+  }
+  const fail = (error: string): QuotaRead => {
+    authFailures.set(configDir, { at: Date.now(), error, credsMtimeMs: credsMtimeMs(configDir) })
+    return { quota: null, authError: error }
+  }
   try {
     const accessToken = await getClaudeOAuthAccessToken(configDir)
-    if (!accessToken) return { quota: null, authError: 'not signed in' }
+    if (!accessToken) return fail('not signed in')
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -180,18 +203,21 @@ async function readClaudeOAuthQuota(configDir: string, label: string): Promise<Q
       }),
     })
     const quota = parseClaudeRateLimitHeaders(resp.headers)
-    if (quota) return { quota, authError: null }
+    if (quota) {
+      authFailures.delete(configDir)
+      return { quota, authError: null }
+    }
     if (resp.status === 401 || resp.status === 403) {
       console.error(`[ai-usage] claude oauth rejected (${label}): ${resp.status}`)
-      return { quota: null, authError: 'sign-in expired' }
+      return fail('sign-in expired')
     }
     return { quota: null, authError: null }
   } catch (err) {
     const msg = (err as Error).message
     console.error(`[ai-usage] claude oauth quota failed (${label})`, msg)
-    if (msg.includes('ENOENT')) return { quota: null, authError: 'not signed in' }
+    if (msg.includes('ENOENT')) return fail('not signed in')
     // a 400 from the token endpoint means the stored refresh token is spent or revoked
-    if (/refresh failed|no access token/.test(msg)) return { quota: null, authError: 'sign-in expired' }
+    if (/refresh failed|no access token/.test(msg)) return fail('sign-in expired')
     return { quota: null, authError: null }
   }
 }
