@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft, Clapperboard, Tablet, Smartphone, Settings as SettingsIcon } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, TrendingUp, KeyRound, Server, Activity as ActivityIcon, Search, CornerDownLeft, Clapperboard, Tablet, Smartphone, Settings as SettingsIcon, Terminal } from 'lucide-react'
 import { useProfile } from '../lib/deviceMode'
 
 // Global command palette (Ctrl/Cmd+K): jump to any page by name. Opens over
@@ -16,6 +16,7 @@ type Cmd = { id: string; label: string; hint?: string; icon: React.ReactNode; ru
 
 const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} /> },
+  { to: '/sessions', label: 'Sessions', icon: <Terminal size={15} /> },
   { to: '/plex', label: 'Plex', icon: <Clapperboard size={15} /> },
   { to: '/lights', label: 'Lights', icon: <Lightbulb size={15} /> },
   { to: '/trade', label: 'Trades', icon: <TrendingUp size={15} /> },

@@ -426,6 +426,178 @@ export const fetchSessions = async () => {
   return r.data as SessionInfo[]
 }
 
+// ---------- workspaces (the Claude session board) ----------
+// Mirrors GET /api/workspaces in backend/src/routes/workspaces.ts: thor's
+// collector snapshot merged with odin's own live processes. Every field is
+// re-validated here because the payload starts life as a file written by
+// another machine, and one bad record must not take the page down.
+
+export type WorkspaceState = 'running' | 'asking' | 'idle' | 'closed'
+export type WorkspaceArea = 'personal' | 'server' | 'work' | 'org-c'
+export type WorkspaceHealth = 'healthy' | 'stale' | 'unhealthy' | 'suspicious'
+
+export type WorkspaceSession = {
+  host: string
+  sessionId: string | null
+  pid: number | null
+  name: string | null
+  title: string | null
+  cwd: string
+  // The backend may send null; the leaf folder of cwd is the fallback so the
+  // page always has something to label a redacted session with.
+  project: string
+  area: WorkspaceArea
+  state: WorkspaceState
+  lastActivityUtc: string | null
+  startedAtUtc: string | null
+  transcriptBytes: number | null
+  messageCount: number | null
+  resumeCommand: string | null
+  redacted: boolean
+}
+
+export type WorkspaceHost = {
+  host: string
+  health: WorkspaceHealth
+  // Age of that host's snapshot, in seconds. Shown whenever health is not good.
+  ageSeconds: number | null
+  generatedAt: string | null
+  producerOk: boolean
+  sessionCount: number
+  claudeVersion: string | null
+  lastBootUtc: string | null
+  servedFromCache: boolean
+  droppedRecords: number
+  // Older sessions the API's payload cap left behind. Not a fault: thor keeps
+  // thousands of closed sessions and the route serves the newest slice.
+  truncatedRecords: number
+  error: string | null
+}
+
+export type Workspaces = {
+  generatedAt: string | null
+  hosts: WorkspaceHost[]
+  sessions: WorkspaceSession[]
+}
+
+// Either the board, or the fact that the route is not deployed on this backend.
+export type WorkspacesResult =
+  | { installed: true; data: Workspaces }
+  | { installed: false; status: number; detail: string | null }
+
+const WS_STATES: WorkspaceState[] = ['running', 'asking', 'idle', 'closed']
+const WS_AREAS: WorkspaceArea[] = ['personal', 'server', 'work', 'org-c']
+const WS_HEALTHS: WorkspaceHealth[] = ['healthy', 'stale', 'unhealthy', 'suspicious']
+
+const wsStr = (v: unknown): string | null => (typeof v === 'string' && v.trim().length > 0 ? v : null)
+const wsNum = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+const leafFolder = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
+
+function parseWorkspaceSession(raw: unknown, index: number): WorkspaceSession | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const cwd = wsStr(r.cwd)
+  if (!cwd) return null
+  const redacted = r.redacted === true
+  return {
+    host: wsStr(r.host) ?? `unknown-${index}`,
+    sessionId: wsStr(r.sessionId),
+    pid: wsNum(r.pid),
+    // A redacted session never gets a title or a name rendered, whatever the
+    // producer sent: that is client data and it stops here.
+    name: redacted ? null : wsStr(r.name),
+    title: redacted ? null : wsStr(r.title),
+    cwd,
+    project: wsStr(r.project) ?? leafFolder(cwd),
+    area: WS_AREAS.includes(r.area as WorkspaceArea) ? (r.area as WorkspaceArea) : 'personal',
+    state: WS_STATES.includes(r.state as WorkspaceState) ? (r.state as WorkspaceState) : 'idle',
+    lastActivityUtc: wsStr(r.lastActivityUtc),
+    startedAtUtc: wsStr(r.startedAtUtc),
+    transcriptBytes: wsNum(r.transcriptBytes),
+    messageCount: wsNum(r.messageCount),
+    resumeCommand: wsStr(r.resumeCommand),
+    redacted,
+  }
+}
+
+function parseWorkspaceHost(raw: unknown): WorkspaceHost | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const host = wsStr(r.host)
+  if (!host) return null
+  const known = WS_HEALTHS.includes(r.health as WorkspaceHealth)
+  return {
+    host,
+    // An unrecognized health value is itself a fault, so it reads as unhealthy
+    // rather than being quietly drawn as good.
+    health: known ? (r.health as WorkspaceHealth) : 'unhealthy',
+    ageSeconds: wsNum(r.ageSeconds),
+    generatedAt: wsStr(r.generatedAt),
+    producerOk: r.producerOk !== false,
+    sessionCount: wsNum(r.sessionCount) ?? 0,
+    claudeVersion: wsStr(r.claudeVersion),
+    lastBootUtc: wsStr(r.lastBootUtc),
+    servedFromCache: r.servedFromCache === true,
+    droppedRecords: wsNum(r.droppedRecords) ?? 0,
+    truncatedRecords: wsNum(r.truncatedRecords) ?? 0,
+    error: wsStr(r.error) ?? (known ? null : `unknown health value: ${String(r.health)}`),
+  }
+}
+
+const missingRouteStatus = (e: unknown): number | null => {
+  const status = (e as { response?: { status?: number } } | null)?.response?.status
+  return status === 404 || status === 501 ? status : null
+}
+
+const apiDetail = (e: unknown): string | null =>
+  wsStr((e as { detail?: unknown } | null)?.detail)
+  ?? wsStr((e as { response?: { data?: { error?: unknown } } } | null)?.response?.data?.error)
+
+export const fetchWorkspaces = async (): Promise<WorkspacesResult> => {
+  let payload: unknown
+  try {
+    payload = (await api.get<unknown>('/workspaces')).data
+  } catch (e) {
+    const status = missingRouteStatus(e)
+    if (status) return { installed: false, status, detail: apiDetail(e) }
+    throw e
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid workspaces response')
+  const p = payload as Record<string, unknown>
+  if (!Array.isArray(p.hosts) || !Array.isArray(p.sessions)) {
+    throw new Error(apiDetail(p) ?? 'Invalid workspaces response: hosts or sessions missing')
+  }
+  return {
+    installed: true,
+    data: {
+      generatedAt: wsStr(p.generatedAt),
+      hosts: p.hosts.map(parseWorkspaceHost).filter((h): h is WorkspaceHost => h !== null),
+      sessions: p.sessions
+        .map((s, i) => parseWorkspaceSession(s, i))
+        .filter((s): s is WorkspaceSession => s !== null),
+    },
+  }
+}
+
+// Launching a session on thor is not implemented on the backend yet, so a
+// 404/501 is reported as its own state: the page says "launcher not installed"
+// instead of showing a red failure the user can do nothing about.
+export type LaunchResult =
+  | { ok: true; detail: string | null }
+  | { ok: false; notInstalled: true; status: number; detail: string | null }
+
+export const launchSessionOnThor = async (sessionId: string | null, cwd: string): Promise<LaunchResult> => {
+  try {
+    const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>('/hosts/thor/launch', { sessionId, cwd })
+    if (r.data && r.data.ok === false) throw new Error(r.data.detail || r.data.error || 'launch failed')
+    return { ok: true, detail: wsStr(r.data?.detail) }
+  } catch (e) {
+    const status = missingRouteStatus(e)
+    if (status) return { ok: false, notInstalled: true, status, detail: apiDetail(e) }
+    throw new Error(apiDetail(e) ?? (e as Error).message ?? 'launch failed', { cause: e })
+  }
+}
+
 export const fetchAIUsage = async () => {
   const r = await api.get<AIUsage | { error?: string; detail?: string }>('/ai-usage')
   if (!r.data || typeof r.data !== 'object' || 'error' in r.data) throw new Error((r.data as { detail?: string }).detail || 'Invalid AI usage response')

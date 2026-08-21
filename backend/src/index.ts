@@ -22,6 +22,7 @@ import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
 import plexRoute from './routes/plex.js'
+import workspacesRoute from './routes/workspaces.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -122,6 +123,7 @@ app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
 app.use('/api', plexRoute)
+app.use('/api', workspacesRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit

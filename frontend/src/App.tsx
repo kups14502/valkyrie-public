@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
-  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone,
+  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -27,6 +27,7 @@ const Plex = lazy(() => import('./pages/Plex'))
 const Pad = lazy(() => import('./pages/Pad'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Phone = lazy(() => import('./pages/Phone'))
+const Sessions = lazy(() => import('./pages/Sessions'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +49,7 @@ function PageFallback() {
 
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
+  { to: '/sessions', label: 'sessions', icon: TerminalIcon },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -260,6 +262,7 @@ function Shell() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
+            <Route path="/sessions" element={<CenterPage><Sessions /></CenterPage>} />
             <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
             <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
             <Route path="/trade" element={<TradeBot />} />
