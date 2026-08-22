@@ -550,7 +550,8 @@ const missingRouteStatus = (e: unknown): number | null => {
   // 404/501 (never installed), 502 (thor asleep or not answering), 500 (the
   // route exists but is broken). Treating only 404/501 as "missing" left a bare
   // red error on screen for every other cause, which told the user nothing.
-  if (status === 404 || status === 501 || status === 502 || status === 503) return status
+  if (typeof status !== 'number') return null
+  if (status === 404 || status === 501) return status
   if (status >= 500) return status
   return null
 }
