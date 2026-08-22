@@ -414,7 +414,7 @@ export default function Sessions() {
 
       {launcherMissing && (
         <div className="border border-[var(--color-warning)]/50 px-3 py-2 text-xs text-[var(--color-warning)]">
-          Launcher not installed yet: POST /api/hosts/{LAUNCH_HOST}/launch answered {launcherMissing.status}.
+          Launcher unavailable: POST /api/hosts/{LAUNCH_HOST}/launch answered {launcherMissing.status}. 501 means it is not configured on the api host, 502 means {LAUNCH_HOST} is not answering.
           {launcherMissing.detail ? ` ${launcherMissing.detail}.` : ''} Copy a resume command instead, that path works today.
         </div>
       )}
