@@ -12,6 +12,10 @@ import { isTauri } from '../lib/auth'
 // health, filters) is detail that belongs below the fold, because it never once
 // answered the question actually being asked.
 
+// Named so the two buttons can say plainly which machine they act on: the
+// bare icons were indistinguishable and 'open' silently meant 'not here'.
+const LAUNCH_HOST = 'thor'
+
 const relAge = (iso: string | null): string => {
   if (!iso) return ''
   const ms = Date.now() - Date.parse(iso)
@@ -104,20 +108,20 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
             type="button"
             disabled={opening || busy || t.live || !t.latestSessionId}
             onClick={() => onOpen(t)}
-            title={t.live ? 'Already running on thor' : 'Reopen the newest session of this thread on thor'}
+            title={t.live ? `Already running on ${LAUNCH_HOST}` : `Reopen it in a terminal on ${LAUNCH_HOST}'s own desktop`}
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
           >
-            <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : 'open'}
+            <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : `on ${LAUNCH_HOST}`}
           </button>
         )}
         {isTauri() && t.latestSessionId && (
           <button
             type="button"
             onClick={() => { void openSessionHere(t.latestSessionId!).catch((e) => setLocalErr(String(e))) }}
-            title="Open it here, in a terminal on this machine, over SSH to thor"
-            className="inline-flex min-h-9 items-center border border-transparent px-2 text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+            title={`Open a terminal on THIS machine and resume over SSH to ${LAUNCH_HOST}`}
+            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
-            <Laptop size={12} />
+            <Laptop size={11} /> here
           </button>
         )}
         <button
