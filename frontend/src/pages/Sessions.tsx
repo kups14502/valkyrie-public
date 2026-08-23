@@ -387,7 +387,10 @@ export default function Sessions() {
           </div>
           <button
             type="button"
-            onClick={() => void qc.invalidateQueries({ queryKey: ['workspaces'] })}
+            onClick={() => {
+              void qc.invalidateQueries({ queryKey: ['workspaces'] })
+              void qc.invalidateQueries({ queryKey: ['threads'] })
+            }}
             disabled={board.isFetching}
             title="Re-read the board"
             className="inline-flex min-h-10 items-center gap-2 border border-[var(--color-border)] px-3 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"

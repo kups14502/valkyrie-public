@@ -132,7 +132,16 @@ export function ThreadBoard() {
   const qc = useQueryClient()
   const [showDone, setShowDone] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
-  const q = useQuery({ queryKey: ['threads'], queryFn: fetchThreads })
+  // Poll. Whether a thread is running changes the moment a terminal closes, and
+  // this list froze at page load: a stale live=true kept saying "running" and
+  // left the open button disabled, so a session you had just closed could not
+  // be reopened. Cheap to ask, and thor answers in about a second.
+  const q = useQuery({
+    queryKey: ['threads'],
+    queryFn: fetchThreads,
+    refetchInterval: 10_000,
+    refetchOnWindowFocus: true,
+  })
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['threads'] })
