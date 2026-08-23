@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Copy, Pencil, Play, RotateCcw, Square, Undo2 } from 'lucide-react'
 import {
-  fetchThreads, launchSessionOnThor, localHostname, openSessionHere, setThreadDisposition, setThreadLabel,
+  fetchThreads, launchSessionOnThor, localHostname, openSessionHere, setThreadDisposition, setThreadLabel, stopSessionOnThor,
   type ThreadDisposition, type WorkThread,
 } from '../lib/api'
 
@@ -14,6 +14,22 @@ import {
 // Named so the two buttons can say plainly which machine they act on: the
 // bare icons were indistinguishable and 'open' silently meant 'not here'.
 const LAUNCH_HOST = 'thor'
+
+// Claude's own status enum, translated. 'working' is the one worth animating:
+// it is the difference between a session mid-thought and one sitting idle,
+// which the board could not previously tell you at all.
+const ACTIVITY_TONE: Record<string, string> = {
+  working: 'var(--color-accent)',
+  asking:  'var(--color-warning)',
+  idle:    'var(--color-success)',
+  closed:  'var(--color-border)',
+}
+const ACTIVITY_WORD: Record<string, string> = {
+  working: 'working',
+  asking:  'waiting on you',
+  idle:    'open, idle',
+  closed:  'not running',
+}
 const LAUNCH_HOST_IP = '100.118.7.57'
 
 const relAge = (iso: string | null): string => {
@@ -28,12 +44,14 @@ const relAge = (iso: string | null): string => {
   return `${Math.round(h / 24)}d ago`
 }
 
-function ThreadRow({ t, here, onOpen, onDone, onLabel, opening, busy }: {
+function ThreadRow({ t, here, onOpen, onStop, onDone, onLabel, opening, stopping, busy }: {
   t: WorkThread
   /** This machine's name, or null in a browser. Null means the only place a
    *  terminal can be opened from here is the remote host. */
   here: string | null
   onOpen: (t: WorkThread) => void
+  onStop: (t: WorkThread) => void
+  stopping: boolean
   onDone: (t: WorkThread, d: ThreadDisposition) => void
   onLabel: (id: string, label: string) => void
   opening: boolean
@@ -59,9 +77,9 @@ function ThreadRow({ t, here, onOpen, onDone, onLabel, opening, busy }: {
           button from promising something it will refuse to do. */}
       <span
         aria-hidden
-        className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: t.liveCount > 0 ? 'var(--color-success)' : 'var(--color-border)' }}
-        title={t.liveCount === 0 ? 'nothing running' : `${t.liveCount} running in this folder`}
+        className={`h-1.5 w-1.5 shrink-0 rounded-full${t.activity === 'working' ? ' animate-pulse' : ''}`}
+        style={{ background: ACTIVITY_TONE[t.activity] }}
+        title={ACTIVITY_WORD[t.activity]}
       />
 
       <div className="min-w-0 flex-1">
@@ -99,7 +117,10 @@ function ThreadRow({ t, here, onOpen, onDone, onLabel, opening, busy }: {
         )}
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
           {t.path}{t.lastActivityUtc ? ` · ${relAge(t.lastActivityUtc)}` : ''}
-          {t.liveCount > 1 && <span className="text-[var(--color-success)]"> · {t.liveCount} running</span>}
+          {t.activity !== 'closed' && (
+            <span style={{ color: ACTIVITY_TONE[t.activity] }}> · {ACTIVITY_WORD[t.activity]}</span>
+          )}
+          {t.liveCount > 1 && <span className="text-[var(--color-text-faint)]"> · {t.liveCount} open here</span>}
         </div>
       </div>
 
@@ -117,6 +138,17 @@ function ThreadRow({ t, here, onOpen, onDone, onLabel, opening, busy }: {
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
           >
             <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : 'open'}
+          </button>
+        )}
+        {t.live && (
+          <button
+            type="button"
+            disabled={stopping}
+            onClick={() => onStop(t)}
+            title={`Stop it on ${LAUNCH_HOST}. The transcript is kept, so you can reopen it anywhere.`}
+            className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+          >
+            <Square size={11} /> {stopping ? 'stopping…' : 'stop'}
           </button>
         )}
         <button
@@ -148,6 +180,7 @@ export function ThreadBoard() {
   // Which machine the app itself is running on. Null in a browser, where the
   // page cannot start a process and the remote launcher is the only option.
   const [here, setHere] = useState<string | null>(null)
+  const [stoppingId, setStoppingId] = useState<string | null>(null)
   useEffect(() => { void localHostname().then(setHere) }, [])
   // Poll. Whether a thread is running changes the moment a terminal closes, and
   // this list froze at page load: a stale live=true kept saying "running" and
@@ -186,6 +219,12 @@ export function ThreadBoard() {
     mutationFn: openWhereIAm,
     onSettled: () => { setOpeningId(null); refresh() },
   })
+  // Stop ends the process and nothing else. The transcript stays, which is what
+  // makes "close it on thor, pick it up on mimir" a two-click move.
+  const stop = useMutation({
+    mutationFn: (t: WorkThread) => stopSessionOnThor(t.latestSessionId!),
+    onSettled: () => { setStoppingId(null); refresh() },
+  })
 
   const { active, done } = useMemo(() => {
     const all = q.data?.installed ? q.data.threads : []
@@ -216,6 +255,7 @@ export function ThreadBoard() {
   const closable = active.filter((t) => !t.live && t.latestSessionId)
 
   const onOpen = (t: WorkThread) => { setOpeningId(t.threadId); open.mutate(t) }
+  const onStop = (t: WorkThread) => { setStoppingId(t.threadId); stop.mutate(t) }
   const openAll = async () => {
     for (const t of closable) {
       setOpeningId(t.threadId)
@@ -229,7 +269,14 @@ export function ThreadBoard() {
     <div>
       <div className="mb-1 flex items-center justify-between gap-3">
         <div className="text-[11px] text-[var(--color-text-faint)]">
-          {active.length === 0 ? 'nothing open' : `${active.length} open · ${active.reduce((n, t) => n + t.liveCount, 0)} running`}
+          {active.length === 0
+            ? 'nothing open'
+            : [
+                `${active.length} open`,
+                `${active.reduce((n, t) => n + t.liveCount, 0)} running`,
+                active.some((t) => t.activity === 'working') ? `${active.filter((t) => t.activity === 'working').length} working` : null,
+                active.some((t) => t.activity === 'asking') ? `${active.filter((t) => t.activity === 'asking').length} waiting on you` : null,
+              ].filter(Boolean).join(' · ')}
         </div>
         {closable.length > 0 && (
           <button
@@ -251,7 +298,8 @@ export function ThreadBoard() {
 
       {active.map((t) => (
         <ThreadRow
-          key={t.threadId} t={t} here={here} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+          key={t.threadId} t={t} here={here} onOpen={onOpen} onStop={onStop}
+          opening={openingId === t.threadId} stopping={stoppingId === t.threadId} busy={busy}
           onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
           onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
         />
@@ -270,7 +318,8 @@ export function ThreadBoard() {
         <div className="mt-1 opacity-60">
           {done.map((t) => (
             <ThreadRow
-              key={t.threadId} t={t} here={here} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+              key={t.threadId} t={t} here={here} onOpen={onOpen} onStop={onStop}
+          opening={openingId === t.threadId} stopping={stoppingId === t.threadId} busy={busy}
               onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
               onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
             />
@@ -278,9 +327,9 @@ export function ThreadBoard() {
         </div>
       )}
 
-      {(disposition.isError || label.isError || open.isError) && (
+      {(disposition.isError || label.isError || open.isError || stop.isError) && (
         <div className="mt-2 text-[11px] text-[var(--color-danger)]">
-          {((disposition.error ?? label.error ?? open.error) as Error)?.message}
+          {((disposition.error ?? label.error ?? open.error ?? stop.error) as Error)?.message}
         </div>
       )}
     </div>

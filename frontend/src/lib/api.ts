@@ -458,6 +458,31 @@ export const fetchSessions = async () => {
   return r.data as SessionInfo[]
 }
 
+// ---------- hosts (multi-machine health) ----------
+// Mirrors GET /api/hosts: odin measured locally, thor/mimir read from the
+// stats each publishes into bifrost. A host with no fresh file comes back
+// online:false so the panel can show it as offline rather than erroring.
+export type HostMetric = { percent: number; used: number; total: number }
+export type HostStat = {
+  host: string
+  label: string
+  os: 'linux' | 'windows' | 'unknown'
+  online: boolean
+  stale: boolean
+  ts: number | null
+  uptime: number | null
+  cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
+  memory: HostMetric | null
+  disk: HostMetric | null
+  error?: string
+}
+export const fetchHosts = async () => {
+  const r = await api.get<{ hosts: HostStat[] } | { error?: string; detail?: string }>('/hosts')
+  const hosts = (r.data as { hosts?: unknown }).hosts
+  if (!Array.isArray(hosts)) throw new Error((r.data as { detail?: string }).detail || 'Invalid hosts response')
+  return hosts as HostStat[]
+}
+
 // ---------- workspaces (the Claude session board) ----------
 // Mirrors GET /api/workspaces in backend/src/routes/workspaces.ts: thor's
 // collector snapshot merged with odin's own live processes. Every field is
@@ -601,6 +626,7 @@ export type WorkThread = {
   latestSessionId: string | null
   live: boolean
   liveCount: number
+  activity: 'working' | 'asking' | 'idle' | 'closed'
   labelSource: 'user' | 'topic' | 'folder'
   userLabelled: boolean
   redacted: boolean
@@ -629,6 +655,9 @@ const parseThread = (raw: unknown): WorkThread | null => {
     latestSessionId: wsStr(r.latestSessionId),
     live: r.live === true,
     liveCount: wsNum(r.liveCount) ?? 0,
+    activity: (['working', 'asking', 'idle', 'closed'] as const).includes(wsStr(r.activity) as never)
+      ? (wsStr(r.activity) as 'working' | 'asking' | 'idle' | 'closed')
+      : 'closed',
     labelSource: src === 'user' || src === 'topic' ? src : 'folder',
     userLabelled: r.userLabelled === true,
     redacted: r.redacted === true,
@@ -660,6 +689,9 @@ export const fetchThreads = async (): Promise<ThreadsResult> => {
 // the security boundary.
 // Which machine the app is running on, lowercased, or null in a browser. Lets
 // "open" mean the same thing everywhere: put a terminal in front of me.
+export const stopSessionOnThor = async (sessionId: string) =>
+  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/stop', { sessionId })).data
+
 export const localHostname = async (): Promise<string | null> => {
   if (!isTauri()) return null
   try {

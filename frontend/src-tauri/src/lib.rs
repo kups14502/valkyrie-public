@@ -54,7 +54,17 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
     let remote = format!("brendon@{host}");
-    let resume = format!("claude -r {session_id}");
+    // NOT a bare `claude -r`. An SSH login starts in the home directory, so that
+    // resumed the session in the wrong place: it prompted to trust the folder,
+    // relative paths resolved somewhere unexpected, and the session's registry
+    // entry began reporting the home directory as its cwd, which the desk
+    // capture then recorded and a later restore would have made real.
+    // Resume.ps1 runs on the far end and works out the right directory there,
+    // so no path ever crosses the wire.
+    const RESUME_PS1: &str = r"C:\Thor\tools\session-board\Resume.ps1";
+    let resume = format!(
+      "powershell -NoProfile -ExecutionPolicy Bypass -File {RESUME_PS1} -SessionId {session_id}"
+    );
 
     // Prefer Windows Terminal for the tab, but never depend on it. wt.exe is a
     // Store app-execution alias: on mimir it resolves into a different user's
