@@ -43,23 +43,52 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
   {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // wt.exe here is fine: this runs from the app, which the user launched, so
-    // it has the interactive activation context that a background service on
-    // thor did not. -t forces a pty, without which the TUI will not start.
-    std::process::Command::new("wt.exe")
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+    let remote = format!("brendon@{host}");
+    let resume = format!("claude -r {session_id}");
+
+    // Prefer Windows Terminal for the tab, but never depend on it. wt.exe is a
+    // Store app-execution alias: on mimir it resolves into a different user's
+    // WindowsApps folder and launching it produced no window at all, the same
+    // way it silently failed from a service on thor. So try it, and if the spawn
+    // errors fall back to conhost, which is always present at a fixed path.
+    let wt = std::process::Command::new("wt.exe")
       .args([
         "new-tab",
         "--title",
         &format!("{host} · claude"),
         "ssh",
         "-t",
-        &format!("brendon@{host}"),
-        &format!("claude -r {session_id}"),
+        &remote,
+        &resume,
       ])
       .creation_flags(CREATE_NO_WINDOW)
+      .spawn();
+
+    if wt.is_ok() {
+      return Ok(());
+    }
+
+    // ssh.exe lives in System32\OpenSSH on every supported build. Spawned with
+    // its own console so there is a visible window to type into, and -t forces
+    // the pty the TUI needs.
+    let ssh = std::path::Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
+      .join("System32")
+      .join("OpenSSH")
+      .join("ssh.exe");
+    let exe = if ssh.exists() {
+      ssh.to_string_lossy().into_owned()
+    } else {
+      "ssh.exe".into()
+    };
+
+    std::process::Command::new(exe)
+      .args(["-t", &remote, &resume])
+      .creation_flags(CREATE_NEW_CONSOLE)
       .spawn()
       .map(|_| ())
-      .map_err(|e| format!("could not start Windows Terminal: {e}"))
+      .map_err(|e| format!("could not open a terminal: {e}"))
   }
 
   #[cfg(not(target_os = "windows"))]
