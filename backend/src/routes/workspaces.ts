@@ -140,7 +140,14 @@ function nonNegativeOrNull(v: unknown): number | null {
   return v
 }
 
-function shouldRedact(cwd: string): boolean {
+function shouldRedact(cwd: string, rawRedacted?: unknown): boolean {
+  // Trust the producer. thor decides this, via redactClients in its
+  // board.config.json, and it is the only side that can see the real paths
+  // anyway. Recomputing here used to override that: the collector published 0
+  // redacted sessions and this route still masked 137 of them, because it was
+  // pattern-matching client names in a cwd the producer had deliberately left
+  // whole. The patterns stay as a backstop for a record with no flag at all.
+  if (typeof rawRedacted === 'boolean') return rawRedacted
   return REDACT_RES.some((re) => re.test(cwd))
 }
 
@@ -194,7 +201,7 @@ function validateThorSession(raw: unknown): WorkspaceSession | null {
     pid = raw.pid
   }
 
-  const redacted = shouldRedact(cwd) || raw.redacted === true
+  const redacted = shouldRedact(cwd, raw.redacted)
   // The redaction rule allows exactly this much of a client session to leave
   // the machine: the leaf folder, area, state, timestamps and the id. So the
   // path itself is truncated to its leaf, the incoming project label is not
