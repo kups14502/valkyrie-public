@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Play, Square, Undo2 } from 'lucide-react'
+import { Check, Copy, Play, RotateCcw, Square, Undo2 } from 'lucide-react'
 import {
   fetchSessionList, launchSessionOnThor, localHostname, openSessionHere,
   setSessionDone, stopSessionOnThor,
@@ -148,6 +148,7 @@ export function SessionBoard() {
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
+  const [recovering, setRecovering] = useState(false)
 
   useEffect(() => { void localHostname().then(setHere) }, [])
 
@@ -184,11 +185,15 @@ export function SessionBoard() {
     onSuccess: refresh,
   })
 
-  const { live, rest } = useMemo(() => {
+  const { live, rest, desk } = useMemo(() => {
     const all = q.data?.installed ? q.data.sessions : []
     return {
       live: all.filter((s) => s.live),
       rest: all.filter((s) => !s.live),
+      // The desk is what was open on thor recently, so recovering it after a
+      // reboot is one action rather than a click per row. Already-running and
+      // finished sessions are excluded, so pressing it twice does nothing.
+      desk: all.filter((s) => s.onDesk && !s.live && !s.done),
     }
   }, [q.data])
 
@@ -202,6 +207,23 @@ export function SessionBoard() {
   }
   if (q.isError) return <div className="py-2 text-[11px] text-[var(--color-danger)]">{(q.error as Error)?.message}</div>
 
+  // Serial, with the same pause the launcher uses: Windows Terminal drops tabs
+  // when several arrive at once.
+  const recoverDesk = async () => {
+    setRecovering(true)
+    for (const s of desk) {
+      setOpeningId(s.sessionId)
+      try {
+        if (remote) await openSessionHere(s.sessionId, HOST_IP)
+        else await launchSessionOnThor(s.sessionId, '')
+      } catch { /* one failure must not abandon the rest */ }
+      await new Promise((r) => setTimeout(r, 700))
+    }
+    setOpeningId(null)
+    setRecovering(false)
+    refresh()
+  }
+
   const busy = done.isPending
   const shown = showAll ? rest : rest.slice(0, SHOWN_BY_DEFAULT)
   const hidden = rest.length - shown.length
@@ -214,9 +236,22 @@ export function SessionBoard() {
 
   return (
     <div>
-      <div className="mb-1 text-[11px] text-[var(--color-text-faint)]">
-        {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
-        {remote && here ? ` · opening on ${here}` : ''}
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="text-[11px] text-[var(--color-text-faint)]">
+          {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
+          {remote && here ? ` · opening on ${here}` : ''}
+        </div>
+        {desk.length > 0 && (
+          <button
+            type="button"
+            disabled={recovering || openingId !== null}
+            onClick={() => void recoverDesk()}
+            title={`Reopen the ${desk.length} session(s) that were open on ${HOST} and are not running now`}
+            className="inline-flex min-h-9 items-center gap-2 border border-[var(--color-accent)] px-3 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
+          >
+            <RotateCcw size={12} /> {recovering ? 'recovering…' : `recover my desk (${desk.length})`}
+          </button>
+        )}
       </div>
 
       {live.map((s) => (

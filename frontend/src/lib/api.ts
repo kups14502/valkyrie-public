@@ -630,6 +630,7 @@ export type WorkSession = {
   lastActivityUtc: string | null
   bytes: number
   live: boolean
+  onDesk: boolean
   activity: SessionActivity
   done: boolean
   resumeCommand: string | null
@@ -656,6 +657,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
     lastActivityUtc: wsStr(r.lastActivityUtc),
     bytes: wsNum(r.bytes) ?? 0,
     live: r.live === true,
+    onDesk: r.onDesk === true,
     activity: (ACTIVITIES as string[]).includes(act ?? '') ? (act as SessionActivity) : 'closed',
     done: wsStr(r.disposition) === 'done',
     resumeCommand: wsStr(r.resumeCommand),
