@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Lock, Play, RefreshCw, Rocket } from 'lucide-react'
 import { Card } from '../components/Card'
-import { ThreadBoard } from '../components/ThreadBoard'
+import { SessionBoard } from '../components/SessionBoard'
 import {
   fetchWorkspaces, launchSessionOnThor,
   type WorkspaceHealth, type WorkspaceHost, type WorkspaceSession, type WorkspaceState,
@@ -427,7 +427,7 @@ export default function Sessions() {
       {/* The page. Everything below is detail, folded away by default: the
           455-row session list never once answered "what am I working on". */}
       <Card title="working on">
-        <ThreadBoard />
+        <SessionBoard />
       </Card>
 
       <button

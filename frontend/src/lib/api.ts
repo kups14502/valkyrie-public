@@ -617,6 +617,74 @@ const apiDetail = (e: unknown): string | null =>
   wsStr((e as { detail?: unknown } | null)?.detail)
   ?? wsStr((e as { response?: { data?: { error?: unknown } } } | null)?.response?.data?.error)
 
+// One row per real session, newest first. Replaces the thread grouping, which
+// had to guess which session a folder meant.
+export type SessionActivity = 'working' | 'asking' | 'idle' | 'closed'
+
+export type WorkSession = {
+  sessionId: string
+  title: string
+  titleFromClaude: boolean
+  project: string
+  cwd: string | null
+  lastActivityUtc: string | null
+  bytes: number
+  live: boolean
+  activity: SessionActivity
+  done: boolean
+  resumeCommand: string | null
+}
+
+export type SessionsResult =
+  | { installed: true; sessions: WorkSession[]; hookRunsSkipped: number }
+  | { installed: false; status: number; detail: string | null }
+
+const ACTIVITIES: SessionActivity[] = ['working', 'asking', 'idle', 'closed']
+
+const parseSession = (raw: unknown): WorkSession | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = wsStr(r.sessionId)
+  if (!id) return null
+  const act = wsStr(r.activity)
+  return {
+    sessionId: id,
+    title: wsStr(r.title) ?? id.slice(0, 8),
+    titleFromClaude: r.titleFromClaude === true,
+    project: wsStr(r.project) ?? '',
+    cwd: wsStr(r.cwd),
+    lastActivityUtc: wsStr(r.lastActivityUtc),
+    bytes: wsNum(r.bytes) ?? 0,
+    live: r.live === true,
+    activity: (ACTIVITIES as string[]).includes(act ?? '') ? (act as SessionActivity) : 'closed',
+    done: wsStr(r.disposition) === 'done',
+    resumeCommand: wsStr(r.resumeCommand),
+  }
+}
+
+export const fetchSessionList = async (): Promise<SessionsResult> => {
+  let payload: unknown
+  try {
+    payload = (await api.get<unknown>('/hosts/thor/sessions')).data
+  } catch (e) {
+    const status = missingRouteStatus(e)
+    if (status) return { installed: false, status, detail: apiDetail(e) }
+    throw e
+  }
+  const p = (payload ?? {}) as Record<string, unknown>
+  if (!Array.isArray(p.sessions)) throw new Error(apiDetail(p) ?? 'Invalid sessions response')
+  return {
+    installed: true,
+    sessions: p.sessions.map(parseSession).filter((x): x is WorkSession => x !== null),
+    hookRunsSkipped: wsNum(p.hookRunsSkipped) ?? 0,
+  }
+}
+
+export const setSessionDone = async (sessionId: string, done: boolean) =>
+  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/sessions/disposition', {
+    sessionId, disposition: done ? 'done' : 'open',
+  })).data
+
 export type ThreadDisposition = 'active' | 'parked' | 'done'
 
 export type WorkThread = {

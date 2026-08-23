@@ -143,6 +143,43 @@ router.post('/hosts/thor/restore-desk', async (req, res) => {
   }
 })
 
+// --------------------------------------------------------------- sessions ----
+// The list the page draws: real sessions, newest first, one row per session.
+//
+// This replaces the thread grouping. Threads existed to tame 455 rows, but 92%
+// of those were the Obsidian hook's summariser runs; filtered out, only 265 are
+// real. Grouping also had to guess which session a folder meant, and guessed
+// wrong: it resumed a hook run and showed its own JSON prompt as the
+// conversation. One row per session leaves nothing to guess.
+
+const SESSION_DISPOSITIONS = new Set(['open', 'done'])
+
+router.get('/hosts/thor/sessions', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    // Reading transcripts is cached on thor but a cold call still walks the
+    // tree, so this gets a longer leash than the other proxies.
+    const r = await callLauncher('/sessions', { method: 'GET' }, 60_000)
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/sessions/disposition', async (req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  const sessionId = String((req.body ?? {}).sessionId ?? '')
+  const disposition = String((req.body ?? {}).disposition ?? '')
+  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
+  if (!SESSION_DISPOSITIONS.has(disposition)) return res.status(400).json({ error: 'disposition must be open or done' })
+  try {
+    const r = await callLauncher('/sessions/disposition', { method: 'POST', body: { sessionId, disposition } }, 60_000)
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
 // ---------------------------------------------------------------- threads ----
 // A thread is the unit above a session: the folder, with every session that ran
 // in it. 455 sessions in a week is unreadable; 29 threads is a list. Disposition
