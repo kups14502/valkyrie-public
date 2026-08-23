@@ -52,8 +52,8 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
       <span
         aria-hidden
         className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: t.live ? 'var(--color-success)' : 'var(--color-border)' }}
-        title={t.live ? 'running now' : 'not running'}
+        style={{ background: t.liveCount > 0 ? 'var(--color-success)' : 'var(--color-border)' }}
+        title={t.liveCount === 0 ? 'nothing running' : `${t.liveCount} running in this folder`}
       />
 
       <div className="min-w-0 flex-1">
@@ -91,6 +91,7 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
         )}
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
           {t.path}{t.lastActivityUtc ? ` · ${relAge(t.lastActivityUtc)}` : ''}
+          {t.liveCount > 1 && <span className="text-[var(--color-success)]"> · {t.liveCount} running</span>}
         </div>
       </div>
 
@@ -203,7 +204,7 @@ export function ThreadBoard() {
     <div>
       <div className="mb-1 flex items-center justify-between gap-3">
         <div className="text-[11px] text-[var(--color-text-faint)]">
-          {active.length === 0 ? 'nothing open' : `${active.length} open · ${active.filter((t) => t.live).length} running`}
+          {active.length === 0 ? 'nothing open' : `${active.length} open · ${active.reduce((n, t) => n + t.liveCount, 0)} running`}
         </div>
         {closable.length > 0 && (
           <button
