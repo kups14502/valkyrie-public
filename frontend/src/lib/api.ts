@@ -466,7 +466,7 @@ export type HostMetric = { percent: number; used: number; total: number }
 export type HostStat = {
   host: string
   label: string
-  os: 'linux' | 'windows' | 'unknown'
+  os: 'linux' | 'windows'
   online: boolean
   stale: boolean
   ts: number | null

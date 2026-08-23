@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Card, Stat } from '../components/Card'
-import { Sparkline } from '../components/Sparkline'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchSystemHistory, fetchLauncher, fetchTradeBotStatus, type AIClientUsage } from '../lib/api'
+import { Card } from '../components/Card'
+import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -21,49 +20,12 @@ const fmtAgo = (ms: number | null): string | null => {
 
 const clampPct = (pct: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(pct) ? pct : 0)))
 const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(n)
-const fmtCost = (n: number) => n > 0 ? `$${n.toFixed(n >= 10 ? 0 : 2)}` : '—'
-
-function UsageBar({ pct, label, sub, warn, claude }: { pct: number; label: string; sub?: string; warn?: boolean; claude?: boolean }) {
-  const clamped = clampPct(pct)
-  const color = claude
-    ? (clamped >= 85 ? 'var(--color-danger)' : '#D97757')
-    : (warn || clamped >= 90 ? 'var(--color-danger)' : clamped >= 70 ? 'var(--color-warning)' : 'var(--color-accent)')
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-[var(--color-text-dim)]">{label}</span>
-        <span className="shrink-0 font-semibold text-[var(--color-text)]">{clamped}% used</span>
-      </div>
-      <div className="h-1.5 w-full rounded-full bg-[var(--color-surface-2)]">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${clamped}%`, backgroundColor: color }} />
-      </div>
-      {sub && <div className="text-[11px] text-[var(--color-text-faint)]">{sub}</div>}
-    </div>
-  )
-}
 
 const fmtUptime = (s: number) => {
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
   const m = Math.floor((s % 3600) / 60)
   return d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`
-}
-
-const hasSystemShape = (value: unknown): value is {
-  cpu: { usage: number; cores: number; loadAvg: [number, number, number] }
-  memory: { percent: number; used: number; total: number }
-  disk: { percent: number; used: number; total: number }
-  uptime: number
-  hostname: string
-} => {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, any>
-  return Boolean(
-    v.cpu && typeof v.cpu.usage === 'number' && typeof v.cpu.cores === 'number' && Array.isArray(v.cpu.loadAvg) &&
-    v.memory && typeof v.memory.percent === 'number' && typeof v.memory.used === 'number' && typeof v.memory.total === 'number' &&
-    v.disk && typeof v.disk.percent === 'number' && typeof v.disk.used === 'number' && typeof v.disk.total === 'number' &&
-    typeof v.uptime === 'number' && typeof v.hostname === 'string'
-  )
 }
 
 type Tone = 'ok' | 'watch' | 'alert' | 'dim'
@@ -206,60 +168,54 @@ function fmtResetAt(iso: string | null | undefined): string | undefined {
   return `resets ${new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
 }
 
-function AIClientCard({ client }: { client: AIClientUsage }) {
+// Claude's usage colors: warm accent until it's close to a limit, then red.
+const claudeBarColor = (p: number) => (clampPct(p) >= 85 ? 'var(--color-danger)' : '#D97757')
+const claudePctText = (p: number) => (clampPct(p) >= 85 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]')
+
+// One account, one line: name, plan, the week bar (the number that actually
+// matters), week %, and the 5h % trailing. Reset times live on hover so the row
+// stays a single scannable line instead of a boxed card with four sub-rows.
+function AIClientRow({ client }: { client: AIClientUsage }) {
+  const q = client.quota
+  const plan = client.subscription.replace(/ plan$/i, '')
+  const title = q
+    ? `5h: ${fmtResetAt(q.sessionResetsAt) ?? '—'} · week: ${fmtResetAt(q.weeklyResetsAt) ?? '—'}`
+    : client.authError || undefined
   return (
-    <div className="flex min-w-0 flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{client.label}</div>
-        <div className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-          claude · {client.subscription.replace(/ plan$/i, '')}
-        </div>
+    <div
+      title={title}
+      className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-2 text-sm last:border-b-0"
+    >
+      <div className="w-28 shrink-0 truncate font-semibold text-[var(--color-text)] sm:w-40">{client.label}</div>
+      <div className="hidden w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:block">
+        {plan}
       </div>
-      {client.quota ? (
-        <div className="space-y-2.5">
-          <UsageBar
-            claude
-            pct={client.quota.sessionPct}
-            label="5h session"
-            sub={fmtResetAt(client.quota.sessionResetsAt)}
-          />
-          <UsageBar
-            claude
-            pct={client.quota.weeklyPct}
-            label="Week"
-            sub={fmtResetAt(client.quota.weeklyResetsAt)}
-          />
-        </div>
-      ) : (
-        // A dead sign-in used to fill the whole card with a warning box, which
-        // read as "this account is gone" and left the card taller than its
-        // neighbours. The local token history is still real, so show that and
-        // keep the auth badge to one line.
-        <div className="flex flex-col gap-2">
-          {client.authError && (
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--color-warning)]">
-                {client.authError}
-              </span>
-              <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
-                claude /login
-              </span>
-            </div>
-          )}
-          <div className="grid grid-cols-3 gap-2">
-            {([
-              ['Today', client.today],
-              ['7d', client.last7d],
-              ['30d', client.last30d],
-            ] as const).map(([label, bucket]) => (
-              <div key={label} className="rounded bg-[var(--color-surface)] px-2 py-1.5">
-                <div className="text-[10px] text-[var(--color-text-faint)]">{label}</div>
-                <div className="text-xs font-semibold text-[var(--color-text)]">{fmtTokens(bucket.tokens)}</div>
-                <div className="text-[10px] text-[var(--color-text-faint)]">{fmtCost(bucket.costUSD)}</div>
-              </div>
-            ))}
+      {q ? (
+        <>
+          <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${clampPct(q.weeklyPct)}%`, backgroundColor: claudeBarColor(q.weeklyPct) }}
+            />
           </div>
-        </div>
+          <div className={`w-16 shrink-0 text-right font-semibold tabular-nums ${claudePctText(q.weeklyPct)}`}>
+            {clampPct(q.weeklyPct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">wk</span>
+          </div>
+          <div className="w-16 shrink-0 text-right tabular-nums text-[var(--color-text-dim)]">
+            {clampPct(q.sessionPct)}% <span className="text-[10px] text-[var(--color-text-faint)]">5h</span>
+          </div>
+        </>
+      ) : (
+        // Dead sign-in: no quota to draw, so the line reports the auth state and
+        // today's real token spend instead of a bar. One line, same height.
+        <>
+          <div className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--color-warning)]">
+            {client.authError || 'not signed in'}
+          </div>
+          <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
+            {fmtTokens(client.today.tokens)} today
+          </div>
+        </>
       )}
     </div>
   )
@@ -281,8 +237,8 @@ function AIUsageHero() {
       ) : aiUsage.error ? (
         <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {sorted.map((client) => <AIClientCard key={client.id} client={client} />)}
+        <div className="flex flex-col">
+          {sorted.map((client) => <AIClientRow key={client.id} client={client} />)}
         </div>
       )}
     </Card>
@@ -380,21 +336,87 @@ function TradeBotCard() {
   )
 }
 
+// Usage color shared by every host bar: calm accent, amber past 80, red past 90.
+const usageColor = (p: number) =>
+  clampPct(p) >= 90 ? 'var(--color-danger)' : clampPct(p) >= 80 ? 'var(--color-warning)' : 'var(--color-accent)'
+
+function HostBar({ label, pct, sub }: { label: string; pct: number | null; sub?: string }) {
+  const c = pct == null ? null : clampPct(pct)
+  return (
+    <div className="flex items-center gap-2.5" title={sub}>
+      <span className="w-9 shrink-0 text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{label}</span>
+      <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+        {c != null && (
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
+        )}
+      </div>
+      <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
+    </div>
+  )
+}
+
+// One machine: name + a status dot, three usage bars, one footer line. odin,
+// thor, and mimir all render identically, so the fleet reads as one list rather
+// than one rich card and two afterthoughts.
+function HostCard({ h }: { h: HostStat }) {
+  const status = !h.online
+    ? { label: 'offline', color: 'var(--color-danger)' }
+    : h.stale
+    ? { label: 'stale', color: 'var(--color-warning)' }
+    : { label: 'online', color: 'var(--color-success)' }
+  const load = h.cpu?.loadAvg ? `load ${h.cpu.loadAvg[0].toFixed(2)}` : null
+  const cores = h.cpu?.cores ? `${h.cpu.cores} cores` : null
+  const up = h.uptime != null ? `up ${fmtUptime(h.uptime)}` : null
+  const footer = [cores, load, up].filter(Boolean).join(' · ')
+  const memSub = h.memory ? `${fmtBytes(h.memory.used)} / ${fmtBytes(h.memory.total)}` : undefined
+  const diskSub = h.disk ? `${fmtBytes(h.disk.used)} / ${fmtBytes(h.disk.total)}` : undefined
+  return (
+    <div className="space-y-2.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-sm font-semibold text-[var(--color-text)]">{h.label}</span>
+          <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{h.os}</span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: status.color }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
+          {status.label}
+        </span>
+      </div>
+      {h.online ? (
+        <>
+          <HostBar label="cpu" pct={h.cpu?.usage ?? null} sub={cores ?? undefined} />
+          <HostBar label="mem" pct={h.memory?.percent ?? null} sub={memSub} />
+          <HostBar label="disk" pct={h.disk?.percent ?? null} sub={diskSub} />
+          {footer && <div className="pt-0.5 text-[10px] text-[var(--color-text-faint)]">{footer}</div>}
+        </>
+      ) : (
+        <div className="text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
+      )}
+    </div>
+  )
+}
+
+function HostsCard() {
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts, refetchInterval: 30_000 })
+  return (
+    <Card title="Hosts">
+      {hosts.isLoading && !hosts.data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : hosts.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Host telemetry unavailable</div>
+      ) : (
+        <div className="space-y-3">
+          {(hosts.data ?? []).map((h) => <HostCard key={h.host} h={h} />)}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Dashboard() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
-  const history = useQuery({ queryKey: ['system-history'], queryFn: fetchSystemHistory, refetchInterval: 30_000 })
-  const launcher = useQuery({ queryKey: ['launcher'], queryFn: fetchLauncher, refetchInterval: 60_000 })
 
-  const samples = history.data?.samples ?? []
-  const cpuSeries = samples.map((s) => s.cpu)
-  const memSeries = samples.map((s) => s.mem)
-  const diskSeries = samples.map((s) => s.disk)
-
-  const sysError = sys.error as { isUnauthorized?: boolean; isBackendUnavailable?: boolean; detail?: string; message?: string } | null
-  const sysUnauthorized = Boolean(sysError?.isUnauthorized)
-  const sysBackendUnavailable = Boolean(sysError?.isBackendUnavailable)
-  const sysValid = hasSystemShape(sys.data)
   const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
 
   return (
@@ -429,38 +451,6 @@ export default function Dashboard() {
         </div>
 
         <div className="order-3 min-w-0 space-y-6 xl:order-2">
-          <Card title="Launcher">
-            {launcher.isLoading && !launcher.data ? (
-              <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-            ) : launcher.error ? (
-              <div className="text-sm text-[var(--color-danger)]">Launcher unavailable</div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-                {(launcher.data ?? []).map((s) => {
-                  const dot = s.health === 'alive' ? 'bg-[var(--color-success)]' : s.health === 'down' ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-text-faint)]'
-                  const tone = s.health === 'alive' ? 'text-[var(--color-text)]' : s.health === 'down' ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-faint)]'
-                  return (
-                    <a
-                      key={s.id}
-                      href={s.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`flex items-center justify-between gap-2 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-2.5 transition hover:border-[var(--color-accent)] active:border-[var(--color-accent)] ${tone}`}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className={`h-1.5 w-1.5 shrink-0 ${dot}`} aria-hidden />
-                        <span className="truncate text-sm">{s.name}</span>
-                      </span>
-                      {s.latencyMs != null && (
-                        <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{s.latencyMs}ms</span>
-                      )}
-                    </a>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
-
           <Card title={`Sessions (${sessionsList.length})`}>
             {sessionsList.length > 0 ? (
               <div className="space-y-2">
@@ -506,50 +496,7 @@ export default function Dashboard() {
         </div>
 
         <div className="order-2 min-w-0 xl:sticky xl:top-24 xl:order-3">
-          <Card title="Server">
-            {sys.isLoading ? (
-              <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-            ) : sysUnauthorized ? (
-              <div className="space-y-1 text-sm">
-                <div className="text-[var(--color-warning)]">Access handshake required</div>
-                <div className="text-[var(--color-text-dim)]">API is online, but this session is not passing auth yet.</div>
-              </div>
-            ) : sysBackendUnavailable ? (
-              <div className="space-y-1 text-sm">
-                <div className="text-[var(--color-danger)]">API route unavailable</div>
-                <div className="text-[var(--color-text-dim)]">The frontend cannot currently reach the telemetry API from this host.</div>
-              </div>
-            ) : sys.error ? (
-              <div className="space-y-1 text-sm">
-                <div className="text-[var(--color-danger)]">Telemetry unavailable</div>
-                {sysError?.detail || sysError?.message ? <div className="text-[var(--color-text-dim)]">{sysError.detail || sysError.message}</div> : null}
-              </div>
-            ) : sys.data && sysValid ? (
-              <div className="grid grid-cols-1 gap-4">
-                <Stat
-                  label="CPU"
-                  value={`${sys.data.cpu.usage.toFixed(1)}%`}
-                  sub={`${sys.data.cpu.cores} cores · load ${sys.data.cpu.loadAvg[0].toFixed(2)}`}
-                  chart={<Sparkline values={cpuSeries} color="var(--color-accent)" />}
-                />
-                <Stat
-                  label="Memory"
-                  value={`${sys.data.memory.percent.toFixed(0)}%`}
-                  sub={`${fmtBytes(sys.data.memory.used)} / ${fmtBytes(sys.data.memory.total)}`}
-                  chart={<Sparkline values={memSeries} color="#7a5cff" />}
-                />
-                <Stat
-                  label="Disk"
-                  value={`${sys.data.disk.percent.toFixed(0)}%`}
-                  sub={`${fmtBytes(sys.data.disk.used)} / ${fmtBytes(sys.data.disk.total)}`}
-                  chart={<Sparkline values={diskSeries} color="#48e3ce" />}
-                />
-                <Stat label="Uptime" value={fmtUptime(sys.data.uptime)} sub={sys.data.hostname} />
-              </div>
-            ) : sys.data ? (
-              <div className="text-sm text-[var(--color-warning)]">System data shape was invalid.</div>
-            ) : null}
-          </Card>
+          <HostsCard />
         </div>
       </div>
     </div>

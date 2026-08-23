@@ -10,6 +10,7 @@ import { requireAuth } from './middleware/auth.js'
 import authRoute from './routes/auth.js'
 import updatesRoute from './routes/updates.js'
 import systemRoute from './routes/system.js'
+import hostsRoute from './routes/hosts.js'
 import sessionsRoute from './routes/sessions.js'
 import aiUsageRoute from './routes/aiUsage.js'
 import projectsRoute from './routes/projects.js'
@@ -112,6 +113,7 @@ app.use('/api', updatesRoute)
 
 app.use('/api', requireAuth)
 app.use('/api', systemRoute)
+app.use('/api', hostsRoute)
 app.use('/api', sessionsRoute)
 app.use('/api', aiUsageRoute)
 app.use('/api', projectsRoute)

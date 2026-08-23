@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Server, KeyRound, Activity as ActivityIcon, Menu, X, TrendingUp, Search,
+import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
@@ -47,16 +47,16 @@ function PageFallback() {
   )
 }
 
+// Services, Vault, and Activity were pulled from the nav (unused day to day);
+// they stay routable and remain in the Ctrl+K palette. Seven items now fit one
+// row at lg, so there is no orphaned second row.
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
-  { to: '/vault', label: 'vault', icon: KeyRound },
   { to: '/slop', label: 'slop', icon: Film },
-  { to: '/services', label: 'services', icon: Server },
-  { to: '/activity', label: 'activity', icon: ActivityIcon },
   { to: '/settings', label: 'settings', icon: SettingsIcon },
 ]
 
@@ -153,12 +153,13 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   )
 }
 
-function CenterPage({ children }: { children: ReactNode }) {
-  return (
-    <div className="xl:grid xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:gap-6">
-      <div className="xl:col-start-2">{children}</div>
-    </div>
-  )
+// One shared width for every page. Fluid below the cap so it scales with the
+// device, then centered on very wide screens so line lengths stay sane. Every
+// tabbed route uses this, so nothing is full-bleed while its neighbor sits in a
+// narrow column any more. The device home screens (pad/phone) keep their own
+// full-screen layouts.
+function PageContainer({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-[1800px]">{children}</div>
 }
 
 function Shell() {
@@ -260,17 +261,17 @@ function Shell() {
           <ErrorBoundary compact key={location.pathname}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/lights" element={<CenterPage><Lights /></CenterPage>} />
-            <Route path="/sessions" element={<CenterPage><Sessions /></CenterPage>} />
-            <Route path="/services" element={<CenterPage><Services /></CenterPage>} />
-            <Route path="/vault" element={<CenterPage><Vault /></CenterPage>} />
-            <Route path="/trade" element={<TradeBot />} />
-            <Route path="/slop" element={<SlopFactory />} />
-            <Route path="/activity" element={<CenterPage><Activity /></CenterPage>} />
-            <Route path="/plex" element={<Plex />} />
+            <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
+            <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
+            <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
+            <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
+            <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
+            <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />
+            <Route path="/slop" element={<PageContainer><SlopFactory /></PageContainer>} />
+            <Route path="/activity" element={<PageContainer><Activity /></PageContainer>} />
+            <Route path="/plex" element={<PageContainer><Plex /></PageContainer>} />
             <Route path="/pad" element={<Pad />} />
-            <Route path="/settings" element={<CenterPage><Settings /></CenterPage>} />
+            <Route path="/settings" element={<PageContainer><Settings /></PageContainer>} />
             <Route path="/phone" element={<Phone />} />
           </Routes>
           </ErrorBoundary>
