@@ -44,11 +44,13 @@ const relAge = (iso: string | null): string => {
   return `${Math.round(h / 24)}d ago`
 }
 
-function ThreadRow({ t, here, onOpen, onStop, onDone, onLabel, opening, stopping, busy }: {
+function ThreadRow({ t, here, remote, onOpen, onStop, onDone, onLabel, opening, stopping, busy }: {
   t: WorkThread
-  /** This machine's name, or null in a browser. Null means the only place a
-   *  terminal can be opened from here is the remote host. */
+  /** This machine's name, or null in a browser. */
   here: string | null
+  /** True only when this machine is NOT the session's host, i.e. when reaching
+   *  it genuinely needs an SSH hop. */
+  remote: boolean
   onOpen: (t: WorkThread) => void
   onStop: (t: WorkThread) => void
   stopping: boolean
@@ -132,7 +134,7 @@ function ThreadRow({ t, here, onOpen, onStop, onDone, onLabel, opening, stopping
             onClick={() => onOpen(t)}
             title={
               t.live ? 'Already running'
-                : here ? `Open a terminal on this machine (${here}) and resume over SSH to ${LAUNCH_HOST}`
+                : remote ? `Open a terminal here on ${here}, resuming over SSH to ${LAUNCH_HOST}`
                 : `Open a terminal on ${LAUNCH_HOST}`
             }
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
@@ -206,13 +208,17 @@ export function ThreadBoard() {
     mutationFn: ({ id, text }: { id: string; text: string }) => setThreadLabel(id, text),
     onSuccess: refresh,
   })
-  // "open" always means "put a terminal in front of me". In the app that is
-  // this machine, reached over SSH when the session lives elsewhere; in a
-  // browser the page cannot spawn anything, so the remote launcher is the only
-  // thing it can do. Asking the user to pick was the wrong shape: the app
-  // already knows where it is running.
+  // "open" always means "put a terminal in front of me", and the SSH hop is
+  // only for reaching a DIFFERENT machine.
+  //
+  // The test is `here !== LAUNCH_HOST`, not just `here`. Gating on "am I in the
+  // app" made thor SSH to its own address: thor has no key to itself, so it sat
+  // there asking for a password, having opened a remote shell to the machine it
+  // was already running on. On the session's own host the local launcher opens
+  // it directly, no SSH involved.
+  const remoteFromHere = here !== null && here !== LAUNCH_HOST
   const openWhereIAm = async (t: WorkThread) => {
-    if (here) return openSessionHere(t.latestSessionId!, LAUNCH_HOST_IP)
+    if (remoteFromHere) return openSessionHere(t.latestSessionId!, LAUNCH_HOST_IP)
     await launchSessionOnThor(t.latestSessionId!, '')
   }
   const open = useMutation({
@@ -298,7 +304,7 @@ export function ThreadBoard() {
 
       {active.map((t) => (
         <ThreadRow
-          key={t.threadId} t={t} here={here} onOpen={onOpen} onStop={onStop}
+          key={t.threadId} t={t} here={here} remote={remoteFromHere} onOpen={onOpen} onStop={onStop}
           opening={openingId === t.threadId} stopping={stoppingId === t.threadId} busy={busy}
           onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
           onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
@@ -318,7 +324,7 @@ export function ThreadBoard() {
         <div className="mt-1 opacity-60">
           {done.map((t) => (
             <ThreadRow
-              key={t.threadId} t={t} here={here} onOpen={onOpen} onStop={onStop}
+              key={t.threadId} t={t} here={here} remote={remoteFromHere} onOpen={onOpen} onStop={onStop}
           opening={openingId === t.threadId} stopping={stoppingId === t.threadId} busy={busy}
               onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
               onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
