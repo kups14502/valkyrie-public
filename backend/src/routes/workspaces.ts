@@ -21,7 +21,11 @@ const THOR_BOARD_FILE = process.env.WORKSPACES_THOR_FILE
 
 // thor's collector runs on a short cycle; anything older than this is not a
 // live view of that machine any more.
-const STALE_MS = 150_000
+// The collector publishes every 5 minutes, so a threshold below 300s marks the
+// board stale for most of every cycle even when everything is working. Observed:
+// the page read "STALE - 3m old" while the producer was perfectly healthy. One
+// interval plus two minutes of slack for a slow run or a clock skew.
+const STALE_MS = 420_000
 // Hard ceiling on how much of a file written by another process we will fan
 // out to clients. thor has ~40 live sessions on a bad day, so 500 is slack
 // with a bound.
