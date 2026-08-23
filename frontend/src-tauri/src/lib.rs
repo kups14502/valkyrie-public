@@ -1,6 +1,17 @@
 use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
 
+/// This machine's name, lowercased. The page uses it to decide whether a
+/// session lives here or on another host, so "open" can always mean "open in
+/// front of me" instead of making the user pick a machine.
+#[tauri::command]
+fn local_hostname() -> String {
+  std::env::var("COMPUTERNAME")
+    .or_else(|_| std::env::var("HOSTNAME"))
+    .unwrap_or_default()
+    .to_lowercase()
+}
+
 /// Open a Claude session in a terminal on THIS machine, over SSH to the host
 /// that owns it.
 ///
@@ -10,9 +21,6 @@ use tauri_plugin_window_state::StateFlags;
 /// both of its inputs are validated against a fixed shape. The session id must
 /// be a uuid and the host must be a tailnet address or a bare hostname, so
 /// nothing a page could say turns into extra arguments or a second command.
-///
-/// This complements the launcher on thor: that one opens the session on thor's
-/// own desktop, this one opens it in front of you on the laptop.
 #[tauri::command]
 fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
   fn is_uuid(s: &str) -> bool {
@@ -168,7 +176,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![open_session_ssh])
+    .invoke_handler(tauri::generate_handler![open_session_ssh, local_hostname])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

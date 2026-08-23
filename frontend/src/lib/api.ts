@@ -658,6 +658,16 @@ export const fetchThreads = async (): Promise<ThreadsResult> => {
 // it. Only the desktop app can do this: a web page cannot start a process. The
 // Rust side re-validates both arguments, so this is a convenience wrapper, not
 // the security boundary.
+// Which machine the app is running on, lowercased, or null in a browser. Lets
+// "open" mean the same thing everywhere: put a terminal in front of me.
+export const localHostname = async (): Promise<string | null> => {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return (await invoke<string>('local_hostname')) || null
+  } catch { return null }
+}
+
 export const openSessionHere = async (sessionId: string, host = '100.118.7.57'): Promise<void> => {
   if (!isTauri()) throw new Error('only the desktop app can open a local terminal')
   const { invoke } = await import('@tauri-apps/api/core')

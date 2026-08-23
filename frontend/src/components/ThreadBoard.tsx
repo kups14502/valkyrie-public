@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Laptop, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Copy, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
 import {
-  fetchThreads, launchSessionOnThor, openSessionHere, setThreadDisposition, setThreadLabel,
+  fetchThreads, launchSessionOnThor, localHostname, openSessionHere, setThreadDisposition, setThreadLabel,
   type ThreadDisposition, type WorkThread,
 } from '../lib/api'
-import { isTauri } from '../lib/auth'
 
 // What am I working on, get me back into it, and let me say when it's finished.
 // Those three things are the whole page. Everything else (455 sessions, host
@@ -15,6 +14,7 @@ import { isTauri } from '../lib/auth'
 // Named so the two buttons can say plainly which machine they act on: the
 // bare icons were indistinguishable and 'open' silently meant 'not here'.
 const LAUNCH_HOST = 'thor'
+const LAUNCH_HOST_IP = '100.118.7.57'
 
 const relAge = (iso: string | null): string => {
   if (!iso) return ''
@@ -28,8 +28,11 @@ const relAge = (iso: string | null): string => {
   return `${Math.round(h / 24)}d ago`
 }
 
-function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
+function ThreadRow({ t, here, onOpen, onDone, onLabel, opening, busy }: {
   t: WorkThread
+  /** This machine's name, or null in a browser. Null means the only place a
+   *  terminal can be opened from here is the remote host. */
+  here: string | null
   onOpen: (t: WorkThread) => void
   onDone: (t: WorkThread, d: ThreadDisposition) => void
   onLabel: (id: string, label: string) => void
@@ -39,7 +42,6 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(t.label)
   const [copied, setCopied] = useState(false)
-  const [localErr, setLocalErr] = useState<string | null>(null)
   const done = t.disposition === 'done'
 
   const copyResume = async () => {
@@ -95,7 +97,6 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
             </button>
           </div>
         )}
-        {localErr && <div className="mt-0.5 text-[11px] text-[var(--color-danger)]">{localErr}</div>}
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
           {t.path}{t.lastActivityUtc ? ` · ${relAge(t.lastActivityUtc)}` : ''}
           {t.liveCount > 1 && <span className="text-[var(--color-success)]"> · {t.liveCount} running</span>}
@@ -108,20 +109,14 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
             type="button"
             disabled={opening || busy || t.live || !t.latestSessionId}
             onClick={() => onOpen(t)}
-            title={t.live ? `Already running on ${LAUNCH_HOST}` : `Reopen it in a terminal on ${LAUNCH_HOST}'s own desktop`}
+            title={
+              t.live ? 'Already running'
+                : here ? `Open a terminal on this machine (${here}) and resume over SSH to ${LAUNCH_HOST}`
+                : `Open a terminal on ${LAUNCH_HOST}`
+            }
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
           >
-            <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : `on ${LAUNCH_HOST}`}
-          </button>
-        )}
-        {isTauri() && t.latestSessionId && (
-          <button
-            type="button"
-            onClick={() => { void openSessionHere(t.latestSessionId!).catch((e) => setLocalErr(String(e))) }}
-            title={`Open a terminal on THIS machine and resume over SSH to ${LAUNCH_HOST}`}
-            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-          >
-            <Laptop size={11} /> here
+            <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : 'open'}
           </button>
         )}
         <button
@@ -150,6 +145,10 @@ export function ThreadBoard() {
   const qc = useQueryClient()
   const [showDone, setShowDone] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
+  // Which machine the app itself is running on. Null in a browser, where the
+  // page cannot start a process and the remote launcher is the only option.
+  const [here, setHere] = useState<string | null>(null)
+  useEffect(() => { void localHostname().then(setHere) }, [])
   // Poll. Whether a thread is running changes the moment a terminal closes, and
   // this list froze at page load: a stale live=true kept saying "running" and
   // left the open button disabled, so a session you had just closed could not
@@ -174,8 +173,17 @@ export function ThreadBoard() {
     mutationFn: ({ id, text }: { id: string; text: string }) => setThreadLabel(id, text),
     onSuccess: refresh,
   })
+  // "open" always means "put a terminal in front of me". In the app that is
+  // this machine, reached over SSH when the session lives elsewhere; in a
+  // browser the page cannot spawn anything, so the remote launcher is the only
+  // thing it can do. Asking the user to pick was the wrong shape: the app
+  // already knows where it is running.
+  const openWhereIAm = async (t: WorkThread) => {
+    if (here) return openSessionHere(t.latestSessionId!, LAUNCH_HOST_IP)
+    await launchSessionOnThor(t.latestSessionId!, '')
+  }
   const open = useMutation({
-    mutationFn: (t: WorkThread) => launchSessionOnThor(t.latestSessionId!, ''),
+    mutationFn: openWhereIAm,
     onSettled: () => { setOpeningId(null); refresh() },
   })
 
@@ -211,7 +219,7 @@ export function ThreadBoard() {
   const openAll = async () => {
     for (const t of closable) {
       setOpeningId(t.threadId)
-      try { await launchSessionOnThor(t.latestSessionId!, '') } catch { /* keep going */ }
+      try { await openWhereIAm(t) } catch { /* keep going */ }
     }
     setOpeningId(null)
     refresh()
@@ -243,7 +251,7 @@ export function ThreadBoard() {
 
       {active.map((t) => (
         <ThreadRow
-          key={t.threadId} t={t} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+          key={t.threadId} t={t} here={here} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
           onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
           onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
         />
@@ -262,7 +270,7 @@ export function ThreadBoard() {
         <div className="mt-1 opacity-60">
           {done.map((t) => (
             <ThreadRow
-              key={t.threadId} t={t} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+              key={t.threadId} t={t} here={here} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
               onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
               onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
             />
