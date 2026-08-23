@@ -565,6 +565,8 @@ export type ThreadDisposition = 'active' | 'parked' | 'done'
 export type WorkThread = {
   threadId: string
   label: string
+  path: string
+  labelSource: 'user' | 'topic' | 'folder'
   userLabelled: boolean
   redacted: boolean
   sessions: number
@@ -584,9 +586,12 @@ const parseThread = (raw: unknown): WorkThread | null => {
   const id = wsStr(r.threadId)
   if (!id) return null
   const d = wsStr(r.disposition)
+  const src = wsStr(r.labelSource)
   return {
     threadId: id,
     label: wsStr(r.label) ?? id,
+    path: wsStr(r.path) ?? '',
+    labelSource: src === 'user' || src === 'topic' ? src : 'folder',
     userLabelled: r.userLabelled === true,
     redacted: r.redacted === true,
     sessions: wsNum(r.sessions) ?? 0,

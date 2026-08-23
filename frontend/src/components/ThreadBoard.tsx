@@ -95,7 +95,7 @@ function ThreadRow({ t, busy, onDisposition, onLabel }: {
             </form>
           ) : (
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate text-sm font-semibold text-[var(--color-text)]">{t.label}</span>
+              <span className="text-sm font-semibold text-[var(--color-text)]">{t.label}</span>
               <button
                 type="button"
                 onClick={() => { setDraft(t.userLabelled ? t.label : ''); setEditing(true) }}
@@ -116,7 +116,8 @@ function ThreadRow({ t, busy, onDisposition, onLabel }: {
             </div>
           )}
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
-            {t.threadId} · {t.sessions} {t.sessions === 1 ? 'session' : 'sessions'} · {relAge(t.lastActivityUtc)} ago
+            {t.path && <span className="text-[var(--color-text-dim)]">{t.path}</span>}
+            {t.path && ' · '}{t.sessions} {t.sessions === 1 ? 'session' : 'sessions'} · {relAge(t.lastActivityUtc)} ago
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
