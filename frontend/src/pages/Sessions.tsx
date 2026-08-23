@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Lock, Play, RefreshCw, Rocket } from 'lucide-react'
 import { Card } from '../components/Card'
+import { ThreadBoard } from '../components/ThreadBoard'
 import {
   fetchWorkspaces, launchSessionOnThor,
   type WorkspaceHealth, type WorkspaceHost, type WorkspaceSession, type WorkspaceState,
@@ -486,6 +487,13 @@ export default function Sessions() {
           {routeMissing.detail && <div className="mt-1 text-[11px] text-[var(--color-text-faint)]">{routeMissing.detail}</div>}
         </Card>
       )}
+
+      {/* Threads first. The session list below answers "what exists"; this
+          answers "what am I working on", which is the question actually being
+          asked, and it is 4 rows instead of 455. */}
+      <Card title="threads · what i'm working on">
+        <ThreadBoard />
+      </Card>
 
       {data && hosts.map((host) => {
         const rows = visibleByHost.get(host.host) ?? []

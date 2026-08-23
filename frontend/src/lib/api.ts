@@ -560,6 +560,63 @@ const apiDetail = (e: unknown): string | null =>
   wsStr((e as { detail?: unknown } | null)?.detail)
   ?? wsStr((e as { response?: { data?: { error?: unknown } } } | null)?.response?.data?.error)
 
+export type ThreadDisposition = 'active' | 'parked' | 'done'
+
+export type WorkThread = {
+  threadId: string
+  label: string
+  userLabelled: boolean
+  redacted: boolean
+  sessions: number
+  disposition: ThreadDisposition
+  lastActivityUtc: string | null
+}
+
+export type ThreadsResult =
+  | { installed: true; threads: WorkThread[] }
+  | { installed: false; status: number; detail: string | null }
+
+const DISPOSITIONS: ThreadDisposition[] = ['active', 'parked', 'done']
+
+const parseThread = (raw: unknown): WorkThread | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = wsStr(r.threadId)
+  if (!id) return null
+  const d = wsStr(r.disposition)
+  return {
+    threadId: id,
+    label: wsStr(r.label) ?? id,
+    userLabelled: r.userLabelled === true,
+    redacted: r.redacted === true,
+    sessions: wsNum(r.sessions) ?? 0,
+    // An unknown or missing disposition means active: threads exist before the
+    // store has an opinion about them, and nothing needed backfilling.
+    disposition: (DISPOSITIONS as string[]).includes(d ?? '') ? (d as ThreadDisposition) : 'active',
+    lastActivityUtc: wsStr(r.lastActivityUtc),
+  }
+}
+
+export const fetchThreads = async (): Promise<ThreadsResult> => {
+  let payload: unknown
+  try {
+    payload = (await api.get<unknown>('/hosts/thor/threads')).data
+  } catch (e) {
+    const status = missingRouteStatus(e)
+    if (status) return { installed: false, status, detail: apiDetail(e) }
+    throw e
+  }
+  const p = (payload ?? {}) as Record<string, unknown>
+  if (!Array.isArray(p.threads)) throw new Error(apiDetail(p) ?? 'Invalid threads response')
+  return { installed: true, threads: p.threads.map(parseThread).filter((t): t is WorkThread => t !== null) }
+}
+
+export const setThreadDisposition = async (threadId: string, disposition: ThreadDisposition) =>
+  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/threads/disposition', { threadId, disposition })).data
+
+export const setThreadLabel = async (threadId: string, label: string) =>
+  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/threads/label', { threadId, label })).data
+
 export const fetchWorkspaces = async (): Promise<WorkspacesResult> => {
   let payload: unknown
   try {
