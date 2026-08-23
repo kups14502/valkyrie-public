@@ -23,6 +23,38 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+// The desktop app loads its page from the bundle, so window.location.hostname is
+// never a tailnet address and the check above always sends it to Cloudflare —
+// which means a sign-in even while sitting on the tailnet. The backend decides
+// trust from the socket peer address, so the fix is simply to talk to odin
+// directly when odin is reachable: /auth/status then reports trusted and
+// AuthGate opens on its own, with no token involved.
+//
+// Tauri only. A browser on the public site must not go probing private
+// addresses: it is pointless there and trips Private Network Access warnings.
+const TAILNET_BASES = ['http://100.96.237.89:8420', 'http://odin:8420']
+const PROBE_MS = 1200
+
+export async function resolveApiBase(): Promise<string> {
+  if (onTailnet || !isTauri()) return baseURL
+  for (const base of TAILNET_BASES) {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), PROBE_MS)
+    try {
+      const r = await fetch(`${base}/healthz`, { signal: ctl.signal, cache: 'no-store' })
+      if (r.ok) {
+        api.defaults.baseURL = `${base}/api`
+        return api.defaults.baseURL
+      }
+    } catch {
+      // unreachable or too slow: try the next candidate, then Cloudflare
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return baseURL
+}
+
 // Attach the self-hosted app token (if present) to every request.
 api.interceptors.request.use((config) => {
   const token = getToken()

@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { resolveApiBase } from './lib/api'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
@@ -48,13 +49,21 @@ if (startHome !== '/dashboard' && (location.pathname === '/' || location.pathnam
   try { history.replaceState(null, '', startHome) } catch { /* ignore */ }
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-)
+// Settle the API base before the first request. In the desktop app this probes
+// odin over the tailnet, so being at home means no sign-in: the backend trusts
+// the socket address and AuthGate lets us straight through. Off the tailnet the
+// probe fails in about a second and we fall back to Cloudflare, where signing in
+// is correct. Awaited rather than fired-and-forgotten, otherwise AuthGate can
+// ask Cloudflare first and show a login card that did not need to exist.
+void resolveApiBase().finally(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  )
+})
 
 // The desktop window starts hidden (tauri.conf.json) and Rust only reveals it
 // as a last resort, so reveal it here the moment the app has actually mounted.
