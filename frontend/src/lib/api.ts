@@ -654,6 +654,16 @@ export const fetchThreads = async (): Promise<ThreadsResult> => {
   return { installed: true, threads: p.threads.map(parseThread).filter((t): t is WorkThread => t !== null) }
 }
 
+// Open a session in a terminal on THIS machine, over SSH to the host that owns
+// it. Only the desktop app can do this: a web page cannot start a process. The
+// Rust side re-validates both arguments, so this is a convenience wrapper, not
+// the security boundary.
+export const openSessionHere = async (sessionId: string, host = '100.118.7.57'): Promise<void> => {
+  if (!isTauri()) throw new Error('only the desktop app can open a local terminal')
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('open_session_ssh', { sessionId, host })
+}
+
 export const setThreadDisposition = async (threadId: string, disposition: ThreadDisposition) =>
   (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/threads/disposition', { threadId, disposition })).data
 

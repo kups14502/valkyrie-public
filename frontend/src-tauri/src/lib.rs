@@ -1,6 +1,74 @@
 use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
 
+/// Open a Claude session in a terminal on THIS machine, over SSH to the host
+/// that owns it.
+///
+/// Deliberately a hand-written command rather than tauri-plugin-shell. The
+/// plugin would give the webview a general "run a program" capability that then
+/// has to be fenced off with scope rules; this can do exactly one thing, and
+/// both of its inputs are validated against a fixed shape. The session id must
+/// be a uuid and the host must be a tailnet address or a bare hostname, so
+/// nothing a page could say turns into extra arguments or a second command.
+///
+/// This complements the launcher on thor: that one opens the session on thor's
+/// own desktop, this one opens it in front of you on the laptop.
+#[tauri::command]
+fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
+  fn is_uuid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+      && b.iter().enumerate().all(|(i, c)| match i {
+        8 | 13 | 18 | 23 => *c == b'-',
+        _ => c.is_ascii_hexdigit(),
+      })
+  }
+  // A tailnet IP, or a plain hostname. No spaces, quotes or shell characters.
+  fn is_host(s: &str) -> bool {
+    !s.is_empty()
+      && s.len() <= 64
+      && s
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+  }
+
+  if !is_uuid(&session_id) {
+    return Err("session id is not a uuid".into());
+  }
+  if !is_host(&host) {
+    return Err("host is not a plain hostname or address".into());
+  }
+
+  #[cfg(target_os = "windows")]
+  {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // wt.exe here is fine: this runs from the app, which the user launched, so
+    // it has the interactive activation context that a background service on
+    // thor did not. -t forces a pty, without which the TUI will not start.
+    std::process::Command::new("wt.exe")
+      .args([
+        "new-tab",
+        "--title",
+        &format!("{host} · claude"),
+        "ssh",
+        "-t",
+        &format!("brendon@{host}"),
+        &format!("claude -r {session_id}"),
+      ])
+      .creation_flags(CREATE_NO_WINDOW)
+      .spawn()
+      .map(|_| ())
+      .map_err(|e| format!("could not start Windows Terminal: {e}"))
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = (session_id, host);
+    Err("opening a local terminal is only wired up for Windows".into())
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -71,6 +139,7 @@ pub fn run() {
       }
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![open_session_ssh])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

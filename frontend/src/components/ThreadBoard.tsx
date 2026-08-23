@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Copy, Laptop, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
 import {
-  fetchThreads, launchSessionOnThor, setThreadDisposition, setThreadLabel,
+  fetchThreads, launchSessionOnThor, openSessionHere, setThreadDisposition, setThreadLabel,
   type ThreadDisposition, type WorkThread,
 } from '../lib/api'
+import { isTauri } from '../lib/auth'
 
 // What am I working on, get me back into it, and let me say when it's finished.
 // Those three things are the whole page. Everything else (455 sessions, host
@@ -34,6 +35,7 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(t.label)
   const [copied, setCopied] = useState(false)
+  const [localErr, setLocalErr] = useState<string | null>(null)
   const done = t.disposition === 'done'
 
   const copyResume = async () => {
@@ -89,6 +91,7 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
             </button>
           </div>
         )}
+        {localErr && <div className="mt-0.5 text-[11px] text-[var(--color-danger)]">{localErr}</div>}
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
           {t.path}{t.lastActivityUtc ? ` · ${relAge(t.lastActivityUtc)}` : ''}
           {t.liveCount > 1 && <span className="text-[var(--color-success)]"> · {t.liveCount} running</span>}
@@ -105,6 +108,16 @@ function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
           >
             <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : 'open'}
+          </button>
+        )}
+        {isTauri() && t.latestSessionId && (
+          <button
+            type="button"
+            onClick={() => { void openSessionHere(t.latestSessionId!).catch((e) => setLocalErr(String(e))) }}
+            title="Open it here, in a terminal on this machine, over SSH to thor"
+            className="inline-flex min-h-9 items-center border border-transparent px-2 text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+          >
+            <Laptop size={12} />
           </button>
         )}
         <button
