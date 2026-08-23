@@ -566,6 +566,8 @@ export type WorkThread = {
   threadId: string
   label: string
   path: string
+  latestSessionId: string | null
+  live: boolean
   labelSource: 'user' | 'topic' | 'folder'
   userLabelled: boolean
   redacted: boolean
@@ -591,6 +593,8 @@ const parseThread = (raw: unknown): WorkThread | null => {
     threadId: id,
     label: wsStr(r.label) ?? id,
     path: wsStr(r.path) ?? '',
+    latestSessionId: wsStr(r.latestSessionId),
+    live: r.live === true,
     labelSource: src === 'user' || src === 'topic' ? src : 'folder',
     userLabelled: r.userLabelled === true,
     redacted: r.redacted === true,

@@ -293,6 +293,7 @@ export default function Sessions() {
   // The snapshot behind this is minutes old by design, so the app-wide 15s
   // React Query default is already more than enough. No extra polling.
   const board = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const [showAll, setShowAll] = useState(false)
   const [filter, setFilter] = useState<Filter>('asking')
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<Record<string, boolean>>({})
@@ -420,6 +421,20 @@ export default function Sessions() {
         </div>
       )}
 
+      {/* The page. Everything below is detail, folded away by default: the
+          455-row session list never once answered "what am I working on". */}
+      <Card title="working on">
+        <ThreadBoard />
+      </Card>
+
+      <button
+        type="button"
+        onClick={() => setShowAll((v) => !v)}
+        className="text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+      >
+        {showAll ? 'hide' : 'show'} all {counts.all} sessions
+      </button>
+      {showAll && (<>
       <div className="flex flex-wrap items-center gap-2">
         <FilterButton id="asking" active={filter} label="Asking" count={counts.asking} onClick={setFilter} />
         <FilterButton id="running" active={filter} label="Running" count={counts.running} onClick={setFilter} />
@@ -488,12 +503,6 @@ export default function Sessions() {
         </Card>
       )}
 
-      {/* Threads first. The session list below answers "what exists"; this
-          answers "what am I working on", which is the question actually being
-          asked, and it is 4 rows instead of 455. */}
-      <Card title="threads · what i'm working on">
-        <ThreadBoard />
-      </Card>
 
       {data && hosts.map((host) => {
         const rows = visibleByHost.get(host.host) ?? []
@@ -539,6 +548,7 @@ export default function Sessions() {
           </Card>
         )
       })}
+      </>)}
 
       {data && sessions.length === 0 && (
         <Card title="nothing collected yet">

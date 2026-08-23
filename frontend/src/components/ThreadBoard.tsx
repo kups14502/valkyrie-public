@@ -1,130 +1,128 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Pause, Pencil, Play } from 'lucide-react'
+import { Check, Copy, Pencil, Play, RotateCcw, Undo2 } from 'lucide-react'
 import {
-  fetchThreads, setThreadDisposition, setThreadLabel,
+  fetchThreads, launchSessionOnThor, setThreadDisposition, setThreadLabel,
   type ThreadDisposition, type WorkThread,
 } from '../lib/api'
 
-// A thread is the folder plus every session that ran in it. The session list
-// answers "what exists"; this answers the three questions it cannot:
-//
-//   what was I working on   -> threads by last activity
-//   what is still open      -> active, whether or not a process is running
-//   what is done            -> done, hidden, and never reopened
-//
-// The distinction the session list can never make is that "closed" is a fact
-// about a process while "done" is a decision. Only Brendon can supply the
-// second, so disposition is stored rather than inferred.
+// What am I working on, get me back into it, and let me say when it's finished.
+// Those three things are the whole page. Everything else (455 sessions, host
+// health, filters) is detail that belongs below the fold, because it never once
+// answered the question actually being asked.
 
 const relAge = (iso: string | null): string => {
-  if (!iso) return '?'
+  if (!iso) return ''
   const ms = Date.now() - Date.parse(iso)
-  if (!Number.isFinite(ms)) return '?'
+  if (!Number.isFinite(ms)) return ''
   const m = Math.round(ms / 60000)
-  if (m < 60) return `${m}m`
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
   const h = Math.round(m / 60)
-  if (h < 48) return `${h}h`
-  return `${Math.round(h / 24)}d`
+  if (h < 48) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
 }
 
-const DISP_TONE: Record<ThreadDisposition, string> = {
-  active: 'var(--color-success)',
-  parked: 'var(--color-warning)',
-  done: 'var(--color-text-faint)',
-}
-
-function DispositionButton({
-  current, target, icon, label, onPick, busy,
-}: {
-  current: ThreadDisposition
-  target: ThreadDisposition
-  icon: React.ReactNode
-  label: string
-  onPick: (d: ThreadDisposition) => void
-  busy: boolean
-}) {
-  const on = current === target
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => onPick(target)}
-      title={label}
-      className="inline-flex min-h-9 items-center gap-1.5 border px-2.5 text-[10px] uppercase tracking-[0.14em] transition disabled:opacity-40"
-      style={{
-        borderColor: on ? DISP_TONE[target] : 'var(--color-border)',
-        color: on ? DISP_TONE[target] : 'var(--color-text-faint)',
-      }}
-    >
-      {icon} {target}
-    </button>
-  )
-}
-
-function ThreadRow({ t, busy, onDisposition, onLabel }: {
+function ThreadRow({ t, onOpen, onDone, onLabel, opening, busy }: {
   t: WorkThread
-  busy: boolean
-  onDisposition: (id: string, d: ThreadDisposition) => void
+  onOpen: (t: WorkThread) => void
+  onDone: (t: WorkThread, d: ThreadDisposition) => void
   onLabel: (id: string, label: string) => void
+  opening: boolean
+  busy: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(t.label)
+  const [copied, setCopied] = useState(false)
+  const done = t.disposition === 'done'
+
+  const copyResume = async () => {
+    if (!t.latestSessionId) return
+    try {
+      await navigator.clipboard.writeText(`claude -r ${t.latestSessionId}`)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard blocked; the button just does nothing */ }
+  }
 
   return (
-    <div
-      className="border border-dashed p-3"
-      style={{ borderColor: t.disposition === 'done' ? 'var(--color-border)' : DISP_TONE[t.disposition] + '55' }}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          {editing ? (
-            <form
-              onSubmit={(e) => { e.preventDefault(); onLabel(t.threadId, draft.trim()); setEditing(false) }}
-              className="flex items-center gap-2"
+    <div className="group flex items-center gap-3 border-b border-[var(--color-border)] py-3 last:border-b-0">
+      {/* A live thread is already open. Saying so up front stops the main
+          button from promising something it will refuse to do. */}
+      <span
+        aria-hidden
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ background: t.live ? 'var(--color-success)' : 'var(--color-border)' }}
+        title={t.live ? 'running now' : 'not running'}
+      />
+
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <form
+            onSubmit={(e) => { e.preventDefault(); onLabel(t.threadId, draft.trim()); setEditing(false) }}
+            className="flex items-center gap-2"
+          >
+            <input
+              autoFocus
+              value={draft}
+              maxLength={60}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => setEditing(false)}
+              className="min-w-0 flex-1 border-b border-[var(--color-accent)] bg-transparent pb-0.5 text-sm text-[var(--color-text)] outline-none"
+            />
+          </form>
+        ) : (
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span
+              className={`truncate text-sm ${done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'}`}
+              title={t.label}
             >
-              <input
-                autoFocus
-                value={draft}
-                maxLength={60}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={() => setEditing(false)}
-                className="min-w-0 border border-[var(--color-accent)] bg-transparent px-2 py-1 text-sm text-[var(--color-text)] outline-none"
-              />
-              <button type="submit" className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">save</button>
-            </form>
-          ) : (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-[var(--color-text)]">{t.label}</span>
-              <button
-                type="button"
-                onClick={() => { setDraft(t.userLabelled ? t.label : ''); setEditing(true) }}
-                title="Rename this thread"
-                className="text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
-              >
-                <Pencil size={11} />
-              </button>
-              {t.redacted && !t.userLabelled && (
-                <span
-                  className="border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em]"
-                  style={{ borderColor: 'var(--color-warning)', color: 'var(--color-warning)' }}
-                  title="Client work. Only the business root is published, so name it yourself if you want it recognizable here."
-                >
-                  unnamed client
-                </span>
-              )}
-            </div>
-          )}
-          <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
-            {t.path && <span className="text-[var(--color-text-dim)]">{t.path}</span>}
-            {t.path && ' · '}{t.sessions} {t.sessions === 1 ? 'session' : 'sessions'} · {relAge(t.lastActivityUtc)} ago
+              {t.label}
+            </span>
+            <button
+              type="button"
+              onClick={() => { setDraft(t.userLabelled ? t.label : ''); setEditing(true) }}
+              title="Rename"
+              className="shrink-0 text-[var(--color-text-faint)] opacity-0 transition group-hover:opacity-100 hover:text-[var(--color-accent)]"
+            >
+              <Pencil size={11} />
+            </button>
           </div>
+        )}
+        <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
+          {t.path}{t.lastActivityUtc ? ` · ${relAge(t.lastActivityUtc)}` : ''}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <DispositionButton current={t.disposition} target="active" icon={<Play size={10} />} label="Work in progress. Restore reopens it." onPick={(d) => onDisposition(t.threadId, d)} busy={busy} />
-          <DispositionButton current={t.disposition} target="parked" icon={<Pause size={10} />} label="Stopped on purpose, coming back. Restore skips it." onPick={(d) => onDisposition(t.threadId, d)} busy={busy} />
-          <DispositionButton current={t.disposition} target="done" icon={<Check size={10} />} label="Finished. Hidden, never reopened." onPick={(d) => onDisposition(t.threadId, d)} busy={busy} />
-        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1">
+        {!done && (
+          <button
+            type="button"
+            disabled={opening || busy || t.live || !t.latestSessionId}
+            onClick={() => onOpen(t)}
+            title={t.live ? 'Already running on thor' : 'Reopen the newest session of this thread on thor'}
+            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
+          >
+            <Play size={11} /> {t.live ? 'running' : opening ? 'opening…' : 'open'}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={copyResume}
+          title="Copy the resume command"
+          className="inline-flex min-h-9 items-center border border-transparent px-2 text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onDone(t, done ? 'active' : 'done')}
+          title={done ? 'Put it back on the board' : 'Finished. Hides it, and restore will not reopen it.'}
+          className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-30"
+        >
+          {done ? <><Undo2 size={12} /> undo</> : <><Check size={12} /> done</>}
+        </button>
       </div>
     </div>
   )
@@ -133,86 +131,121 @@ function ThreadRow({ t, busy, onDisposition, onLabel }: {
 export function ThreadBoard() {
   const qc = useQueryClient()
   const [showDone, setShowDone] = useState(false)
+  const [openingId, setOpeningId] = useState<string | null>(null)
   const q = useQuery({ queryKey: ['threads'], queryFn: fetchThreads })
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['threads'] })
+    void qc.invalidateQueries({ queryKey: ['workspaces'] })
+  }
 
   const disposition = useMutation({
     mutationFn: ({ id, d }: { id: string; d: ThreadDisposition }) => setThreadDisposition(id, d),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['threads'] }),
+    onSuccess: refresh,
   })
   const label = useMutation({
     mutationFn: ({ id, text }: { id: string; text: string }) => setThreadLabel(id, text),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['threads'] }),
+    onSuccess: refresh,
+  })
+  const open = useMutation({
+    mutationFn: (t: WorkThread) => launchSessionOnThor(t.latestSessionId!, ''),
+    onSettled: () => { setOpeningId(null); refresh() },
   })
 
-  const groups = useMemo(() => {
-    const threads = q.data?.installed ? q.data.threads : []
-    const by = (d: ThreadDisposition) =>
-      threads.filter((t) => t.disposition === d)
-        .sort((a, b) => Date.parse(b.lastActivityUtc ?? '0') - Date.parse(a.lastActivityUtc ?? '0'))
-    return { active: by('active'), parked: by('parked'), done: by('done') }
+  const { active, done } = useMemo(() => {
+    const all = q.data?.installed ? q.data.threads : []
+    const byAge = (a: WorkThread, b: WorkThread) =>
+      Date.parse(b.lastActivityUtc ?? '0') - Date.parse(a.lastActivityUtc ?? '0')
+    // Parked is folded in with active: the distinction earns its keep in the
+    // data (restore skips parked) but not in a list of four rows.
+    return {
+      active: all.filter((t) => t.disposition !== 'done').sort(byAge),
+      done: all.filter((t) => t.disposition === 'done').sort(byAge),
+    }
   }, [q.data])
 
-  if (q.isLoading) {
-    return <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">reading threads…</div>
-  }
+  if (q.isLoading) return <div className="py-2 text-[11px] text-[var(--color-text-faint)]">loading…</div>
+
   if (q.data && !q.data.installed) {
     return (
-      <div className="border border-dashed border-[var(--color-warning)]/60 p-3 text-[11px] text-[var(--color-warning)]">
-        Threads unavailable: /api/hosts/thor/threads answered {q.data.status}.
-        {q.data.detail ? ` ${q.data.detail}` : ''}
+      <div className="py-2 text-[11px] text-[var(--color-warning)]">
+        Threads unavailable ({q.data.status}). {q.data.detail ?? ''}
       </div>
     )
   }
   if (q.isError) {
-    return (
-      <div className="border border-dashed border-[var(--color-danger)]/60 p-3 text-[11px] text-[var(--color-danger)]">
-        Could not read threads. {(q.error as Error)?.message}
-      </div>
-    )
+    return <div className="py-2 text-[11px] text-[var(--color-danger)]">{(q.error as Error)?.message}</div>
   }
 
   const busy = disposition.isPending || label.isPending
-  const onDisp = (id: string, d: ThreadDisposition) => disposition.mutate({ id, d })
-  const onLabel = (id: string, text: string) => { if (text) label.mutate({ id, text }) }
+  const closable = active.filter((t) => !t.live && t.latestSessionId)
+
+  const onOpen = (t: WorkThread) => { setOpeningId(t.threadId); open.mutate(t) }
+  const openAll = async () => {
+    for (const t of closable) {
+      setOpeningId(t.threadId)
+      try { await launchSessionOnThor(t.latestSessionId!, '') } catch { /* keep going */ }
+    }
+    setOpeningId(null)
+    refresh()
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
-          {groups.active.length} active · {groups.parked.length} parked · {groups.done.length} done
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="text-[11px] text-[var(--color-text-faint)]">
+          {active.length === 0 ? 'nothing open' : `${active.length} open · ${active.filter((t) => t.live).length} running`}
         </div>
+        {closable.length > 0 && (
+          <button
+            type="button"
+            disabled={openingId !== null}
+            onClick={() => void openAll()}
+            className="inline-flex min-h-9 items-center gap-2 border border-[var(--color-accent)] px-3 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
+          >
+            <RotateCcw size={12} /> reopen {closable.length}
+          </button>
+        )}
+      </div>
+
+      {active.length === 0 && (
+        <div className="py-3 text-[11px] text-[var(--color-text-faint)]">
+          Everything is marked done. Undo one below to bring it back.
+        </div>
+      )}
+
+      {active.map((t) => (
+        <ThreadRow
+          key={t.threadId} t={t} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+          onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
+          onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
+        />
+      ))}
+
+      {done.length > 0 && (
         <button
           type="button"
           onClick={() => setShowDone((v) => !v)}
-          className="inline-flex min-h-9 items-center border border-[var(--color-border)] px-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          className="mt-3 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
         >
-          {showDone ? 'hide done' : `show done (${groups.done.length})`}
+          {showDone ? 'hide' : 'show'} {done.length} done
         </button>
-      </div>
-
-      {groups.active.length === 0 && groups.parked.length === 0 && (
-        <div className="border border-dashed border-[var(--color-border)] p-3 text-[11px] text-[var(--color-text-faint)]">
-          Nothing active. Every thread is done, which is either a clean desk or a reset that went too far.
+      )}
+      {showDone && (
+        <div className="mt-1 opacity-60">
+          {done.map((t) => (
+            <ThreadRow
+              key={t.threadId} t={t} onOpen={onOpen} opening={openingId === t.threadId} busy={busy}
+              onDone={(th, d) => disposition.mutate({ id: th.threadId, d })}
+              onLabel={(id, text) => { if (text) label.mutate({ id, text }) }}
+            />
+          ))}
         </div>
       )}
 
-      {groups.active.map((t) => <ThreadRow key={t.threadId} t={t} busy={busy} onDisposition={onDisp} onLabel={onLabel} />)}
-
-      {groups.parked.length > 0 && (
-        <div className="pt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">parked</div>
-      )}
-      {groups.parked.map((t) => <ThreadRow key={t.threadId} t={t} busy={busy} onDisposition={onDisp} onLabel={onLabel} />)}
-
-      {showDone && (
-        <>
-          <div className="pt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">done</div>
-          {groups.done.map((t) => <ThreadRow key={t.threadId} t={t} busy={busy} onDisposition={onDisp} onLabel={onLabel} />)}
-        </>
-      )}
-
-      {(disposition.isError || label.isError) && (
-        <div className="text-[11px] text-[var(--color-danger)]">
-          That change did not stick. {((disposition.error ?? label.error) as Error)?.message}
+      {(disposition.isError || label.isError || open.isError) && (
+        <div className="mt-2 text-[11px] text-[var(--color-danger)]">
+          {((disposition.error ?? label.error ?? open.error) as Error)?.message}
         </div>
       )}
     </div>
