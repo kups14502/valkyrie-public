@@ -54,7 +54,16 @@ export type LightPatch = Omit<LightUpdate, 'entity_id'>
 // Assistant answers and the next poll lands.
 export function useLightsControl() {
   const qc = useQueryClient()
-  const lights = useQuery({ queryKey: ['lights'], queryFn: fetchLights, refetchInterval: 10_000 })
+  // 5s, and refetch on focus: the backend now answers polls from a 1.5s cache
+  // over a single HA round trip, so polling twice as often costs almost nothing
+  // and halves how long a change made elsewhere (the pad, HA itself) takes to
+  // show up here.
+  const lights = useQuery({
+    queryKey: ['lights'],
+    queryFn: fetchLights,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  })
 
   const mutation = useMutation({
     mutationFn: setLight,
@@ -79,6 +88,13 @@ export function useLightsControl() {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) qc.setQueryData(['lights'], ctx.previous)
+    },
+    // Reconcile with the real bulbs shortly after the command lands, instead of
+    // waiting for the next poll. Delayed rather than immediate because the Cync
+    // bulbs report their old state for a beat after obeying, and an instant
+    // refetch would snap the optimistic value back.
+    onSettled: () => {
+      setTimeout(() => { void qc.invalidateQueries({ queryKey: ['lights'] }) }, 1_200)
     },
   })
 
