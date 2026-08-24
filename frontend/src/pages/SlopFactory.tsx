@@ -25,6 +25,13 @@ import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
 // Coloured marks are always paired with a word, so colour alone never carries
 // meaning.
 
+// Compact view counts: 1.2K, 3.4M. Small numbers print as-is.
+const fmtCount = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return `${n}`
+}
+
 const minutes = (seconds: number) => seconds / 60
 
 const fmtMin = (seconds: number) => {
@@ -229,6 +236,11 @@ export default function SlopFactory() {
               tone={pub.uploads_needed > 0 ? 'emphasis' : 'normal'}
             />
             <Figure label="published" value={`${pub.total}`} sub={`across ${pub.platforms_enabled.length} platform(s)`} />
+            <Figure
+              label="total views"
+              value={fmtCount(pub.total_views ?? 0)}
+              tone={(pub.total_views ?? 0) > 0 ? 'emphasis' : 'normal'}
+            />
             {pub.failed > 0 ? (
               <Figure label="failed" value={`${pub.failed}`} sub="see run.py publish" tone="danger" />
             ) : null}
@@ -246,6 +258,56 @@ export default function SlopFactory() {
               )
             })}
           </div>
+
+          {/* Per-short view counts, newest first. Views read null until the first fetch,
+              shown as a dash rather than 0 so "unknown" and "no views yet" stay distinct. */}
+          {pub.videos && pub.videos.length > 0 ? (
+            <div className="mt-5">
+              <div
+                className="mb-1 text-xs uppercase tracking-wide"
+                style={{ color: 'var(--color-text-faint)' }}
+              >
+                shorts
+              </div>
+              {pub.videos.map((v, i) => {
+                const label =
+                  v.views == null ? '—' : `${fmtCount(v.views)} view${v.views === 1 ? '' : 's'}`
+                const row = (
+                  <div
+                    className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  >
+                    <span
+                      className="min-w-0 truncate text-sm"
+                      style={{ color: 'var(--color-text-dim)' }}
+                    >
+                      {v.title}
+                    </span>
+                    <span
+                      className="shrink-0 text-sm tabular-nums"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                )
+                return v.url ? (
+                  <a
+                    key={v.url ?? i}
+                    href={v.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block no-underline hover:opacity-80"
+                  >
+                    {row}
+                  </a>
+                ) : (
+                  <div key={i}>{row}</div>
+                )
+              })}
+            </div>
+          ) : null}
+
           <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
             {pub.last_published_at
               ? `last published ${new Date(pub.last_published_at).toLocaleString()}`

@@ -947,6 +947,18 @@ export type SlopStats = {
     uploads_needed: number
     uploads_needed_by_platform: Record<string, number>
     platforms_enabled: string[]
+    // Added with view tracking (schema v5). total_views sums all published videos;
+    // videos is the per-video list, newest first. views is null until first fetched.
+    total_views?: number
+    videos?: {
+      title: string
+      url: string | null
+      platform: string
+      views: number | null
+      likes: number | null
+      published_at: string | null
+      stats_at: string | null
+    }[]
   }
 }
 
