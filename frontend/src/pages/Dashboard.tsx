@@ -178,9 +178,9 @@ function fmtResetAt(iso: string | null | undefined): string | undefined {
 const claudeBarColor = (p: number) => (clampPct(p) >= 85 ? 'var(--color-danger)' : '#D97757')
 const claudePctText = (p: number) => (clampPct(p) >= 85 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]')
 
-// One account, one line: name, plan, the week bar (the number that actually
-// matters), week %, and the 5h % trailing. Reset times live on hover so the row
-// stays a single scannable line instead of a boxed card with four sub-rows.
+// One account per row: name, plan, and a bar for each limit, 5-hour above
+// weekly. Reset times live on hover, so the row stays scannable instead of
+// becoming a boxed card with four sub-rows.
 function AIClientRow({ client }: { client: AIClientUsage }) {
   const q = client.quota
   const plan = client.subscription.replace(/ plan$/i, '')
@@ -197,20 +197,29 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
         {plan}
       </div>
       {q ? (
-        <>
-          <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${clampPct(q.weeklyPct)}%`, backgroundColor: claudeBarColor(q.weeklyPct) }}
-            />
-          </div>
-          <div className={`w-16 shrink-0 text-right font-semibold tabular-nums ${claudePctText(q.weeklyPct)}`}>
-            {clampPct(q.weeklyPct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">wk</span>
-          </div>
-          <div className="w-16 shrink-0 text-right tabular-nums text-[var(--color-text-dim)]">
-            {clampPct(q.sessionPct)}% <span className="text-[10px] text-[var(--color-text-faint)]">5h</span>
-          </div>
-        </>
+        // Both limits get a bar. Only the weekly one was drawn, so the 5-hour
+        // number, which is the one that actually stops you mid-session, was a
+        // bare percentage with nothing to read it against at a glance.
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          {([
+            { label: '5h', pct: q.sessionPct, resets: q.sessionResetsAt },
+            { label: 'wk', pct: q.weeklyPct, resets: q.weeklyResetsAt },
+          ] as const).map((row) => (
+            // Each bar carries its own reset time: one shared tooltip for two
+            // bars leaves you guessing which window it describes.
+            <div key={row.label} className="flex items-center gap-3" title={fmtResetAt(row.resets)}>
+              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${clampPct(row.pct)}%`, backgroundColor: claudeBarColor(row.pct) }}
+                />
+              </div>
+              <div className={`w-16 shrink-0 text-right font-semibold tabular-nums ${claudePctText(row.pct)}`}>
+                {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">{row.label}</span>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         // Dead sign-in: no quota to draw, so the line reports the auth state and
         // today's real token spend instead of a bar. One line, same height.
