@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
-import { fetchSystem, fetchSessions, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
+import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -46,7 +46,7 @@ const toneText: Record<Tone, string> = {
 
 function NowBanner() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
-  const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
+  const sessions = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const vault = useQuery({ queryKey: ['vault'], queryFn: fetchVault, refetchInterval: 60_000 })
@@ -60,9 +60,15 @@ function NowBanner() {
     else if (tone === 'watch') watches++
   }
 
-  const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
-  if (sessionsList.length > 0) note(`${sessionsList.length} session${sessionsList.length === 1 ? '' : 's'}`, 'ok')
-  else note('no sessions', 'dim')
+  // Claude runs on thor, so ask thor. This used to call /api/sessions, which
+  // greps odin's own process list for `claude --resume` and therefore always
+  // answered zero: the banner and the Sessions page disagreed because they were
+  // describing different machines.
+  const live = sessions.data?.installed ? sessions.data.sessions.filter((x) => x.live) : []
+  const asking = live.filter((x) => x.activity === 'asking').length
+  if (asking > 0) note(`${asking} waiting on you`, 'watch')
+  if (live.length > 0) note(`${live.length} session${live.length === 1 ? '' : 's'} running`, 'ok')
+  else note('no sessions running', 'dim')
 
   const projectsList = Array.isArray(projects.data) ? projects.data : []
   const activeProject = projectsList.find((p) => p.status === 'active')
@@ -414,10 +420,9 @@ function HostsCard() {
 }
 
 export default function Dashboard() {
-  const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
-  const sessions = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions })
+  const sessions = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, refetchInterval: 10_000 })
 
-  const sessionsList = Array.isArray(sessions.data) ? sessions.data : []
+  const running = sessions.data?.installed ? sessions.data.sessions.filter((x) => x.live) : []
 
   return (
     // overflow-x-clip rather than overflow-hidden. `hidden` makes this element a
@@ -451,46 +456,44 @@ export default function Dashboard() {
         </div>
 
         <div className="order-3 min-w-0 space-y-6 xl:order-2">
-          <Card title={`Sessions (${sessionsList.length})`}>
-            {sessionsList.length > 0 ? (
+          {/* The same sessions the Sessions page shows, because it is the same
+              query. This card used to read /api/sessions, which greps odin's
+              own process list for `claude --resume`; Claude runs on thor, so it
+              sat at zero and bore no relation to the page. Titles and activity
+              here, not pids and cpu: the useful question is what is running and
+              whether it needs you. */}
+          <Card title={`Sessions (${running.length})`}>
+            {running.length > 0 ? (
               <div className="space-y-2">
-                {sessionsList.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm">
+                {running.map((s) => (
+                  <a
+                    key={s.sessionId}
+                    href="/sessions"
+                    title={s.cwd ?? undefined}
+                    className="flex items-center gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm transition hover:border-[var(--color-border-strong)]"
+                  >
+                    <span
+                      aria-hidden
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
+                      style={{
+                        background: s.activity === 'working' ? 'var(--color-accent)'
+                          : s.activity === 'asking' ? 'var(--color-warning)'
+                          : 'var(--color-success)',
+                      }}
+                    />
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="font-semibold">{s.model}</span>
-                        {s.project && (
-                          <span className="text-[var(--color-text-dim)]">· {s.project}</span>
-                        )}
-                        {s.gitBranch && s.gitBranch !== 'master' && s.gitBranch !== 'main' && (
-                          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-accent)]">
-                            [{s.gitBranch}]
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
-                        pid:{s.pid}{s.gitBranch && (s.gitBranch === 'master' || s.gitBranch === 'main') ? ` · ${s.gitBranch}` : ''}
+                      <div className="truncate font-semibold">{s.title}</div>
+                      <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
+                        {s.project}
+                        {s.activity === 'asking' && <span className="text-[var(--color-warning)]"> · waiting on you</span>}
+                        {s.activity === 'working' && <span className="text-[var(--color-accent)]"> · working</span>}
                       </div>
                     </div>
-                    <div className="shrink-0 text-right text-xs text-[var(--color-text-dim)]">
-                      <div>{s.cpu.toFixed(2)}% cpu</div>
-                      <div className="mt-0.5">
-                        {fmtBytes(s.memory)}
-                        {sys.data?.memory?.total
-                          ? <span className="ml-1 text-[10px] text-[var(--color-text-faint)]">({clampPct((s.memory / sys.data.memory.total) * 100)}%)</span>
-                          : null}
-                      </div>
-                      {s.lastActivity != null && (
-                        <div className="mt-0.5 text-[10px] text-[var(--color-text-faint)]">
-                          {fmtAgo(s.lastActivity)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             ) : (
-              <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No active sessions'}</div>
+              <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No sessions running'}</div>
             )}
           </Card>
         </div>
