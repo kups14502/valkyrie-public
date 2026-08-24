@@ -937,6 +937,17 @@ export type SlopStats = {
     failing_clips: number
     budget_blocked: boolean
   }
+  // Added with the publish stage (slop-factory schema v4). Optional so an older
+  // CLI that predates it still type-checks; the tab treats it as absent then.
+  publishing?: {
+    total: number
+    failed: number
+    by_platform: Record<string, number>
+    last_published_at: string | null
+    uploads_needed: number
+    uploads_needed_by_platform: Record<string, number>
+    platforms_enabled: string[]
+  }
 }
 
 export type SlopStatsEnvelope = {

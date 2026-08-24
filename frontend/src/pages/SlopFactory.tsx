@@ -3,15 +3,16 @@ import { Card } from '../components/Card'
 import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
 
 // Slop factory page. Every figure comes from `run.py stats --json` on Odin via
-// /api/slopfactory/stats. The pipeline turns long video into vertical shorts and
-// stops at a review gate; it has no upload code, so "posted" here is a flag the
-// operator sets by hand after putting something out themselves. Nothing on this
-// page can publish anything.
+// /api/slopfactory/stats. The pipeline turns long video into vertical shorts,
+// holds them at a review gate, and the publish stage then uploads approved
+// renders to the configured platforms. "posted" means a short has gone out to at
+// least one platform (via the publish stage, or marked by hand). This tab is a
+// read-only view: it does not itself trigger any upload.
 //
-// The question this tab exists to answer, in one glance: do I need to record
-// more gameplay? Every short lays a slice of filler underneath it and the pool
-// is finite, so past a point the same footage repeats under different shorts.
-// That is why gameplay is the headline and everything else is below it.
+// The two questions this tab answers at a glance: do I need to record more
+// gameplay (the finite filler pool that sits under every short), and how many
+// approved shorts are still waiting to be uploaded to each platform. Gameplay is
+// the headline; the publish backlog sits with the shorts below it.
 //
 // Colour follows the same contract as the trade bot page:
 //  * --color-danger ONLY when something actually wants a human. Here that is
@@ -146,6 +147,8 @@ export default function SlopFactory() {
   const s = stats.shorts
   const f = stats.footage
   const p = stats.pipeline
+  const pub = stats.publishing
+  const publishing = pub != null && pub.platforms_enabled.length > 0
   const stalled = p.budget_blocked || p.failing_sources > 0 || p.failing_clips > 0
 
   return (
@@ -203,7 +206,7 @@ export default function SlopFactory() {
       <Card title="shorts">
         <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
           <Figure label="made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
-          <Figure label="posted" value={`${s.posted}`} sub="marked by hand" tone="emphasis" />
+          <Figure label="posted" value={`${s.posted}`} sub="on a platform" tone="emphasis" />
           <Figure label="awaiting review" value={`${s.pending}`} />
         </div>
         <div className="mt-4">
@@ -213,6 +216,44 @@ export default function SlopFactory() {
           <Row label="rejected (gameplay returned)" value={`${s.rejected}`} />
         </div>
       </Card>
+
+      {/* Publish backlog: only drawn once at least one platform is configured. The
+          headline is uploads still needed; per-platform rows break it down. */}
+      {publishing && pub ? (
+        <Card title="publishing">
+          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
+            <Figure
+              label="to upload"
+              value={`${pub.uploads_needed}`}
+              sub="approved, not yet on every platform"
+              tone={pub.uploads_needed > 0 ? 'emphasis' : 'normal'}
+            />
+            <Figure label="published" value={`${pub.total}`} sub={`across ${pub.platforms_enabled.length} platform(s)`} />
+            {pub.failed > 0 ? (
+              <Figure label="failed" value={`${pub.failed}`} sub="see run.py publish" tone="danger" />
+            ) : null}
+          </div>
+          <div className="mt-4">
+            {pub.platforms_enabled.map((name) => {
+              const need = pub.uploads_needed_by_platform[name] ?? 0
+              const done = pub.by_platform[name] ?? 0
+              return (
+                <Row
+                  key={name}
+                  label={name}
+                  value={need > 0 ? `${need} to upload · ${done} posted` : `up to date · ${done} posted`}
+                />
+              )
+            })}
+          </div>
+          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+            {pub.last_published_at
+              ? `last published ${new Date(pub.last_published_at).toLocaleString()}`
+              : 'nothing published yet'}
+            . On Odin: run.py publish uploads the backlog.
+          </p>
+        </Card>
+      ) : null}
 
       <Card title="footage">
         <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">

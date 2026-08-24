@@ -69,6 +69,19 @@ export type SlopStats = {
     failing_clips: number
     budget_blocked: boolean
   }
+  // Added with the publish stage (slop-factory schema v4). Optional: the validator
+  // allows extra keys and an older CLI without it still passes, so the tab guards
+  // for absence. Not validated field-by-field here (unknown extras are allowed
+  // through), so this type is documentation, not an enforced contract.
+  publishing?: {
+    total: number
+    failed: number
+    by_platform: Record<string, number>
+    last_published_at: string | null
+    uploads_needed: number
+    uploads_needed_by_platform: Record<string, number>
+    platforms_enabled: string[]
+  }
 }
 
 type ErrorKind =
