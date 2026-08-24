@@ -149,6 +149,7 @@ export function SessionBoard() {
   const [stoppingId, setStoppingId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  const [showDone, setShowDone] = useState(false)
 
   useEffect(() => { void localHostname().then(setHere) }, [])
 
@@ -185,11 +186,16 @@ export function SessionBoard() {
     onSuccess: refresh,
   })
 
-  const { live, rest, desk } = useMemo(() => {
+  const { live, rest, doneList, desk } = useMemo(() => {
     const all = q.data?.installed ? q.data.sessions : []
     return {
       live: all.filter((s) => s.live),
-      rest: all.filter((s) => !s.live),
+      // "recent" means recent AND still open. Done rows arrive in the payload
+      // (undo needs them) but live in their own collapsed section: after the
+      // fresh start everything finished is done, so this is what keeps the
+      // default view at "what am I working on" instead of "what happened".
+      rest: all.filter((s) => !s.live && !s.done),
+      doneList: all.filter((s) => !s.live && s.done),
       // The desk is what was open on thor recently, so recovering it after a
       // reboot is one action rather than a click per row. Already-running and
       // finished sessions are excluded, so pressing it twice does nothing.
@@ -264,14 +270,39 @@ export function SessionBoard() {
           opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
       ))}
 
-      {hidden > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowAll(true)}
-          className="mt-3 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
-        >
-          show {hidden} older
-        </button>
+      {live.length === 0 && rest.length === 0 && (
+        <div className="py-3 text-[11px] text-[var(--color-text-faint)]">
+          Nothing open. Finished sessions are under done, and a new one appears here the moment you start it.
+        </div>
+      )}
+
+      <div className="mt-3 flex items-center gap-4">
+        {hidden > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+          >
+            show {hidden} older
+          </button>
+        )}
+        {doneList.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowDone((v) => !v)}
+            className="text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+          >
+            {showDone ? 'hide done' : `show ${doneList.length} done`}
+          </button>
+        )}
+      </div>
+      {showDone && (
+        <div className="mt-1 opacity-60">
+          {doneList.map((s) => (
+            <Row key={s.sessionId} s={s} {...rowProps}
+              opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
+          ))}
+        </div>
       )}
 
       {(open.isError || stop.isError || done.isError) && (
