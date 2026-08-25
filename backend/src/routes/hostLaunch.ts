@@ -143,6 +143,36 @@ router.post('/hosts/thor/restore-desk', async (req, res) => {
   }
 })
 
+// ----------------------------------------------------------- new session ----
+// Start a session on thor without remoting in first. The client sends a KEY
+// from thor's own list, never a path, so this route cannot widen where the
+// launcher may open a terminal: thor resolves the directory locally, exactly as
+// it does for resume.
+
+const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+
+router.get('/hosts/thor/launch-targets', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    const r = await callLauncher('/launch-targets', { method: 'GET' })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/launch-new', async (req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  const target = String((req.body ?? {}).target ?? '')
+  if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
+  try {
+    const r = await callLauncher('/launch-new', { method: 'POST', body: { target } }, 20_000)
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
 // --------------------------------------------------------------- sessions ----
 // The list the page draws: real sessions, newest first, one row per session.
 //

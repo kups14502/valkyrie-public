@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Play, RotateCcw, Square, Undo2 } from 'lucide-react'
+import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, Undo2 } from 'lucide-react'
 import {
-  fetchSessionList, launchSessionOnThor, localHostname, openSessionHere,
-  setSessionDone, stopSessionOnThor,
+  fetchLaunchTargets, fetchSessionList, launchSessionOnThor, localHostname, openSessionHere,
+  setSessionDone, startSessionOnThor, stopSessionOnThor,
   type SessionActivity, type WorkSession,
 } from '../lib/api'
 
@@ -142,6 +142,71 @@ function Row({ s, remote, here, onOpen, onStop, onDone, opening, stopping, busy 
   )
 }
 
+// Start a session on thor without remoting in first. The list comes from thor
+// and the click sends back only a key, so the page never names a directory.
+function NewSession({ onStarted }: { onStarted: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const targets = useQuery({ queryKey: ['launchTargets'], queryFn: fetchLaunchTargets, staleTime: 60_000 })
+  const list = (targets.data ?? []).filter((t) => t.exists)
+
+  // Click-away, so the menu does not sit open over the list.
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [open])
+
+  if (list.length === 0) return null
+
+  const start = async (key: string) => {
+    setBusy(key); setErr(null)
+    try {
+      const r = await startSessionOnThor(key)
+      if (!r.ok) setErr(r.detail ?? 'could not start it')
+      // Claude takes a moment to register, so give the list something to find.
+      setTimeout(onStarted, 2_500)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(null); setOpen(false)
+    }
+  }
+
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        disabled={busy !== null}
+        onClick={() => setOpen((v) => !v)}
+        title={`Start a new Claude session on ${HOST}`}
+        className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border-strong)] px-3 text-[11px] text-[var(--color-text)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+      >
+        <Plus size={12} /> {busy ? `starting ${busy}…` : 'new session'} <ChevronDown size={11} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 min-w-44 border border-[var(--color-border-strong)] bg-[var(--color-surface)] py-1 shadow-lg">
+          {list.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => void start(t.key)}
+              className="block w-full px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {err && <div className="absolute right-0 mt-1 text-[11px] text-[var(--color-danger)]">{err}</div>}
+    </div>
+  )
+}
+
 export function SessionBoard() {
   const qc = useQueryClient()
   const [here, setHere] = useState<string | null>(null)
@@ -247,6 +312,8 @@ export function SessionBoard() {
           {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
           {remote && here ? ` · opening on ${here}` : ''}
         </div>
+        <div className="flex items-center gap-2">
+        <NewSession onStarted={refresh} />
         {desk.length > 0 && (
           <button
             type="button"
@@ -258,6 +325,7 @@ export function SessionBoard() {
             <RotateCcw size={12} /> {recovering ? 'recovering…' : `recover my desk (${desk.length})`}
           </button>
         )}
+        </div>
       </div>
 
       {live.map((s) => (

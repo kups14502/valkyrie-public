@@ -664,6 +664,29 @@ const parseSession = (raw: unknown): WorkSession | null => {
   }
 }
 
+export type LaunchTarget = { key: string; label: string; exists: boolean }
+
+export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
+  try {
+    const d = (await api.get<{ targets?: unknown }>('/hosts/thor/launch-targets')).data
+    if (!Array.isArray(d.targets)) return []
+    return d.targets
+      .map((raw) => {
+        const r = (raw ?? {}) as Record<string, unknown>
+        const key = wsStr(r.key)
+        return key ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false } : null
+      })
+      .filter((x): x is LaunchTarget => x !== null)
+  } catch {
+    // A backend without the route is not an error worth a banner: the button
+    // simply does not appear.
+    return []
+  }
+}
+
+export const startSessionOnThor = async (target: string) =>
+  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/launch-new', { target })).data
+
 export const fetchSessionList = async (): Promise<SessionsResult> => {
   let payload: unknown
   try {
