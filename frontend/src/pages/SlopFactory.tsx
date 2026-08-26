@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
@@ -6,15 +7,12 @@ import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
 // /api/slopfactory/stats. The pipeline turns long video into vertical shorts, holds them
 // at a review gate, and the publish stage uploads approved renders to the platforms.
 //
-// This tab leads with PERFORMANCE: what is published and how it is doing (views, likes,
-// per-short list). The production pipeline (clips, render queue, gameplay footage) is real
-// but secondary, so it sits below in compact cards.
+// This tab leads with PERFORMANCE and shows the published shorts as a thumbnail grid, like
+// a content dashboard. The production pipeline (clips, render queue, gameplay footage) is
+// real but secondary, so it sits below in compact, collapsible cards.
 //
-// Colour contract, same as the trade bot page:
-//  * --color-danger ONLY when something wants a human: the endpoint failing, gameplay
-//    running short, or a stalled render queue. Zero views is never red.
-//  * --color-accent is EMPHASIS, not "good" (the hue is user-picked at runtime).
-//  * everything else is --color-text / -dim / -faint / --color-border.
+// Colour: --color-danger only when something wants a human (endpoint down, gameplay short,
+// stalled queue). --color-accent is emphasis, not "good". Zero views is never red.
 
 const fmtCount = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -29,7 +27,13 @@ const fmtMin = (seconds: number) => {
   return `${Math.round(seconds)} s`
 }
 
-// Short relative date for the shorts list: "today", "2d ago", else a locale date.
+const fmtDur = (seconds: number | null | undefined) => {
+  if (!seconds || seconds <= 0) return ''
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 const fmtWhen = (iso: string | null | undefined) => {
   if (!iso) return ''
   const t = new Date(iso).getTime()
@@ -41,37 +45,50 @@ const fmtWhen = (iso: string | null | undefined) => {
   return new Date(iso).toLocaleDateString()
 }
 
-// Thumbnail for a published video. YouTube ids map to a stable image URL, so no fetch or
-// stored column is needed; other platforms fall back to no image.
-const thumbUrl = (platform: string, remoteId: string | null | undefined) =>
-  platform === 'youtube' && remoteId
-    ? `https://i.ytimg.com/vi/${remoteId}/mqdefault.jpg`
-    : null
+type Video = {
+  title: string
+  url: string | null
+  platform: string
+  remote_id?: string | null
+  views: number | null
+  likes: number | null
+  comments?: number | null
+  duration?: number | null
+  published_at: string | null
+  stats_at: string | null
+}
 
-function Figure({
-  label,
+// A big number with a small caption, for the performance hero.
+function Stat({
   value,
+  label,
   sub,
-  tone = 'normal',
+  accent,
 }: {
-  label: string
   value: string
+  label: string
   sub?: string
-  tone?: 'normal' | 'emphasis' | 'danger'
+  accent?: boolean
 }) {
-  const colour =
-    tone === 'danger'
-      ? 'var(--color-danger)'
-      : tone === 'emphasis'
-        ? 'var(--color-accent)'
-        : 'var(--color-text)'
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
-        {label}
-      </span>
-      <span className="text-2xl font-semibold tabular-nums" style={{ color: colour }}>
+    <div
+      className="flex flex-col gap-0.5 rounded-lg px-4 py-3"
+      style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
+    >
+      <span
+        className="text-3xl font-bold tabular-nums leading-none"
+        style={{
+          color: accent ? 'var(--color-accent)' : 'var(--color-text)',
+          textShadow: accent ? '0 0 12px rgba(var(--color-accent-rgb),0.5)' : undefined,
+        }}
+      >
         {value}
+      </span>
+      <span
+        className="mt-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+        style={{ color: 'var(--color-text-faint)' }}
+      >
+        {label}
       </span>
       {sub ? (
         <span className="text-xs" style={{ color: 'var(--color-text-dim)' }}>
@@ -79,6 +96,92 @@ function Figure({
         </span>
       ) : null}
     </div>
+  )
+}
+
+// Vertical thumbnail for a short. Tries the original 9:16 frame, falls back to the 16:9
+// frame, then a placeholder. YouTube ids map to stable image URLs, so no fetch is needed.
+function Thumb({ id, platform }: { id: string | null | undefined; platform: string }) {
+  const base = platform === 'youtube' && id ? `https://i.ytimg.com/vi/${id}` : ''
+  const [src, setSrc] = useState(base ? `${base}/oardefault.jpg` : '')
+  const [dead, setDead] = useState(!base)
+  return (
+    <div
+      className="relative w-full overflow-hidden rounded-md"
+      style={{ aspectRatio: '9 / 16', background: 'var(--color-surface-3)' }}
+    >
+      {!dead ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => {
+            if (src.includes('oardefault')) setSrc(`${base}/hqdefault.jpg`)
+            else setDead(true)
+          }}
+        />
+      ) : (
+        <div
+          className="flex h-full w-full items-center justify-center text-2xl"
+          style={{ color: 'var(--color-text-faint)' }}
+        >
+          ▶
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ShortCard({ v }: { v: Video }) {
+  const views = v.views
+  const dur = fmtDur(v.duration)
+  const card = (
+    <div className="group flex flex-col gap-2">
+      <div className="relative">
+        <Thumb id={v.remote_id} platform={v.platform} />
+        {/* views badge, YouTube-style overlay */}
+        <div
+          className="absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums"
+          style={{ background: 'rgba(0,0,0,0.78)', color: '#fff' }}
+        >
+          {views == null ? '—' : `${fmtCount(views)} views`}
+        </div>
+        {dur ? (
+          <div
+            className="absolute bottom-1.5 left-1.5 rounded px-1.5 py-0.5 text-[11px] tabular-nums"
+            style={{ background: 'rgba(0,0,0,0.78)', color: '#fff' }}
+          >
+            {dur}
+          </div>
+        ) : null}
+      </div>
+      <div className="min-w-0">
+        <div
+          className="text-sm leading-snug"
+          style={{
+            color: 'var(--color-text)',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {v.title}
+        </div>
+        <div className="mt-0.5 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+          {fmtWhen(v.published_at)}
+          {v.likes != null && v.likes > 0 ? ` · ${fmtCount(v.likes)} likes` : ''}
+        </div>
+      </div>
+    </div>
+  )
+  return v.url ? (
+    <a href={v.url} target="_blank" rel="noreferrer" className="block no-underline hover:opacity-90">
+      {card}
+    </a>
+  ) : (
+    card
   )
 }
 
@@ -101,61 +204,18 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'dan
   )
 }
 
-type Video = {
-  title: string
-  url: string | null
-  platform: string
-  remote_id?: string | null
-  views: number | null
-  likes: number | null
-  comments?: number | null
-  duration?: number | null
-  published_at: string | null
-  stats_at: string | null
-}
-
-function ShortRow({ v }: { v: Video }) {
-  const thumb = thumbUrl(v.platform, v.remote_id)
-  const views = v.views == null ? null : v.views
-  const inner = (
-    <div
-      className="flex items-center gap-3 py-2 border-b last:border-b-0"
-      style={{ borderColor: 'var(--color-border)' }}
-    >
-      <div
-        className="relative shrink-0 overflow-hidden rounded"
-        style={{ width: 64, height: 36, background: 'var(--color-border)' }}
-      >
-        {thumb ? (
-          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
-        ) : null}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm" style={{ color: 'var(--color-text)' }}>
-          {v.title}
-        </div>
-        <div className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
-          {v.platform}
-          {v.published_at ? ` · ${fmtWhen(v.published_at)}` : ''}
-        </div>
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="text-sm font-semibold tabular-nums" style={{ color: 'var(--color-text)' }}>
-          {views == null ? '—' : fmtCount(views)}
-        </div>
-        <div className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
-          {views == null ? 'views n/a' : views === 1 ? 'view' : 'views'}
-          {v.likes != null && v.likes > 0 ? ` · ${fmtCount(v.likes)} likes` : ''}
-        </div>
-      </div>
+function MiniStat({ value, label, tone }: { value: string; label: string; tone?: 'danger' | 'emphasis' }) {
+  const color =
+    tone === 'danger' ? 'var(--color-danger)' : tone === 'emphasis' ? 'var(--color-accent)' : 'var(--color-text)'
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xl font-semibold tabular-nums" style={{ color }}>
+        {value}
+      </span>
+      <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'var(--color-text-faint)' }}>
+        {label}
+      </span>
     </div>
-  )
-  return v.url ? (
-    <a href={v.url} target="_blank" rel="noreferrer" className="block no-underline hover:opacity-80">
-      {inner}
-    </a>
-  ) : (
-    inner
   )
 }
 
@@ -221,18 +281,13 @@ export default function SlopFactory() {
   const publishing = pub != null && pub.platforms_enabled.length > 0
   const stalled = p.budget_blocked || p.failing_sources > 0 || p.failing_clips > 0
 
-  // Performance figures, from the published-video list.
-  const videos = (pub?.videos ?? []).slice()
-  const byViews = videos
-    .slice()
-    .sort((a, b) => (b.views ?? -1) - (a.views ?? -1))
+  const videos: Video[] = (pub?.videos ?? []) as Video[]
+  const byViews = videos.slice().sort((a, b) => (b.views ?? -1) - (a.views ?? -1))
   const posted = pub?.total ?? 0
   const totalViews = pub?.total_views ?? 0
   const totalLikes = pub?.total_likes ?? 0
   const avgViews = posted > 0 ? Math.round(totalViews / posted) : 0
-  const best = byViews.find((v) => (v.views ?? 0) > 0) ?? null
 
-  // Cadence: how fast the approved backlog drains.
   const perRun = pub?.per_run ?? 0
   const queued = pub?.uploads_needed ?? 0
   const daysToClear = perRun > 0 && queued > 0 ? Math.ceil(queued / perRun) : 0
@@ -247,63 +302,47 @@ export default function SlopFactory() {
         </Card>
       ) : null}
 
-      {/* Headline: performance of what is published. Only shown once publishing is set up. */}
+      {/* Performance hero. */}
       {publishing ? (
         <Card title="performance">
-          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-            <Figure
-              label="total views"
-              value={fmtCount(totalViews)}
-              tone={totalViews > 0 ? 'emphasis' : 'normal'}
-            />
-            <Figure label="total likes" value={fmtCount(totalLikes)} />
-            <Figure label="published" value={`${posted}`} sub={`across ${pub!.platforms_enabled.length} platform(s)`} />
-            <Figure label="avg / short" value={fmtCount(avgViews)} sub="views" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat value={fmtCount(totalViews)} label="total views" accent />
+            <Stat value={fmtCount(totalLikes)} label="total likes" />
+            <Stat value={`${posted}`} label="published" sub={`${pub!.platforms_enabled.join(', ')}`} />
+            <Stat value={fmtCount(avgViews)} label="avg / short" />
           </div>
-          {best ? (
-            <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
-              Top short:{' '}
-              <span style={{ color: 'var(--color-text)' }}>{best.title}</span>{' '}
-              <span className="tabular-nums" style={{ color: 'var(--color-accent)' }}>
-                ({fmtCount(best.views ?? 0)} views)
-              </span>
+          {totalViews === 0 ? (
+            <p className="mt-3 text-sm" style={{ color: 'var(--color-text-dim)' }}>
+              No views yet. Fresh uploads sit near zero until subscribers or the algorithm
+              surface them, which is the cold-start problem, not a pipeline fault.
             </p>
-          ) : (
-            <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
-              No views yet. Fresh uploads sit near zero until something surfaces them.
-            </p>
-          )}
+          ) : null}
         </Card>
       ) : null}
 
-      {/* The shorts themselves, top performers first. */}
+      {/* Shorts as a thumbnail grid, top performers first. */}
       {publishing && byViews.length > 0 ? (
-        <Card title={`shorts (${byViews.length})`}>
-          <div>
+        <Card title={`shorts · ${byViews.length}`}>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {byViews.map((v, i) => (
-              <ShortRow key={v.url ?? v.remote_id ?? i} v={v} />
+              <ShortCard key={v.url ?? v.remote_id ?? i} v={v} />
             ))}
           </div>
-          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
-            Sorted by views. Click a short to open it. Counts refresh on each run and on load.
+          <p className="mt-4 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+            Sorted by views. Counts refresh on each run and on load. Click a short to open it.
           </p>
         </Card>
       ) : null}
 
-      {/* Upload pipeline: what is queued and how fast it posts. */}
+      {/* Upload pipeline: cadence and backlog. */}
       {publishing ? (
         <Card title="upload pipeline">
-          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-            <Figure label="posted" value={`${posted}`} />
-            <Figure
-              label="queued"
-              value={`${queued}`}
-              sub="approved, not yet up"
-              tone={queued > 0 ? 'emphasis' : 'normal'}
-            />
-            <Figure label="awaiting review" value={`${s.pending}`} />
+          <div className="flex flex-wrap gap-x-10 gap-y-4">
+            <MiniStat value={`${posted}`} label="posted" />
+            <MiniStat value={`${queued}`} label="queued" tone={queued > 0 ? 'emphasis' : undefined} />
+            <MiniStat value={`${s.pending}`} label="awaiting review" />
             {pub!.failed > 0 ? (
-              <Figure label="upload failures" value={`${pub!.failed}`} sub="see run.py publish" tone="danger" />
+              <MiniStat value={`${pub!.failed}`} label="upload failures" tone="danger" />
             ) : null}
           </div>
           <div className="mt-4">
@@ -337,16 +376,16 @@ export default function SlopFactory() {
         </Card>
       )}
 
-      {/* Production: clips and the render queue. Compact, below the fold. */}
+      {/* Production, compact and collapsible. */}
       <Card title="production" collapsible storageKey="slop-production">
-        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-          <Figure label="episodes" value={`${f.episodes_ingested}`} sub={`${fmtMin(f.source_seconds)} ingested`} />
-          <Figure label="clips cut" value={`${f.clips_total}`} />
-          <Figure label="shorts made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
-          <Figure
-            label="awaiting render"
+        <div className="flex flex-wrap gap-x-10 gap-y-4">
+          <MiniStat value={`${f.episodes_ingested}`} label="episodes" />
+          <MiniStat value={`${f.clips_total}`} label="clips cut" />
+          <MiniStat value={`${s.total}`} label="shorts made" />
+          <MiniStat
             value={`${f.clips_awaiting_render}`}
-            tone={p.budget_blocked ? 'danger' : 'normal'}
+            label="awaiting render"
+            tone={p.budget_blocked ? 'danger' : undefined}
           />
         </div>
         <div className="mt-4">
@@ -357,35 +396,27 @@ export default function SlopFactory() {
         </div>
       </Card>
 
-      {/* Gameplay footage budget: the finite filler pool under every short. */}
+      {/* Gameplay footage budget, compact and collapsible. */}
       <Card title="gameplay footage" collapsible storageKey="slop-gameplay">
-        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-          <Figure
-            label="footage left"
+        <div className="flex flex-wrap gap-x-10 gap-y-4">
+          <MiniStat
             value={fmtMin(g.seconds_remaining)}
-            sub={`of ${fmtMin(g.seconds_available)} across ${g.files.length} file(s)`}
-            tone={g.short_on_gameplay ? 'danger' : 'normal'}
+            label="footage left"
+            tone={g.short_on_gameplay ? 'danger' : undefined}
           />
-          <Figure
-            label="covers"
+          <MiniStat
             value={`${g.shorts_supported_remaining}`}
-            sub="more short(s) before footage repeats"
-            tone={g.shorts_supported_remaining === 0 ? 'danger' : 'normal'}
+            label="covers N more"
+            tone={g.shorts_supported_remaining === 0 ? 'danger' : undefined}
           />
         </div>
-        {g.short_on_gameplay ? (
-          <p className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>
-            Record about {fmtMin(g.seconds_needed_for_backlog)} more to cover the{' '}
-            {f.clips_awaiting_render} waiting clip(s).
-          </p>
-        ) : (
-          <p className="mt-3 text-sm" style={{ color: 'var(--color-text-dim)' }}>
-            Enough footage for the current queue.
-          </p>
-        )}
+        <p className="mt-3 text-sm" style={{ color: g.short_on_gameplay ? 'var(--color-danger)' : 'var(--color-text-dim)' }}>
+          {g.short_on_gameplay
+            ? `Record about ${fmtMin(g.seconds_needed_for_backlog)} more to cover the ${f.clips_awaiting_render} waiting clip(s).`
+            : `Enough footage for the current queue (${fmtMin(g.seconds_available)} across ${g.files.length} file(s)).`}
+        </p>
       </Card>
 
-      {/* Only drawn when the pipeline actually stalled: the failure a timer would hide. */}
       {stalled ? (
         <Card title="needs attention">
           {p.budget_blocked ? (
