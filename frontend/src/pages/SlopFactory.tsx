@@ -3,43 +3,50 @@ import { Card } from '../components/Card'
 import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
 
 // Slop factory page. Every figure comes from `run.py stats --json` on Odin via
-// /api/slopfactory/stats. The pipeline turns long video into vertical shorts,
-// holds them at a review gate, and the publish stage then uploads approved
-// renders to the configured platforms. "posted" means a short has gone out to at
-// least one platform (via the publish stage, or marked by hand). This tab is a
-// read-only view: it does not itself trigger any upload.
+// /api/slopfactory/stats. The pipeline turns long video into vertical shorts, holds them
+// at a review gate, and the publish stage uploads approved renders to the platforms.
 //
-// The two questions this tab answers at a glance: do I need to record more
-// gameplay (the finite filler pool that sits under every short), and how many
-// approved shorts are still waiting to be uploaded to each platform. Gameplay is
-// the headline; the publish backlog sits with the shorts below it.
+// This tab leads with PERFORMANCE: what is published and how it is doing (views, likes,
+// per-short list). The production pipeline (clips, render queue, gameplay footage) is real
+// but secondary, so it sits below in compact cards.
 //
-// Colour follows the same contract as the trade bot page:
-//  * --color-danger ONLY when something actually wants a human. Here that is
-//    exactly three things: the endpoint failing, gameplay running short, and a
-//    render queue that stalled (budget_blocked or non-zero failures). A queue of
-//    shorts waiting to be reviewed is routine and never red.
-//  * --color-accent is EMPHASIS, not "good" (the hue is user-picked at runtime,
-//    so green-means-good is not available).
+// Colour contract, same as the trade bot page:
+//  * --color-danger ONLY when something wants a human: the endpoint failing, gameplay
+//    running short, or a stalled render queue. Zero views is never red.
+//  * --color-accent is EMPHASIS, not "good" (the hue is user-picked at runtime).
 //  * everything else is --color-text / -dim / -faint / --color-border.
-// Coloured marks are always paired with a word, so colour alone never carries
-// meaning.
 
-// Compact view counts: 1.2K, 3.4M. Small numbers print as-is.
 const fmtCount = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
   return `${n}`
 }
 
-const minutes = (seconds: number) => seconds / 60
-
 const fmtMin = (seconds: number) => {
-  const m = minutes(seconds)
+  const m = seconds / 60
   if (m >= 10) return `${Math.round(m)} min`
   if (m >= 1) return `${m.toFixed(1)} min`
   return `${Math.round(seconds)} s`
 }
+
+// Short relative date for the shorts list: "today", "2d ago", else a locale date.
+const fmtWhen = (iso: string | null | undefined) => {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return ''
+  const days = Math.floor((Date.now() - t) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
+}
+
+// Thumbnail for a published video. YouTube ids map to a stable image URL, so no fetch or
+// stored column is needed; other platforms fall back to no image.
+const thumbUrl = (platform: string, remoteId: string | null | undefined) =>
+  platform === 'youtube' && remoteId
+    ? `https://i.ytimg.com/vi/${remoteId}/mqdefault.jpg`
+    : null
 
 function Figure({
   label,
@@ -94,6 +101,64 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'dan
   )
 }
 
+type Video = {
+  title: string
+  url: string | null
+  platform: string
+  remote_id?: string | null
+  views: number | null
+  likes: number | null
+  comments?: number | null
+  duration?: number | null
+  published_at: string | null
+  stats_at: string | null
+}
+
+function ShortRow({ v }: { v: Video }) {
+  const thumb = thumbUrl(v.platform, v.remote_id)
+  const views = v.views == null ? null : v.views
+  const inner = (
+    <div
+      className="flex items-center gap-3 py-2 border-b last:border-b-0"
+      style={{ borderColor: 'var(--color-border)' }}
+    >
+      <div
+        className="relative shrink-0 overflow-hidden rounded"
+        style={{ width: 64, height: 36, background: 'var(--color-border)' }}
+      >
+        {thumb ? (
+          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : null}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm" style={{ color: 'var(--color-text)' }}>
+          {v.title}
+        </div>
+        <div className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+          {v.platform}
+          {v.published_at ? ` · ${fmtWhen(v.published_at)}` : ''}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums" style={{ color: 'var(--color-text)' }}>
+          {views == null ? '—' : fmtCount(views)}
+        </div>
+        <div className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+          {views == null ? 'views n/a' : views === 1 ? 'view' : 'views'}
+          {v.likes != null && v.likes > 0 ? ` · ${fmtCount(v.likes)} likes` : ''}
+        </div>
+      </div>
+    </div>
+  )
+  return v.url ? (
+    <a href={v.url} target="_blank" rel="noreferrer" className="block no-underline hover:opacity-80">
+      {inner}
+    </a>
+  ) : (
+    inner
+  )
+}
+
 export default function SlopFactory() {
   const { data, isLoading, error } = useQuery<SlopStatsEnvelope>({
     queryKey: ['slopfactory', 'stats'],
@@ -111,8 +176,6 @@ export default function SlopFactory() {
     )
   }
 
-  // A transport failure and a CLI failure are different facts, but both mean the
-  // numbers on screen cannot be trusted, so both say so rather than drawing zeros.
   if (error || !data) {
     return (
       <div className="p-0 sm:p-4">
@@ -158,6 +221,22 @@ export default function SlopFactory() {
   const publishing = pub != null && pub.platforms_enabled.length > 0
   const stalled = p.budget_blocked || p.failing_sources > 0 || p.failing_clips > 0
 
+  // Performance figures, from the published-video list.
+  const videos = (pub?.videos ?? []).slice()
+  const byViews = videos
+    .slice()
+    .sort((a, b) => (b.views ?? -1) - (a.views ?? -1))
+  const posted = pub?.total ?? 0
+  const totalViews = pub?.total_views ?? 0
+  const totalLikes = pub?.total_likes ?? 0
+  const avgViews = posted > 0 ? Math.round(totalViews / posted) : 0
+  const best = byViews.find((v) => (v.views ?? 0) > 0) ?? null
+
+  // Cadence: how fast the approved backlog drains.
+  const perRun = pub?.per_run ?? 0
+  const queued = pub?.uploads_needed ?? 0
+  const daysToClear = perRun > 0 && queued > 0 ? Math.ceil(queued / perRun) : 0
+
   return (
     <div className="flex flex-col gap-4 p-0 sm:p-4">
       {stale ? (
@@ -168,8 +247,118 @@ export default function SlopFactory() {
         </Card>
       ) : null}
 
-      {/* Headline: the only question that decides whether the operator has to act. */}
-      <Card title="gameplay">
+      {/* Headline: performance of what is published. Only shown once publishing is set up. */}
+      {publishing ? (
+        <Card title="performance">
+          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
+            <Figure
+              label="total views"
+              value={fmtCount(totalViews)}
+              tone={totalViews > 0 ? 'emphasis' : 'normal'}
+            />
+            <Figure label="total likes" value={fmtCount(totalLikes)} />
+            <Figure label="published" value={`${posted}`} sub={`across ${pub!.platforms_enabled.length} platform(s)`} />
+            <Figure label="avg / short" value={fmtCount(avgViews)} sub="views" />
+          </div>
+          {best ? (
+            <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
+              Top short:{' '}
+              <span style={{ color: 'var(--color-text)' }}>{best.title}</span>{' '}
+              <span className="tabular-nums" style={{ color: 'var(--color-accent)' }}>
+                ({fmtCount(best.views ?? 0)} views)
+              </span>
+            </p>
+          ) : (
+            <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
+              No views yet. Fresh uploads sit near zero until something surfaces them.
+            </p>
+          )}
+        </Card>
+      ) : null}
+
+      {/* The shorts themselves, top performers first. */}
+      {publishing && byViews.length > 0 ? (
+        <Card title={`shorts (${byViews.length})`}>
+          <div>
+            {byViews.map((v, i) => (
+              <ShortRow key={v.url ?? v.remote_id ?? i} v={v} />
+            ))}
+          </div>
+          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+            Sorted by views. Click a short to open it. Counts refresh on each run and on load.
+          </p>
+        </Card>
+      ) : null}
+
+      {/* Upload pipeline: what is queued and how fast it posts. */}
+      {publishing ? (
+        <Card title="upload pipeline">
+          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
+            <Figure label="posted" value={`${posted}`} />
+            <Figure
+              label="queued"
+              value={`${queued}`}
+              sub="approved, not yet up"
+              tone={queued > 0 ? 'emphasis' : 'normal'}
+            />
+            <Figure label="awaiting review" value={`${s.pending}`} />
+            {pub!.failed > 0 ? (
+              <Figure label="upload failures" value={`${pub!.failed}`} sub="see run.py publish" tone="danger" />
+            ) : null}
+          </div>
+          <div className="mt-4">
+            {pub!.platforms_enabled.map((name) => {
+              const need = pub!.uploads_needed_by_platform[name] ?? 0
+              const done = pub!.by_platform[name] ?? 0
+              return (
+                <Row
+                  key={name}
+                  label={name}
+                  value={need > 0 ? `${need} to upload · ${done} posted` : `up to date · ${done} posted`}
+                />
+              )
+            })}
+          </div>
+          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+            {pub!.auto_publish && perRun > 0
+              ? `Auto-posting up to ${perRun} per run on Odin's daily timer${
+                  daysToClear > 0 ? ` · about ${daysToClear} day(s) to clear the queue` : ''
+                }.`
+              : 'Publishing is manual (run.py publish on Odin).'}
+            {pub!.last_published_at ? ` Last posted ${fmtWhen(pub!.last_published_at)}.` : ''}
+          </p>
+        </Card>
+      ) : (
+        <Card title="publishing">
+          <p className="text-sm" style={{ color: 'var(--color-text-dim)' }}>
+            No platforms configured. Set publish.platforms in config.toml on Odin to start
+            uploading.
+          </p>
+        </Card>
+      )}
+
+      {/* Production: clips and the render queue. Compact, below the fold. */}
+      <Card title="production" collapsible storageKey="slop-production">
+        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
+          <Figure label="episodes" value={`${f.episodes_ingested}`} sub={`${fmtMin(f.source_seconds)} ingested`} />
+          <Figure label="clips cut" value={`${f.clips_total}`} />
+          <Figure label="shorts made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
+          <Figure
+            label="awaiting render"
+            value={`${f.clips_awaiting_render}`}
+            tone={p.budget_blocked ? 'danger' : 'normal'}
+          />
+        </div>
+        <div className="mt-4">
+          <Row label="pending review" value={`${s.pending}`} />
+          <Row label="approved, not yet posted" value={`${s.approved}`} />
+          <Row label="posted" value={`${s.posted}`} />
+          <Row label="rejected (gameplay returned)" value={`${s.rejected}`} />
+        </div>
+      </Card>
+
+      {/* Gameplay footage budget: the finite filler pool under every short. */}
+      <Card title="gameplay footage" collapsible storageKey="slop-gameplay">
         <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
           <Figure
             label="footage left"
@@ -181,173 +370,26 @@ export default function SlopFactory() {
             label="covers"
             value={`${g.shorts_supported_remaining}`}
             sub="more short(s) before footage repeats"
-            tone={g.shorts_supported_remaining === 0 ? 'danger' : 'emphasis'}
+            tone={g.shorts_supported_remaining === 0 ? 'danger' : 'normal'}
           />
-          <Figure label="spent" value={fmtMin(g.seconds_consumed)} sub="under existing shorts" />
         </div>
-
         {g.short_on_gameplay ? (
-          <p className="mt-4 text-sm" style={{ color: 'var(--color-danger)' }}>
-            [record more] about {fmtMin(g.seconds_needed_for_backlog)} of extra gameplay is
-            needed to cover the {f.clips_awaiting_render} clip(s) waiting to render. Drop
-            recordings into the filler directory on Odin and run render again.
+          <p className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>
+            Record about {fmtMin(g.seconds_needed_for_backlog)} more to cover the{' '}
+            {f.clips_awaiting_render} waiting clip(s).
           </p>
         ) : (
-          <p className="mt-4 text-sm" style={{ color: 'var(--color-text-dim)' }}>
+          <p className="mt-3 text-sm" style={{ color: 'var(--color-text-dim)' }}>
             Enough footage for the current queue.
           </p>
         )}
-
-        <div className="mt-4">
-          {g.files.map((file) => (
-            <Row key={file.name} label={file.name} value={fmtMin(file.seconds)} />
-          ))}
-          {g.files.length === 0 ? (
-            <p className="text-sm" style={{ color: 'var(--color-danger)' }}>
-              [empty] no filler videos found. Every short would render without gameplay.
-            </p>
-          ) : null}
-        </div>
       </Card>
 
-      <Card title="shorts">
-        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-          <Figure label="made" value={`${s.total}`} sub={fmtMin(s.seconds_total)} />
-          <Figure label="posted" value={`${s.posted}`} sub="on a platform" tone="emphasis" />
-          <Figure label="awaiting review" value={`${s.pending}`} />
-        </div>
-        <div className="mt-4">
-          <Row label="pending" value={`${s.pending}`} />
-          <Row label="approved, not yet posted" value={`${s.approved}`} />
-          <Row label="posted" value={`${s.posted}`} />
-          <Row label="rejected (gameplay returned)" value={`${s.rejected}`} />
-        </div>
-      </Card>
-
-      {/* Publish backlog: only drawn once at least one platform is configured. The
-          headline is uploads still needed; per-platform rows break it down. */}
-      {publishing && pub ? (
-        <Card title="publishing">
-          <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-            <Figure
-              label="to upload"
-              value={`${pub.uploads_needed}`}
-              sub="approved, not yet on every platform"
-              tone={pub.uploads_needed > 0 ? 'emphasis' : 'normal'}
-            />
-            <Figure label="published" value={`${pub.total}`} sub={`across ${pub.platforms_enabled.length} platform(s)`} />
-            <Figure
-              label="total views"
-              value={fmtCount(pub.total_views ?? 0)}
-              tone={(pub.total_views ?? 0) > 0 ? 'emphasis' : 'normal'}
-            />
-            {pub.failed > 0 ? (
-              <Figure label="failed" value={`${pub.failed}`} sub="see run.py publish" tone="danger" />
-            ) : null}
-          </div>
-          <div className="mt-4">
-            {pub.platforms_enabled.map((name) => {
-              const need = pub.uploads_needed_by_platform[name] ?? 0
-              const done = pub.by_platform[name] ?? 0
-              return (
-                <Row
-                  key={name}
-                  label={name}
-                  value={need > 0 ? `${need} to upload · ${done} posted` : `up to date · ${done} posted`}
-                />
-              )
-            })}
-          </div>
-
-          {/* Per-short view counts, newest first. Views read null until the first fetch,
-              shown as a dash rather than 0 so "unknown" and "no views yet" stay distinct. */}
-          {pub.videos && pub.videos.length > 0 ? (
-            <div className="mt-5">
-              <div
-                className="mb-1 text-xs uppercase tracking-wide"
-                style={{ color: 'var(--color-text-faint)' }}
-              >
-                shorts
-              </div>
-              {pub.videos.map((v, i) => {
-                const label =
-                  v.views == null ? '—' : `${fmtCount(v.views)} view${v.views === 1 ? '' : 's'}`
-                const row = (
-                  <div
-                    className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <span
-                      className="min-w-0 truncate text-sm"
-                      style={{ color: 'var(--color-text-dim)' }}
-                    >
-                      {v.title}
-                    </span>
-                    <span
-                      className="shrink-0 text-sm tabular-nums"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                )
-                return v.url ? (
-                  <a
-                    key={v.url ?? i}
-                    href={v.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block no-underline hover:opacity-80"
-                  >
-                    {row}
-                  </a>
-                ) : (
-                  <div key={i}>{row}</div>
-                )
-              })}
-            </div>
-          ) : null}
-
-          <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
-            {pub.last_published_at
-              ? `last published ${new Date(pub.last_published_at).toLocaleString()}`
-              : 'nothing published yet'}
-            . On Odin: run.py publish uploads the backlog.
-          </p>
-        </Card>
-      ) : null}
-
-      <Card title="footage">
-        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
-          <Figure
-            label="episodes"
-            value={`${f.episodes_ingested}`}
-            sub={`${fmtMin(f.source_seconds)} ingested`}
-          />
-          <Figure label="clips cut" value={`${f.clips_total}`} />
-          <Figure
-            label="awaiting render"
-            value={`${f.clips_awaiting_render}`}
-            tone={p.budget_blocked ? 'danger' : 'normal'}
-          />
-        </div>
-        {f.episodes_awaiting_clip > 0 ? (
-          <p className="mt-3 text-sm" style={{ color: 'var(--color-text-dim)' }}>
-            {f.episodes_awaiting_clip} episode(s) ingested but not yet cut into clips.
-          </p>
-        ) : null}
-      </Card>
-
-      {/* Only drawn when something is actually wrong: a silently stalled pipeline is
-          the failure the operator would otherwise not notice, especially on a timer. */}
+      {/* Only drawn when the pipeline actually stalled: the failure a timer would hide. */}
       {stalled ? (
         <Card title="needs attention">
           {p.budget_blocked ? (
-            <Row
-              label="render stopped early"
-              value="out of gameplay"
-              tone="danger"
-            />
+            <Row label="render stopped early" value="out of gameplay" tone="danger" />
           ) : null}
           {p.failing_sources > 0 ? (
             <Row label="episodes failing" value={`${p.failing_sources}`} tone="danger" />

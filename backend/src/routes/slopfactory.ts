@@ -81,13 +81,20 @@ export type SlopStats = {
     uploads_needed: number
     uploads_needed_by_platform: Record<string, number>
     platforms_enabled: string[]
+    auto_publish?: boolean
+    per_run?: number
     total_views?: number
+    total_likes?: number
+    total_comments?: number
     videos?: {
       title: string
       url: string | null
       platform: string
+      remote_id?: string | null
       views: number | null
       likes: number | null
+      comments?: number | null
+      duration?: number | null
       published_at: string | null
       stats_at: string | null
     }[]
