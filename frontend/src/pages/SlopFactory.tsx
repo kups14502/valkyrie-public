@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '../components/Card'
-import { fetchSlopFactoryStats, type SlopStatsEnvelope } from '../lib/api'
+import { fetchSlopFactoryStats, markTiktokPosted, type SlopStatsEnvelope } from '../lib/api'
 
 // Slop factory page. Every figure comes from `run.py stats --json` on Odin via
 // /api/slopfactory/stats. The pipeline turns long video into vertical shorts, holds them
@@ -219,6 +219,102 @@ function MiniStat({ value, label, tone }: { value: string; label: string; tone?:
   )
 }
 
+type TiktokItem = {
+  render_id: number
+  title: string
+  path: string
+  caption: string
+  duration?: number
+}
+
+function TiktokChecklist({
+  posted,
+  remaining,
+  queue,
+}: {
+  posted: number
+  remaining: number
+  queue: TiktokItem[]
+}) {
+  const qc = useQueryClient()
+  const [copied, setCopied] = useState<number | null>(null)
+  const mark = useMutation({
+    mutationFn: (id: number) => markTiktokPosted(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['slopfactory', 'stats'] }),
+  })
+  const copy = (item: TiktokItem) => {
+    navigator.clipboard?.writeText(item.caption).then(
+      () => {
+        setCopied(item.render_id)
+        setTimeout(() => setCopied((c) => (c === item.render_id ? null : c)), 1500)
+      },
+      () => {},
+    )
+  }
+  return (
+    <Card title="tiktok · to post by hand">
+      <div className="mb-3 flex flex-wrap gap-x-10 gap-y-4">
+        <MiniStat value={`${posted}`} label="posted" />
+        <MiniStat value={`${remaining}`} label="left to post" tone={remaining > 0 ? 'emphasis' : undefined} />
+      </div>
+      {queue.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--color-text-dim)' }}>
+          Nothing waiting. New shorts appear here as they render.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {queue.map((item) => (
+            <div
+              key={item.render_id}
+              className="rounded-lg p-3"
+              style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
+            >
+              <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                {item.title}
+              </div>
+              <div className="mt-1 break-all text-xs" style={{ color: 'var(--color-text-faint)' }}>
+                {item.path.replace('/home/brendon/slop-factory/', 'B:\\slop-factory\\').replace(/\//g, '\\')}
+              </div>
+              <div
+                className="mt-2 rounded p-2 text-xs"
+                style={{ background: 'var(--color-surface-3)', color: 'var(--color-text-dim)' }}
+              >
+                {item.caption}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => copy(item)}
+                  className="rounded px-3 py-1.5 text-xs font-semibold"
+                  style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text)' }}
+                >
+                  {copied === item.render_id ? 'copied ✓' : 'copy caption'}
+                </button>
+                <button
+                  onClick={() => mark.mutate(item.render_id)}
+                  disabled={mark.isPending}
+                  className="rounded px-3 py-1.5 text-xs font-bold"
+                  style={{ background: 'var(--color-accent)', color: '#000', opacity: mark.isPending ? 0.6 : 1 }}
+                >
+                  {mark.isPending && mark.variables === item.render_id ? 'marking…' : 'posted ✓'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {mark.isError ? (
+        <p className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>
+          could not mark posted, try again
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+        Open the file in B:\slop-factory\renders, upload it in the TikTok app, paste the
+        caption, then hit posted. Best shorts first, {queue.length} shown at a time.
+      </p>
+    </Card>
+  )
+}
+
 export default function SlopFactory() {
   const { data, isLoading, error } = useQuery<SlopStatsEnvelope>({
     queryKey: ['slopfactory', 'stats'],
@@ -375,6 +471,15 @@ export default function SlopFactory() {
           </p>
         </Card>
       )}
+
+      {/* Manual TikTok checklist. */}
+      {pub?.tiktok ? (
+        <TiktokChecklist
+          posted={pub.tiktok.posted}
+          remaining={pub.tiktok.remaining}
+          queue={pub.tiktok.queue}
+        />
+      ) : null}
 
       {/* Production, compact and collapsible. */}
       <Card title="production" collapsible storageKey="slop-production">

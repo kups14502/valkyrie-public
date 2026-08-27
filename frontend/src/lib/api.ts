@@ -977,6 +977,19 @@ export type SlopStats = {
     total_views?: number
     total_likes?: number
     total_comments?: number
+    // Manual TikTok checklist: the next few shorts to post by hand, with a copy-paste
+    // caption, plus how many are done and left. TikTok has no usable posting API.
+    tiktok?: {
+      posted: number
+      remaining: number
+      queue: {
+        render_id: number
+        title: string
+        path: string
+        caption: string
+        duration?: number
+      }[]
+    }
     videos?: {
       title: string
       url: string | null
@@ -1008,6 +1021,14 @@ export type SlopStatsEnvelope = {
 
 export const fetchSlopFactoryStats = async () => {
   const r = await api.get<SlopStatsEnvelope>('/slopfactory/stats')
+  return r.data
+}
+
+// Mark one short as hand-posted to TikTok (drops it from the checklist).
+export const markTiktokPosted = async (renderId: number) => {
+  const r = await api.post<{ ok: boolean; error?: string }>('/slopfactory/tiktok-posted', {
+    render_id: renderId,
+  })
   return r.data
 }
 

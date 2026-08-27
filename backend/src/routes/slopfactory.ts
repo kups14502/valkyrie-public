@@ -86,6 +86,11 @@ export type SlopStats = {
     total_views?: number
     total_likes?: number
     total_comments?: number
+    tiktok?: {
+      posted: number
+      remaining: number
+      queue: { render_id: number; title: string; path: string; caption: string; duration?: number }[]
+    }
     videos?: {
       title: string
       url: string | null
@@ -469,6 +474,44 @@ router.get('/slopfactory/stats', async (_req, res) => {
       signal: null,
       stderr_tail: null,
     }))
+  }
+})
+
+// Run a slop-factory write command and resolve once it exits. The only write the
+// dashboard makes: marking a short hand-posted to TikTok. Bounded and never throws.
+function runWriteCli(args: string[]): Promise<{ ok: boolean; message: string }> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(PYTHON, [RUN_PY, ...args], { cwd: FACTORY_DIR })
+    } catch (err) {
+      resolve({ ok: false, message: redact((err as Error).message) })
+      return
+    }
+    let stderr = ''
+    const timer = setTimeout(() => child.kill('SIGKILL'), 20_000)
+    child.stderr?.on('data', (b) => { stderr += String(b) })
+    child.on('error', (err) => { clearTimeout(timer); resolve({ ok: false, message: redact(err.message) }) })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve(code === 0 ? { ok: true, message: 'ok' } : { ok: false, message: redact(tail(stderr, 200) ?? '') || `exit ${code}` })
+    })
+  })
+}
+
+// Mark one render hand-posted to TikTok. Body: { render_id: number }.
+router.post('/slopfactory/tiktok-posted', async (req, res) => {
+  const id = Number((req.body ?? {}).render_id)
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ ok: false, error: 'render_id must be a positive integer' })
+    return
+  }
+  const result = await runWriteCli(['tiktok-posted', String(id)])
+  if (result.ok) {
+    cache = null // force the next stats read to reflect the change
+    res.json({ ok: true })
+  } else {
+    res.status(500).json({ ok: false, error: result.message })
   }
 })
 
