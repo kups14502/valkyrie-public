@@ -89,6 +89,8 @@ export type SlopStats = {
     tiktok?: {
       posted: number
       remaining: number
+      posted_today?: number
+      daily_limit?: number
       queue: { render_id: number; title: string; path: string; caption: string; duration?: number }[]
     }
     videos?: {

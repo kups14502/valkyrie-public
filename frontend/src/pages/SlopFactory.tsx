@@ -231,10 +231,14 @@ function TiktokChecklist({
   posted,
   remaining,
   queue,
+  postedToday = 0,
+  dailyLimit = 3,
 }: {
   posted: number
   remaining: number
   queue: TiktokItem[]
+  postedToday?: number
+  dailyLimit?: number
 }) {
   const qc = useQueryClient()
   const [copied, setCopied] = useState<number | null>(null)
@@ -254,12 +258,15 @@ function TiktokChecklist({
   return (
     <Card title="tiktok · to post by hand">
       <div className="mb-3 flex flex-wrap gap-x-10 gap-y-4">
-        <MiniStat value={`${posted}`} label="posted" />
-        <MiniStat value={`${remaining}`} label="left to post" tone={remaining > 0 ? 'emphasis' : undefined} />
+        <MiniStat value={`${postedToday}/${dailyLimit}`} label="posted today" tone={postedToday >= dailyLimit ? 'emphasis' : undefined} />
+        <MiniStat value={`${remaining}`} label="left in backlog" />
+        <MiniStat value={`${posted}`} label="total posted" />
       </div>
       {queue.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--color-text-dim)' }}>
-          Nothing waiting. New shorts appear here as they render.
+          {remaining === 0
+            ? 'Nothing waiting. New shorts appear here as they render.'
+            : `Today's ${dailyLimit} are done. The next ${Math.min(dailyLimit, remaining)} show up tomorrow.`}
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -309,7 +316,7 @@ function TiktokChecklist({
       ) : null}
       <p className="mt-3 text-xs" style={{ color: 'var(--color-text-faint)' }}>
         Open the file in B:\slop-factory\renders, upload it in the TikTok app, paste the
-        caption, then hit posted. Best shorts first, {queue.length} shown at a time.
+        caption, then hit posted. {dailyLimit} per day, best shorts first.
       </p>
     </Card>
   )
@@ -478,6 +485,8 @@ export default function SlopFactory() {
           posted={pub.tiktok.posted}
           remaining={pub.tiktok.remaining}
           queue={pub.tiktok.queue}
+          postedToday={pub.tiktok.posted_today}
+          dailyLimit={pub.tiktok.daily_limit}
         />
       ) : null}
 
