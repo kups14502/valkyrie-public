@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Lightbulb, Power } from 'lucide-react'
 import { type LightState } from '../lib/api'
 import {
-  PRESETS, brightnessFromPct, hexToRgb, pctFromBrightness, presetSwatchStyle, rgbToHex,
-  useBrightnessThrottle, useSliderSync, type LightPatch,
+  PRESETS, brightnessFromPct, hexToRgb, lightColor, pctFromBrightness, presetSwatchStyle,
+  rgbToHex, useSliderSync, type LightPatch,
 } from '../lib/lights'
 
 // One light UI for both the Lights page and the iPad pad screen, in two sizes.
@@ -35,19 +35,6 @@ const SZ = {
     dot: 'h-9 w-9',
   },
 } as const
-
-// The brightness a finger is currently holding, plus the release that pointer
-// events miss. onCommit only fires on pointerup/touchend, so an arrow-key nudge
-// or a touch the OS cancels would leave the hold set forever, and the thumb and
-// the % readout would stop tracking the bulb for the life of the component.
-// Dropping the hold once the light reports the held value covers those.
-function usePendingPct(externalPct: number | null) {
-  const [pending, setPending] = useState<number | null>(null)
-  useEffect(() => {
-    if (pending !== null && externalPct === pending) setPending(null)
-  }, [externalPct, pending])
-  return [pending, setPending] as const
-}
 
 // Eight presets plus a custom picker. A responsive grid rather than fixed
 // widths, so the swatches stay tappable at 390px and never wrap raggedly.
@@ -89,22 +76,75 @@ function Swatches({ size, customHex, onPick, onCustom }: {
   )
 }
 
-function Brightness({ size, pct, syncTo, onDrag, onCommit }: {
+// The slider commits ONCE, on release.
+//
+// It used to send a throttled command every 150-200ms while the finger moved,
+// so one drag of the whole-room slider fired six or seven separate five-bulb
+// commands at a cloud integration that answers slowly and drops commands. The
+// bulbs spent the next several seconds working through values the user had
+// already dragged past. Nothing about that was visible as feedback, because the
+// percentage readout is local: it tracks the finger either way.
+//
+// The held value owns the thumb from the moment a drag starts until the light
+// reports that value back. useSliderSync cannot write while it is held, and the
+// committed value comes from a ref fed by onInput rather than being read back
+// off the DOM at release, so a background sync can never be mistaken for what
+// the user chose. Holding it past the release matters too: dropping it there
+// exposed the thumb to the pre-command value for the frame before the write
+// landed, which read as a flick backward.
+const HOLD_CEILING_MS = 4_000
+
+function Brightness({ size, pct, onCommit }: {
   size: Size
   pct: number | null
-  syncTo: number | null
-  onDrag: (pct: number) => void
   onCommit: (pct: number) => void
 }) {
-  const ref = useSliderSync(syncTo)
+  const [held, setHeld] = useState<number | null>(null)
+  const dragging = useRef(false)
+  const value = useRef(pct ?? 100)
+  const ceiling = useRef<number | null>(null)
+  const ref = useSliderSync(pct, held !== null)
   const s = SZ[size]
-  const release = (e: React.SyntheticEvent<HTMLInputElement>) => onCommit(Number(e.currentTarget.value))
+  const shown = held ?? pct
+
+  const clearCeiling = () => {
+    if (ceiling.current !== null) { clearTimeout(ceiling.current); ceiling.current = null }
+  }
+  useEffect(() => clearCeiling, [])
+
+  // The light agreed: stop holding and let it drive the thumb again.
+  useEffect(() => {
+    if (dragging.current || held === null || pct !== held) return
+    clearCeiling()
+    setHeld(null)
+  }, [pct, held])
+
+  const begin = (v: number) => {
+    clearCeiling()
+    dragging.current = true
+    value.current = v
+    setHeld(v)
+  }
+
+  // A bulb that never reports the value it was given must not freeze the thumb.
+  const commit = () => {
+    clearCeiling()
+    ceiling.current = window.setTimeout(() => { ceiling.current = null; setHeld(null) }, HOLD_CEILING_MS)
+    onCommit(value.current)
+  }
+
+  const release = () => {
+    if (!dragging.current) return
+    dragging.current = false
+    commit()
+  }
+
   return (
     <div>
       <div className="mb-2 flex items-baseline justify-between">
         <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">brightness</span>
         <span className={`${s.pct} font-semibold tabular-nums leading-none text-[var(--color-text)]`}>
-          {pct != null ? `${pct}%` : '—'}
+          {shown != null ? `${shown}%` : '—'}
         </span>
       </div>
       <input
@@ -113,16 +153,23 @@ function Brightness({ size, pct, syncTo, onDrag, onCommit }: {
         min={1}
         max={100}
         defaultValue={pct ?? 100}
-        onInput={(e) => onDrag(Number(e.currentTarget.value))}
+        // Pointer events cover mouse, pen and touch. Binding touchend as well
+        // made every release on the iPad commit twice.
+        onPointerDown={(e) => begin(Number(e.currentTarget.value))}
+        onInput={(e) => {
+          const v = Number(e.currentTarget.value)
+          value.current = v
+          setHeld(v)
+        }}
         onPointerUp={release}
-        onTouchEnd={release}
         // A touch the OS steals (notification, palm, scroll takeover) fires
         // pointercancel and never pointerup.
         onPointerCancel={release}
-        // Arrow keys change the value without any pointer event at all. syncTo
-        // is null exactly while a value is held, so this won't fire a redundant
-        // write for stray keyups like Tab.
-        onKeyUp={(e) => { if (syncTo === null) release(e) }}
+        onLostPointerCapture={release}
+        // Arrow keys change the value with no pointer event at all, so they get
+        // their own commit. Guarded on a real held value so a stray Tab keyup
+        // cannot fire a write.
+        onKeyUp={() => { if (!dragging.current && held !== null) commit() }}
         className="brightness-slider"
       />
     </div>
@@ -139,15 +186,20 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
 }) {
   const s = SZ[size]
   const [open, setOpen] = useState(!compact)
-  const externalPct = pctFromBrightness(light.brightness)
-  const [pendingPct, setPendingPct] = usePendingPct(externalPct)
-  const displayPct = pendingPct ?? externalPct
-  const color = light.rgb_color ? `rgb(${light.rgb_color.join(',')})` : '#ffd9a0'
+  const pct = pctFromBrightness(light.brightness)
+  const color = lightColor(light)
 
-  const { push, commit } = useBrightnessThrottle(
-    (pct) => onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(pct) }),
-    150,
-  )
+  // Every color change carries the brightness the bulb is already at. Sent
+  // without one, a Cync bulb switching color mode picks its own, which is how
+  // tapping Neutral threw away a brightness that had just been set.
+  const pickColor = (rgb: [number, number, number] | null, kelvin: number | null) => {
+    onUpdate(light.entity_id, {
+      state: 'on',
+      ...(light.brightness != null ? { brightness: light.brightness } : {}),
+      ...(rgb ? { rgb_color: rgb } : {}),
+      ...(kelvin && !rgb ? { color_temp_kelvin: kelvin } : {}),
+    })
+  }
 
   const off = !light.on || light.unavailable
   return (
@@ -177,7 +229,7 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
           <div className="min-w-0">
             <div className={`${s.name} truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
             <div className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
-              {light.unavailable ? 'unavailable' : light.on ? `on · ${displayPct}%` : 'off'}
+              {light.unavailable ? 'unavailable' : light.on ? `on${pct != null ? ` · ${pct}%` : ''}` : 'off'}
             </div>
           </div>
           {compact && !light.unavailable && (
@@ -208,21 +260,14 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
         <div className="mt-4 space-y-4">
           <Brightness
             size={size}
-            pct={displayPct}
-            // null while a drag owns the thumb, so we never fight the finger.
-            syncTo={pendingPct === null ? externalPct : null}
-            onDrag={(pct) => { setPendingPct(pct); push(pct) }}
-            onCommit={(pct) => { commit(pct); setPendingPct(null) }}
+            pct={pct}
+            onCommit={(v) => onUpdate(light.entity_id, { state: 'on', brightness: brightnessFromPct(v) })}
           />
           <Swatches
             size={size}
             customHex={rgbToHex(light.rgb_color)}
-            onPick={(rgb, kelvin) => onUpdate(light.entity_id, {
-              state: 'on',
-              ...(rgb ? { rgb_color: rgb } : {}),
-              ...(kelvin ? { color_temp_kelvin: kelvin } : {}),
-            })}
-            onCustom={(rgb) => onUpdate(light.entity_id, { state: 'on', rgb_color: rgb })}
+            onPick={pickColor}
+            onCustom={(rgb) => pickColor(rgb, null)}
           />
         </div>
       )}
@@ -233,21 +278,19 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
 // The whole-room control. Deliberately the same shape as a single light so the
 // page reads as one system rather than two different widgets.
 export function AllLightsControl({
-  count, anyOn, avgPct, size = 'normal', onToggleAll, onBrightness, onPreset,
+  count, litCount, anyOn, pct, size = 'normal', onToggleAll, onBrightness, onPreset,
 }: {
   count: number
+  litCount: number
   anyOn: boolean
-  avgPct: number | null
+  pct: number | null
   size?: Size
   onToggleAll: (state: 'on' | 'off') => void
   onBrightness: (pct: number) => void
   onPreset: (rgb: [number, number, number] | null, kelvin: number | null) => void
 }) {
   const s = SZ[size]
-  const [pct, setPct] = usePendingPct(avgPct)
   const [hex, setHex] = useState('#ffb87a')
-  const { push, commit } = useBrightnessThrottle(onBrightness, 200)
-  const shown = pct ?? avgPct
 
   return (
     <div className={`panel ${s.card}`} style={{ boxShadow: anyOn ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}>
@@ -261,7 +304,7 @@ export function AllLightsControl({
           <div className="min-w-0">
             <div className={`${s.name} truncate leading-tight text-[var(--color-text)]`}>every light</div>
             <div className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
-              {count} bulb{count === 1 ? '' : 's'}{anyOn && shown != null ? ` · ${shown}%` : ''}
+              {count} bulb{count === 1 ? '' : 's'}{anyOn && pct != null ? ` · ${pct}%` : ''}
             </div>
           </div>
         </div>
@@ -279,21 +322,24 @@ export function AllLightsControl({
         </button>
       </div>
 
-      <div className="mt-4 space-y-4">
-        <Brightness
-          size={size}
-          pct={shown}
-          syncTo={pct === null ? avgPct : null}
-          onDrag={(v) => { setPct(v); push(v) }}
-          onCommit={(v) => { commit(v); setPct(null) }}
-        />
-        <Swatches
-          size={size}
-          customHex={hex}
-          onPick={onPreset}
-          onCustom={(rgb) => { setHex(rgbToHex(rgb)); onPreset(rgb, null) }}
-        />
-      </div>
+      {/* Brightness and color apply to the bulbs that are on, so with the room
+          dark there is nothing here to drive. Showing the controls anyway made
+          a preset tap turn the whole room back on. */}
+      {litCount > 0 ? (
+        <div className="mt-4 space-y-4">
+          <Brightness size={size} pct={pct} onCommit={onBrightness} />
+          <Swatches
+            size={size}
+            customHex={hex}
+            onPick={onPreset}
+            onCustom={(rgb) => { setHex(rgbToHex(rgb)); onPreset(rgb, null) }}
+          />
+        </div>
+      ) : (
+        <div className="mt-4 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+          all off · turn a light on to set brightness or color
+        </div>
+      )}
     </div>
   )
 }

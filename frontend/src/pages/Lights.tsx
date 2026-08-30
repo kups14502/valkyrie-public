@@ -1,18 +1,13 @@
 import { useMemo } from 'react'
 import { Card } from '../components/Card'
 import { AllLightsControl, LightControl } from '../components/LightControl'
-import { pctFromBrightness, useLightsControl } from '../lib/lights'
+import { useLightsControl } from '../lib/lights'
 
 export default function Lights() {
   const {
-    lights, mutation, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset,
+    lights, mutation, all, anyOn, availableTargets, litTargets, roomPct,
+    updateOne, bulk, bulkBrightness, bulkPreset,
   } = useLightsControl()
-
-  const avgPct = useMemo(() => {
-    const on = all.filter((l) => !l.unavailable && l.on && l.brightness != null)
-    if (!on.length) return null
-    return Math.round(on.reduce((sum, l) => sum + pctFromBrightness(l.brightness), 0) / on.length)
-  }, [all])
 
   // Plugged-in bulbs first, so two live lights don't drown in dead cards.
   const ordered = useMemo(
@@ -51,8 +46,9 @@ export default function Lights() {
           {availableTargets.length > 1 && (
             <AllLightsControl
               count={availableTargets.length}
+              litCount={litTargets.length}
               anyOn={anyOn}
-              avgPct={avgPct}
+              pct={roomPct}
               onToggleAll={bulk}
               onBrightness={bulkBrightness}
               onPreset={bulkPreset}

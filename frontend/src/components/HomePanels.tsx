@@ -6,7 +6,7 @@ import {
   fetchImgToken, fetchMediaDownloads, fetchPlexRecent, fetchPlexServer, fetchSystem, onTailnet,
   openInApp, plexAppItemLink, plexImg, plexWatchLink, plexWebItemLink, shouldDeferAppClick,
 } from '../lib/api'
-import { pctFromBrightness, useLightsControl } from '../lib/lights'
+import { useLightsControl } from '../lib/lights'
 import { AllLightsControl, LightControl } from './LightControl'
 
 // Panels shared by the two home screens: the iPad's pad dashboard and the
@@ -88,7 +88,7 @@ export function SystemChips() {
 const LIGHTS_OPEN_KEY = 'valkyrie-pad-lights-open'
 
 export function LightsPanel({ size }: { size: PanelSize }) {
-  const { lights, all, anyOn, availableTargets, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
+  const { lights, all, anyOn, availableTargets, litTargets, roomPct, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(LIGHTS_OPEN_KEY) !== '0' } catch { return true }
   })
@@ -97,12 +97,6 @@ export function LightsPanel({ size }: { size: PanelSize }) {
     try { localStorage.setItem(LIGHTS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
     return next
   })
-
-  const avgPct = useMemo(() => {
-    const on = all.filter((l) => !l.unavailable && l.on && l.brightness != null)
-    if (!on.length) return null
-    return Math.round(on.reduce((sum, l) => sum + pctFromBrightness(l.brightness), 0) / on.length)
-  }, [all])
 
   const ordered = useMemo(
     () => [...all].sort((a, b) => Number(a.unavailable) - Number(b.unavailable)),
@@ -164,8 +158,9 @@ export function LightsPanel({ size }: { size: PanelSize }) {
             <AllLightsControl
               size={size}
               count={availableTargets.length}
+              litCount={litTargets.length}
               anyOn={anyOn}
-              avgPct={avgPct}
+              pct={roomPct}
               onToggleAll={bulk}
               onBrightness={bulkBrightness}
               onPreset={bulkPreset}
