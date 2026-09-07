@@ -173,6 +173,39 @@ router.post('/hosts/thor/launch-new', async (req, res) => {
   }
 })
 
+// -------------------------------------------------------------- desk RGB ----
+// thor's desk lighting: the same two actions as its "Relight Thor" and "Dark
+// Thor" desktop buttons. Same rule as the launch routes above: the client sends
+// a MODE from a fixed list, never a task name, and thor maps it to a scheduled
+// task out of its own local table.
+
+const RGB_MODES = new Set(['relight', 'dark'])
+
+router.get('/hosts/thor/rgb', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    const r = await callLauncher('/rgb', { method: 'GET' })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/rgb', async (req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  const mode = String((req.body ?? {}).mode ?? '')
+  if (!RGB_MODES.has(mode)) return res.status(400).json({ error: 'mode must be relight or dark' })
+  // The reply comes back as soon as the task is STARTED. A relight runs two
+  // full OpenRGB cycles and takes about 45 seconds, so the page polls the
+  // status route instead of holding a request open for it.
+  try {
+    const r = await callLauncher('/rgb', { method: 'POST', body: { mode } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
 // --------------------------------------------------------------- sessions ----
 // The list the page draws: real sessions, newest first, one row per session.
 //

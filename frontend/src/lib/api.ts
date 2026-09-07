@@ -687,6 +687,67 @@ export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
 export const startSessionOnThor = async (target: string) =>
   (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/launch-new', { target })).data
 
+// ---------------------------------------------------------------- desk RGB ----
+// thor's desk lighting, the two actions its desktop buttons already have.
+// `state` is what the desk is doing: 'lit' is a live fact (the storm is
+// streaming), 'dark' is inferred on thor from which button ran last, and
+// 'unknown' means relight was the last press and nothing is streaming, so it
+// failed.
+
+export type ThorRgbMode = 'relight' | 'dark'
+export type ThorRgbTask = { registered: boolean; lastRun: string | null; lastResult: number | null }
+export type ThorRgbState = {
+  installed: boolean
+  state: 'lit' | 'dark' | 'unknown'
+  openrgb: boolean
+  storm: boolean
+  tasks: Record<ThorRgbMode, ThorRgbTask>
+}
+
+const parseRgbTask = (raw: unknown): ThorRgbTask => {
+  const r = (raw ?? {}) as Record<string, unknown>
+  return {
+    registered: r.registered === true,
+    lastRun: wsStr(r.lastRun),
+    lastResult: wsNum(r.lastResult),
+  }
+}
+
+const RGB_ABSENT: ThorRgbState = {
+  installed: false,
+  state: 'unknown',
+  openrgb: false,
+  storm: false,
+  tasks: { relight: { registered: false, lastRun: null, lastResult: null }, dark: { registered: false, lastRun: null, lastResult: null } },
+}
+
+export const fetchThorRgb = async (): Promise<ThorRgbState> => {
+  let payload: unknown
+  try {
+    payload = (await api.get<unknown>('/hosts/thor/rgb')).data
+  } catch (e) {
+    // An old backend, or thor asleep. The panel says so calmly rather than
+    // throwing a red banner across the Lights page.
+    if (missingRouteStatus(e)) return RGB_ABSENT
+    throw e
+  }
+  const p = (payload ?? {}) as Record<string, unknown>
+  const state = wsStr(p.state)
+  return {
+    installed: true,
+    state: state === 'lit' || state === 'dark' ? state : 'unknown',
+    openrgb: p.openrgb === true,
+    storm: p.storm === true,
+    tasks: {
+      relight: parseRgbTask((p.tasks as Record<string, unknown> | undefined)?.relight),
+      dark: parseRgbTask((p.tasks as Record<string, unknown> | undefined)?.dark),
+    },
+  }
+}
+
+export const setThorRgb = async (mode: ThorRgbMode) =>
+  (await api.post<{ ok: boolean; mode?: string; detail?: string }>('/hosts/thor/rgb', { mode })).data
+
 export const fetchSessionList = async (): Promise<SessionsResult> => {
   let payload: unknown
   try {

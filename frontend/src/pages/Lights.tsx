@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Card } from '../components/Card'
 import { AllLightsControl, LightControl } from '../components/LightControl'
+import { ThorRgbControl } from '../components/ThorRgbControl'
 import { useLightsControl } from '../lib/lights'
 
 export default function Lights() {
@@ -23,6 +24,11 @@ export default function Lights() {
           lights<span className="cursor-blink">_</span>
         </h1>
       </div>
+
+      {/* The desk lives above the room's bulbs and OUTSIDE the Home Assistant
+          branch below: thor's RGB has nothing to do with HA, and HA losing the
+          Cync bulbs must not take the desk buttons off the page with it. */}
+      <ThorRgbControl />
 
       {lights.isLoading && !lights.data ? (
         <Card><div className="text-sm text-[var(--color-text-dim)]">Loading…</div></Card>
