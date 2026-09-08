@@ -10,6 +10,14 @@ const router = Router()
 const DB_PATH = '/home/brendon/vaultwarden/vw-data/db.sqlite3'
 const BACKUP_DIR = '/home/brendon/vaultwarden-backups'
 const BACKUP_STALE_HOURS = 36
+
+// What the backup chain actually writes. vaultwarden/backup.sh (the 03:00 timer
+// and the on-change one) produces a single age-encrypted tarball per run,
+// vw-<TS>.tar.gz.age. This looked for db-*.sqlite3, which nothing has written
+// since the chain moved to age, so it counted zero files and reported "backups
+// stale" on the dashboard with nine good archives sitting in the directory. The
+// old name stays matched so a restored archive of loose snapshots still counts.
+const BACKUP_NAME = /^(?:vw-.*\.tar\.gz\.age|db-.*\.sqlite3)$/
 const CACHE_TTL_MS = 120_000
 
 type ContainerInfo = {
@@ -111,7 +119,7 @@ function readBackups(): BackupInfo {
   let entries: { mtimeMs: number; size: number }[] = []
   try {
     entries = readdirSync(BACKUP_DIR)
-      .filter((f) => f.startsWith('db-') && f.endsWith('.sqlite3'))
+      .filter((f) => BACKUP_NAME.test(f))
       .map((f) => {
         const s = statSync(path.join(BACKUP_DIR, f))
         return { mtimeMs: s.mtimeMs, size: s.size }

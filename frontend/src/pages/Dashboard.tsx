@@ -192,7 +192,7 @@ function AccountEmail({ email }: { email: string }) {
       type="button"
       title={`Copy ${email}`}
       onClick={() => { void copyText(email).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } }) }}
-      className="group flex max-w-full items-center gap-1 text-left font-normal text-[10px] text-[var(--color-text-faint)] transition-colors hover:text-[var(--color-text-dim)]"
+      className="group mt-0.5 flex max-w-full items-center gap-1 text-left font-normal text-[11px] text-[var(--color-text-faint)] transition-colors hover:text-[var(--color-text-dim)]"
     >
       <span className="truncate">{email}</span>
       <span className={`shrink-0 uppercase tracking-[0.1em] ${copied ? 'text-[var(--color-success)]' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -215,13 +215,13 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
   return (
     <div
       title={q ? undefined : client.authError || undefined}
-      className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-2 text-sm last:border-b-0"
+      className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-3 text-sm last:border-b-0 sm:gap-4"
     >
-      <div className="w-32 shrink-0 sm:w-56">
-        <div className="truncate font-semibold text-[var(--color-text)]">{client.label}</div>
+      <div className="w-32 shrink-0 sm:w-60">
+        <div className="truncate font-semibold text-[var(--color-text)] sm:text-base">{client.label}</div>
         {client.email && <AccountEmail email={client.email} />}
       </div>
-      <div className="hidden w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:block">
+      <div className="hidden w-28 shrink-0 truncate text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:block">
         {plan}
       </div>
       {q ? (
@@ -236,18 +236,18 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
             // Each bar carries its own reset countdown: one shared tooltip for
             // two bars left you guessing which window it described.
             <div key={row.label} className="flex items-center gap-3">
-              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+              <div className="h-2.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${clampPct(row.pct)}%`, backgroundColor: claudeBarColor(row.pct) }}
                 />
               </div>
-              <div className={`w-16 shrink-0 text-right font-semibold tabular-nums ${claudePctText(row.pct)}`}>
-                {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">{row.label}</span>
+              <div className={`w-16 shrink-0 text-right font-semibold tabular-nums sm:w-20 sm:text-base ${claudePctText(row.pct)}`}>
+                {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)] sm:text-[11px]">{row.label}</span>
               </div>
               <div
                 title={fmtResetExact(row.resets)}
-                className="w-[104px] shrink-0 truncate text-right text-[10px] tabular-nums text-[var(--color-text-faint)]"
+                className="w-[92px] shrink-0 truncate text-right text-[10px] tabular-nums text-[var(--color-text-faint)] sm:w-[124px] sm:text-[11px]"
               >
                 {fmtResetAt(row.resets) ?? 'reset unknown'}
               </div>
@@ -393,13 +393,13 @@ function HostBar({ label, pct, sub }: { label: string; pct: number | null; sub?:
   const c = pct == null ? null : clampPct(pct)
   return (
     <div className="flex items-center gap-2.5" title={sub}>
-      <span className="w-9 shrink-0 text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{label}</span>
-      <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+      <span className="w-9 shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{label}</span>
+      <div className="h-2.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
         {c != null && (
           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
         )}
       </div>
-      <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
+      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
     </div>
   )
 }
@@ -420,11 +420,11 @@ function HostCard({ h }: { h: HostStat }) {
   const memSub = h.memory ? `${fmtBytes(h.memory.used)} / ${fmtBytes(h.memory.total)}` : undefined
   const diskSub = h.disk ? `${fmtBytes(h.disk.used)} / ${fmtBytes(h.disk.total)}` : undefined
   return (
-    <div className="space-y-2.5 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-3">
+    <div className="space-y-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-4">
       <div className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-sm font-semibold text-[var(--color-text)]">{h.label}</span>
-          <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{h.os}</span>
+          <span className="truncate text-base font-semibold text-[var(--color-text)]">{h.label}</span>
+          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{h.os}</span>
         </span>
         <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: status.color }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
@@ -454,7 +454,9 @@ function HostsCard() {
       ) : hosts.error ? (
         <div className="text-sm text-[var(--color-danger)]">Host telemetry unavailable</div>
       ) : (
-        <div className="space-y-3">
+        // Side by side now that this card owns the wide column: three machines
+        // stacked in a 360px rail wasted most of the row.
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {(hosts.data ?? []).map((h) => <HostCard key={h.host} h={h} />)}
         </div>
       )}
@@ -463,10 +465,6 @@ function HostsCard() {
 }
 
 export default function Dashboard() {
-  const sessions = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, refetchInterval: 10_000 })
-
-  const running = sessions.data?.installed ? sessions.data.sessions.filter((x) => x.live) : []
-
   return (
     // overflow-x-clip rather than overflow-hidden. `hidden` makes this element a
     // scroll container in BOTH axes; `clip` clips the horizontal axis without
@@ -493,56 +491,16 @@ export default function Dashboard() {
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />
 
-      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(420px,1fr)_minmax(280px,420px)] xl:items-start">
-        <div className="order-1 min-w-0 space-y-6 xl:sticky xl:top-24 xl:order-1">
-          <TradeBotCard />
-        </div>
-
-        <div className="order-3 min-w-0 space-y-6 xl:order-2">
-          {/* The same sessions the Sessions page shows, because it is the same
-              query. This card used to read /api/sessions, which greps odin's
-              own process list for `claude --resume`; Claude runs on thor, so it
-              sat at zero and bore no relation to the page. Titles and activity
-              here, not pids and cpu: the useful question is what is running and
-              whether it needs you. */}
-          <Card title={`Sessions (${running.length})`}>
-            {running.length > 0 ? (
-              <div className="space-y-2">
-                {running.map((s) => (
-                  <a
-                    key={s.sessionId}
-                    href="/sessions"
-                    title={s.cwd ?? undefined}
-                    className="flex items-center gap-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] px-3 py-3 text-sm transition hover:border-[var(--color-border-strong)]"
-                  >
-                    <span
-                      aria-hidden
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
-                      style={{
-                        background: s.activity === 'working' ? 'var(--color-accent)'
-                          : s.activity === 'asking' ? 'var(--color-warning)'
-                          : 'var(--color-success)',
-                      }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold">{s.title}</div>
-                      <div className="mt-0.5 truncate text-xs text-[var(--color-text-dim)]">
-                        {s.project}
-                        {s.activity === 'asking' && <span className="text-[var(--color-warning)]"> · waiting on you</span>}
-                        {s.activity === 'working' && <span className="text-[var(--color-accent)]"> · working</span>}
-                      </div>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-[var(--color-text-dim)]">{sessions.isLoading ? 'Loading…' : 'No sessions running'}</div>
-            )}
-          </Card>
-        </div>
-
-        <div className="order-2 min-w-0 xl:sticky xl:top-24 xl:order-3">
+      {/* Two columns now that the sessions card is gone: hosts take the wide
+          side (the Sessions page owns session state, and this card duplicated
+          it), the trade bot keeps the narrow one. */}
+      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(300px,400px)] xl:items-start">
+        <div className="order-1 min-w-0">
           <HostsCard />
+        </div>
+
+        <div className="order-2 min-w-0 space-y-6 xl:sticky xl:top-24">
+          <TradeBotCard />
         </div>
       </div>
     </div>
