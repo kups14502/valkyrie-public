@@ -283,7 +283,14 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
 // argv for the pane. `-t` forces the pty the TUI needs; tmux is already
 // giving ssh one, so a plain -t suffices. BatchMode makes a missing key fail
 // with "Permission denied" instead of sitting at a password prompt nobody can
-// see; remain-on-exit=failed then keeps that line on screen.
+// see, and remain-on-exit=failed keeps that line on screen.
+//
+// That last part only covers failures on THIS side of the connection. Once a
+// pty is allocated, the Windows OpenSSH server runs the command under a ConPTY
+// and reports exit 0 to the client however the command ended, so nothing thor
+// does can make this ssh exit non-zero. Measured: the same failing command
+// gives 1 with no pty and 0 with one. Remote failures therefore have to keep
+// their own pane alive, which is what Remote-Session.ps1's Hold-Pane does.
 //
 // ConnectTimeout is the one that matters day to day: thor is a workstation and
 // it sleeps. Without it a connection that never opens sits in TCP SYN retries

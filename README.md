@@ -31,9 +31,15 @@ That split is deliberate. Locking the phone, closing the tab, or restarting the
 API all just detach; reopening reattaches to the same running session, and the
 SSH connection to thor is never touched by any of it. The tmux server has to be
 started by its own unit, because systemd kills a service's whole cgroup and a
-server started by the API would die with every deploy. `remain-on-exit failed`
-in the conf keeps a pane whose command failed (a refused login, a crash) on
-screen to read; a clean exit still closes the session.
+server started by the API would die with every deploy.
+
+`remain-on-exit failed` in the conf keeps a pane on screen when ssh itself
+fails (thor asleep, a refused login), and a clean exit still closes the
+session. It cannot catch a failure on thor's side: with a pty allocated,
+Windows OpenSSH runs the command under a ConPTY and always reports exit 0 to
+the client, so a bad target or a failed resume would otherwise vanish a second
+after opening. `Remote-Session.ps1` holds its own pane open on failure instead,
+printing the reason and closing itself after ten minutes.
 
 Install once, on odin:
 
