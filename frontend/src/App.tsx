@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
@@ -185,8 +185,16 @@ function Shell() {
   const onDashboard = location.pathname === '/dashboard'
   useEffect(() => { if (onDashboard) setMenuOpen(true) }, [onDashboard])
 
+  // /terminal is pinned: it owns its own height, must not scroll, and must not
+  // carry main's padding. The page itself owns the document-level state
+  // (html[data-term-pin], --vp-kb, --vp-pin, data-kb) so there is exactly one
+  // owner; the shell only owns what it renders. Layout effect, not effect, so
+  // the menu is already closed in the paint that first shows the terminal.
+  const pinned = location.pathname === '/terminal'
+  useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
+
   return (
-    <div className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div data-shell className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBar />
       {/* The header doubles as the frameless window's draggable title bar in the app.
           shrink-0 so it keeps its height; <main> below is the scroll container. */}
@@ -257,7 +265,17 @@ function Shell() {
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
       </header>
 
-      <main className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8">
+      {/* `relative overflow-hidden` is inside the pinned branch only: making main
+          a containing block on every route would re-anchor other pages'
+          absolutely positioned descendants. overflow-hidden covers both axes, so
+          overflow-x-hidden moves into the unpinned branch. */}
+      <main
+        className={`min-h-0 w-full flex-1 ${
+          pinned
+            ? 'relative overflow-hidden'
+            : 'overflow-y-auto overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8'
+        }`}
+      >
         <Suspense fallback={<PageFallback />}>
           {/* Per-route boundary: a crash in one page shows an inline error and
               keeps the nav usable; the key resets it when you navigate away. */}
@@ -267,7 +285,10 @@ function Shell() {
             <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
             <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
             <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
-            <Route path="/terminal" element={<PageContainer><Terminal /></PageContainer>} />
+            {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
+                exists for prose line length, and a non-positioned wrapper between
+                main and an absolute inset-0 page root is dead weight. */}
+            <Route path="/terminal" element={<Terminal />} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />

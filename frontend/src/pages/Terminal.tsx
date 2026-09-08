@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -14,6 +14,29 @@ import { getToken } from '../lib/auth'
 // is only a screen and a keyboard for it: closing the tab, locking the phone,
 // or deploying the API all just detach, and coming back reattaches to the same
 // running session.
+//
+// The whole layout exists to make one promise: the terminal DOES NOT MOVE.
+// Nothing on this route scrolls, so a drag cannot shift it, and the software
+// keyboard is handled by two separate channels that must not be confused:
+//
+//   SIZE  --vp-kb  how much of the visible bottom the keyboard is covering,
+//                  paid as padding-bottom on the shell root. This is the only
+//                  thing that can change the terminal's box, so it is written
+//                  ONLY on a settled reading or a cached prediction: one write,
+//                  one layout, one fit, one pty resize per transition.
+//   PIN   --vp-pin  how far WebKit shifted the layout viewport to reveal the
+//                  caret, undone with a compositor-only transform. The size
+//                  formula has no offsetTop term, so writing this can never
+//                  change a box, fire the ResizeObserver, or refit. That is
+//                  what makes it safe to run at event rate.
+//
+// The first version of this page sized the terminal from
+// getBoundingClientRect().top inside a scrolling <main> and re-measured on
+// visualViewport scroll. Every drag and every keyboard frame therefore resized
+// the grid, which resized the pty, which made the remote TUI repaint. Position
+// must never feed size. It does not here: no width is ever written by JS, so
+// cols is structurally immune to focus and keyboard events, and only rotation,
+// a zoom change or a font change can reflow tmux history.
 
 type TermSession = {
   name: string
@@ -49,6 +72,23 @@ type TermStatus = {
 const FONT_KEY = 'valkyrie-term-font'
 const FONT_MIN = 9
 const FONT_MAX = 20
+
+// Stable identity, so the auto-select effect stops re-running on every render
+// while the query is still undefined.
+const EMPTY: TermSession[] = []
+
+// The observed software-keyboard inset, remembered per viewport geometry. Its
+// presence IS the evidence that this device has a software keyboard at this
+// size, which is why a hardware-keyboard-only device never pre-shrinks.
+const KB_KEY = 'valkyrie-term-kb'
+// A keyboard, not a URL bar or an accessory strip.
+const KB_OPEN = 120
+// No keyboard at all.
+const KB_NONE = 40
+// Below this the grid is unreadable and safeFit refuses to resize into it, so
+// say so instead of leaving a stale clipped screen.
+const CRAMPED_H = 72
+const CRAMPED_W = 120
 
 // The app token rides the query string because a browser cannot set headers on
 // a websocket handshake. It is the same trade the existing upgrade path makes;
@@ -120,18 +160,34 @@ const errText = (e: unknown) =>
   || (e as Error)?.message
   || 'failed'
 
+function isEditableFocused(): boolean {
+  const el = document.activeElement
+  if (!(el instanceof HTMLElement)) return false
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+}
+
 const BTN = 'inline-flex min-h-9 items-center justify-center gap-1.5 border border-[var(--color-border)] px-2.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition-colors active:border-[var(--color-accent)] active:text-[var(--color-accent)] hover:border-[var(--color-accent)]/50'
 
 export default function TerminalPage() {
   const qc = useQueryClient()
 
   const hostRef = useRef<HTMLDivElement>(null)
-  const keysRef = useRef<HTMLDivElement>(null)
+  const probeRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const ctrlRef = useRef(false)
   const fontRef = useRef(12)
+
+  // Geometry lives in refs, never state: a viewport event must not re-render
+  // the chip list, the resume list, or the fourteen buttons.
+  const kbRef = useRef(0)
+  const topRef = useRef(0)
+  const rafRef = useRef(0)
+  const roRafRef = useRef(0)
+  const settleRef = useRef(0)
+  const sampleRef = useRef(0)
+  const growRef = useRef(0)
 
   const [active, setActive] = useState<string | null>(null)
   const [gen, setGen] = useState(0)
@@ -141,11 +197,10 @@ export default function TerminalPage() {
     const v = Number(localStorage.getItem(FONT_KEY))
     return v >= FONT_MIN && v <= FONT_MAX ? v : 12
   })
-  const [height, setHeight] = useState(320)
   const [picker, setPicker] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  fontRef.current = font
+  const [cramped, setCramped] = useState(false)
 
   const sessions = useQuery({
     queryKey: ['term', 'sessions'],
@@ -170,58 +225,295 @@ export default function TerminalPage() {
     staleTime: 60_000,
   })
 
-  const list = sessions.data ?? []
+  const list = sessions.data ?? EMPTY
 
-  // Land on whatever ran most recently. Opening the page and being asked to
-  // choose before you can see anything is the wrong default on a phone.
-  useEffect(() => {
-    if (active || !list.length) return
-    if (!list.some((s) => s.name === active)) setActive(list[0].name)
-  }, [list, active])
-
-  // The terminal is sized in px against the *visible* viewport, not a
-  // percentage: it sits inside a scrolling <main>, and on iOS the software
-  // keyboard shrinks visualViewport without touching the layout viewport, so
-  // anything height-based in CSS ends up under the keyboard.
-  const measure = useCallback(() => {
-    const el = hostRef.current
-    if (!el) return
-    const top = el.getBoundingClientRect().top
-    const vv = window.visualViewport
-    const avail = vv ? vv.height + vv.offsetTop : window.innerHeight
-    const keys = keysRef.current?.offsetHeight ?? 0
-    setHeight(Math.max(180, Math.floor(avail - top - keys - 18)))
+  // The single fit entry point, and the only pty resize in the app. Every
+  // guard here is a case where fitting would make things worse than not
+  // fitting: a hidden route, a squeezed box, or a grid that has not changed.
+  const safeFit = useCallback(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    const host = hostRef.current
+    if (!term || !fit || !host || !host.isConnected) return
+    if (host.clientWidth < 40 || host.clientHeight < 40) return
+    let d: { cols: number; rows: number } | undefined
+    try { d = fit.proposeDimensions() } catch { return }
+    if (!d || !Number.isFinite(d.cols) || !Number.isFinite(d.rows)) return
+    // FitAddon clamps rows at 1, and handing rows=1 to tmux makes the TUI
+    // redraw catastrophically.
+    if (d.rows < 2 || d.cols < 20) return
+    // The common case. Two forced layout reads saved, and no repaint asked of
+    // the far side.
+    if (d.cols === term.cols && d.rows === term.rows) return
+    const buf = term.buffer.active
+    const atBottom = buf.viewportY >= buf.baseY
+    try { fit.fit() } catch { return }
+    // Keep the prompt visible after a keyboard open without yanking a user who
+    // deliberately scrolled back.
+    if (atBottom) term.scrollToBottom()
   }, [])
 
-  useEffect(() => {
-    measure()
-    const vv = window.visualViewport
-    window.addEventListener('resize', measure)
-    window.addEventListener('orientationchange', measure)
-    vv?.addEventListener('resize', measure)
-    vv?.addEventListener('scroll', measure)
-    return () => {
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('orientationchange', measure)
-      vv?.removeEventListener('resize', measure)
-      vv?.removeEventListener('scroll', measure)
-    }
-  }, [measure])
+  // A. Layout effects run before passive effects in the same commit, so the
+  //    session effect always builds xterm at the current size. Also safe under
+  //    StrictMode's double render, which a render-phase write is not.
+  useLayoutEffect(() => { fontRef.current = font }, [font])
 
-  // The strip and the launcher panel change how much room is left.
-  useEffect(() => {
-    const t = setTimeout(measure, 60)
-    return () => clearTimeout(t)
-  }, [measure, picker, list.length, error])
+  // B. The geometry controller. Declared before the session effect so both
+  //    properties are committed and laid out before xterm is ever constructed:
+  //    returning to the route with the keyboard up paints once, already short.
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    root.dataset.termPin = ''
+
+    const geoKey = () => {
+      const vv = window.visualViewport
+      const probe = probeRef.current
+      if (!vv || !probe) return ''
+      return `${Math.round(vv.width)}x${probe.offsetHeight}`
+    }
+
+    const cachedKb = (): number | null => {
+      try {
+        const m = JSON.parse(localStorage.getItem(KB_KEY) || '{}') as Record<string, number>
+        const v = m[geoKey()]
+        return typeof v === 'number' && v >= KB_OPEN ? v : null
+      } catch { return null }
+    }
+
+    const rememberKb = (kb: number) => {
+      try {
+        const m = JSON.parse(localStorage.getItem(KB_KEY) || '{}') as Record<string, number>
+        const k = geoKey()
+        if (!k) return
+        if (kb >= KB_OPEN) m[k] = kb
+        // A device that used to have a software keyboard here and now reports
+        // none while something is focused has grown a hardware one. Unlearn,
+        // or every focus would pre-shrink for nothing.
+        else if (kb < KB_NONE && isEditableFocused()) delete m[k]
+        else return
+        localStorage.setItem(KB_KEY, JSON.stringify(m))
+      } catch { /* private mode */ }
+    }
+
+    // The height reference comes from CSS, not from window.*, so it cannot
+    // disagree with the calc() in index.css that consumes it. Reading it is a
+    // height read and never a position read, so it cannot recreate the
+    // position-feeds-size loop this rewrite exists to delete.
+    const readGeom = (): { kb: number; top: number } | null => {
+      const vv = window.visualViewport
+      const probe = probeRef.current
+      if (!vv || !probe) return null
+      // Pinch-zoomed in either direction: write nothing at all.
+      if (Math.abs((vv.scale ?? 1) - 1) > 0.01) return null
+      const dvh = probe.offsetHeight
+      if (!dvh) return null
+      const kb = Math.max(0, Math.ceil(dvh - vv.height))
+      // Clamped to what the size channel has already removed, so the pin can
+      // never push the key bar past the visible bottom, and a stale offset
+      // with no keyboard clamps to zero.
+      const top = Math.max(0, Math.min(vv.offsetTop, kbRef.current))
+      return { kb, top }
+    }
+
+    const commitPin = (top: number) => {
+      if (Math.abs(top - topRef.current) < 0.5) return
+      topRef.current = top
+      // Removing the property leaves transform:none, which means no containing
+      // block for fixed descendants and behaviour identical to every other
+      // route whenever there is nothing to correct.
+      if (top <= 0) root.style.removeProperty('--vp-pin')
+      else root.style.setProperty('--vp-pin', `translate3d(0, calc(${top}px / var(--ui-zoom)), 0)`)
+    }
+
+    const commitSize = (kb: number) => {
+      if (kb === kbRef.current) return
+      kbRef.current = kb
+      if (kb <= 0) root.style.removeProperty('--vp-kb')
+      else root.style.setProperty('--vp-kb', `${kb}px`)
+      if (kb >= KB_OPEN) root.dataset.kb = '1'
+      else delete root.dataset.kb
+      // Hold the clamp invariant when the size shrinks under a live pin.
+      if (topRef.current > kb) commitPin(kb)
+    }
+
+    // Channel A: every event, transform only, one rAF.
+    const pump = () => {
+      rafRef.current = 0
+      const g = readGeom()
+      if (!g) return
+      commitPin(g.top)
+      scheduleSettle()
+    }
+    const onGeom = () => {
+      if (!rafRef.current) rafRef.current = requestAnimationFrame(pump)
+    }
+
+    // Channel B: size, and therefore exactly one fit, on a settled reading.
+    // Two samples because Safari coalesces visualViewport events and the final
+    // correct value can arrive after the animation ends, so "the last event
+    // received" is not "the final geometry".
+    const scheduleSettle = () => {
+      clearTimeout(settleRef.current)
+      clearTimeout(sampleRef.current)
+      settleRef.current = window.setTimeout(() => {
+        const a = readGeom()
+        if (!a) return
+        sampleRef.current = window.setTimeout(() => {
+          const b = readGeom()
+          if (!b) return
+          if (Math.abs(a.kb - b.kb) > 1) { scheduleSettle(); return }
+          commitSize(b.kb)
+          commitPin(b.top)
+          rememberKb(b.kb)
+        }, 120)
+      }, 150)
+    }
+
+    // Predicting the keyboard from the cached inset is what keeps offsetTop at
+    // zero on the warm path: shrink before it animates in and the caret is
+    // already above it, so WebKit's reveal-focus pass has nothing to do.
+    const onFocusIn = () => {
+      clearTimeout(growRef.current)
+      const g = readGeom()
+      if (g && g.kb < KB_NONE) {
+        const c = cachedKb()
+        if (c) commitSize(c)
+      }
+      onGeom()
+    }
+    const onFocusOut = () => {
+      clearTimeout(growRef.current)
+      growRef.current = window.setTimeout(() => {
+        // A soft-key tap blurs the textarea and send() refocuses it within
+        // ~100ms. Growing on that would flash a full-height screen per keypress.
+        if (isEditableFocused()) return
+        commitSize(0)
+        onGeom()
+      }, 150)
+    }
+
+    const onWindowResize = () => { onGeom(); scheduleSettle() }
+
+    const onOrientation = () => {
+      // Commit the best known size immediately, so a rotation with the
+      // keyboard up is right within a frame instead of after the settle.
+      commitSize(isEditableFocused() ? (cachedKb() ?? 0) : 0)
+      onGeom()
+      window.setTimeout(onGeom, 400)
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') window.setTimeout(onGeom, 100)
+    }
+    const onPageShow = () => { window.setTimeout(onGeom, 100) }
+
+    // WebKit's reveal-focus pass really does programmatically scroll an
+    // overflow:hidden ancestor. Reset only the document and ancestors of the
+    // host, so a scrollable a later author adds still scrolls.
+    const onStrayScroll = (e: Event) => {
+      const t = e.target
+      if (t === document || t === root || t === document.body) {
+        root.scrollTop = 0
+        root.scrollLeft = 0
+        document.body.scrollTop = 0
+        document.body.scrollLeft = 0
+        return
+      }
+      const host = hostRef.current
+      if (!(t instanceof HTMLElement) || !host || !t.contains(host)) return
+      if (t.scrollTop) t.scrollTop = 0
+      if (t.scrollLeft) t.scrollLeft = 0
+    }
+    const onWindowScroll = () => {
+      window.scrollTo(0, 0)
+      onGeom()
+    }
+
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', onGeom)
+    vv?.addEventListener('scroll', onGeom)
+    window.addEventListener('resize', onWindowResize)
+    window.addEventListener('orientationchange', onOrientation)
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    document.addEventListener('scroll', onStrayScroll, { capture: true, passive: true })
+    window.addEventListener('scroll', onWindowScroll, { passive: true })
+
+    // The only fit trigger. It cannot see the keyboard on its own; it observes
+    // the box change the size channel produces.
+    const host = hostRef.current
+    const ro = new ResizeObserver(() => {
+      if (roRafRef.current) return
+      roRafRef.current = requestAnimationFrame(() => {
+        roRafRef.current = 0
+        const h = hostRef.current
+        if (!h) return
+        setCramped(h.clientHeight < CRAMPED_H || h.clientWidth < CRAMPED_W)
+        safeFit()
+      })
+    })
+    if (host) ro.observe(host)
+
+    // First pass, synchronous, before paint.
+    const g0 = readGeom()
+    if (g0) {
+      commitSize(g0.kb)
+      commitPin(g0.top)
+    }
+
+    return () => {
+      vv?.removeEventListener('resize', onGeom)
+      vv?.removeEventListener('scroll', onGeom)
+      window.removeEventListener('resize', onWindowResize)
+      window.removeEventListener('orientationchange', onOrientation)
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+      document.removeEventListener('scroll', onStrayScroll, { capture: true })
+      window.removeEventListener('scroll', onWindowScroll)
+      ro.disconnect()
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      if (roRafRef.current) cancelAnimationFrame(roRafRef.current)
+      rafRef.current = 0
+      roRafRef.current = 0
+      clearTimeout(settleRef.current)
+      clearTimeout(sampleRef.current)
+      clearTimeout(growRef.current)
+      kbRef.current = 0
+      topRef.current = 0
+      // Unconditional and idempotent, so StrictMode's double mount is safe.
+      root.style.removeProperty('--vp-kb')
+      root.style.removeProperty('--vp-pin')
+      delete root.dataset.kb
+      delete root.dataset.termPin
+    }
+  }, [safeFit])
 
   const send = useCallback((d: string) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'i', d }))
+    // Load-bearing: tapping a button blurs xterm's textarea, which drops the
+    // iOS keyboard unless focus comes straight back.
     termRef.current?.focus()
   }, [])
 
-  // One terminal + one socket per selected session. `gen` is the reconnect
-  // handle: bumping it tears the pair down and builds them again.
+  const focusTerm = useCallback(() => { termRef.current?.focus() }, [])
+
+  const hideKeyboard = useCallback(() => { termRef.current?.textarea?.blur() }, [])
+
+  const toggleKeyboard = useCallback(() => {
+    const term = termRef.current
+    const ta = term?.textarea
+    if (!term || !ta) return
+    if (document.activeElement === ta) ta.blur()
+    else term.focus()
+  }, [])
+
+  // C. One terminal + one socket per selected session. `gen` is the reconnect
+  //    handle: bumping it tears the pair down and builds them again.
   useEffect(() => {
     const host = hostRef.current
     if (!active || !host) return
@@ -239,7 +531,22 @@ export default function TerminalPage() {
     term.open(host)
     termRef.current = term
     fitRef.current = fit
-    try { fit.fit() } catch { /* not laid out yet */ }
+
+    const ta = term.textarea
+    if (ta) {
+      // Two independent iOS problems. A focus that scrolls the caret into view
+      // is how the layout viewport gets shifted in the first place, and one
+      // legacy xterm path still calls bare focus(). And iOS pinch-zooms the
+      // whole layout whenever a focused control is under 16px, which the
+      // helper textarea is, because it inherits the terminal font size. Cell
+      // metrics come from canvas measureText at options.fontSize, so pinning
+      // this to 16px changes nothing visible.
+      const orig = ta.focus.bind(ta)
+      ta.focus = (o?: FocusOptions) => orig({ preventScroll: true, ...o })
+      ta.style.fontSize = '16px'
+    }
+
+    safeFit()
 
     setConn('connecting')
     const ws = new WebSocket(wsUrl(active, term.cols, term.rows))
@@ -254,7 +561,7 @@ export default function TerminalPage() {
       setConn('live')
       // Resizing straight after attach makes tmux repaint the pane in full.
       // Without it a reattach shows whatever the last client's geometry left
-      // behind, which after a phone rotation is a half-drawn screen.
+      // behind, which after a rotation is a half-drawn screen.
       resize(term.cols, term.rows)
       term.focus()
     }
@@ -283,9 +590,15 @@ export default function TerminalPage() {
     })
     const onResize = term.onResize(({ cols, rows }) => resize(cols, rows))
 
+    // JetBrains Mono is a webfont, and cell metrics measured before it loads
+    // are wrong by a fraction of a column.
+    void document.fonts?.ready.then(() => safeFit())
+
     return () => {
       onData.dispose()
       onResize.dispose()
+      // Null these BEFORE close() so a dying generation cannot stamp
+      // conn:'closed' over the generation replacing it.
       ws.onclose = null
       ws.onerror = null
       ws.close()
@@ -294,43 +607,58 @@ export default function TerminalPage() {
       if (termRef.current === term) termRef.current = null
       if (fitRef.current === fit) fitRef.current = null
     }
-  }, [active, gen])
+  }, [active, gen, safeFit])
 
-  // Font and height both change the grid, and refitting is the only thing that
-  // tells the far side about it.
+  // D. A font change alters cell metrics without changing the host's box, so
+  //    the ResizeObserver does not fire and this must fit for itself.
   useEffect(() => {
     const term = termRef.current
     const fit = fitRef.current
     if (!term || !fit) return
     term.options.fontSize = font
     try { localStorage.setItem(FONT_KEY, String(font)) } catch { /* private mode */ }
-    const id = requestAnimationFrame(() => { try { fit.fit() } catch { /* detached */ } })
+    const id = requestAnimationFrame(() => safeFit())
     return () => cancelAnimationFrame(id)
-  }, [font, height])
+  }, [font, safeFit])
 
-  // iOS suspends a backgrounded socket. Coming back to a dead one should just
-  // reattach rather than showing a frozen screen.
+  // E. iOS suspends a backgrounded socket. Coming back to a dead one should
+  //    reattach rather than show a frozen screen. Debounced, because an iOS
+  //    focus burst would otherwise double-bump gen and rebuild twice.
   useEffect(() => {
+    let timer = 0
     const revive = () => {
-      if (document.visibilityState !== 'visible') return
-      const ws = wsRef.current
-      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-        setGen((g) => g + 1)
-      }
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        if (document.visibilityState !== 'visible') return
+        const ws = wsRef.current
+        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+          setGen((g) => g + 1)
+        }
+      }, 300)
     }
     document.addEventListener('visibilitychange', revive)
     window.addEventListener('focus', revive)
     return () => {
+      window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', revive)
       window.removeEventListener('focus', revive)
     }
   }, [])
 
+  // F. Land on whatever ran most recently, and re-land if the active session
+  //    is killed out from under us.
+  useEffect(() => {
+    if (!list.length) return
+    if (!active || !list.some((s) => s.name === active)) setActive(list[0].name)
+  }, [list, active])
+
   const guessGrid = () => {
-    const w = hostRef.current?.clientWidth ?? 360
+    const host = hostRef.current
+    const w = host?.clientWidth ?? 360
+    const h = host?.clientHeight ?? 320
     return {
       cols: Math.max(24, Math.floor(w / (font * 0.6))),
-      rows: Math.max(10, Math.floor(height / (font * 1.32))),
+      rows: Math.max(10, Math.floor(h / (font * 1.32))),
     }
   }
 
@@ -373,10 +701,23 @@ export default function TerminalPage() {
       ? 'var(--color-accent-2)'
       : 'var(--color-text-faint)'
 
+  const showBanners = Boolean(error) || Boolean(status.data && !status.data.ok)
+
   return (
-    <div className="space-y-2.5">
-      {/* Open sessions. Horizontally scrollable so twelve of them still fit one row. */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+    // absolute inset-0, not h-full: it resolves against main's padding box and
+    // therefore skips whatever Suspense or ErrorBoundary renders in between.
+    // z-0 makes this a stacking context, so the overlay z-indexes below stay
+    // inside the page and under the header instead of competing with it.
+    // touch-manipulation kills double-tap zoom and keeps the pan that xterm
+    // scrollback needs; never touch-action:none.
+    <div
+      data-term-root
+      className="absolute inset-0 z-0 flex touch-manipulation flex-col gap-2 p-2 sm:p-3"
+    >
+      {/* Open sessions. Horizontally scrollable so twelve of them still fit one
+          row, and never hidden: 36px is worth less than a switcher that
+          disappears when the keyboard opens. */}
+      <div data-term-scroll className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5">
         {list.map((s) => {
           const on = s.name === active
           return (
@@ -417,11 +758,7 @@ export default function TerminalPage() {
           )
         })}
 
-        <button
-          type="button"
-          onClick={() => setPicker((v) => !v)}
-          className={`${BTN} shrink-0`}
-        >
+        <button type="button" onClick={() => setPicker((v) => !v)} className={`${BTN} shrink-0`}>
           <Plus size={12} /> new
         </button>
 
@@ -431,112 +768,32 @@ export default function TerminalPage() {
         </div>
       </div>
 
-      {error && (
-        <div className="border border-[var(--color-danger)]/60 px-3 py-2 text-[11px] text-[var(--color-danger)]">
-          {error}
-        </div>
-      )}
-
-      {status.data && !status.data.ok && (
-        <div className="border border-[var(--color-accent-2)]/60 px-3 py-2 text-[11px] text-[var(--color-accent-2)]">
-          {!status.data.tmux ? 'tmux is not installed on odin.' : 'claude is not installed on odin.'}
-        </div>
-      )}
-
-      {picker && (
-        <div className="panel space-y-4 p-3">
-          <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-              &gt; new session in
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(targets.data ?? []).map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void openSession({ mode: 'new', target: t.key })}
-                  className={`${BTN} disabled:opacity-40`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-              &gt; pick up the last session in
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(targets.data ?? []).map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void openSession({ mode: 'continue', target: t.key })}
-                  className={`${BTN} disabled:opacity-40`}
-                >
-                  <RotateCw size={11} /> {t.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void openSession({ mode: 'shell', target: 'home' })}
-                className={`${BTN} disabled:opacity-40`}
-              >
-                <TerminalIcon size={11} /> plain shell
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-              &gt; resume by conversation
-            </div>
-            {recent.isLoading && (
-              <div className="text-[11px] text-[var(--color-text-faint)]">reading transcripts…</div>
-            )}
-            <div className="max-h-64 space-y-1 overflow-y-auto">
-              {(recent.data ?? []).map((r) => (
-                <button
-                  key={r.sessionId}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void openSession({ mode: 'resume', sessionId: r.sessionId })}
-                  className="flex w-full items-start gap-2 border border-[var(--color-border)] px-2.5 py-2 text-left transition-colors active:border-[var(--color-accent)] hover:border-[var(--color-accent)]/50 disabled:opacity-40"
-                >
-                  <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent)]">
-                    {r.project}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">
-                    {r.title}
-                  </span>
-                  <span className="shrink-0 text-[9px] text-[var(--color-text-faint)]">
-                    {relative(r.lastActivity)}
-                  </span>
-                </button>
-              ))}
-              {recent.data?.length === 0 && (
-                <div className="text-[11px] text-[var(--color-text-faint)]">no transcripts on odin yet</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* The screen. Tapping it focuses xterm's textarea, which is what raises
-          the software keyboard on iOS. */}
-      <div className="relative">
+      {/* The stage is the only box on the page whose height varies, and
+          everything inside it is absolutely positioned. So no page state can
+          change the host's size: opening the launcher or showing a banner
+          costs zero refits and zero tmux repaints. */}
+      <div data-term-stage className="relative min-h-0 flex-1">
         <div
           ref={hostRef}
-          onClick={() => termRef.current?.focus()}
-          style={{ height }}
-          className="w-full overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)] px-1 py-1"
+          data-term-host
+          onClick={focusTerm}
+          className="absolute inset-0 overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)] px-1 py-1"
         />
+
+        {/* The height reference the geometry rule measures. Fixed, so it adds
+            no scrollable overflow to an overflow:hidden ancestor (which is
+            exactly the hazard WebKit's reveal-focus pass exploits), and
+            invisible rather than display:none so offsetHeight still reports a
+            used height. */}
+        <div
+          ref={probeRef}
+          aria-hidden
+          className="pointer-events-none invisible fixed left-0 top-0 w-0"
+          style={{ height: '100dvh' }}
+        />
+
         {!active && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+          <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-center">
             <TerminalIcon size={20} className="text-[var(--color-text-faint)]" />
             <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
               {sessions.isLoading ? 'loading' : 'no session open'}
@@ -546,16 +803,137 @@ export default function TerminalPage() {
             )}
           </div>
         )}
+
+        {showBanners && (
+          <div className="absolute inset-x-0 top-0 z-20 space-y-1 p-1">
+            {error && (
+              <div
+                onClick={() => setError(null)}
+                title="dismiss"
+                className="border border-[var(--color-danger)]/60 bg-[var(--color-bg)] px-3 py-2 text-[11px] text-[var(--color-danger)]"
+              >
+                {error}
+              </div>
+            )}
+            {status.data && !status.data.ok && (
+              <div className="border border-[var(--color-accent-2)]/60 bg-[var(--color-bg)] px-3 py-2 text-[11px] text-[var(--color-accent-2)]">
+                {!status.data.tmux ? 'tmux is not installed on odin.' : 'claude is not installed on odin.'}
+              </div>
+            )}
+          </div>
+        )}
+
+        {picker && (
+          <div data-term-scroll className="absolute inset-0 z-30 overflow-y-auto bg-black/90 p-1">
+            <div className="panel space-y-4 p-3">
+              <div>
+                <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+                  &gt; new session in
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(targets.data ?? []).map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void openSession({ mode: 'new', target: t.key })}
+                      className={`${BTN} disabled:opacity-40`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+                  &gt; pick up the last session in
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(targets.data ?? []).map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void openSession({ mode: 'continue', target: t.key })}
+                      className={`${BTN} disabled:opacity-40`}
+                    >
+                      <RotateCw size={11} /> {t.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void openSession({ mode: 'shell', target: 'home' })}
+                    className={`${BTN} disabled:opacity-40`}
+                  >
+                    <TerminalIcon size={11} /> plain shell
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+                  &gt; resume by conversation
+                </div>
+                {recent.isLoading && (
+                  <div className="text-[11px] text-[var(--color-text-faint)]">reading transcripts…</div>
+                )}
+                {/* No nested scroller: the overlay is already a bounded one,
+                    and a scroller inside a scroller is the iOS chaining trap
+                    this route exists to remove. */}
+                <div className="space-y-1">
+                  {(recent.data ?? []).map((r) => (
+                    <button
+                      key={r.sessionId}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void openSession({ mode: 'resume', sessionId: r.sessionId })}
+                      className="flex w-full items-start gap-2 border border-[var(--color-border)] px-2.5 py-2 text-left transition-colors active:border-[var(--color-accent)] hover:border-[var(--color-accent)]/50 disabled:opacity-40"
+                    >
+                      <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                        {r.project}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-dim)]">
+                        {r.title}
+                      </span>
+                      <span className="shrink-0 text-[9px] text-[var(--color-text-faint)]">
+                        {relative(r.lastActivity)}
+                      </span>
+                    </button>
+                  ))}
+                  {recent.data?.length === 0 && (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">no transcripts on odin yet</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {cramped && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-black/85 p-3 text-center">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-accent-2)]">
+              not enough room
+            </div>
+            <div className="text-[10px] text-[var(--color-text-faint)]">
+              hide the keyboard, close the menu, or rotate
+            </div>
+            <button type="button" onClick={hideKeyboard} className={BTN}>
+              <Keyboard size={12} /> hide keyboard
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Keys a software keyboard does not have. Two rows on a phone, one on
-          anything wider. */}
-      <div ref={keysRef} className="flex flex-wrap items-center gap-1.5">
+      {/* Keys a software keyboard does not have. Flexbox reserves this row, so
+          there is no height to measure and no magic gap allowance. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         <button type="button" onClick={() => send('\x1b')} className={BTN}>esc</button>
         <button type="button" onClick={() => send('\t')} className={BTN}>tab</button>
         <button
           type="button"
-          onClick={() => { ctrlRef.current = !ctrlRef.current; setCtrlArmed(ctrlRef.current); termRef.current?.focus() }}
+          onClick={() => { ctrlRef.current = !ctrlRef.current; setCtrlArmed(ctrlRef.current); focusTerm() }}
           className={`${BTN} ${ctrlArmed ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
         >
           ctrl
@@ -576,24 +954,12 @@ export default function TerminalPage() {
         >
           paste
         </button>
-        <button type="button" onClick={() => termRef.current?.focus()} className={BTN} aria-label="Keyboard">
+        <button type="button" onClick={toggleKeyboard} className={BTN} aria-label="Keyboard">
           <Keyboard size={12} />
         </button>
         <div className="ml-auto flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setFont((f) => Math.max(FONT_MIN, f - 1))}
-            className={BTN}
-          >
-            a-
-          </button>
-          <button
-            type="button"
-            onClick={() => setFont((f) => Math.min(FONT_MAX, f + 1))}
-            className={BTN}
-          >
-            a+
-          </button>
+          <button type="button" onClick={() => setFont((f) => Math.max(FONT_MIN, f - 1))} className={BTN}>a-</button>
+          <button type="button" onClick={() => setFont((f) => Math.min(FONT_MAX, f + 1))} className={BTN}>a+</button>
           <button type="button" onClick={() => setGen((g) => g + 1)} className={BTN} aria-label="Reconnect">
             <RotateCw size={12} />
           </button>

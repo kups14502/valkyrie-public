@@ -239,3 +239,81 @@ body::after {
     width: 14px;
   }
 }
+
+/* ---- Pinned route: /terminal ---------------------------------------------
+   The terminal must not move when the page scrolls or when the software
+   keyboard opens, so on this route nothing scrolls: <main> is a definite-height
+   non-scrolling box, the page is a flex column inside it, and the xterm host is
+   absolutely positioned so its height can only be handed down by the box tree.
+
+   Two custom properties, both written by pages/Terminal.tsx, both deltas from
+   the box this shell already has, both defaulting to zero so the route renders
+   exactly like every other one on first paint, if the page's JS never runs, and
+   in a webview with no visualViewport:
+
+     --vp-kb   visible-bottom loss in unzoomed CSS px (keyboard plus accessory
+               bar), written ONLY on a settled or predicted reading.
+     --vp-pin  correction for visualViewport.offsetTop, i.e. how far WebKit
+               shifted the layout viewport to reveal the caret. Written on every
+               viewport event, clamped so it can never exceed --vp-kb.
+
+   The shell is border-box with height:100%, so paying --vp-kb as padding-bottom
+   shortens <main>, and therefore the terminal, and touches nothing else: html
+   keeps calc(100dvh / var(--ui-zoom)), body keeps its safe-area padding, and
+   every position:fixed element in the app still measures against an unchanged
+   layout viewport. Because the height formula has no offsetTop term, the
+   transform is size-neutral: a re-pin cannot refit xterm or resize the pty,
+   which is what makes it safe to run at event rate on the compositor. */
+html[data-term-pin] [data-shell] {
+  padding-bottom: calc(var(--vp-kb, 0px) / var(--ui-zoom));
+  transform: var(--vp-pin, none);
+}
+
+/* The home-indicator inset sits behind the keyboard, so paying it costs a row
+   of terminal for nothing. This is the ONLY thing the keyboard flag drives, so
+   a wrong flag costs 34px and can never produce a wrong box. padding-BOTTOM
+   only: TitleBar.tsx writes body.style.paddingTop inline in WCO mode. */
+html[data-term-pin][data-kb] body { padding-bottom: 0; }
+
+/* A rubber-band moves the visual viewport, which is the thing being pinned
+   against. */
+html[data-term-pin],
+html[data-term-pin] body { overscroll-behavior: none; }
+
+/* A size transition makes the ResizeObserver fire once per animation frame and
+   turns one SIGWINCH into fifteen, and a fit mid-transition reads an
+   interpolated height and lands a row off. */
+html[data-term-pin] [data-shell],
+html[data-term-pin] main,
+html[data-term-pin] [data-term-root],
+html[data-term-pin] [data-term-stage],
+html[data-term-pin] [data-term-host] { transition: none !important; }
+
+/* Whatever Suspense or ErrorBoundary puts between <main> and the page root
+   must not become the containing block for it. */
+html[data-term-pin] main > :not([data-term-root]) {
+  position: static;
+  transform: none;
+  filter: none;
+  contain: none;
+}
+
+/* Bound the squeeze. <header> is shrink-0 and the mobile menu is several
+   hundred px on a phone, so without a cap it can drive main to zero. */
+html[data-term-pin] header {
+  max-height: 45%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* iOS pinch-zooms the layout whenever a focused control is under 16px, and
+   xterm's hidden helper textarea inherits the terminal font size (9 to 20
+   here). That is an independent cause of drift on every tap, of a non-zero
+   offsetTop, and of blurry glyphs. The element is 0x0 and transparent, and cell
+   metrics come from canvas measureText at options.fontSize, so this changes
+   nothing except the zoom trigger. !important beats xterm's inline write. */
+.xterm .xterm-helper-textarea { font-size: 16px !important; }
+
+/* Scrollback becomes the only scroller on the route. */
+.xterm .xterm-viewport,
+[data-term-scroll] { overscroll-behavior: contain; }
