@@ -1,15 +1,15 @@
 {
-  "version": "0.3.74",
-  "notes": "terminal: say why remain-on-exit cannot catch a failure on thor",
-  "pub_date": "2026-09-08T05:40:26Z",
+  "version": "0.3.75",
+  "notes": "sessions: reattach to a running session instead of stopping it first",
+  "pub_date": "2026-09-08T06:28:10Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVhDSk53ZUlJSGtNQ0JQM0dYU3JLRzhaSThXbWxXZGp4ZklxWkp1UmZHcWI5MHRzekZwUTUyQXJaUTJJb2xySlo0YkZwLzR5ZXBxWnpGSGN2bk9PTFFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODQ2MDI2CWZpbGU6VmFsa3lyaWVfMC4zLjc0X3g2NC1zZXR1cC5leGUKOW5UTU81VlZRM293MmYxRTRMblJxbVdMNUdTNm9TRVBIZmFGZVdiZEovbHlGMTJEa3d4czBqa1l5SHAvNWRlbklBWVVDakVFbUswdkxMc09tVnRhRFE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.74/Valkyrie_0.3.74_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVdEbHIrZ0praVVCK0EwS1JyWXUvZ0ZWdmJXS2hIWTlwOTdvQ0dEdWtpY1ZhNkxycW5FcVcxTFNzUm14M1NWWlFZdWw4aXNFa0tCUU8xNzFPbUJWMHc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODQ4ODkwCWZpbGU6VmFsa3lyaWVfMC4zLjc1X3g2NC1zZXR1cC5leGUKMXdqZHBHZTY2KzVoSmdhSTEzazVjOThnenQ1dlRkTHVhWWtwZTFQK3ZNa0J1NjF6Z0NSN1piRG81c1hvYkhCaEpwRHEyQlZtcHFnMHhDZS80Q3o3REE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.75/Valkyrie_0.3.75_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFBcm1YRVJSWTZJL2hRVTNXUUhhUkxZK0dybGlGOUI4YVRBQ01jUjBsa053ckdHWkhjYUdFWXRaYnZnM1R5bmlCWkRwRk1oQ2liNHovdStUWnY0N1FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODQ1OTgzCWZpbGU6VmFsa3lyaWVfMC4zLjc0X2FtZDY0LkFwcEltYWdlCjFqS1hOZDY5L3hKVmJvcGZmQVc2TlFTcVNMYjFrZTRhNXJEdlQrVU5EK21iS3hjUXFMY0RwemtLNVRwNzNMUHc2VjhKbHU0ZHM2Yko0Q3A1TlVsbkRBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.74/Valkyrie_0.3.74_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJwUFVVK3JsTzIrMi9sZFE1c0pkVmVQd2ZwZnNwRUoxMWNINS8zeW1YTGp3c28zeThvc1k3M2tzVFEvZkVjakp4THJ3TGlDdi9EaWQ1N2tiK2JLVmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODQ4ODQwCWZpbGU6VmFsa3lyaWVfMC4zLjc1X2FtZDY0LkFwcEltYWdlCk04U2N2NWYzWnZyYmhRQThPYzRUeE5nM3lVcDVuUytPUjJDdkdnQTdicStyUENPOHlvQTFlNG5NY0E0cjRXVjFaMDBraU9mTkRZc0lhYjBDRG5kVUR3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.75/Valkyrie_0.3.75_amd64.AppImage"
     }
   }
 }
