@@ -5,8 +5,8 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronLeft, CornerDownLeft, Keyboard,
-  Plus, RotateCw, Terminal as TerminalIcon, X,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, ChevronLeft, ChevronUp,
+  CornerDownLeft, Keyboard, MoreHorizontal, Plus, RotateCw, Terminal as TerminalIcon, X,
 } from 'lucide-react'
 import {
   api, fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
@@ -149,6 +149,8 @@ function isEditableFocused(): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
 }
 
+const KEY = 'inline-flex min-h-10 items-center justify-center gap-1 border border-[var(--color-border)] text-[11px] uppercase tracking-[0.08em] text-[var(--color-text-dim)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.12)] active:text-[var(--color-accent)] hover:border-[var(--color-accent)]/50'
+
 const BTN = 'inline-flex min-h-9 items-center justify-center gap-1.5 border border-[var(--color-border)] px-2.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition-colors active:border-[var(--color-accent)] active:text-[var(--color-accent)] hover:border-[var(--color-accent)]/50'
 
 export default function TerminalPage() {
@@ -188,6 +190,7 @@ export default function TerminalPage() {
     return v >= FONT_MIN && v <= FONT_MAX ? v : 12
   })
   const [picker, setPicker] = useState(false)
+  const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cramped, setCramped] = useState(false)
@@ -494,6 +497,18 @@ export default function TerminalPage() {
     termRef.current?.focus()
   }, [])
 
+  // Ask tmux to move its own view. Nothing here writes a size or a position,
+  // so scrolling cannot move the terminal box: it is not capable of
+  // re-entering the position-feeds-size loop this page was rewritten to
+  // delete. Positive is toward older output.
+  const scrollBy = useCallback((lines: number) => {
+    const ws = wsRef.current
+    if (!lines || !ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ t: 's', lines }))
+  }, [])
+
+  const halfScreen = useCallback(() => Math.max(1, Math.floor((termRef.current?.rows ?? 24) / 2)), [])
+
   const focusTerm = useCallback(() => { termRef.current?.focus() }, [])
 
   const hideKeyboard = useCallback(() => { termRef.current?.textarea?.blur() }, [])
@@ -505,6 +520,73 @@ export default function TerminalPage() {
     if (document.activeElement === ta) ta.blur()
     else term.focus()
   }, [])
+
+  // B2. Swipe to scroll. xterm's own touch handling scrolls its local buffer,
+  //     which under tmux holds about one screen, so a swipe appeared to do
+  //     nothing whatsoever. This converts the drag into a line delta for tmux
+  //     instead. Registered on the host rather than the xterm viewport so it
+  //     survives xterm being rebuilt, and non-passive because a real drag has
+  //     to be swallowed rather than handed to the browser.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    let id: number | null = null
+    let startY = 0
+    let lastY = 0
+    let acc = 0
+    let dragging = false
+
+    // A row's height, taken from the box rather than xterm's private renderer
+    // metrics, so a font change needs no invalidation.
+    const rowPx = () => {
+      const term = termRef.current
+      const rows = term?.rows ?? 24
+      return Math.max(6, host.clientHeight / rows)
+    }
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) { id = null; return }
+      const t = e.touches[0]
+      id = t.identifier
+      startY = lastY = t.clientY
+      acc = 0
+      dragging = false
+    }
+
+    const onMove = (e: TouchEvent) => {
+      if (id === null) return
+      // A second finger means a pinch, which belongs to the browser.
+      if (e.touches.length !== 1) { id = null; return }
+      const t = Array.from(e.touches).find((x) => x.identifier === id)
+      if (!t) return
+      // 10px of slop, so a tap that drifts still types instead of scrolling.
+      if (!dragging && Math.abs(t.clientY - startY) < 10) return
+      dragging = true
+      e.preventDefault()
+      acc += t.clientY - lastY
+      lastY = t.clientY
+      const h = rowPx()
+      const lines = Math.trunc(acc / h)
+      if (lines) {
+        acc -= lines * h
+        scrollBy(lines)
+      }
+    }
+
+    const onEnd = () => { id = null; dragging = false; acc = 0 }
+
+    host.addEventListener('touchstart', onStart, { passive: true })
+    host.addEventListener('touchmove', onMove, { passive: false })
+    host.addEventListener('touchend', onEnd, { passive: true })
+    host.addEventListener('touchcancel', onEnd, { passive: true })
+    return () => {
+      host.removeEventListener('touchstart', onStart)
+      host.removeEventListener('touchmove', onMove)
+      host.removeEventListener('touchend', onEnd)
+      host.removeEventListener('touchcancel', onEnd)
+    }
+  }, [scrollBy])
 
   // C. One terminal + one socket per selected session. `gen` is the reconnect
   //    handle: bumping it tears the pair down and builds them again.
@@ -948,42 +1030,102 @@ export default function TerminalPage() {
         )}
       </div>
 
-      {/* Keys a software keyboard does not have. Flexbox reserves this row, so
-          there is no height to measure and no magic gap allowance. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <button type="button" onClick={() => send('\x1b')} className={BTN}>esc</button>
-        <button type="button" onClick={() => send('\t')} className={BTN}>tab</button>
-        <button
-          type="button"
-          onClick={() => { ctrlRef.current = !ctrlRef.current; setCtrlArmed(ctrlRef.current); focusTerm() }}
-          className={`${BTN} ${ctrlArmed ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
-        >
-          ctrl
-        </button>
-        <button type="button" onClick={() => send('\x03')} className={BTN}>^c</button>
-        <button type="button" onClick={() => send('\x1b[A')} className={BTN} aria-label="Up"><ArrowUp size={12} /></button>
-        <button type="button" onClick={() => send('\x1b[B')} className={BTN} aria-label="Down"><ArrowDown size={12} /></button>
-        <button type="button" onClick={() => send('\x1b[D')} className={BTN} aria-label="Left"><ArrowLeft size={12} /></button>
-        <button type="button" onClick={() => send('\x1b[C')} className={BTN} aria-label="Right"><ArrowRight size={12} /></button>
-        <button type="button" onClick={() => send('\r')} className={BTN} aria-label="Enter"><CornerDownLeft size={12} /></button>
-        {/* Backslash-Enter is the newline Claude Code always accepts; Option and
-            Shift+Enter are not reachable from a phone keyboard. */}
-        <button type="button" onClick={() => send('\\\r')} className={BTN}>\⏎</button>
-        <button
-          type="button"
-          onClick={() => { void navigator.clipboard?.readText().then((t) => t && send(t)).catch(() => setError('clipboard blocked')) }}
-          className={BTN}
-        >
-          paste
-        </button>
-        <button type="button" onClick={toggleKeyboard} className={BTN} aria-label="Keyboard">
-          <Keyboard size={12} />
-        </button>
-        <div className="ml-auto flex items-center gap-1.5">
-          <button type="button" onClick={() => setFont((f) => Math.max(FONT_MIN, f - 1))} className={BTN}>a-</button>
-          <button type="button" onClick={() => setFont((f) => Math.min(FONT_MAX, f + 1))} className={BTN}>a+</button>
-          <button type="button" onClick={() => setGen((g) => g + 1)} className={BTN} aria-label="Reconnect">
-            <RotateCw size={12} />
+      {/* Keys a software keyboard does not have.
+          A keypad, not a strip. Fourteen equal buttons in a wrapping flex row
+          reflowed differently at every width, ran the four arrows out
+          horizontally where a thumb cannot aim at them, and left Enter buried
+          in the middle of the sequence. The groups are fixed now and the
+          arrows form the usual inverted T, so aiming is muscle memory and
+          nothing moves when the keyboard opens. Everything that is not a key
+          (paste, font size, reconnect) hides behind the last button, because
+          it was competing for the same thumb as Enter.
+          Still flexbox, so the row is reserved and there is no height to
+          measure and no magic gap allowance. */}
+      <div className="flex shrink-0 flex-col gap-1.5">
+        {more && (
+          <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] pb-1.5">
+            <button
+              type="button"
+              onClick={() => { void navigator.clipboard?.readText().then((t) => t && send(t)).catch(() => setError('clipboard blocked')) }}
+              className={BTN}
+            >
+              paste
+            </button>
+            <button type="button" onClick={toggleKeyboard} className={BTN}>
+              <Keyboard size={12} /> kbd
+            </button>
+            {/* Half a screen at a time, for reading back without a swipe. */}
+            <button type="button" onClick={() => scrollBy(halfScreen())} className={BTN} aria-label="Page up">
+              <ChevronUp size={14} />
+            </button>
+            <button type="button" onClick={() => scrollBy(-halfScreen())} className={BTN} aria-label="Page down">
+              <ChevronDown size={14} />
+            </button>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button type="button" onClick={() => setFont((f) => Math.max(FONT_MIN, f - 1))} className={BTN}>a-</button>
+              <span className="min-w-6 text-center text-[10px] text-[var(--color-text-faint)]">{font}</span>
+              <button type="button" onClick={() => setFont((f) => Math.min(FONT_MAX, f + 1))} className={BTN}>a+</button>
+              <button type="button" onClick={() => setGen((g) => g + 1)} className={BTN} aria-label="Reconnect">
+                <RotateCw size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-stretch gap-1.5">
+          {/* Modifiers, the two-by-two block under the left thumb. */}
+          <div className="grid flex-1 grid-cols-2 gap-1.5">
+            <button type="button" onClick={() => send('\x1b')} className={KEY}>esc</button>
+            <button type="button" onClick={() => send('\t')} className={KEY}>tab</button>
+            <button
+              type="button"
+              onClick={() => { ctrlRef.current = !ctrlRef.current; setCtrlArmed(ctrlRef.current); focusTerm() }}
+              className={`${KEY} ${ctrlArmed ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
+            >
+              ctrl
+            </button>
+            {/* Shift+Tab cycles Claude Code's permission modes and a phone
+                keyboard cannot produce it at all. */}
+            <button type="button" onClick={() => send('\x1b[Z')} className={KEY} aria-label="Shift Tab">
+              &#8679;tab
+            </button>
+          </div>
+
+          {/* Arrows, the inverted T. The blanks are deliberate: they are what
+              makes the shape readable without looking at it. */}
+          <div className="grid flex-[1.4] grid-cols-3 gap-1.5">
+            <span aria-hidden />
+            <button type="button" onClick={() => send('\x1b[A')} className={KEY} aria-label="Up"><ArrowUp size={15} /></button>
+            <span aria-hidden />
+            <button type="button" onClick={() => send('\x1b[D')} className={KEY} aria-label="Left"><ArrowLeft size={15} /></button>
+            <button type="button" onClick={() => send('\x1b[B')} className={KEY} aria-label="Down"><ArrowDown size={15} /></button>
+            <button type="button" onClick={() => send('\x1b[C')} className={KEY} aria-label="Right"><ArrowRight size={15} /></button>
+          </div>
+
+          {/* Send. Enter is the most-pressed key on the page, so it is the
+              biggest target and it sits at the right edge where the thumb
+              already rests. Backslash-Enter is the newline Claude Code always
+              accepts; Option and Shift+Enter are not reachable from a phone. */}
+          <div className="grid flex-1 grid-cols-2 gap-1.5">
+            <button type="button" onClick={() => send('\\\r')} className={KEY}>\&#9166;</button>
+            <button
+              type="button"
+              onClick={() => send('\r')}
+              aria-label="Enter"
+              className={`${KEY} row-span-2 border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.10)] text-[var(--color-accent)]`}
+            >
+              <CornerDownLeft size={18} />
+            </button>
+            <button type="button" onClick={() => send('\x03')} className={KEY}>^c</button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setMore((v) => !v)}
+            aria-label="More keys"
+            className={`${KEY} w-8 shrink-0 ${more ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
+          >
+            <MoreHorizontal size={14} />
           </button>
         </div>
       </div>

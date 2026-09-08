@@ -235,6 +235,44 @@ export async function killSession(name: string): Promise<boolean> {
   }
 }
 
+// ------------------------------------------------------------ scrollback ----
+
+// Scrolling has to be done by tmux, and only tmux.
+//
+// The history is in tmux's pane (history-limit 20000), not in the browser's
+// terminal: tmux repaints just the visible pane, so xterm holds barely a
+// screenful of its own and a swipe on the phone scrolled nothing at all.
+//
+// Nor can the swipe be forwarded as wheel events. tmux's `mouse on` would
+// handle those, but only while nothing inside the pane has asked for the
+// mouse, and Claude Code's TUI asks: tmux then passes the events straight
+// through to it and the view never moves. Driving copy-mode from this side is
+// what works whatever happens to be running in there.
+//
+// Positive lines scroll toward older output, which is the direction a finger
+// dragging DOWN expects.
+export async function scrollPane(name: string, lines: number): Promise<void> {
+  if (!SESSION_NAME_RE.test(name)) return
+  const n = Math.min(500, Math.abs(Math.trunc(lines)))
+  if (!n) return
+  // Entering copy-mode while already in it is a no-op, which is what makes a
+  // stream of swipe deltas cheap. Bare name, not `=name`: these take a
+  // target-PANE, where `=` is not exact-match syntax but a malformed spec.
+  await tmux(['copy-mode', '-t', name], 5_000).catch(() => {})
+  await tmux(
+    ['send-keys', '-t', name, '-X', '-N', String(n), lines < 0 ? 'scroll-down' : 'scroll-up'],
+    5_000,
+  ).catch(() => {})
+}
+
+// Leave copy-mode, so the next keystroke reaches the application instead of
+// being read as a copy-mode command. Errors when the pane is not in a mode,
+// which is why this is fire-and-forget.
+export async function endScroll(name: string): Promise<void> {
+  if (!SESSION_NAME_RE.test(name)) return
+  await tmux(['send-keys', '-t', name, '-X', 'cancel'], 5_000).catch(() => {})
+}
+
 // --------------------------------------------------------------- create ----
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {

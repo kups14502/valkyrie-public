@@ -7,8 +7,8 @@ import { homedir } from 'node:os'
 import { requireStrongAuth, authorizeStrongUpgrade } from '../middleware/auth.js'
 import {
   MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
-  attachArgs, createSession, ensureServer, hasSession, killSession, listSessions,
-  remoteLabel, serverUp, sshPresent, tmuxVersion,
+  attachArgs, createSession, endScroll, ensureServer, hasSession, killSession, listSessions,
+  remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion,
   type TermMode,
 } from '../terminal/tmux.js'
 
@@ -163,6 +163,10 @@ function clampInt(v: string | null, lo: number, hi: number, dflt: number): numbe
 type ClientMsg =
   | { t: 'i'; d: string }
   | { t: 'r'; cols: number; rows: number }
+  // Swipe-to-scroll. The client sends a line delta, never a key: what moves
+  // the view is a tmux copy-mode command, see scrollPane.
+  | { t: 's'; lines: number }
+  | { t: 'se' }
 
 function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
   const env: Record<string, string> = {}
@@ -201,12 +205,39 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
     ws.close(1000, 'detached')
   })
 
+  // Scrolling puts the pane in copy-mode, where keys are copy-mode commands
+  // rather than input, so a keystroke has to leave it first. That exit is an
+  // async tmux call, so everything the client sends is serialized through one
+  // chain: a keystroke must never overtake the cancel that makes it mean what
+  // the user typed. One microtask per keystroke, at phone typing speed.
+  let inCopy = false
+  let chain: Promise<unknown> = Promise.resolve()
+  const run = (fn: () => unknown) => { chain = chain.then(fn).catch(() => {}) }
+  const leaveCopy = () => {
+    if (!inCopy) return
+    inCopy = false
+    run(() => endScroll(name))
+  }
+
   ws.on('message', (raw, isBinary) => {
     if (isBinary) return
     let msg: ClientMsg
     try { msg = JSON.parse(String(raw)) as ClientMsg } catch { return }
     if (msg.t === 'i' && typeof msg.d === 'string') {
-      pty.write(msg.d)
+      leaveCopy()
+      const d = msg.d
+      run(() => { pty.write(d) })
+      return
+    }
+    if (msg.t === 's') {
+      const lines = Number(msg.lines)
+      if (!Number.isFinite(lines) || lines === 0) return
+      inCopy = true
+      run(() => scrollPane(name, lines))
+      return
+    }
+    if (msg.t === 'se') {
+      leaveCopy()
       return
     }
     if (msg.t === 'r') {

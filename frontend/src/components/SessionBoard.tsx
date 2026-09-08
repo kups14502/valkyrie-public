@@ -76,7 +76,7 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
   }
 
   return (
-    <div className="group flex items-center gap-3 border-b border-[var(--color-border)] py-2.5 last:border-b-0">
+    <div className="group flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--color-border)] py-2.5 last:border-b-0">
       <span
         aria-hidden
         className={`h-1.5 w-1.5 shrink-0 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
@@ -84,9 +84,14 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
         title={WORD[s.activity] || 'not running'}
       />
 
-      <div className="min-w-0 flex-1">
+      {/* The title gets the whole first line on a phone. Four buttons on the
+          same line as it left about twenty readable characters, which for a
+          list whose entire job is telling one conversation from another is no
+          list at all: the basis pushes them onto their own line below, and at
+          sm and up the original single row comes back. */}
+      <div className="min-w-0 flex-1 basis-[calc(100%-1.5rem)] sm:basis-auto">
         <div
-          className={`truncate text-sm ${s.done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'}`}
+          className={`text-sm ${s.done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'} line-clamp-2 sm:truncate`}
           title={s.cwd ?? undefined}
         >
           {s.title}
@@ -99,7 +104,7 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {!s.done && !s.live && (
           <button
             type="button"
@@ -108,9 +113,9 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
             title={inPage
               ? `Open it here in the page, running on ${HOST}`
               : remote ? `Open a terminal here on ${here}, resuming over SSH to ${HOST}` : `Open a terminal on ${HOST}`}
-            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
+            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-2.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
           >
-            <Play size={11} /> {opening ? 'opening…' : 'open'}
+            <Play size={11} /> {opening ? 'opening' : 'open'}
           </button>
         )}
         {s.live && (
@@ -119,9 +124,9 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
             disabled={stopping || busy}
             onClick={() => onStop(s)}
             title={`Stop it on ${HOST}. The transcript is kept, so it reopens anywhere.`}
-            className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+            className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
           >
-            <Square size={11} /> {stopping ? 'stopping…' : 'stop'}
+            <Square size={11} /> {stopping ? 'stopping' : 'stop'}
           </button>
         )}
         <button
@@ -138,7 +143,7 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
           disabled={busy}
           onClick={() => onDone(s)}
           title={s.done ? 'Put it back on the list' : 'Finished with this one. Hides it.'}
-          className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[11px] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-30"
+          className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-30"
         >
           {s.done ? <><Undo2 size={12} /> undo</> : <><Check size={12} /> done</>}
         </button>
