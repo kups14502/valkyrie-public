@@ -135,6 +135,8 @@ export type ClaudeUsageClient = ProviderUsage & {
   id: string
   kind: 'claude'
   label: string
+  // the sign-in address for this account, shown on the dashboard so it can be copied
+  email?: string
   subscription: string
   byModel: Record<string, UsageBucket>
   session: ClaudeSession | null

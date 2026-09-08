@@ -7,6 +7,7 @@ import {
   fetchWorkspaces, launchSessionOnThor,
   type WorkspaceHealth, type WorkspaceHost, type WorkspaceSession, type WorkspaceState,
 } from '../lib/api'
+import { copyText } from '../lib/clipboard'
 
 // The Claude session desk: every session on every host in one place. Getting
 // back into one is the whole point of the page, so the two ways of doing that
@@ -73,32 +74,6 @@ function fmtBytes(bytes: number | null): string | null {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
-}
-
-// navigator.clipboard is missing over plain http and inside some webviews, so
-// fall back to the old selection trick rather than silently doing nothing.
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch { /* fall through to the textarea path */ }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.setAttribute('readonly', '')
-    ta.style.position = 'fixed'
-    ta.style.top = '-1000px'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
 }
 
 const sessionKey = (s: WorkspaceSession) => `${s.host}:${s.sessionId ?? `${s.cwd}#${s.pid ?? 'x'}`}`

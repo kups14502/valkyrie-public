@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
+import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
 
 const fmtBytes = (b: number) => {
@@ -163,36 +165,62 @@ function NowBanner() {
   )
 }
 
-// "resets in 42m" / "resets in 3h 10m" / "resets Mon Jul 14" — pick the
-// granularity that reads best for the distance.
+// "resets in 42m" / "resets in 3h 10m" / "resets Mon 4 PM" — pick the
+// granularity that reads best for the distance. Drawn on the row itself, so it
+// stays short enough to sit beside the bar.
 function fmtResetAt(iso: string | null | undefined): string | undefined {
   if (!iso) return undefined
   const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000)
   if (mins <= 0) return 'resets now'
   if (mins < 100) return `resets in ${mins}m`
   if (mins < 48 * 60) return `resets in ${Math.floor(mins / 60)}h ${mins % 60}m`
-  return `resets ${new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+  return `resets ${new Date(iso).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })}`
+}
+
+// The exact wall-clock reset, for the hover on the countdown.
+function fmtResetExact(iso: string | null | undefined): string | undefined {
+  if (!iso) return undefined
+  return `resets ${new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+}
+
+// The sign-in address, one click to the clipboard. Truncated on narrow screens,
+// but the click always copies the whole address.
+function AccountEmail({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      title={`Copy ${email}`}
+      onClick={() => { void copyText(email).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } }) }}
+      className="group flex max-w-full items-center gap-1 text-left font-normal text-[10px] text-[var(--color-text-faint)] transition-colors hover:text-[var(--color-text-dim)]"
+    >
+      <span className="truncate">{email}</span>
+      <span className={`shrink-0 uppercase tracking-[0.1em] ${copied ? 'text-[var(--color-success)]' : 'opacity-0 group-hover:opacity-100'}`}>
+        {copied ? 'copied' : 'copy'}
+      </span>
+    </button>
+  )
 }
 
 // Claude's usage colors: warm accent until it's close to a limit, then red.
 const claudeBarColor = (p: number) => (clampPct(p) >= 85 ? 'var(--color-danger)' : '#D97757')
 const claudePctText = (p: number) => (clampPct(p) >= 85 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]')
 
-// One account per row: name, plan, and a bar for each limit, 5-hour above
-// weekly. Reset times live on hover, so the row stays scannable instead of
-// becoming a boxed card with four sub-rows.
+// One account per row: name, sign-in address, plan, and a bar for each limit,
+// 5-hour above weekly. Each bar carries its own reset countdown, and the email
+// copies on click, so nothing needed for signing in hides behind a hover.
 function AIClientRow({ client }: { client: AIClientUsage }) {
   const q = client.quota
   const plan = client.subscription.replace(/ plan$/i, '')
-  const title = q
-    ? `5h: ${fmtResetAt(q.sessionResetsAt) ?? '—'} · week: ${fmtResetAt(q.weeklyResetsAt) ?? '—'}`
-    : client.authError || undefined
   return (
     <div
-      title={title}
+      title={q ? undefined : client.authError || undefined}
       className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-2 text-sm last:border-b-0"
     >
-      <div className="w-28 shrink-0 truncate font-semibold text-[var(--color-text)] sm:w-40">{client.label}</div>
+      <div className="w-32 shrink-0 sm:w-56">
+        <div className="truncate font-semibold text-[var(--color-text)]">{client.label}</div>
+        {client.email && <AccountEmail email={client.email} />}
+      </div>
       <div className="hidden w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:block">
         {plan}
       </div>
@@ -205,9 +233,9 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
             { label: '5h', pct: q.sessionPct, resets: q.sessionResetsAt },
             { label: 'wk', pct: q.weeklyPct, resets: q.weeklyResetsAt },
           ] as const).map((row) => (
-            // Each bar carries its own reset time: one shared tooltip for two
-            // bars leaves you guessing which window it describes.
-            <div key={row.label} className="flex items-center gap-3" title={fmtResetAt(row.resets)}>
+            // Each bar carries its own reset countdown: one shared tooltip for
+            // two bars left you guessing which window it described.
+            <div key={row.label} className="flex items-center gap-3">
               <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
                 <div
                   className="h-full rounded-full transition-all duration-500"
@@ -216,6 +244,12 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
               </div>
               <div className={`w-16 shrink-0 text-right font-semibold tabular-nums ${claudePctText(row.pct)}`}>
                 {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">{row.label}</span>
+              </div>
+              <div
+                title={fmtResetExact(row.resets)}
+                className="w-[104px] shrink-0 truncate text-right text-[10px] tabular-nums text-[var(--color-text-faint)]"
+              >
+                {fmtResetAt(row.resets) ?? 'reset unknown'}
               </div>
             </div>
           ))}

@@ -331,7 +331,7 @@ async function refreshAIUsage(): Promise<void> {
       }))
 
       const claudeClients = claudeResults.map(({ acct, blocks, usage, quota, authError }) => ({
-        id: acct.id, kind: 'claude', label: acct.label, subscription: acct.subscription,
+        id: acct.id, kind: 'claude', label: acct.label, email: acct.email, subscription: acct.subscription,
         ...usage, session: blocks.activeBlock, quota, authError,
       }))
 
