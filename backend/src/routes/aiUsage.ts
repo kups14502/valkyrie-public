@@ -41,8 +41,15 @@ const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
 const emptyProvider = (): ProviderUsage => ({ today: emptyBucket(), last7d: emptyBucket(), last30d: emptyBucket() })
 
 const CACHE_TTL_MS = 300_000
+// A dead sign-in is the one state a person acts on immediately, and five
+// minutes of "sign-in expired" after a successful `claude /login` reads as the
+// login having failed. Re-probe that account every minute instead.
+const CACHE_TTL_AUTH_FAILED_MS = 60_000
 const CCUSAGE_BIN = path.join('/home/brendon/valkyrie/backend', 'node_modules', '.bin', 'ccusage')
 let cache: { at: number; data: any } | null = null
+// When the last FULL read (usage + sessions + quotas) landed, tracked apart
+// from cache.at so a quota-only refresh cannot stand in for it.
+let fullAt = 0
 let refreshing: Promise<void> | null = null
 
 const todayStartMs = () => {
@@ -431,8 +438,41 @@ async function refreshAIUsage(): Promise<void> {
         updatedAt: new Date().toISOString(),
       }
       cache = { at: Date.now(), data }
+      fullAt = Date.now()
     } catch (err) {
       console.error('[ai-usage] refresh failed', (err as Error).message)
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+// The cheap path: re-read the quotas and merge them into the cached numbers.
+// Whether a signed-out account came back is worth asking every minute; ccusage
+// over 292 MB of transcripts is 14 s of CPU that has nothing to do with the
+// answer. A held auth failure short-circuits before any request, so this costs
+// one probe for the account that actually changed.
+async function refreshQuotasOnly(): Promise<void> {
+  if (refreshing) return refreshing
+  refreshing = (async () => {
+    try {
+      const current = cache?.data
+      if (!current?.aiClients) return
+      const reads = await Promise.all(CLAUDE_ACCOUNTS.map((acct) => readClaudeOAuthQuota(acct.configDir, acct.label)))
+      const byId = new Map(CLAUDE_ACCOUNTS.map((acct, i) => [acct.id, reads[i]]))
+      const aiClients = current.aiClients.map((c: { id: string }) => {
+        const read = byId.get(c.id)
+        return read ? { ...c, quota: read.quota, authError: read.authError } : c
+      })
+      const primary = byId.get(CLAUDE_ACCOUNTS[0].id)
+      const claude = primary ? { ...current.claude, quota: primary.quota } : current.claude
+      cache = {
+        at: Date.now(),
+        data: { ...current, claude, aiClients, updatedAt: new Date().toISOString() },
+      }
+    } catch (err) {
+      console.error('[ai-usage] quota refresh failed', (err as Error).message)
     } finally {
       refreshing = null
     }
@@ -444,7 +484,12 @@ void refreshAIUsage()
 
 router.get('/ai-usage', async (_req, res) => {
   if (cache) {
-    if (Date.now() - cache.at >= CACHE_TTL_MS) void refreshAIUsage()
+    const anyDead = (cache.data?.aiClients ?? []).some((c: { authError?: string | null }) => c.authError)
+    // fullAt, not cache.at: the quota-only path below stamps cache.at, and
+    // reading that here would postpone the full refresh for as long as an
+    // account stayed signed out, freezing every token and cost number with it.
+    if (Date.now() - fullAt >= CACHE_TTL_MS) void refreshAIUsage()
+    else if (anyDead && Date.now() - cache.at >= CACHE_TTL_AUTH_FAILED_MS) void refreshQuotasOnly()
     return res.json(cache.data)
   }
   try {
