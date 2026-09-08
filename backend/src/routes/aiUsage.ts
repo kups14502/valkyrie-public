@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { writeFileSync, readFileSync, statSync } from 'node:fs'
+import { writeFileSync, readFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 
 const exec = promisify(execFile)
@@ -127,13 +127,81 @@ function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
   }
 }
 
-async function getClaudeOAuthAccessToken(configDir: string): Promise<string | null> {
-  const credsPath = path.join(configDir, '.credentials.json')
-  const creds = JSON.parse(readFileSync(credsPath, 'utf8'))
-  const oauth = creds?.claudeAiOauth
-  if (!oauth?.accessToken) return null
+// Refreshing rotates the token: the refresh token dies the moment it is
+// exchanged, and posting a spent one again is what an OAuth server reads as a
+// stolen token, so it revokes the whole family and the account needs a fresh
+// `claude /login`. Two accounts have died exactly that way (acct-c on
+// 2026-08-07, acct-d on 2026-08-28), and nothing but this backend has
+// touched those profile dirs since July, so the loss came from here.
+//
+// Three rules stop it:
+//   1. one refresh at a time per profile, in this process AND across processes:
+//      a deploy restart can leave two backends briefly alive and both refresh
+//      at module load, which is a double exchange of one token,
+//   2. the rotated token is written atomically and fsynced BEFORE it is used,
+//      so a crash between the response and the write cannot lose it,
+//   3. a refresh token this process already posted is never posted twice, which
+//      turns a lost write into one dead account instead of a revoked family.
+const REFRESH_LOCK_STALE_MS = 60_000
+const refreshInFlight = new Map<string, Promise<string | null>>()
+const postedRefreshTokens = new Map<string, string>()
 
-  if (oauth.refreshToken && (!oauth.expiresAt || Date.now() > Number(oauth.expiresAt) - 60_000)) {
+const readCreds = (credsPath: string): any => JSON.parse(readFileSync(credsPath, 'utf8'))
+
+function writeCredsDurable(credsPath: string, creds: unknown): void {
+  const tmp = `${credsPath}.${process.pid}.tmp`
+  const fd = openSync(tmp, 'w', 0o600)
+  try {
+    writeFileSync(fd, JSON.stringify(creds, null, 2))
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(tmp, credsPath)
+}
+
+// O_EXCL create is the lock. A lock older than the stale window belonged to a
+// process that died holding it, so it gets taken over.
+function acquireRefreshLock(configDir: string): string | null {
+  const lockPath = path.join(configDir, '.credentials.refresh.lock')
+  const take = (): boolean => {
+    try {
+      closeSync(openSync(lockPath, 'wx'))
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (take()) return lockPath
+  try {
+    if (Date.now() - statSync(lockPath).mtimeMs > REFRESH_LOCK_STALE_MS) {
+      unlinkSync(lockPath)
+      if (take()) return lockPath
+    }
+  } catch { /* another writer got there first */ }
+  return null
+}
+
+async function refreshUnderLock(configDir: string, credsPath: string): Promise<string | null> {
+  const lockPath = acquireRefreshLock(configDir)
+  // Someone else is mid-exchange. Their write lands in a moment; reading the
+  // token that is being spent right now and posting it too is the exact reuse
+  // that revokes the family, so wait for the next cycle. Not an auth failure.
+  if (!lockPath) throw new Error('refresh deferred: another writer holds the lock')
+
+  try {
+    // Re-read inside the lock: another process may have just rotated it.
+    const creds = readCreds(credsPath)
+    const oauth = creds?.claudeAiOauth
+    if (!oauth?.refreshToken) return oauth?.accessToken ?? null
+    if (oauth.expiresAt && Date.now() < Number(oauth.expiresAt) - 60_000) return oauth.accessToken
+    if (postedRefreshTokens.get(configDir) === oauth.refreshToken) {
+      // Already exchanged this exact token and the file never advanced, so the
+      // server has rotated past it. Sending it again would revoke the family.
+      throw new Error('refresh failed: stored refresh token was already spent')
+    }
+
+    postedRefreshTokens.set(configDir, oauth.refreshToken)
     const resp = await fetch(ANTHROPIC_OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -149,10 +217,28 @@ async function getClaudeOAuthAccessToken(configDir: string): Promise<string | nu
     oauth.accessToken = data.access_token
     oauth.refreshToken = data.refresh_token ?? oauth.refreshToken
     oauth.expiresAt = Date.now() + Number(data.expires_in ?? 0) * 1000 - 5 * 60 * 1000
-    writeFileSync(credsPath, JSON.stringify(creds, null, 2))
+    writeCredsDurable(credsPath, creds)
+    console.log(`[ai-usage] ${new Date().toISOString()} rotated oauth token for ${configDir}`)
+    return oauth.accessToken
+  } finally {
+    try { unlinkSync(lockPath) } catch { /* stale sweep will clear it */ }
   }
+}
 
-  return oauth.accessToken
+async function getClaudeOAuthAccessToken(configDir: string): Promise<string | null> {
+  const credsPath = path.join(configDir, '.credentials.json')
+  const oauth = readCreds(credsPath)?.claudeAiOauth
+  if (!oauth?.accessToken) return null
+  if (oauth.expiresAt && Date.now() < Number(oauth.expiresAt) - 60_000) return oauth.accessToken
+  // No refresh token: hand the probe what we have and let its status speak.
+  if (!oauth.refreshToken) return oauth.accessToken
+
+  const running = refreshInFlight.get(configDir)
+  if (running) return running
+  const attempt = refreshUnderLock(configDir, credsPath)
+    .finally(() => { refreshInFlight.delete(configDir) })
+  refreshInFlight.set(configDir, attempt)
+  return attempt
 }
 
 // A null quota has two very different causes: the probe came back without

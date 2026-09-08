@@ -16,6 +16,9 @@ type AlertState = {
   diskOver90: boolean
   vaultDown: boolean
   vaultStale: boolean
+  // Account ids already reported as signed out, so one dead sign-in is one
+  // message rather than one a minute.
+  signedOut: string[]
 }
 
 const defaultState = (): AlertState => ({
@@ -25,6 +28,7 @@ const defaultState = (): AlertState => ({
   diskOver90: false,
   vaultDown: false,
   vaultStale: false,
+  signedOut: [],
 })
 
 function loadState(): AlertState {
@@ -73,6 +77,9 @@ async function fetchJSON<T>(p: string): Promise<T | null> {
 
 type AIClient = {
   id: string
+  label?: string
+  email?: string
+  authError?: string | null
   session: { isActive: boolean; endTime: string } | null
   quota: { sessionPct: number; sessionResetsAt: string | null } | null
 }
@@ -130,6 +137,28 @@ async function tick(state: AlertState): Promise<AlertState> {
       }
       next.claudeOver90 = over
     }
+  }
+
+  // A dead sign-in used to sit on the dashboard unnoticed for weeks:
+  // acct-c went out on 2026-08-07 and nobody was told. Say it once, name
+  // the address to sign in with, and say it again only if it comes back and dies.
+  const clients = ai?.aiClients ?? []
+  if (clients.length > 0) {
+    const dead = clients.filter((c) => c.authError)
+    for (const c of dead) {
+      if (state.signedOut.includes(c.id)) continue
+      const who = c.email ? `${c.label ?? c.id} (${c.email})` : (c.label ?? c.id)
+      await postDiscord(`🔴 **Claude sign-in ${c.authError}** — ${who}. Run \`claude /login\` against its config dir on odin.`)
+    }
+    const recovered = state.signedOut.filter((id) => {
+      const c = clients.find((x) => x.id === id)
+      return c && !c.authError
+    })
+    for (const id of recovered) {
+      const c = clients.find((x) => x.id === id)
+      await postDiscord(`🟢 **Claude sign-in restored** — ${c?.label ?? id}.`)
+    }
+    next.signedOut = dead.map((c) => c.id)
   }
 
   if (sys?.disk) {
