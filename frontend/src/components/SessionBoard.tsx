@@ -332,6 +332,7 @@ export function SessionBoard() {
   const [stoppingId, setStoppingId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  const [recoverDone, setRecoverDone] = useState(0)
   const [showDone, setShowDone] = useState(false)
 
   useEffect(() => { void localHostname().then(setHere) }, [])
@@ -404,10 +405,16 @@ export function SessionBoard() {
       // default view at "what am I working on" instead of "what happened".
       rest: all.filter((s) => !s.live && !s.done),
       doneList: all.filter((s) => !s.live && s.done),
-      // The desk is what was open on thor recently, so recovering it after a
-      // reboot is one action rather than a click per row. Already-running and
-      // finished sessions are excluded, so pressing it twice does nothing.
-      desk: all.filter((s) => s.onDesk && !s.live && !s.done),
+      // Everything still open and not running: reopening is one action rather
+      // than a click per row. Already-running and finished sessions are
+      // excluded, so pressing it twice does nothing.
+      //
+      // This used to also require onDesk, and that quietly crippled it. The
+      // desk is a 72-hour union of what was LIVE, so with 21 sessions open the
+      // button offered 4 and silently ignored the rest. Time is not what
+      // decides whether Brendon still wants a session: done is. Same mistake as
+      // the age window that once hid 11 sessions from the board itself.
+      desk: all.filter((s) => !s.live && !s.done),
     }
   }, [q.data])
 
@@ -425,12 +432,16 @@ export function SessionBoard() {
   // when several arrive at once.
   const recoverDesk = async () => {
     setRecovering(true)
+    setRecoverDone(0)
+    // 21 sessions is a long silence with no counter, and the earlier version
+    // gave none: it just sat on "recovering…" for half a minute.
     for (const s of desk) {
       setOpeningId(s.sessionId)
       try {
         if (remote) await openSessionHere(s.sessionId, HOST_IP)
         else await launchSessionOnThor(s.sessionId, '')
       } catch { /* one failure must not abandon the rest */ }
+      setRecoverDone((n) => n + 1)
       await new Promise((r) => setTimeout(r, 700))
     }
     setOpeningId(null)
@@ -464,10 +475,10 @@ export function SessionBoard() {
             type="button"
             disabled={recovering || openingId !== null}
             onClick={() => void recoverDesk()}
-            title={`Reopen the ${desk.length} session(s) that were open on ${HOST} and are not running now`}
+            title={`Reopen the ${desk.length} session(s) still open and not running. Marking one done is what takes it off this list.`}
             className="inline-flex min-h-9 items-center gap-2 border border-[var(--color-accent)] px-3 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
           >
-            <RotateCcw size={12} /> {recovering ? 'recovering…' : `recover my desk (${desk.length})`}
+            <RotateCcw size={12} /> {recovering ? `recovering ${recoverDone}/${desk.length}…` : `recover my desk (${desk.length})`}
           </button>
         )}
         </div>
