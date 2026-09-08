@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
+  SquareTerminal,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -28,6 +29,7 @@ const Pad = lazy(() => import('./pages/Pad'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Phone = lazy(() => import('./pages/Phone'))
 const Sessions = lazy(() => import('./pages/Sessions'))
+const Terminal = lazy(() => import('./pages/Terminal'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +55,7 @@ function PageFallback() {
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
+  { to: '/terminal', label: 'terminal', icon: SquareTerminal },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -264,6 +267,7 @@ function Shell() {
             <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
             <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
             <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
+            <Route path="/terminal" element={<PageContainer><Terminal /></PageContainer>} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />

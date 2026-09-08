@@ -170,3 +170,39 @@ export async function authorizeUpgrade(req: IncomingMessage): Promise<boolean> {
   }
   return false
 }
+
+// ------------------------------------------------------- strong auth ----
+// Same credentials as requireAuth MINUS the legacy no-token bypass.
+//
+// That bypass lets a request through with no credential at all as long as its
+// Origin and Host look like the published frontend talking to the published
+// API, both of which a caller sets freely. For a chart that is a cosmetic
+// risk. For /api/terminal it would be a shell on this box for anyone who can
+// reach the hostname, so these two are what the terminal routes and the
+// terminal websocket use, and they stay strict whether or not AUTH_STRICT is
+// on.
+
+export async function isStrongAuth(req: Pick<IncomingMessage, 'socket' | 'headers' | 'url'>): Promise<boolean> {
+  if (isLoopbackReq(req) || isTailnetReq(req)) return true
+  if (verifyAppToken(bearer(req))) return true
+  try {
+    const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
+    if (verifyAppToken(token)) return true
+  } catch { /* malformed url */ }
+  const cfToken = req.headers['cf-access-jwt-assertion'] as string | undefined
+  if (cfToken && (await verifyCfAccessToken(cfToken))) return true
+  return false
+}
+
+export async function requireStrongAuth(req: Request, res: Response, next: NextFunction) {
+  if (await isStrongAuth(req)) return next()
+  console.warn('[auth] terminal request refused', { path: req.path, origin: req.headers.origin, host: req.headers.host })
+  return res.status(401).json({
+    error: 'unauthorized',
+    detail: 'the terminal needs the tailnet or a signed-in app token',
+  })
+}
+
+export function authorizeStrongUpgrade(req: IncomingMessage): Promise<boolean> {
+  return isStrongAuth(req)
+}

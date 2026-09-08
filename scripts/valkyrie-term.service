@@ -1,0 +1,22 @@
+[Unit]
+Description=Valkyrie terminal sessions (tmux server on the valkyrie socket)
+Documentation=https://github.com/kups14502/valkyrie
+After=default.target
+
+[Service]
+# oneshot + RemainAfterExit is the point of this unit, not an accident. tmux
+# daemonises, so ExecStart returns immediately; staying "active (exited)" means
+# systemd never deactivates the unit and never sweeps its cgroup, and the tmux
+# server therefore keeps running under THIS unit instead of under whoever
+# happened to start it. If the API started the server itself it would land in
+# valkyrie-api.service's cgroup and every deploy would kill every open session.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/tmux -L valkyrie -f %h/.config/valkyrie/tmux.conf start-server
+# Belt for the case where the conf is missing or unreadable: without
+# exit-empty off the server would quit the moment the last session closed.
+ExecStartPost=-/usr/bin/tmux -L valkyrie set-option -g exit-empty off
+ExecStop=-/usr/bin/tmux -L valkyrie kill-server
+
+[Install]
+WantedBy=default.target

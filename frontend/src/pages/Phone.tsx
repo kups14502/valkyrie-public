@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Cast, Clapperboard, Film, Music, Server, TrendingUp } from 'lucide-react'
+import { Cast, Clapperboard, Film, Music, Server, SquareTerminal, TrendingUp } from 'lucide-react'
 import {
   openInApp, plexAppHomeLink, plexWebHomeLink, shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
@@ -12,6 +12,7 @@ import { PhoneClock } from '../components/HomePanels'
 // fold instead of below a full-height header.
 
 const TILES = [
+  { to: '/terminal', label: 'claude', icon: SquareTerminal },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },

@@ -25,6 +25,7 @@ import launcherRoute from './routes/launcher.js'
 import plexRoute from './routes/plex.js'
 import workspacesRoute from './routes/workspaces.js'
 import hostLaunchRoute from './routes/hostLaunch.js'
+import terminalRoute, { attachTerminalWs } from './routes/terminal.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -128,6 +129,7 @@ app.use('/api', launcherRoute)
 app.use('/api', plexRoute)
 app.use('/api', workspacesRoute)
 app.use('/api', hostLaunchRoute)
+app.use('/api', terminalRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
@@ -172,6 +174,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: 'internal error' })
 })
 
+// The terminal websocket rides every listener this app has: the loopback
+// one behind cloudflared, and the tailnet one below, which is the path the
+// phone actually takes while it is on the tailnet.
+attachTerminalWs(server)
+
 server.listen(PORT, BIND, () => {
   console.log(`Valkyrie API listening on ${BIND}:${PORT}`)
   startAlerts()
@@ -189,6 +196,7 @@ if (TAILNET_BIND) {
   // would silently leave the iPad/iPhone with no way in until a manual restart.
   const listenTailnet = () => {
     const tailnetServer = createServer(app)
+    attachTerminalWs(tailnetServer)
     tailnetServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRNOTAVAIL' || err.code === 'EADDRINUSE') {
         console.warn(`[tailnet] ${err.code} binding ${TAILNET_BIND}:${TAILNET_PORT} — retrying in ${RETRY_MS / 1000}s`)
