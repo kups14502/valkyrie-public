@@ -1,15 +1,15 @@
 {
-  "version": "0.3.76",
-  "notes": "fix(sessions): recover reopens everything open, not the last 72 hours",
-  "pub_date": "2026-09-08T15:09:00Z",
+  "version": "0.3.77",
+  "notes": "dashboard(ai usage): show reset countdown and the sign-in email",
+  "pub_date": "2026-09-08T15:21:52Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVKTXZaNzBHbUhBZFJNcEZZTVVGcytFRG9OZHVMTVY1TGlaL2d2VXd4OXZSL28zS0JoZURWZ21nanlTM0wxQkMyeHRSK1NwSEdDcUlNV3NqaEVxNFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODgwMTQwCWZpbGU6VmFsa3lyaWVfMC4zLjc2X3g2NC1zZXR1cC5leGUKbzJiMlVETkY2UjlueklTQzBlQmhZaGNEVFUrR1VidngzZCt0WWZUamdNekRLVDFjOTJyaGI0bldzQmVmWFhyeXJSZmwvUWUrMElQNWdESi9tWWdqQWc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.76/Valkyrie_0.3.76_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWFwUUN0QWNtek00bUZjUlR6bVJGeHQ3c1VISUdmdUk5VENUMlh4M2JGWjFXdWlsemswTGEzSzd4Ti8wOTFlcjlLTEtucTc5bTdkODZtd3lrdk94N0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODgwOTEyCWZpbGU6VmFsa3lyaWVfMC4zLjc3X3g2NC1zZXR1cC5leGUKQkZXa2dFclJONEo0QzFCSmM4WmkvMlJYR0tmNDdqbVdra0JBZ2xDWXJzb1FSNFBnSkdJcTBwS1dRK2Y2cG11NEJjRk5TYnNhZkdEbXd4a1I1ZENIQmc9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.77/Valkyrie_0.3.77_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWIrc1A0a3JCcGJyanRWL1FjeHlaRUZrWkZzMmhZa3Z0R2lsOHBxYTNLQVhJeGUrbGoxYmhUT2ZDN2dnOEVsNEM4KzNwTy90RmJqQ2tnSFJ4Y05XMHdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODgwMDk3CWZpbGU6VmFsa3lyaWVfMC4zLjc2X2FtZDY0LkFwcEltYWdlCm5RWVFZMDVRT2NhTzlNMzd3b3RGWTVrM1VoVVFiS2JSYllKL0pqa1gwaGk5QUlRcC9JZkRMbVNvYjR3U0tINW12b2c0dU1OZURMcGVEd0FLOHcxWURRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.76/Valkyrie_0.3.76_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMxcW5tZU1wSmtjQVNVZGx5cWFibzl1cmdsTzlQZ2xHeDNBSU1aTVluTTEvdjZ2TEFpT1RvdklicEJFdHcvR1RpVGYvZ0RTZEYwYlNJY1ZjQVpHN0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODgwODY3CWZpbGU6VmFsa3lyaWVfMC4zLjc3X2FtZDY0LkFwcEltYWdlCndGTGhlY0tWZ2pDTjNHN0NtS2ltbllRMXkxMEY3bEtYQ0JMcXh5SkVvS0VYdTdPdVNleGRqTG5wb1hQSzl2SUd3RXZyUXhONlNXQ0I3cXlkcVh4eEN3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.77/Valkyrie_0.3.77_amd64.AppImage"
     }
   }
 }
