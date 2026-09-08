@@ -52,14 +52,17 @@ const relAge = (iso: string | null): string => {
 const fmtSize = (b: number): string =>
   b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
 
-function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stopping, busy }: {
+function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onReattach, opening, stopping, busy }: {
   s: WorkSession
   remote: boolean
   here: string | null
   inPage: boolean
+  // The in-page terminal already running this conversation, if there is one.
+  attachedTo: string | null
   onOpen: (s: WorkSession) => void
   onStop: (s: WorkSession) => void
   onDone: (s: WorkSession) => void
+  onReattach: (terminal: string) => void
   opening: boolean
   stopping: boolean
   busy: boolean
@@ -105,6 +108,20 @@ function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stoppin
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        {/* Running in a terminal on this page: just go to it. Stopping a
+            session to reopen it is what the old row forced, because a live row
+            offered nothing but stop. tmux is built for exactly this, so the
+            session never needed to end. */}
+        {attachedTo && (
+          <button
+            type="button"
+            onClick={() => onReattach(attachedTo)}
+            title="Go to the terminal already running this session"
+            className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-accent)]/60 bg-[rgba(var(--color-accent-rgb),0.10)] px-2.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)] transition hover:border-[var(--color-accent)]"
+          >
+            <SquareTerminal size={11} /> reattach
+          </button>
+        )}
         {!s.done && !s.live && (
           <button
             type="button"
@@ -364,6 +381,19 @@ export function SessionBoard() {
     onSuccess: refresh,
   })
 
+  // Which conversations are already open in an in-page terminal. A resumed
+  // terminal records the conversation id it was opened with, so this is an
+  // exact match rather than a guess about folders. Same query key as
+  // OpenTerminals, so it is one fetch shared through the cache.
+  const terms = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
+  const attachedTerminals = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const t of terms.data ?? []) {
+      if (t.mode === 'resume' && t.target && !t.dead) m.set(t.target, t.name)
+    }
+    return m
+  }, [terms.data])
+
   const { live, rest, doneList, desk } = useMemo(() => {
     const all = q.data?.installed ? q.data.sessions : []
     return {
@@ -413,6 +443,7 @@ export function SessionBoard() {
   const hidden = rest.length - shown.length
   const rowProps = {
     remote, here, inPage, busy,
+    onReattach: (terminal: string) => navigate(termPath(terminal)),
     onOpen: (s: WorkSession) => { setOpeningId(s.sessionId); open.mutate(s) },
     onStop: (s: WorkSession) => { setStoppingId(s.sessionId); stop.mutate(s) },
     onDone: (s: WorkSession) => done.mutate(s),
@@ -443,12 +474,12 @@ export function SessionBoard() {
       </div>
 
       {live.map((s) => (
-        <Row key={s.sessionId} s={s} {...rowProps}
+        <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
           opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
       ))}
       {live.length > 0 && rest.length > 0 && <div className="h-3" />}
       {shown.map((s) => (
-        <Row key={s.sessionId} s={s} {...rowProps}
+        <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
           opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
       ))}
 
@@ -481,7 +512,7 @@ export function SessionBoard() {
       {showDone && (
         <div className="mt-1 opacity-60">
           {doneList.map((s) => (
-            <Row key={s.sessionId} s={s} {...rowProps}
+            <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
               opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
           ))}
         </div>
