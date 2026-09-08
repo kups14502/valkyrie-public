@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Lock, Play, RefreshCw, Rocket } from 'lucide-react'
 import { Card } from '../components/Card'
 import { SessionBoard } from '../components/SessionBoard'
@@ -263,6 +263,13 @@ const missingHost = (host: string): WorkspaceHost => ({
 
 type LaunchOutcome = { launched: number; notInstalled: { status: number; detail: string | null } | null }
 
+// Everything the page draws, by query key root. The button used to invalidate
+// ['workspaces'] and ['threads'] only: 'threads' belongs to no query at all,
+// and the session list on top of the page is ['sessionList'] plus ['term',
+// 'sessions'], so pressing refresh re-read the host table and left the list
+// itself untouched. That is why it looked dead.
+const REFRESH_KEYS = ['sessionList', 'term', 'workspaces'] as const
+
 export default function Sessions() {
   const qc = useQueryClient()
   // The snapshot behind this is minutes old by design, so the app-wide 15s
@@ -275,6 +282,23 @@ export default function Sessions() {
   const [pendingKey, setPendingKey] = useState<string | null>(null)
   const [launcherMissing, setLauncherMissing] = useState<{ status: number; detail: string | null } | null>(null)
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null)
+  const [refreshed, setRefreshed] = useState(false)
+
+  // Spin while any of the three is in flight, not just the host table.
+  const refreshing = useIsFetching({
+    predicate: (q) => (REFRESH_KEYS as readonly string[]).includes(String(q.queryKey[0])),
+  }) > 0
+
+  // An honest refresh often returns the same rows, so the click needs to say
+  // it ran. Without that the button reads as broken even when it worked.
+  const refreshAll = () => {
+    setRefreshed(false)
+    void Promise.all(REFRESH_KEYS.map((key) => qc.invalidateQueries({ queryKey: [key] })))
+      .then(() => {
+        setRefreshed(true)
+        setTimeout(() => setRefreshed(false), 1500)
+      })
+  }
 
   const result = board.data
   const routeMissing = result && !result.installed ? result : null
@@ -362,15 +386,11 @@ export default function Sessions() {
           </div>
           <button
             type="button"
-            onClick={() => {
-              void qc.invalidateQueries({ queryKey: ['workspaces'] })
-              void qc.invalidateQueries({ queryKey: ['threads'] })
-            }}
-            disabled={board.isFetching}
-            title="Re-read the board"
-            className="inline-flex min-h-10 items-center gap-2 border border-[var(--color-border)] px-3 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+            onClick={refreshAll}
+            title="Re-read the session list and the host board"
+            className={`inline-flex min-h-10 items-center gap-2 border px-3 text-[10px] uppercase tracking-[0.16em] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] ${refreshed ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'}`}
           >
-            <RefreshCw size={12} className={board.isFetching ? 'animate-spin' : ''} /> refresh
+            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> {refreshed ? 'refreshed' : 'refresh'}
           </button>
         </div>
       </div>
