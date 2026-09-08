@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, Undo2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
-  fetchLaunchTargets, fetchSessionList, launchSessionOnThor, localHostname, openSessionHere,
-  setSessionDone, startSessionOnThor, stopSessionOnThor,
-  type SessionActivity, type WorkSession,
+  fetchLaunchTargets, fetchSessionList, fetchTermSessions, killTermSession, launchSessionOnThor, localHostname,
+  openSessionHere, openTermSession, setSessionDone, startSessionOnThor, stopSessionOnThor, termPath,
+  type SessionActivity, type TermSession, type WorkSession,
 } from '../lib/api'
+import { isTauri } from '../lib/auth'
 
 // I open sessions on thor and recover them from anywhere. That is the whole
 // feature, so this is one row per session and one button to get back into it.
@@ -50,10 +52,11 @@ const relAge = (iso: string | null): string => {
 const fmtSize = (b: number): string =>
   b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
 
-function Row({ s, remote, here, onOpen, onStop, onDone, opening, stopping, busy }: {
+function Row({ s, remote, here, inPage, onOpen, onStop, onDone, opening, stopping, busy }: {
   s: WorkSession
   remote: boolean
   here: string | null
+  inPage: boolean
   onOpen: (s: WorkSession) => void
   onStop: (s: WorkSession) => void
   onDone: (s: WorkSession) => void
@@ -102,7 +105,9 @@ function Row({ s, remote, here, onOpen, onStop, onDone, opening, stopping, busy 
             type="button"
             disabled={opening || busy}
             onClick={() => onOpen(s)}
-            title={remote ? `Open a terminal here on ${here}, resuming over SSH to ${HOST}` : `Open a terminal on ${HOST}`}
+            title={inPage
+              ? `Open it here in the page, running on ${HOST}`
+              : remote ? `Open a terminal here on ${here}, resuming over SSH to ${HOST}` : `Open a terminal on ${HOST}`}
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-3 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
           >
             <Play size={11} /> {opening ? 'opening…' : 'open'}
@@ -144,13 +149,20 @@ function Row({ s, remote, here, onOpen, onStop, onDone, opening, stopping, busy 
 
 // Start a session on thor without remoting in first. The list comes from thor
 // and the click sends back only a key, so the page never names a directory.
-function NewSession({ onStarted }: { onStarted: () => void }) {
+//
+// In a browser the session opens IN THE PAGE (Claude on thor, over SSH, see
+// pages/Terminal.tsx), and only the targets thor flagged for the phone are
+// offered: personal, work, work2. The desktop app keeps the full list and
+// opens a Windows Terminal tab on thor's screen, as it always did.
+function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: boolean }) {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const targets = useQuery({ queryKey: ['launchTargets'], queryFn: fetchLaunchTargets, staleTime: 60_000 })
-  const list = (targets.data ?? []).filter((t) => t.exists)
+  const list = (targets.data ?? []).filter((t) => t.exists && (!inPage || t.phone))
 
   // Click-away, so the menu does not sit open over the list.
   useEffect(() => {
@@ -162,9 +174,15 @@ function NewSession({ onStarted }: { onStarted: () => void }) {
 
   if (list.length === 0) return null
 
-  const start = async (key: string) => {
+  const start = async (key: string, label: string) => {
     setBusy(key); setErr(null)
     try {
+      if (inPage) {
+        const r = await openTermSession({ mode: 'new', target: key, label })
+        seedTerminal(qc, r)
+        navigate(termPath(r.name))
+        return
+      }
       const r = await startSessionOnThor(key)
       if (!r.ok) setErr(r.detail ?? 'could not start it')
       // Claude takes a moment to register, so give the list something to find.
@@ -194,7 +212,7 @@ function NewSession({ onStarted }: { onStarted: () => void }) {
             <button
               key={t.key}
               type="button"
-              onClick={() => void start(t.key)}
+              onClick={() => void start(t.key, t.label)}
               className="block w-full px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
             >
               {t.label}
@@ -207,8 +225,86 @@ function NewSession({ onStarted }: { onStarted: () => void }) {
   )
 }
 
+// Put the session we just created into the terminal page's cache BEFORE
+// navigating to it.
+//
+// Without this the handoff picks the wrong session. OpenTerminals below keeps
+// ['term','sessions'] warm, so the terminal page mounts, renders that cached
+// list synchronously (and, inside the 10s global staleTime, may not refetch at
+// all), fails to find the brand-new name from ?s= in it, and falls back to the
+// old list's first row: the phone ends up attached to the previous session
+// while the one just launched sits unselected. POST /terminal/sessions already
+// returns the row, so seeding is exact; if it somehow came back without one,
+// invalidating makes the page refetch and its own guard covers the gap.
+function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession | null }): void {
+  if (!r.session) {
+    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+    return
+  }
+  const fresh = r.session
+  qc.setQueryData<TermSession[]>(['term', 'sessions'], (old) => [fresh, ...(old ?? []).filter((s) => s.name !== fresh.name)])
+}
+
+// Terminals already open in the page: tmux sessions on odin, each an SSH client
+// running Claude (or a shell) on thor. A tap reattaches; the X closes it, which
+// ends the Claude process on thor and leaves the conversation resumable. Hidden
+// when there are none, so a desk with no phone terminals never sees the row.
+function OpenTerminals() {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [killing, setKilling] = useState<string | null>(null)
+  const q = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
+  const list = q.data ?? []
+  if (list.length === 0) return null
+
+  const kill = async (s: TermSession) => {
+    setKilling(s.name)
+    try { await killTermSession(s.name) } catch { /* the refresh below shows whether it went */ }
+    setKilling(null)
+    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
+  }
+
+  return (
+    <div className="mb-2 flex items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] pb-2">
+      <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">in page</span>
+      {list.map((s) => (
+        <div
+          key={s.name}
+          className={`flex shrink-0 items-center border ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
+        >
+          <button
+            type="button"
+            onClick={() => navigate(termPath(s.name))}
+            title={`Reattach to ${s.label} on ${s.host}`}
+            className="flex min-h-9 items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
+          >
+            <SquareTerminal size={11} />
+            {s.label}
+            <span className={`text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+              {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
+              {s.activityAt > 0 ? ` · ${relAge(new Date(s.activityAt).toISOString())}` : ''}
+            </span>
+          </button>
+          <button
+            type="button"
+            disabled={killing === s.name}
+            onClick={() => void kill(s)}
+            aria-label={`Close ${s.label}`}
+            title="Close this terminal. A Claude session ends on thor; the conversation stays resumable."
+            className="min-h-9 px-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function SessionBoard() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [here, setHere] = useState<string | null>(null)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
@@ -236,10 +332,22 @@ export function SessionBoard() {
   // The SSH hop is only for reaching a DIFFERENT machine. Gating on "am I in
   // the app" made thor SSH to its own address and sit at a password prompt.
   const remote = here !== null && here !== HOST
+  // A browser (the phone, above all) cannot open a local terminal and has no
+  // use for a tab on thor's screen, so there "open" means the in-page terminal:
+  // Claude resumes on thor over SSH and the phone is its screen.
+  const inPage = !isTauri()
 
   const open = useMutation({
-    mutationFn: (s: WorkSession) =>
-      remote ? openSessionHere(s.sessionId, HOST_IP) : launchSessionOnThor(s.sessionId, '').then(() => undefined),
+    mutationFn: async (s: WorkSession) => {
+      if (inPage) {
+        const r = await openTermSession({ mode: 'resume', sessionId: s.sessionId, label: s.title })
+        seedTerminal(qc, r)
+        navigate(termPath(r.name))
+        return
+      }
+      if (remote) return openSessionHere(s.sessionId, HOST_IP)
+      await launchSessionOnThor(s.sessionId, '')
+    },
     onSettled: () => { setOpeningId(null); refresh() },
   })
   const stop = useMutation({
@@ -299,7 +407,7 @@ export function SessionBoard() {
   const shown = showAll ? rest : rest.slice(0, SHOWN_BY_DEFAULT)
   const hidden = rest.length - shown.length
   const rowProps = {
-    remote, here, busy,
+    remote, here, inPage, busy,
     onOpen: (s: WorkSession) => { setOpeningId(s.sessionId); open.mutate(s) },
     onStop: (s: WorkSession) => { setStoppingId(s.sessionId); stop.mutate(s) },
     onDone: (s: WorkSession) => done.mutate(s),
@@ -307,13 +415,14 @@ export function SessionBoard() {
 
   return (
     <div>
+      <OpenTerminals />
       <div className="mb-1 flex items-center justify-between gap-3">
         <div className="text-[11px] text-[var(--color-text-faint)]">
           {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
-          {remote && here ? ` · opening on ${here}` : ''}
+          {inPage ? ' · opens in the page' : remote && here ? ` · opening on ${here}` : ''}
         </div>
         <div className="flex items-center gap-2">
-        <NewSession onStarted={refresh} />
+        <NewSession onStarted={refresh} inPage={inPage} />
         {desk.length > 0 && (
           <button
             type="button"

@@ -3,20 +3,23 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
 import ptyModule from 'node-pty'
-import { promises as fs, createReadStream, statSync } from 'node:fs'
-import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
-import path from 'node:path'
 import { requireStrongAuth, authorizeStrongUpgrade } from '../middleware/auth.js'
 import {
-  MAX_SESSIONS, MODES, SESSION_NAME_RE, TMUX_BIN,
-  attachArgs, claudeBin, createSession, ensureServer, hasSession, isAllowedCwd,
-  killSession, listSessions, serverUp, targetFor, targets, tmuxVersion,
+  MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
+  attachArgs, createSession, ensureServer, hasSession, killSession, listSessions,
+  remoteLabel, serverUp, sshPresent, tmuxVersion,
   type TermMode,
 } from '../terminal/tmux.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
-// session itself is tmux (see terminal/tmux.ts) and the bytes ride a websocket.
+// session itself is tmux (see terminal/tmux.ts) holding an SSH client into
+// thor, and the bytes ride a websocket.
+//
+// What to open comes from elsewhere: the launch targets from thor's launcher
+// agent (GET /hosts/thor/launch-targets, filtered to the ones flagged for the
+// phone) and the conversations to resume from the session board
+// (GET /hosts/thor/sessions). This file never reads a transcript.
 //
 // Every route in here is behind requireStrongAuth, NOT the app-wide requireAuth.
 // requireAuth still honours the legacy no-token bypass for a request that looks
@@ -28,168 +31,27 @@ const router = Router()
 
 router.use('/terminal', requireStrongAuth)
 
-// ------------------------------------------------------------- transcripts ----
-// The resume picker. `claude --resume <id>` needs an id, and an id on its own is
-// unpickable on a phone, so each row carries the directory it ran in and the
-// opening line of the conversation.
-
-const PROJECTS_DIR = path.join(homedir(), '.claude', 'projects')
-const RECENT_LIMIT = 24
-const RECENT_TTL_MS = 30_000
-// Enough of the tail to hold a line with a cwd, and of the head to hold the
-// first real message. Transcripts run to megabytes; neither end is worth
-// reading whole on a route that gets polled.
-const TAIL_BYTES = 32_768
-const HEAD_BYTES = 65_536
-// Below this a transcript is a hook run or an abandoned open, not a session
-// worth offering to resume.
-const MIN_BYTES = 4_096
-
-export type RecentSession = {
-  sessionId: string
-  cwd: string
-  project: string
-  title: string
-  lastActivity: number
-  bytes: number
+// The label is cosmetic (the chip in the session strip) but it is also the one
+// free-text field a client can hand this box, so it is cut to something a
+// terminal can print and a tmux option can hold.
+function cleanLabel(v: unknown, fallback: string): string {
+  const s = typeof v === 'string' ? v : ''
+  // eslint-disable-next-line no-control-regex
+  const printable = s.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (printable || fallback).slice(0, 60)
 }
-
-let recentCache: { at: number; data: RecentSession[] } | null = null
-
-async function readTailCwd(file: string, size: number): Promise<string | null> {
-  const start = Math.max(0, size - TAIL_BYTES)
-  let cwd: string | null = null
-  try {
-    const rl = createInterface({
-      input: createReadStream(file, { start, encoding: 'utf8' }),
-      crlfDelay: Infinity,
-    })
-    for await (const line of rl) {
-      if (!line.includes('"cwd"')) continue
-      try {
-        const o = JSON.parse(line) as { cwd?: string }
-        if (o.cwd) cwd = o.cwd
-      } catch { /* a partial first line, or a malformed record */ }
-    }
-  } catch { /* unreadable */ }
-  return cwd
-}
-
-async function readFirstPrompt(file: string): Promise<string> {
-  try {
-    const rl = createInterface({
-      input: createReadStream(file, { start: 0, end: HEAD_BYTES, encoding: 'utf8' }),
-      crlfDelay: Infinity,
-    })
-    for await (const line of rl) {
-      if (!line.startsWith('{')) continue
-      let o: { type?: string; message?: { role?: string; content?: unknown } }
-      try { o = JSON.parse(line) } catch { continue }
-      if (o.type !== 'user' || o.message?.role !== 'user') continue
-      const c = o.message.content
-      const text = typeof c === 'string'
-        ? c
-        : Array.isArray(c)
-          ? (c.find((b) => (b as { type?: string }).type === 'text') as { text?: string } | undefined)?.text ?? ''
-          : ''
-      const clean = text.replace(/\s+/g, ' ').trim()
-      if (!clean) continue
-      // A prompt that opens with a brace or runs to thousands of characters is
-      // a machine talking to itself (hooks, summarisers). Those flooded the
-      // equivalent list on thor — 92% of rows — and none of them is a session
-      // anyone wants to reopen.
-      if (clean.startsWith('{') || clean.length > 2_000) return ''
-      return clean.slice(0, 90)
-    }
-  } catch { /* unreadable */ }
-  return ''
-}
-
-async function readRecent(): Promise<RecentSession[]> {
-  if (recentCache && Date.now() - recentCache.at < RECENT_TTL_MS) return recentCache.data
-
-  let dirs: string[] = []
-  try { dirs = await fs.readdir(PROJECTS_DIR) } catch { return [] }
-
-  const files: { file: string; mtime: number; size: number }[] = []
-  for (const d of dirs) {
-    const dir = path.join(PROJECTS_DIR, d)
-    let entries: string[] = []
-    try { entries = await fs.readdir(dir) } catch { continue }
-    for (const e of entries) {
-      if (!e.endsWith('.jsonl')) continue
-      try {
-        const st = statSync(path.join(dir, e))
-        if (st.size < MIN_BYTES) continue
-        files.push({ file: path.join(dir, e), mtime: st.mtimeMs, size: st.size })
-      } catch { /* vanished between readdir and stat */ }
-    }
-  }
-
-  files.sort((a, b) => b.mtime - a.mtime)
-  const out: RecentSession[] = []
-  for (const f of files.slice(0, RECENT_LIMIT)) {
-    const cwd = await readTailCwd(f.file, f.size)
-    if (!cwd || !isAllowedCwd(cwd)) continue
-    const title = await readFirstPrompt(f.file)
-    if (!title) continue
-    out.push({
-      sessionId: path.basename(f.file, '.jsonl'),
-      cwd,
-      project: cwd === homedir() ? 'home' : path.basename(cwd),
-      title,
-      lastActivity: f.mtime,
-      bytes: f.size,
-    })
-  }
-
-  recentCache = { at: Date.now(), data: out }
-  return out
-}
-
-async function cwdForResume(sessionId: string): Promise<string | null> {
-  const recent = await readRecent()
-  const hit = recent.find((r) => r.sessionId === sessionId)
-  if (hit) return hit.cwd
-  // Not in the recent window: go find the transcript directly rather than
-  // refusing to reopen something a week old.
-  let dirs: string[] = []
-  try { dirs = await fs.readdir(PROJECTS_DIR) } catch { return null }
-  for (const d of dirs) {
-    const file = path.join(PROJECTS_DIR, d, `${sessionId}.jsonl`)
-    let size: number
-    try { size = statSync(file).size } catch { continue }
-    const cwd = await readTailCwd(file, size)
-    if (cwd && isAllowedCwd(cwd)) return cwd
-  }
-  return null
-}
-
-// ------------------------------------------------------------------ routes ----
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 router.get('/terminal/status', async (_req, res) => {
-  const [version] = await Promise.all([tmuxVersion()])
-  const claude = claudeBin()
+  const version = await tmuxVersion()
+  const ssh = sshPresent()
   res.json({
-    ok: Boolean(version) && Boolean(claude),
+    ok: Boolean(version) && ssh,
     tmux: version || null,
-    claude,
+    ssh,
+    remote: remoteLabel(),
     serverUp: serverUp(),
     maxSessions: MAX_SESSIONS,
   })
-})
-
-router.get('/terminal/targets', (_req, res) => res.json(targets()))
-
-router.get('/terminal/recent', async (_req, res) => {
-  try {
-    res.json(await readRecent())
-  } catch (err) {
-    console.error('[terminal] recent failed', err)
-    res.status(500).json({ error: 'could not read transcripts' })
-  }
 })
 
 router.get('/terminal/sessions', async (_req, res) => {
@@ -206,27 +68,23 @@ router.post('/terminal/sessions', async (req, res) => {
   const mode = String(body.mode ?? 'new') as TermMode
   if (!MODES.includes(mode)) return res.status(400).json({ error: `mode must be one of ${MODES.join(', ')}` })
 
-  let cwd: string
-  let label: string
+  let target: string | undefined
   let resumeId: string | undefined
+  let label: string
 
   if (mode === 'resume') {
     resumeId = String(body.sessionId ?? '')
     if (!UUID_RE.test(resumeId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
-    const found = await cwdForResume(resumeId)
-    if (!found) return res.status(404).json({ error: 'no transcript for that session on this host' })
-    cwd = found
-    label = cwd === homedir() ? 'home' : path.basename(cwd)
+    label = cleanLabel(body.label, resumeId.slice(0, 8))
   } else {
-    const target = targetFor(String(body.target ?? ''))
-    if (!target) return res.status(400).json({ error: 'target must be one of the launch targets' })
-    cwd = target.path
-    label = target.label
+    target = String(body.target ?? '')
+    if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
+    label = cleanLabel(body.label, target)
   }
 
   try {
     const name = await createSession({
-      mode, cwd, label, resumeId,
+      mode, target, resumeId, label,
       cols: Number(body.cols), rows: Number(body.rows),
     })
     const session = (await listSessions()).find((s) => s.name === name) ?? null

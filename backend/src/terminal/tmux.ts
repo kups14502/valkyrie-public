@@ -1,33 +1,44 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 
 const exec = promisify(execFile)
 
-// Durable terminal sessions, so Claude Code can be driven from the phone.
+// Durable terminal sessions, so Claude Code on THOR can be driven from the phone.
 //
-// The pty a browser talks to is NOT the session: it is a short-lived
-// `tmux attach` client. The session itself lives in a tmux server on its own
-// socket (-L valkyrie) owned by valkyrie-term.service. That split is what makes
-// this usable rather than a demo:
+// The session Brendon sees is Claude Code running on thor (his Windows
+// workstation) in one of his own directories: personal, work, work2. This
+// box holds none of that work. What lives here is a tmux session whose pane is
+// an SSH client into thor, and tmux is what makes the phone usable rather than
+// a demo:
 //
-//   - Restarting this API (every deploy does) drops the attach clients and
-//     touches nothing that is running. In-process ptys die with the process,
-//     and losing a session mid-thought to a deploy is the exact failure this
-//     is meant to avoid.
+//   - The pty a browser talks to is NOT the session: it is a short-lived
+//     `tmux attach` client. Locking the phone, closing the tab, or restarting
+//     this API (every deploy does) drops the attach client and touches nothing
+//     that is running. In-process ptys die with the process, and losing a
+//     session mid-thought to a deploy is the exact failure this is meant to
+//     avoid.
 //   - Reattaching redraws from tmux's own buffer, so there is no scrollback to
 //     capture, cap, or replay at the wrong offset.
+//   - The SSH client sits inside the pane, so a phone that drops off wifi
+//     detaches from tmux and the SSH session to thor stays up. Claude never
+//     notices.
 //
 // The tmux server MUST be started by its own unit rather than by us: systemd
 // kills a service's whole cgroup, so a server this process spawned would be
 // killed by the next API restart even though tmux daemonises itself.
 //
 // Nothing a client sends ever becomes a path. A request carries a session NAME
-// minted here or a target KEY from the table below, and the directory is
-// resolved on this side.
+// minted here, a launch-target KEY from thor's own list, or a session id, and
+// the directory is resolved on thor by Remote-Session.ps1 out of thor's local
+// launch-targets.json. This box never learns the path at all.
+//
+// The first cut of this ran Claude on odin in odin's own checkouts. That was
+// the wrong machine: Brendon's work is on thor, and a "valkyrie" session on
+// odin is not a session he ever opens by hand.
 
 export const TMUX_BIN = process.env.VALKYRIE_TMUX_BIN || '/usr/bin/tmux'
 const SOCKET = process.env.VALKYRIE_TMUX_SOCKET || 'valkyrie'
@@ -40,14 +51,34 @@ const SOCKET_PATH = path.join(
   SOCKET,
 )
 
+// The far end. THOR_LAUNCHER_HOST is already thor's tailnet address in .env
+// for the launcher proxy, so the SSH hop follows it unless told otherwise.
+export const SSH_BIN = process.env.VALKYRIE_SSH_BIN || '/usr/bin/ssh'
+const THOR_USER = process.env.THOR_SSH_USER || 'brendon'
+const THOR_HOST = process.env.THOR_SSH_HOST || process.env.THOR_LAUNCHER_HOST || '100.118.7.57'
+// Forward slashes on purpose: this string is parsed by PowerShell on thor (the
+// sshd default shell there) and -File accepts either separator, while a
+// backslash would have to survive two more quoting layers to get there.
+const REMOTE_SCRIPT = process.env.THOR_REMOTE_SCRIPT || 'C:/Thor/tools/session-board/Remote-Session.ps1'
+
+export const remoteLabel = (): string => `${THOR_USER}@${THOR_HOST}`
+
 export const MAX_SESSIONS = 12
 // Session names are minted here and are the only name a client may hand back,
 // so they are deliberately boring. Anything else on this socket is neither
 // listed nor attachable through the API.
 export const SESSION_NAME_RE = /^vk-[0-9a-f]{10}$/
 
-export type TermMode = 'new' | 'continue' | 'resume' | 'shell'
-export const MODES: TermMode[] = ['new', 'continue', 'resume', 'shell']
+// No `continue`. Claude's --continue picks the newest conversation in the cwd,
+// and on thor that is usually the Obsidian hook's summariser run (92% of
+// transcripts there), not Brendon's. Resume is by id, from the session board.
+export type TermMode = 'new' | 'resume' | 'shell'
+export const MODES: TermMode[] = ['new', 'resume', 'shell']
+
+// Same shape the launcher agent enforces for /launch-new, so a key that passes
+// here is one thor will at least look up.
+export const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function baseArgs(): string[] {
   const a = ['-L', SOCKET]
@@ -78,6 +109,10 @@ export function tmuxVersion(): Promise<string> {
     .catch(() => '')
 }
 
+export function sshPresent(): boolean {
+  return existsSync(SSH_BIN)
+}
+
 export function serverUp(): boolean {
   return existsSync(SOCKET_PATH)
 }
@@ -104,14 +139,15 @@ export async function ensureServer(): Promise<void> {
   }
   await tmux(['start-server'])
   await tmux(['set-option', '-g', 'exit-empty', 'off']).catch(() => {})
+  await tmux(['set-option', '-g', 'remain-on-exit', 'failed']).catch(() => {})
 }
 
 // ------------------------------------------------------------- sessions ----
 
 // Unit separator, written as an escape rather than the literal byte so no
-// editor or copy-paste can quietly eat it. A label or a path may contain
-// anything printable, tabs and pipes included, so the delimiter has to be a
-// byte a human never types.
+// editor or copy-paste can quietly eat it. A label may contain anything
+// printable, tabs and pipes included, so the delimiter has to be a byte a human
+// never types.
 const SEP = '\u001f'
 const FORMAT = [
   '#{session_name}',
@@ -119,9 +155,10 @@ const FORMAT = [
   '#{session_activity}',
   '#{session_attached}',
   '#{@vk_label}',
-  '#{@vk_cwd}',
+  '#{@vk_host}',
   '#{@vk_mode}',
-  '#{pane_current_command}',
+  '#{@vk_target}',
+  '#{pane_dead}',
   '#{window_width}x#{window_height}',
 ].join(SEP)
 
@@ -129,11 +166,15 @@ export type TermSession = {
   name: string
   label: string
   mode: string
-  cwd: string
+  host: string
+  // The launch-target key for new/shell sessions, the session id for a resume.
+  target: string
   createdAt: number
   activityAt: number
   clients: number
-  command: string
+  // remain-on-exit kept the pane after its command failed: the last screen is
+  // still there to read, and nothing is running behind it.
+  dead: boolean
   size: string
 }
 
@@ -156,13 +197,14 @@ export async function listSessions(): Promise<TermSession[]> {
       return {
         name: f[0] ?? '',
         label: f[4] || f[0] || '',
+        host: f[5] || 'thor',
         mode: f[6] || 'shell',
-        cwd: f[5] || '',
+        target: f[7] || '',
         createdAt: (Number(f[1]) || 0) * 1000,
         activityAt: (Number(f[2]) || 0) * 1000,
         clients: Number(f[3]) || 0,
-        command: f[7] || '',
-        size: f[8] || '',
+        dead: f[8] === '1',
+        size: f[9] || '',
       }
     })
     .filter((s) => SESSION_NAME_RE.test(s.name))
@@ -179,6 +221,10 @@ export async function hasSession(name: string): Promise<boolean> {
   }
 }
 
+// Kills the tmux session, which ends the SSH client in its pane. sshd on thor
+// then tears down that login's ConPTY and the process tree under it, so this
+// is also how a Claude session started from the phone is stopped. The
+// transcript on thor is untouched and the conversation resumes anywhere by id.
 export async function killSession(name: string): Promise<boolean> {
   if (!SESSION_NAME_RE.test(name)) return false
   try {
@@ -189,61 +235,6 @@ export async function killSession(name: string): Promise<boolean> {
   }
 }
 
-// -------------------------------------------------------------- targets ----
-
-export type Target = { key: string; label: string; path: string }
-
-// The whole allow-list. A directory that is not here cannot be opened from the
-// phone at all, which is the point: the client picks a key, never a path.
-const CANDIDATES: Target[] = [
-  { key: 'valkyrie', label: 'valkyrie', path: '/home/brendon/valkyrie' },
-  { key: 'msp-platform', label: 'msp-platform', path: '/home/brendon/msp-platform' },
-  { key: 'slop-factory', label: 'slop-factory', path: '/home/brendon/slop-factory' },
-  { key: 'trade-bot', label: 'trade-bot', path: '/home/brendon/trade-bot' },
-  { key: 'raven', label: 'raven', path: '/home/brendon/raven' },
-  { key: 'projectb-ai', label: 'projectb-ai', path: '/home/brendon/projectb-ai' },
-  { key: 'infra', label: 'infra', path: '/home/brendon/infra' },
-  { key: 'side-proj', label: 'side-proj', path: '/home/brendon/side-proj' },
-  { key: 'home', label: 'home', path: '/home/brendon' },
-]
-
-export function targets(): Target[] {
-  return CANDIDATES.filter((t) => {
-    try { return statSync(t.path).isDirectory() } catch { return false }
-  })
-}
-
-export function targetFor(key: string): Target | null {
-  return targets().find((t) => t.key === key) ?? null
-}
-
-// A resumed session reopens where it ran, and that path comes out of its own
-// transcript rather than off the wire. Keep it inside the home tree so a
-// transcript written by something else still cannot point us anywhere odd.
-export function isAllowedCwd(dir: string): boolean {
-  const home = homedir()
-  const resolved = path.resolve(dir)
-  if (resolved !== home && !resolved.startsWith(`${home}${path.sep}`)) return false
-  try { return statSync(resolved).isDirectory() } catch { return false }
-}
-
-// --------------------------------------------------------------- claude ----
-
-const CLAUDE_CANDIDATES = [
-  process.env.VALKYRIE_CLAUDE_BIN,
-  path.join(homedir(), '.local', 'bin', 'claude'),
-  '/usr/local/bin/claude',
-  '/usr/bin/claude',
-].filter((p): p is string => Boolean(p))
-
-// Resolved to an absolute path on purpose: this box's login shell does not put
-// ~/.local/bin on PATH, so `claude` alone resolves under an interactive
-// session and nowhere else. A session that dies instantly with "command not
-// found" is not worth the guess.
-export function claudeBin(): string | null {
-  return CLAUDE_CANDIDATES.find((p) => existsSync(p)) ?? null
-}
-
 // --------------------------------------------------------------- create ----
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
@@ -252,13 +243,13 @@ const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
   return Math.min(hi, Math.max(lo, n))
 }
 
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-
 export type CreateOpts = {
   mode: TermMode
-  cwd: string
-  label: string
+  // A launch-target key (new, shell) — validated against TARGET_RE by the route.
+  target?: string
+  // A conversation id (resume) — validated against UUID_RE by the route.
   resumeId?: string
+  label: string
   cols?: number
   rows?: number
 }
@@ -273,7 +264,54 @@ async function setOpt(name: string, option: string, value: string): Promise<void
   }
 }
 
+// The command sshd runs on thor. The whole string is one PowerShell command
+// line (PowerShell is thor's sshd default shell), and every variable part of
+// it has already been matched against a regex that admits only [a-z0-9-] or a
+// uuid, so there is nothing here for a shell on either side to interpret.
+export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'>): string {
+  const parts = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', REMOTE_SCRIPT, '-Mode', o.mode]
+  if (o.mode === 'resume') {
+    if (!o.resumeId || !UUID_RE.test(o.resumeId)) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
+    parts.push('-SessionId', o.resumeId)
+  } else {
+    if (!o.target || !TARGET_RE.test(o.target)) throw Object.assign(new Error('target must be a launch-target key'), { status: 400 })
+    parts.push('-Target', o.target)
+  }
+  return parts.join(' ')
+}
+
+// argv for the pane. `-t` forces the pty the TUI needs; tmux is already
+// giving ssh one, so a plain -t suffices. BatchMode makes a missing key fail
+// with "Permission denied" instead of sitting at a password prompt nobody can
+// see; remain-on-exit=failed then keeps that line on screen.
+//
+// ConnectTimeout is the one that matters day to day: thor is a workstation and
+// it sleeps. Without it a connection that never opens sits in TCP SYN retries
+// for the kernel default (about two minutes), and BatchMode plus
+// LogLevel=ERROR mean the pane prints nothing at all while it waits, which on
+// a phone is indistinguishable from Claude thinking. Ten seconds gets a
+// readable "Connection timed out" and a dead pane instead.
+//
+// The keepalives are the other half: a phone that vanishes detaches from tmux
+// and never touches this SSH connection, so an established connection only
+// ever dies when the tailnet does, and this is how sshd finds out.
+export function sshArgs(remote: string): string[] {
+  return [
+    SSH_BIN,
+    '-t',
+    '-o', 'BatchMode=yes',
+    '-o', 'LogLevel=ERROR',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ConnectTimeout=10',
+    '-o', 'ServerAliveInterval=30',
+    '-o', 'ServerAliveCountMax=3',
+    remoteLabel(),
+    remote,
+  ]
+}
+
 export async function createSession(o: CreateOpts): Promise<string> {
+  if (!sshPresent()) throw Object.assign(new Error(`ssh is not installed at ${SSH_BIN}`), { status: 503 })
   await ensureServer()
   const open = await listSessions()
   if (open.length >= MAX_SESSIONS) {
@@ -283,29 +321,21 @@ export async function createSession(o: CreateOpts): Promise<string> {
     )
   }
 
+  // Validates before anything is spawned.
+  const remote = remoteCommand(o)
+
   const name = `vk-${randomBytes(5).toString('hex')}`
   const cols = clamp(o.cols, 20, 400, 80)
   const rows = clamp(o.rows, 8, 200, 24)
 
   // -x/-y size the window now. Without them a detached session starts 80x24
   // and Claude Code paints its first frame to that, which on a phone means a
-  // wrapped mess until the first resize lands.
-  const args = ['new-session', '-d', '-s', name, '-c', o.cwd, '-x', String(cols), '-y', String(rows)]
-
-  if (o.mode !== 'shell') {
-    const bin = claudeBin()
-    if (!bin) throw Object.assign(new Error('claude is not installed on this host'), { status: 503 })
-    const cli = [shq(bin)]
-    if (o.mode === 'continue') cli.push('--continue')
-    if (o.mode === 'resume') {
-      if (!o.resumeId) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
-      cli.push('--resume', shq(o.resumeId))
-    }
-    // A login shell, then exec: claude picks up the profile PATH (git, node, rg
-    // all live there) and still owns the pane, so the session ends when claude
-    // ends rather than dropping to a stray shell nobody is watching.
-    args.push('--', 'bash', '-lc', `exec ${cli.join(' ')}`)
-  }
+  // wrapped mess until the first resize lands. -c is this box's home purely
+  // because tmux needs a cwd for the pane; nothing in it runs here.
+  const args = [
+    'new-session', '-d', '-s', name, '-c', homedir(), '-x', String(cols), '-y', String(rows),
+    '--', ...sshArgs(remote),
+  ]
 
   await tmux(args, 20_000)
 
@@ -320,8 +350,9 @@ export async function createSession(o: CreateOpts): Promise<string> {
   // symptom was a session strip full of raw ids.
   await Promise.all([
     setOpt(name, '@vk_label', o.label.slice(0, 60)),
-    setOpt(name, '@vk_cwd', o.cwd),
+    setOpt(name, '@vk_host', 'thor'),
     setOpt(name, '@vk_mode', o.mode),
+    setOpt(name, '@vk_target', o.mode === 'resume' ? (o.resumeId ?? '') : (o.target ?? '')),
   ])
 
   return name

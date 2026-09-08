@@ -1,19 +1,26 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft, Keyboard,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronLeft, CornerDownLeft, Keyboard,
   Plus, RotateCw, Terminal as TerminalIcon, X,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import {
+  api, fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
+  openTermSession, type TermOpen, type TermSession,
+} from '../lib/api'
 import { getToken } from '../lib/auth'
 
-// Claude Code from the phone. The session lives in tmux on odin, so this page
-// is only a screen and a keyboard for it: closing the tab, locking the phone,
-// or deploying the API all just detach, and coming back reattaches to the same
-// running session.
+// Claude Code on thor, from the phone. The session is Claude running on thor in
+// one of Brendon's own directories (personal, work, work2), reached over
+// SSH from a tmux session on odin, so this page is only a screen and a keyboard
+// for it: closing the tab, locking the phone, or deploying the API all just
+// detach, and coming back reattaches to the same running session. It lives
+// under the Sessions tab at /sessions/terminal: the board is where a session is
+// picked, this is where it is typed into.
 //
 // The whole layout exists to make one promise: the terminal DOES NOT MOVE.
 // Nothing on this route scrolls, so a drag cannot shift it, and the software
@@ -37,37 +44,6 @@ import { getToken } from '../lib/auth'
 // must never feed size. It does not here: no width is ever written by JS, so
 // cols is structurally immune to focus and keyboard events, and only rotation,
 // a zoom change or a font change can reflow tmux history.
-
-type TermSession = {
-  name: string
-  label: string
-  mode: string
-  cwd: string
-  createdAt: number
-  activityAt: number
-  clients: number
-  command: string
-  size: string
-}
-
-type Target = { key: string; label: string; path: string }
-
-type RecentSession = {
-  sessionId: string
-  cwd: string
-  project: string
-  title: string
-  lastActivity: number
-  bytes: number
-}
-
-type TermStatus = {
-  ok: boolean
-  tmux: string | null
-  claude: string | null
-  serverUp: boolean
-  maxSessions: number
-}
 
 const FONT_KEY = 'valkyrie-term-font'
 const FONT_MIN = 9
@@ -155,6 +131,13 @@ const relative = (ms: number) => {
   return `${Math.floor(d / 86_400_000)}d`
 }
 
+// The board reports ISO strings; the tmux list reports epoch ms.
+const relIso = (iso: string | null) => {
+  if (!iso) return ''
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? relative(t) : ''
+}
+
 const errText = (e: unknown) =>
   (e as { response?: { data?: { error?: string } } })?.response?.data?.error
   || (e as Error)?.message
@@ -189,7 +172,14 @@ export default function TerminalPage() {
   const sampleRef = useRef(0)
   const growRef = useRef(0)
 
-  const [active, setActive] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  // ?s= is how the board hands a session over, and it is kept current so a
+  // reload (or a home-screen relaunch) lands back on the same one.
+  const [active, setActive] = useState<string | null>(() => {
+    const s = params.get('s')
+    return s && /^vk-[0-9a-f]{10}$/.test(s) ? s : null
+  })
   const [gen, setGen] = useState(0)
   const [conn, setConn] = useState<'idle' | 'connecting' | 'live' | 'closed'>('idle')
   const [ctrlArmed, setCtrlArmed] = useState(false)
@@ -204,26 +194,30 @@ export default function TerminalPage() {
 
   const sessions = useQuery({
     queryKey: ['term', 'sessions'],
-    queryFn: async () => (await api.get<TermSession[]>('/terminal/sessions')).data,
+    queryFn: fetchTermSessions,
   })
   const status = useQuery({
     queryKey: ['term', 'status'],
-    queryFn: async () => (await api.get<TermStatus>('/terminal/status')).data,
+    queryFn: fetchTermStatus,
     refetchInterval: 60_000,
   })
-  const targets = useQuery({
-    queryKey: ['term', 'targets'],
-    queryFn: async () => (await api.get<Target[]>('/terminal/targets')).data,
-    refetchInterval: false,
-    staleTime: 600_000,
-  })
+  // thor's own list, under the same query key as the board's dropdown so the
+  // two can never disagree. Only the targets thor flagged for the phone show.
+  const targets = useQuery({ queryKey: ['launchTargets'], queryFn: fetchLaunchTargets, staleTime: 60_000 })
+  const phoneTargets = (targets.data ?? []).filter((t) => t.phone && t.exists)
+  // The resume list IS the session board: one row per real conversation on
+  // thor, hook runs already filtered out there. Live ones are left out because
+  // a conversation open on thor's desk has to be stopped before it can move
+  // here, and done ones because Brendon said he was finished with them.
   const recent = useQuery({
-    queryKey: ['term', 'recent'],
-    queryFn: async () => (await api.get<RecentSession[]>('/terminal/recent')).data,
+    queryKey: ['sessionList'],
+    queryFn: fetchSessionList,
     enabled: picker,
-    refetchInterval: false,
-    staleTime: 60_000,
+    staleTime: 10_000,
   })
+  const resumable = recent.data?.installed
+    ? recent.data.sessions.filter((s) => !s.live && !s.done).slice(0, 40)
+    : []
 
   const list = sessions.data ?? EMPTY
 
@@ -647,10 +641,22 @@ export default function TerminalPage() {
 
   // F. Land on whatever ran most recently, and re-land if the active session
   //    is killed out from under us.
+  //
+  //    Never off a list that is still loading. The board hands a session over
+  //    through ?s= and this cache is shared with the board's own strip, so a
+  //    refetch in flight means the named session may not be in `list` yet, and
+  //    stomping `active` here would silently attach to the wrong pane.
   useEffect(() => {
-    if (!list.length) return
+    if (!list.length || sessions.isFetching) return
     if (!active || !list.some((s) => s.name === active)) setActive(list[0].name)
-  }, [list, active])
+  }, [list, active, sessions.isFetching])
+
+  // G. Keep ?s= in step with the selection. Replace, never push, so the back
+  //    gesture leaves the terminal instead of stepping through sessions.
+  useEffect(() => {
+    if ((params.get('s') ?? '') === (active ?? '')) return
+    setParams(active ? { s: active } : {}, { replace: true })
+  }, [active, params, setParams])
 
   const guessGrid = () => {
     const host = hostRef.current
@@ -662,13 +668,13 @@ export default function TerminalPage() {
     }
   }
 
-  const openSession = async (body: Record<string, unknown>) => {
+  const openSession = async (body: TermOpen) => {
     setBusy(true)
     setError(null)
     try {
       const term = termRef.current
       const grid = guessGrid()
-      const { data } = await api.post<{ name: string }>('/terminal/sessions', {
+      const data = await openTermSession({
         ...body,
         cols: term?.cols ?? grid.cols,
         rows: term?.rows ?? grid.rows,
@@ -687,12 +693,15 @@ export default function TerminalPage() {
   const closeSession = async (name: string) => {
     setError(null)
     try {
-      await api.post(`/terminal/sessions/${name}/kill`)
+      await killTermSession(name)
     } catch (e) {
       setError(errText(e))
     }
     if (active === name) setActive(null)
     await qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+    // Closing a Claude session here ends it on thor too, so the board's live
+    // set just changed.
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
   const dot = conn === 'live'
@@ -718,6 +727,15 @@ export default function TerminalPage() {
           row, and never hidden: 36px is worth less than a switcher that
           disappears when the keyboard opens. */}
       <div data-term-scroll className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5">
+        <button
+          type="button"
+          onClick={() => navigate('/sessions')}
+          aria-label="Back to the session board"
+          title="Back to the session board"
+          className={`${BTN} shrink-0 px-2`}
+        >
+          <ChevronLeft size={13} />
+        </button>
         {list.map((s) => {
           const on = s.name === active
           return (
@@ -741,8 +759,8 @@ export default function TerminalPage() {
                 >
                   {s.label}
                 </span>
-                <span className="text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-                  {s.mode === 'shell' ? 'sh' : s.command || s.mode}
+                <span className={`text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+                  {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
                   {s.activityAt ? ` · ${relative(s.activityAt)}` : ''}
                 </span>
               </button>
@@ -799,7 +817,7 @@ export default function TerminalPage() {
               {sessions.isLoading ? 'loading' : 'no session open'}
             </div>
             {!sessions.isLoading && (
-              <div className="text-[10px] text-[var(--color-text-faint)]">tap NEW to start one</div>
+              <div className="text-[10px] text-[var(--color-text-faint)]">tap NEW, or pick one on the board</div>
             )}
           </div>
         )}
@@ -817,7 +835,7 @@ export default function TerminalPage() {
             )}
             {status.data && !status.data.ok && (
               <div className="border border-[var(--color-accent-2)]/60 bg-[var(--color-bg)] px-3 py-2 text-[11px] text-[var(--color-accent-2)]">
-                {!status.data.tmux ? 'tmux is not installed on odin.' : 'claude is not installed on odin.'}
+                {!status.data.tmux ? 'tmux is not installed on odin.' : 'ssh is not installed on odin.'}
               </div>
             )}
           </div>
@@ -828,18 +846,42 @@ export default function TerminalPage() {
             <div className="panel space-y-4 p-3">
               <div>
                 <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-                  &gt; new session in
+                  &gt; new claude session on thor in
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {(targets.data ?? []).map((t) => (
+                  {phoneTargets.map((t) => (
                     <button
                       key={t.key}
                       type="button"
                       disabled={busy}
-                      onClick={() => void openSession({ mode: 'new', target: t.key })}
+                      onClick={() => void openSession({ mode: 'new', target: t.key, label: t.label })}
                       className={`${BTN} disabled:opacity-40`}
                     >
-                      {t.label}
+                      <Plus size={11} /> {t.label}
+                    </button>
+                  ))}
+                  {targets.isSuccess && phoneTargets.length === 0 && (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">
+                      thor offers no phone targets. Flag some with &quot;phone&quot;: true in launch-targets.json.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+                  &gt; plain powershell on thor in
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {phoneTargets.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void openSession({ mode: 'shell', target: t.key, label: `${t.label} sh` })}
+                      className={`${BTN} disabled:opacity-40`}
+                    >
+                      <TerminalIcon size={11} /> {t.label}
                     </button>
                   ))}
                 </div>
@@ -847,48 +889,26 @@ export default function TerminalPage() {
 
               <div>
                 <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-                  &gt; pick up the last session in
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {(targets.data ?? []).map((t) => (
-                    <button
-                      key={t.key}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void openSession({ mode: 'continue', target: t.key })}
-                      className={`${BTN} disabled:opacity-40`}
-                    >
-                      <RotateCw size={11} /> {t.label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void openSession({ mode: 'shell', target: 'home' })}
-                    className={`${BTN} disabled:opacity-40`}
-                  >
-                    <TerminalIcon size={11} /> plain shell
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-                  &gt; resume by conversation
+                  &gt; resume a conversation from thor
                 </div>
                 {recent.isLoading && (
-                  <div className="text-[11px] text-[var(--color-text-faint)]">reading transcripts…</div>
+                  <div className="text-[11px] text-[var(--color-text-faint)]">reading the board…</div>
+                )}
+                {recent.data && !recent.data.installed && (
+                  <div className="text-[11px] text-[var(--color-accent-2)]">
+                    the session board answered {recent.data.status}; thor may be asleep
+                  </div>
                 )}
                 {/* No nested scroller: the overlay is already a bounded one,
                     and a scroller inside a scroller is the iOS chaining trap
                     this route exists to remove. */}
                 <div className="space-y-1">
-                  {(recent.data ?? []).map((r) => (
+                  {resumable.map((r) => (
                     <button
                       key={r.sessionId}
                       type="button"
                       disabled={busy}
-                      onClick={() => void openSession({ mode: 'resume', sessionId: r.sessionId })}
+                      onClick={() => void openSession({ mode: 'resume', sessionId: r.sessionId, label: r.title })}
                       className="flex w-full items-start gap-2 border border-[var(--color-border)] px-2.5 py-2 text-left transition-colors active:border-[var(--color-accent)] hover:border-[var(--color-accent)]/50 disabled:opacity-40"
                     >
                       <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent)]">
@@ -898,12 +918,14 @@ export default function TerminalPage() {
                         {r.title}
                       </span>
                       <span className="shrink-0 text-[9px] text-[var(--color-text-faint)]">
-                        {relative(r.lastActivity)}
+                        {relIso(r.lastActivityUtc)}
                       </span>
                     </button>
                   ))}
-                  {recent.data?.length === 0 && (
-                    <div className="text-[11px] text-[var(--color-text-faint)]">no transcripts on odin yet</div>
+                  {recent.data?.installed && resumable.length === 0 && (
+                    <div className="text-[11px] text-[var(--color-text-faint)]">
+                      nothing on the board to resume. A session that is open on thor has to be stopped there first.
+                    </div>
                   )}
                 </div>
               </div>

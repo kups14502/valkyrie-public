@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
-  SquareTerminal,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -55,7 +54,6 @@ function PageFallback() {
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
-  { to: '/terminal', label: 'terminal', icon: SquareTerminal },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -185,12 +183,13 @@ function Shell() {
   const onDashboard = location.pathname === '/dashboard'
   useEffect(() => { if (onDashboard) setMenuOpen(true) }, [onDashboard])
 
-  // /terminal is pinned: it owns its own height, must not scroll, and must not
-  // carry main's padding. The page itself owns the document-level state
-  // (html[data-term-pin], --vp-kb, --vp-pin, data-kb) so there is exactly one
-  // owner; the shell only owns what it renders. Layout effect, not effect, so
-  // the menu is already closed in the paint that first shows the terminal.
-  const pinned = location.pathname === '/terminal'
+  // The in-page terminal (/sessions/terminal) is pinned: it owns its own
+  // height, must not scroll, and must not carry main's padding. The page itself
+  // owns the document-level state (html[data-term-pin], --vp-kb, --vp-pin,
+  // data-kb) so there is exactly one owner; the shell only owns what it
+  // renders. Layout effect, not effect, so the menu is already closed in the
+  // paint that first shows the terminal.
+  const pinned = location.pathname === '/sessions/terminal'
   useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
 
   return (
@@ -288,7 +287,9 @@ function Shell() {
             {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
                 exists for prose line length, and a non-positioned wrapper between
                 main and an absolute inset-0 page root is dead weight. */}
-            <Route path="/terminal" element={<Terminal />} />
+            <Route path="/sessions/terminal" element={<Terminal />} />
+            {/* The terminal had its own tab for a day. Bookmarks from then. */}
+            <Route path="/terminal" element={<Navigate to="/sessions/terminal" replace />} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />

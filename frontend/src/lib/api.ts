@@ -664,7 +664,9 @@ const parseSession = (raw: unknown): WorkSession | null => {
   }
 }
 
-export type LaunchTarget = { key: string; label: string; exists: boolean }
+// `phone` is thor's own flag in launch-targets.json: the targets the phone
+// terminal offers (personal, work, work2). The desktop dropdown lists all.
+export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean }
 
 export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
   try {
@@ -674,7 +676,7 @@ export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
       .map((raw) => {
         const r = (raw ?? {}) as Record<string, unknown>
         const key = wsStr(r.key)
-        return key ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false } : null
+        return key ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false, phone: r.phone === true } : null
       })
       .filter((x): x is LaunchTarget => x !== null)
   } catch {
@@ -686,6 +688,81 @@ export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
 
 export const startSessionOnThor = async (target: string) =>
   (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/launch-new', { target })).data
+
+// ------------------------------------------------------------ terminals ----
+// The in-page terminal (pages/Terminal.tsx, at /sessions/terminal). Each entry
+// is a tmux session on odin whose pane is an SSH client running Claude Code (or
+// a shell) on thor. Mirrors backend/src/routes/terminal.ts.
+
+export type TermMode = 'new' | 'resume' | 'shell'
+
+export type TermSession = {
+  name: string
+  label: string
+  mode: TermMode
+  host: string
+  // The launch-target key for new/shell, the conversation id for resume.
+  target: string
+  createdAt: number
+  activityAt: number
+  clients: number
+  // The command failed and tmux kept the pane so its last screen can be read.
+  dead: boolean
+  size: string
+}
+
+export type TermStatus = {
+  ok: boolean
+  tmux: string | null
+  ssh: boolean
+  remote: string
+  serverUp: boolean
+  maxSessions: number
+}
+
+export type TermOpen =
+  | { mode: 'new' | 'shell'; target: string; label?: string; cols?: number; rows?: number }
+  | { mode: 'resume'; sessionId: string; label?: string; cols?: number; rows?: number }
+
+const TERM_MODES: TermMode[] = ['new', 'resume', 'shell']
+
+const parseTermSession = (raw: unknown): TermSession | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const name = wsStr(r.name)
+  if (!name) return null
+  const mode = wsStr(r.mode)
+  return {
+    name,
+    label: wsStr(r.label) ?? name,
+    mode: (TERM_MODES as string[]).includes(mode ?? '') ? (mode as TermMode) : 'shell',
+    host: wsStr(r.host) ?? 'thor',
+    target: wsStr(r.target) ?? '',
+    createdAt: wsNum(r.createdAt) ?? 0,
+    activityAt: wsNum(r.activityAt) ?? 0,
+    clients: wsNum(r.clients) ?? 0,
+    dead: r.dead === true,
+    size: wsStr(r.size) ?? '',
+  }
+}
+
+export const fetchTermSessions = async (): Promise<TermSession[]> => {
+  const d = (await api.get<unknown>('/terminal/sessions')).data
+  if (!Array.isArray(d)) throw new Error('Invalid terminal sessions response')
+  return d.map(parseTermSession).filter((s): s is TermSession => s !== null)
+}
+
+export const fetchTermStatus = async () => (await api.get<TermStatus>('/terminal/status')).data
+
+export const openTermSession = async (body: TermOpen) =>
+  (await api.post<{ name: string; session: TermSession | null }>('/terminal/sessions', body)).data
+
+export const killTermSession = async (name: string) =>
+  (await api.post<{ killed: boolean }>(`/terminal/sessions/${encodeURIComponent(name)}/kill`)).data
+
+// Where the in-page terminal lives, optionally landing on one session.
+export const termPath = (name?: string | null): string =>
+  name ? `/sessions/terminal?s=${encodeURIComponent(name)}` : '/sessions/terminal'
 
 // ---------------------------------------------------------------- desk RGB ----
 // thor's desk lighting, the two actions its desktop buttons already have.

@@ -12,7 +12,7 @@ import { PhoneClock } from '../components/HomePanels'
 // fold instead of below a full-height header.
 
 const TILES = [
-  { to: '/terminal', label: 'claude', icon: SquareTerminal },
+  { to: '/sessions', label: 'claude', icon: SquareTerminal },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
