@@ -21,24 +21,38 @@ const LAUNCHER_PORT = Number(process.env.THOR_LAUNCHER_PORT || 8766)
 const LAUNCHER_TOKEN = process.env.THOR_LAUNCHER_TOKEN || ''
 const BASE = `http://${LAUNCHER_HOST}:${LAUNCHER_PORT}`
 
-// Every machine that can host a Claude session, not just thor. The desk routes
-// below (resume, stop, restore, rgb, the session list) stay thor-only because
-// they describe thor's desk, but starting a NEW session is a question with more
-// than one right answer: clicking "new session" while sitting at mimir started
-// it on thor, with nothing in the UI saying so.
+// Which machines Valkyrie will address. EVERYTHING RUNS ON THOR: it is always
+// on, it holds the work, and its sessions are reachable from anywhere through
+// the in-page terminal. mimir was wired up as a second host on 2026-09-10 and
+// taken back out the same day, because a laptop on another network is off
+// exactly when you would want to reach it and a transcript never leaves the
+// machine that wrote it, so a session there is work that can hide.
 //
-// A host with no token is listed and reported unconfigured rather than hidden,
-// because "mimir needs its agent installed" is the answer to the question the
-// menu is being asked.
+// The plumbing stays host-addressed rather than re-hardcoded, since that is
+// what lets a row's resume, stop and done follow the machine it belongs to. A
+// second host is opt-in: name it in LAUNCHER_HOSTS and give it
+// <HOST>_LAUNCHER_HOST and <HOST>_LAUNCHER_TOKEN. With none named, this is a
+// one-entry table and /session-board is thor's list.
 type Launcher = { host: string; port: number; token: string; env: string }
+
 const LAUNCHERS: Record<string, Launcher> = {
   thor: { host: LAUNCHER_HOST, port: LAUNCHER_PORT, token: LAUNCHER_TOKEN, env: 'THOR_LAUNCHER_TOKEN' },
-  mimir: {
-    host: process.env.MIMIR_LAUNCHER_HOST || '100.111.85.107',
-    port: Number(process.env.MIMIR_LAUNCHER_PORT || 8766),
-    token: process.env.MIMIR_LAUNCHER_TOKEN || '',
-    env: 'MIMIR_LAUNCHER_TOKEN',
-  },
+}
+
+for (const name of (process.env.LAUNCHER_HOSTS || '').split(',').map((h) => h.trim().toLowerCase())) {
+  if (!name || name === 'thor') continue
+  const prefix = name.toUpperCase()
+  const host = process.env[`${prefix}_LAUNCHER_HOST`]
+  if (!host) {
+    console.error(`[hosts] ${name} is in LAUNCHER_HOSTS but ${prefix}_LAUNCHER_HOST is not set, skipping it`)
+    continue
+  }
+  LAUNCHERS[name] = {
+    host,
+    port: Number(process.env[`${prefix}_LAUNCHER_PORT`] || 8766),
+    token: process.env[`${prefix}_LAUNCHER_TOKEN`] || '',
+    env: `${prefix}_LAUNCHER_TOKEN`,
+  }
 }
 // The in-page terminal is a tmux pane SSHing into thor (terminal/tmux.ts), so
 // only thor can host one today. Every other host opens on its own screen.
