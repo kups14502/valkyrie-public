@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
+import { ThorRgbControl } from '../components/ThorRgbControl'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
 
@@ -490,6 +491,13 @@ export default function Dashboard() {
 
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />
+
+      {/* The desk relight, the same component the Lights page uses. It is here
+          because it is the control Brendon reaches for most and the dashboard is
+          the page already open: a wedged keyboard gets unstuck without a hop to
+          Lights. One full-width row, since the two buttons do not wrap and the
+          narrow column below would squeeze them. */}
+      <ThorRgbControl />
 
       {/* Two columns now that the sessions card is gone: hosts take the wide
           side (the Sessions page owns session state, and this card duplicated
