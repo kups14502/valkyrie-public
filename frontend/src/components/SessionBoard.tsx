@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
-  fetchLaunchTargets, fetchSessionList, fetchTermSessions, killTermSession, launchSessionOnThor, localHostname,
-  openSessionHere, openTermSession, setSessionDone, startSessionOnThor, stopSessionOnThor, termPath,
-  type SessionActivity, type TermSession, type WorkSession,
+  fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
+  launchSessionOnThor, localHostname, openSessionHere, openTermSession, setSessionDone,
+  startSessionOnHost, stopSessionOnThor, termPath,
+  type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
 import { isTauri } from '../lib/auth'
 
@@ -23,6 +24,46 @@ import { isTauri } from '../lib/auth'
 const HOST = 'thor'
 const HOST_IP = '100.118.7.57'
 const SHOWN_BY_DEFAULT = 20
+
+// Where "open" puts a session. In a browser there is only one answer: the page.
+// The desktop app can do either, and until now it could ONLY open a window on
+// the local screen, so an in-page terminal was reachable from the desktop app
+// only when one already existed and could be clicked in the "in page" row.
+type OpenMode = 'page' | 'screen'
+const OPEN_MODE_KEY = 'valkyrie-session-open-mode'
+
+const readOpenMode = (): OpenMode => {
+  if (!isTauri()) return 'page'
+  try {
+    return localStorage.getItem(OPEN_MODE_KEY) === 'page' ? 'page' : 'screen'
+  } catch {
+    return 'screen'
+  }
+}
+
+// Work and personal do not belong in one interleaved list. thor routes every
+// session to an area out of the same table the Obsidian capture uses, so this
+// only has to order and name them.
+const AREA_ORDER = ['work', 'org-c', 'server', 'personal']
+const AREA_LABEL: Record<string, string> = {
+  work: 'work',
+  org-c: 'org c',
+  server: 'server',
+  personal: 'personal',
+}
+
+function groupByArea(rows: WorkSession[]): { area: string; rows: WorkSession[] }[] {
+  const buckets = new Map<string, WorkSession[]>()
+  for (const s of rows) {
+    const key = s.area || 'other'
+    const held = buckets.get(key)
+    if (held) held.push(s)
+    else buckets.set(key, [s])
+  }
+  const ordered = AREA_ORDER.filter((a) => buckets.has(a))
+  const rest = [...buckets.keys()].filter((a) => !AREA_ORDER.includes(a)).sort()
+  return [...ordered, ...rest].map((area) => ({ area, rows: buckets.get(area) ?? [] }))
+}
 
 const TONE: Record<SessionActivity, string> = {
   working: 'var(--color-accent)',
@@ -140,7 +181,9 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
             type="button"
             disabled={stopping || busy}
             onClick={() => onStop(s)}
-            title={`Stop it on ${HOST}. The transcript is kept, so it reopens anywhere.`}
+            title={s.bytes === 0
+              ? `Stop it on ${HOST}. Nothing has been said in this one yet, so there is no transcript to reopen: stopping discards it.`
+              : `Stop it on ${HOST}. The transcript is kept, so it reopens anywhere.`}
             className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
           >
             <Square size={11} /> {stopping ? 'stopping' : 'stop'}
@@ -169,13 +212,17 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
   )
 }
 
-// Start a session on thor without remoting in first. The list comes from thor
-// and the click sends back only a key, so the page never names a directory.
+// Start a session without remoting in first. The target list comes from the
+// host itself and the click sends back only a key, so the page never names a
+// directory.
 //
-// In a browser the session opens IN THE PAGE (Claude on thor, over SSH, see
-// pages/Terminal.tsx), and only the targets thor flagged for the phone are
-// offered: personal, work, work2. The desktop app keeps the full list and
-// opens a Windows Terminal tab on thor's screen, as it always did.
+// The menu is grouped by machine because it has to be: it used to say "new
+// session" and always mean thor, so pressing it while sitting at mimir started
+// the session on the wrong machine with nothing on screen admitting it. A host
+// with no agent is listed with the reason rather than hidden.
+//
+// In-page mode offers only the targets the host flagged for the phone
+// (personal, work, work2); on its own screen the full list applies.
 function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: boolean }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -183,8 +230,19 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const targets = useQuery({ queryKey: ['launchTargets'], queryFn: fetchLaunchTargets, staleTime: 60_000 })
-  const list = (targets.data ?? []).filter((t) => t.exists && (!inPage || t.phone))
+  const hosts = useQuery({ queryKey: ['sessionHosts'], queryFn: fetchSessionHosts, staleTime: 60_000 })
+  const hostList = hosts.data ?? []
+  const launchable = hostList.filter((h) => h.canLaunch)
+
+  const targets = useQuery({
+    queryKey: ['launchTargets', launchable.map((h) => h.host).join(',')],
+    enabled: launchable.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const lists = await Promise.all(launchable.map((h) => fetchLaunchTargets(h.host)))
+      return new Map(launchable.map((h, i) => [h.host, lists[i]]))
+    },
+  })
 
   // Click-away, so the menu does not sit open over the list.
   useEffect(() => {
@@ -194,18 +252,22 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
     return () => window.removeEventListener('click', close)
   }, [open])
 
-  if (list.length === 0) return null
+  if (hostList.length === 0) return null
 
-  const start = async (key: string, label: string) => {
-    setBusy(key); setErr(null)
+  // In-page means the tmux pane on odin, which SSHes into thor and nowhere
+  // else, so a host that cannot host one opens on its own screen instead.
+  const opensInPage = (h: SessionHost) => inPage && h.canPage
+
+  const start = async (h: SessionHost, key: string, label: string) => {
+    setBusy(`${h.host}:${key}`); setErr(null)
     try {
-      if (inPage) {
+      if (opensInPage(h)) {
         const r = await openTermSession({ mode: 'new', target: key, label })
         seedTerminal(qc, r)
         navigate(termPath(r.name))
         return
       }
-      const r = await startSessionOnThor(key)
+      const r = await startSessionOnHost(h.host, key)
       if (!r.ok) setErr(r.detail ?? 'could not start it')
       // Claude takes a moment to register, so give the list something to find.
       setTimeout(onStarted, 2_500)
@@ -222,24 +284,47 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
         type="button"
         disabled={busy !== null}
         onClick={() => setOpen((v) => !v)}
-        title={`Start a new Claude session on ${HOST}`}
+        title="Start a new Claude session. The menu names the machine it starts on."
         className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border-strong)] px-3 text-[11px] text-[var(--color-text)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
       >
-        <Plus size={12} /> {busy ? `starting ${busy}…` : 'new session'} <ChevronDown size={11} />
+        <Plus size={12} /> {busy ? `starting ${busy.split(':')[1]} on ${busy.split(':')[0]}…` : 'new session'} <ChevronDown size={11} />
       </button>
 
       {open && (
-        <div className="absolute right-0 z-20 mt-1 min-w-44 border border-[var(--color-border-strong)] bg-[var(--color-surface)] py-1 shadow-lg">
-          {list.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => void start(t.key, t.label)}
-              className="block w-full px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="absolute right-0 z-20 mt-1 min-w-56 border border-[var(--color-border-strong)] bg-[var(--color-surface)] py-1 shadow-lg">
+          {hostList.map((h) => {
+            const list = (targets.data?.get(h.host) ?? []).filter((t) => t.exists && (!opensInPage(h) || t.phone))
+            return (
+              <div key={h.host} className="border-b border-[var(--color-border)]/50 py-1 last:border-b-0">
+                <div className="flex items-baseline justify-between gap-2 px-3 py-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text)]">{h.host}</span>
+                  <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
+                    {h.canLaunch ? (opensInPage(h) ? 'in the page' : 'on its screen') : 'unavailable'}
+                  </span>
+                </div>
+                {h.canLaunch ? (
+                  list.length > 0 ? list.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => void start(h, t.key, t.label)}
+                      className="block w-full px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
+                    >
+                      {t.label}
+                    </button>
+                  )) : (
+                    <div className="px-3 py-1.5 text-[10px] text-[var(--color-text-faint)]">
+                      {targets.isLoading ? 'reading targets…' : 'no targets'}
+                    </div>
+                  )
+                ) : (
+                  <div className="px-3 py-1.5 text-[10px] text-[var(--color-warning)]">
+                    {h.detail ?? 'no launcher agent'}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
       {err && <div className="absolute right-0 mt-1 text-[11px] text-[var(--color-danger)]">{err}</div>}
@@ -324,6 +409,15 @@ function OpenTerminals() {
   )
 }
 
+function AreaHeader({ area, count }: { area: string; count: number }) {
+  return (
+    <div className="mb-1 mt-1 flex items-baseline gap-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
+      {AREA_LABEL[area] ?? area}
+      <span className="text-[var(--color-border-strong)]">{count}</span>
+    </div>
+  )
+}
+
 export function SessionBoard() {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -334,6 +428,7 @@ export function SessionBoard() {
   const [recovering, setRecovering] = useState(false)
   const [recoverDone, setRecoverDone] = useState(0)
   const [showDone, setShowDone] = useState(false)
+  const [openMode, setOpenMode] = useState<OpenMode>(readOpenMode)
 
   useEffect(() => { void localHostname().then(setHere) }, [])
 
@@ -357,8 +452,13 @@ export function SessionBoard() {
   const remote = here !== null && here !== HOST
   // A browser (the phone, above all) cannot open a local terminal and has no
   // use for a tab on thor's screen, so there "open" means the in-page terminal:
-  // Claude resumes on thor over SSH and the phone is its screen.
-  const inPage = !isTauri()
+  // Claude resumes on thor over SSH and the phone is its screen. The desktop
+  // app can do both, and the choice is the toggle in the header below.
+  const inPage = openMode === 'page'
+  const chooseMode = (mode: OpenMode) => {
+    setOpenMode(mode)
+    try { localStorage.setItem(OPEN_MODE_KEY, mode) } catch { /* private window */ }
+  }
 
   const open = useMutation({
     mutationFn: async (s: WorkSession) => {
@@ -469,6 +569,26 @@ export function SessionBoard() {
           {inPage ? ' · opens in the page' : remote && here ? ` · opening on ${here}` : ''}
         </div>
         <div className="flex items-center gap-2">
+        {isTauri() && (
+          // Desktop only. A browser has no second option to offer.
+          <div className="flex items-center border border-[var(--color-border)] text-[10px] uppercase tracking-[0.12em]">
+            {(['page', 'screen'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => chooseMode(mode)}
+                title={mode === 'page'
+                  ? 'Open sessions inside Valkyrie, running on thor over SSH'
+                  : `Open sessions in a terminal window on ${here ?? HOST}`}
+                className={`min-h-9 px-2.5 transition ${openMode === mode
+                  ? 'bg-[rgba(var(--color-accent-rgb),0.12)] text-[var(--color-accent)]'
+                  : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]'}`}
+              >
+                {mode === 'page' ? 'in page' : 'on screen'}
+              </button>
+            ))}
+          </div>
+        )}
         <NewSession onStarted={refresh} inPage={inPage} />
         {desk.length > 0 && (
           <button
@@ -484,14 +604,27 @@ export function SessionBoard() {
         </div>
       </div>
 
-      {live.map((s) => (
-        <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
-          opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
+      {/* Grouped by area, work first. A header appears once a block spans more
+          than one area: labelling a single-area block adds a line and says
+          nothing the row does not. */}
+      {groupByArea(live).map((g, i) => (
+        <div key={`live-${g.area}`} className={i > 0 ? 'mt-3' : ''}>
+          {groupByArea(live).length > 1 && <AreaHeader area={g.area} count={g.rows.length} />}
+          {g.rows.map((s) => (
+            <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
+              opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
+          ))}
+        </div>
       ))}
       {live.length > 0 && rest.length > 0 && <div className="h-3" />}
-      {shown.map((s) => (
-        <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
-          opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
+      {groupByArea(shown).map((g, i) => (
+        <div key={`rest-${g.area}`} className={i > 0 ? 'mt-3' : ''}>
+          {groupByArea(shown).length > 1 && <AreaHeader area={g.area} count={g.rows.length} />}
+          {g.rows.map((s) => (
+            <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
+              opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
+          ))}
+        </div>
       ))}
 
       {live.length === 0 && rest.length === 0 && (

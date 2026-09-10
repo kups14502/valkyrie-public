@@ -21,6 +21,29 @@ const LAUNCHER_PORT = Number(process.env.THOR_LAUNCHER_PORT || 8766)
 const LAUNCHER_TOKEN = process.env.THOR_LAUNCHER_TOKEN || ''
 const BASE = `http://${LAUNCHER_HOST}:${LAUNCHER_PORT}`
 
+// Every machine that can host a Claude session, not just thor. The desk routes
+// below (resume, stop, restore, rgb, the session list) stay thor-only because
+// they describe thor's desk, but starting a NEW session is a question with more
+// than one right answer: clicking "new session" while sitting at mimir started
+// it on thor, with nothing in the UI saying so.
+//
+// A host with no token is listed and reported unconfigured rather than hidden,
+// because "mimir needs its agent installed" is the answer to the question the
+// menu is being asked.
+type Launcher = { host: string; port: number; token: string; env: string }
+const LAUNCHERS: Record<string, Launcher> = {
+  thor: { host: LAUNCHER_HOST, port: LAUNCHER_PORT, token: LAUNCHER_TOKEN, env: 'THOR_LAUNCHER_TOKEN' },
+  mimir: {
+    host: process.env.MIMIR_LAUNCHER_HOST || '100.111.85.107',
+    port: Number(process.env.MIMIR_LAUNCHER_PORT || 8766),
+    token: process.env.MIMIR_LAUNCHER_TOKEN || '',
+    env: 'MIMIR_LAUNCHER_TOKEN',
+  },
+}
+// The in-page terminal is a tmux pane SSHing into thor (terminal/tmux.ts), so
+// only thor can host one today. Every other host opens on its own screen.
+const PAGE_HOSTS = new Set((process.env.TERMINAL_HOSTS || 'thor').split(',').map((h) => h.trim()).filter(Boolean))
+
 // thor is on the tailnet, not the internet: a slow reply means it is asleep or
 // gone, not that it needs longer.
 const TIMEOUT_MS = 8_000
@@ -44,6 +67,34 @@ async function callLauncher(path: string, init: { method: string; body?: unknown
       dispatcher: agent,
       headers: {
         Authorization: `Bearer ${LAUNCHER_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    })
+    let body: unknown = null
+    try { body = await r.json() } catch { body = null }
+    return { status: r.status, body }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Same call, aimed at a named host rather than the thor constants.
+async function callHostLauncher(
+  launcher: Launcher,
+  path: string,
+  init: { method: string; body?: unknown },
+  timeoutMs = TIMEOUT_MS,
+): Promise<LauncherResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const r = await undiciFetch(`http://${launcher.host}:${launcher.port}${path}`, {
+      method: init.method,
+      signal: controller.signal,
+      dispatcher: agent,
+      headers: {
+        Authorization: `Bearer ${launcher.token}`,
         'Content-Type': 'application/json',
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -151,25 +202,83 @@ router.post('/hosts/thor/restore-desk', async (req, res) => {
 
 const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-router.get('/hosts/thor/launch-targets', async (_req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
+// Which machines can start a session, and what each one can do. The menu draws
+// itself from this rather than assuming thor.
+type HostProbe = { at: number; reachable: boolean; detail: string | null }
+const PROBE_TTL_MS = 30_000
+const probes = new Map<string, HostProbe>()
+
+async function probeHost(name: string, launcher: Launcher): Promise<HostProbe> {
+  const held = probes.get(name)
+  if (held && Date.now() - held.at < PROBE_TTL_MS) return held
+  let probe: HostProbe
   try {
-    const r = await callLauncher('/launch-targets', { method: 'GET' })
+    const r = await callHostLauncher(launcher, '/launcher', { method: 'GET' }, 3_000)
+    probe = r.status === 200
+      ? { at: Date.now(), reachable: true, detail: null }
+      : { at: Date.now(), reachable: false, detail: `agent answered ${r.status}` }
+  } catch (err) {
+    probe = { at: Date.now(), reachable: false, detail: (err as Error).message }
+  }
+  probes.set(name, probe)
+  return probe
+}
+
+router.get('/session-hosts', async (_req, res) => {
+  const hosts = await Promise.all(Object.keys(LAUNCHERS).map(async (name) => {
+    const launcher = LAUNCHERS[name]
+    if (!launcher.token) {
+      return {
+        host: name,
+        configured: false,
+        reachable: false,
+        canLaunch: false,
+        canPage: PAGE_HOSTS.has(name),
+        detail: `${launcher.env} is not set on the api host`,
+      }
+    }
+    const probe = await probeHost(name, launcher)
+    return {
+      host: name,
+      configured: true,
+      reachable: probe.reachable,
+      canLaunch: probe.reachable,
+      canPage: PAGE_HOSTS.has(name),
+      detail: probe.detail,
+    }
+  }))
+  res.json({ hosts })
+})
+
+router.get('/hosts/:host/launch-targets', async (req, res) => {
+  const name = String(req.params.host ?? '')
+  const launcher = LAUNCHERS[name]
+  if (!launcher) return res.status(404).json({ error: `no launcher for ${name}` })
+  if (!launcher.token) {
+    return res.status(501).json({ error: 'launcher not configured', detail: `${launcher.env} is not set on the api host` })
+  }
+  try {
+    const r = await callHostLauncher(launcher, '/launch-targets', { method: 'GET' })
     return res.status(r.status).json(r.body)
   } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+    return res.status(502).json({ error: `${name} is not answering`, detail: (err as Error).message })
   }
 })
 
-router.post('/hosts/thor/launch-new', async (req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
+router.post('/hosts/:host/launch-new', async (req, res) => {
+  const name = String(req.params.host ?? '')
+  const launcher = LAUNCHERS[name]
+  if (!launcher) return res.status(404).json({ error: `no launcher for ${name}` })
+  if (!launcher.token) {
+    return res.status(501).json({ error: 'launcher not configured', detail: `${launcher.env} is not set on the api host` })
+  }
   const target = String((req.body ?? {}).target ?? '')
   if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
   try {
-    const r = await callLauncher('/launch-new', { method: 'POST', body: { target } }, 20_000)
+    const r = await callHostLauncher(launcher, '/launch-new', { method: 'POST', body: { target } }, 20_000)
     return res.status(r.status).json(r.body)
   } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+    return res.status(502).json({ error: `${name} is not answering`, detail: (err as Error).message })
   }
 })
 

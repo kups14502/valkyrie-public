@@ -628,6 +628,9 @@ export type WorkSession = {
   title: string
   titleFromClaude: boolean
   project: string
+  // work | org-c | server | personal, routed from the cwd by thor out of the
+  // same table the Obsidian capture uses, so the two never disagree.
+  area: string
   cwd: string | null
   lastActivityUtc: string | null
   bytes: number
@@ -655,6 +658,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
     title: wsStr(r.title) ?? id.slice(0, 8),
     titleFromClaude: r.titleFromClaude === true,
     project: wsStr(r.project) ?? '',
+    area: wsStr(r.area) ?? '',
     cwd: wsStr(r.cwd),
     lastActivityUtc: wsStr(r.lastActivityUtc),
     bytes: wsNum(r.bytes) ?? 0,
@@ -670,9 +674,9 @@ const parseSession = (raw: unknown): WorkSession | null => {
 // terminal offers (personal, work, work2). The desktop dropdown lists all.
 export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean }
 
-export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
+export const fetchLaunchTargets = async (host = 'thor'): Promise<LaunchTarget[]> => {
   try {
-    const d = (await api.get<{ targets?: unknown }>('/hosts/thor/launch-targets')).data
+    const d = (await api.get<{ targets?: unknown }>(`/hosts/${encodeURIComponent(host)}/launch-targets`)).data
     if (!Array.isArray(d.targets)) return []
     return d.targets
       .map((raw) => {
@@ -688,8 +692,46 @@ export const fetchLaunchTargets = async (): Promise<LaunchTarget[]> => {
   }
 }
 
-export const startSessionOnThor = async (target: string) =>
-  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/launch-new', { target })).data
+export const startSessionOnHost = async (host: string, target: string) =>
+  (await api.post<{ ok: boolean; detail?: string }>(`/hosts/${encodeURIComponent(host)}/launch-new`, { target })).data
+
+// Which machines can start a session, and what each one can do. A host with no
+// agent is reported rather than hidden: "mimir needs its agent installed" is
+// the answer the new-session menu is being asked for.
+export type SessionHost = {
+  host: string
+  configured: boolean
+  reachable: boolean
+  canLaunch: boolean
+  canPage: boolean
+  detail: string | null
+}
+
+export const fetchSessionHosts = async (): Promise<SessionHost[]> => {
+  try {
+    const d = (await api.get<{ hosts?: unknown }>('/session-hosts')).data
+    if (!Array.isArray(d.hosts)) return []
+    return d.hosts
+      .map((raw) => {
+        const r = (raw ?? {}) as Record<string, unknown>
+        const host = wsStr(r.host)
+        return host
+          ? {
+              host,
+              configured: r.configured === true,
+              reachable: r.reachable === true,
+              canLaunch: r.canLaunch === true,
+              canPage: r.canPage === true,
+              detail: wsStr(r.detail),
+            }
+          : null
+      })
+      .filter((x): x is SessionHost => x !== null)
+  } catch {
+    // An older backend has no such route. Fall back to what was always true.
+    return [{ host: 'thor', configured: true, reachable: true, canLaunch: true, canPage: true, detail: null }]
+  }
+}
 
 // ------------------------------------------------------------ terminals ----
 // The in-page terminal (pages/Terminal.tsx, at /sessions/terminal). Each entry
