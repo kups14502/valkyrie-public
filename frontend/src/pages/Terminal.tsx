@@ -206,7 +206,7 @@ export default function TerminalPage() {
   })
   // thor's own list, under the same query key as the board's dropdown so the
   // two can never disagree. Only the targets thor flagged for the phone show.
-  const targets = useQuery({ queryKey: ['launchTargets'], queryFn: fetchLaunchTargets, staleTime: 60_000 })
+  const targets = useQuery({ queryKey: ['launchTargets', 'thor'], queryFn: () => fetchLaunchTargets('thor'), staleTime: 60_000 })
   const phoneTargets = (targets.data ?? []).filter((t) => t.phone && t.exists)
   // The resume list IS the session board: one row per real conversation on
   // thor, hook runs already filtered out there. Live ones are left out because
