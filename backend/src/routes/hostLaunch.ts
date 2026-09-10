@@ -213,7 +213,7 @@ async function probeHost(name: string, launcher: Launcher): Promise<HostProbe> {
   if (held && Date.now() - held.at < PROBE_TTL_MS) return held
   let probe: HostProbe
   try {
-    const r = await callHostLauncher(launcher, '/launcher', { method: 'GET' }, 3_000)
+    const r = await callHostLauncher(launcher, '/health', { method: 'GET' }, 3_000)
     probe = r.status === 200
       ? { at: Date.now(), reachable: true, detail: null }
       : { at: Date.now(), reachable: false, detail: `agent answered ${r.status}` }
