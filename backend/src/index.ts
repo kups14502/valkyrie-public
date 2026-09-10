@@ -26,6 +26,8 @@ import plexRoute from './routes/plex.js'
 import workspacesRoute from './routes/workspaces.js'
 import hostLaunchRoute from './routes/hostLaunch.js'
 import terminalRoute, { attachTerminalWs } from './routes/terminal.js'
+import calendarRoute from './routes/calendar.js'
+import mealsRoute from './routes/meals.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -88,7 +90,13 @@ app.use(cors({
   },
   credentials: true,
 }))
-app.use(express.json({ limit: '1mb' }))
+// 1mb everywhere, except the endpoints that carry a photo: a meal snapshot is
+// a few megabytes of base64 and the global limit would 413 it before the route
+// ever ran.
+const jsonSmall = express.json({ limit: '1mb' })
+const jsonLarge = express.json({ limit: '12mb' })
+const LARGE_BODY_PATHS = new Set(['/api/meals/estimate'])
+app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? jsonLarge : jsonSmall)(req, res, next))
 
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api')) {
@@ -130,6 +138,8 @@ app.use('/api', plexRoute)
 app.use('/api', workspacesRoute)
 app.use('/api', hostLaunchRoute)
 app.use('/api', terminalRoute)
+app.use('/api', calendarRoute)
+app.use('/api', mealsRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit

@@ -1360,3 +1360,9 @@ export const fetchMediaRequests = async () =>
   (await api.get<{ requests: MediaRequestEntry[] }>('/plex/requests')).data.requests
 export const fetchMediaDownloads = async () =>
   (await api.get<{ downloads: MediaDownload[] }>('/plex/downloads')).data.downloads
+
+/** The message an API rejection carries, if it carries one. */
+export function apiErrorText(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: unknown } } } | null)?.response?.data?.error
+  return typeof detail === 'string' && detail ? detail : fallback
+}

@@ -106,7 +106,7 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
 
 const DEFAULT_CLAUDE_DIR = '/home/brendon/.claude'
 
-const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
+export const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
   { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-a' },
   { id: 'claude-acct-b', label: 'Account B', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-b' },
   // acct-c signs in at the DEFAULT dir on odin (~/.claude, 292M of transcripts). The

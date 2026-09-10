@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
+  CalendarDays, UtensilsCrossed,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -29,6 +30,8 @@ const Settings = lazy(() => import('./pages/Settings'))
 const Phone = lazy(() => import('./pages/Phone'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Terminal = lazy(() => import('./pages/Terminal'))
+const Calendar = lazy(() => import('./pages/Calendar'))
+const Meals = lazy(() => import('./pages/Meals'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,10 +52,13 @@ function PageFallback() {
 }
 
 // Services, Vault, and Activity were pulled from the nav (unused day to day);
-// they stay routable and remain in the Ctrl+K palette. Seven items now fit one
-// row at lg, so there is no orphaned second row.
+// they stay routable and remain in the Ctrl+K palette. The menu grid is 8 wide
+// at lg, so nine items wrap one onto a second row; calendar and meals earn that
+// because both are opened several times a day.
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
+  { to: '/calendar', label: 'calendar', icon: CalendarDays },
+  { to: '/meals', label: 'meals', icon: UtensilsCrossed },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
@@ -283,6 +289,8 @@ function Shell() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
             <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
+            <Route path="/calendar" element={<PageContainer><Calendar /></PageContainer>} />
+            <Route path="/meals" element={<PageContainer><Meals /></PageContainer>} />
             <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
             {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
                 exists for prose line length, and a non-positioned wrapper between
