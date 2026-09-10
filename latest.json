@@ -1,15 +1,15 @@
 {
-  "version": "0.3.80",
-  "notes": "calendar and meals: two new tabs",
-  "pub_date": "2026-09-10T05:33:28Z",
+  "version": "0.3.81",
+  "notes": "Thor desk RGB on the dashboard, plus calendar and meals tabs",
+  "pub_date": "2026-09-10T05:35:09Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJnTGtuOENLbUs0T2JrQk5WUXhYeTZVU1dhdzRFTlhQZER3TU1aTE8rK1dNVHZTSUZnUGNNNTN0a3BhVDZmeUkwbE1oSVkrQlpCdnpuOUh4VnE5UUFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDE4NDA4CWZpbGU6VmFsa3lyaWVfMC4zLjgwX3g2NC1zZXR1cC5leGUKelFROWk4R0p0bG9BSUVVeG45bStlZElueVZWcVhGQXJuZ252K0haRnJpQ0FTTlFtcVM2Q1ZpN1BLTUdmQlprWmFyRlBldHFCRk5xekF4Wjh3QWVqQmc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.80/Valkyrie_0.3.80_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZYMk54Q2pLUHhCc3ZFcFRsWVNlL0ttRVQxT2ptQVBhN1FaOTZUN0x4aFdJVXB5TXpHYnA4Tkt4UjBleGRWQjQ3aFZiWDFoVXZEN2NBRCtZS1FqOEFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDE4NTA5CWZpbGU6VmFsa3lyaWVfMC4zLjgxX3g2NC1zZXR1cC5leGUKRVBWU1MrSDZsSFhtenQ4MUhuNFVUUkdJdHova09pSkI2RkpnNU5VVnd4NHgyN1h4V0Q3K0ZjTUxvZE5SZFJOT2FRSFhXVnh5UFIwTEN3T0Zrb3RnQ3c9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.81/Valkyrie_0.3.81_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVNcTdnUm9jNVQ2Mlc1RHlHMnpQWllBQkZDZTZTVmo5ZWlCRU96T2ZZVXNZWVJZNWNpSXcxNmlWUzZlYXphVE8zRWplUCs4M0ZzMHlTNmR6bHZ6M1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDE4MzY0CWZpbGU6VmFsa3lyaWVfMC4zLjgwX2FtZDY0LkFwcEltYWdlCndqWVRKOS9zT3JCOXNxVlFkeWFZQnBlMmxWVDNUMCtwOG82WVFVb1RYSEZwN2RZZFh5WFgwNjN2M1RiTC9naEFnQUpTSVJyaEw2M045aVAxSlE1MEJnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.80/Valkyrie_0.3.80_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFmRVVzWDlGOCtybkowTW9TSU9UY0JpMXdGTTJpdEJhNVp0Q3JjNFZ3dHRmMTVXaUk4MVR2SDE3MkpZSkttejlIWlFobEhkT0xOM3BzU25McHVxMWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDE4NDY1CWZpbGU6VmFsa3lyaWVfMC4zLjgxX2FtZDY0LkFwcEltYWdlCjUxTWpkL1ZjQmp6SGlqMUFvWmlBdk1mdXNsWXBWcnlwR1lIa3NHOEZDYlNqc1QrQkFQR2ZFekpoTmpQMzRLNWp6SS9ZRXBOUEZkRGxGbkNGN3Z5aEFnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.81/Valkyrie_0.3.81_amd64.AppImage"
     }
   }
 }
