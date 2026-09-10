@@ -1,15 +1,15 @@
 {
-  "version": "0.3.82",
-  "notes": "dashboard: the thor rgb panel is phone and ipad only",
-  "pub_date": "2026-09-10T16:12:01Z",
+  "version": "0.3.83",
+  "notes": "terminal: pass the host to fetchLaunchTargets explicitly",
+  "pub_date": "2026-09-10T20:11:56Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWFheUd3VFQrY1JpS3NjQ09UU3NWdGcxQUNqMUU0eUVpMXpGcUVsbmd6VXR3MkJFK0IrQkhhb1JPak10UENsZFZnU2pPdVZaaFd6VzNTVm5ubkdQcHd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDU2NzIxCWZpbGU6VmFsa3lyaWVfMC4zLjgyX3g2NC1zZXR1cC5leGUKSzArajlnd3dkclhWejdub0wyNkpOL1JxZ1VJOStoT0N5bHdXSi9FR1Qya1FMSnRKYVJTVTlqcGtZZTFFUmNTQWI4bFcvaFZ3NGlGblNjdisrVVFPQVE9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.82/Valkyrie_0.3.82_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpwa3JBMU56MkJYWHpFU09SeXFBUzJ0V2N3ZDFqRXNmWTljT1dSSkxiaGhIY3Ixb0JFalZCU1FKNzJFRmlrcHQvM1JRclNPd1IycmIwbzdzVEt5R0FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDcxMTE2CWZpbGU6VmFsa3lyaWVfMC4zLjgzX3g2NC1zZXR1cC5leGUKNUdKUWt1UnEzMWJxdUJFK25jTE9icXVhZmRLMlZQU1krbGJBMlBZS0tkdFN5aVZONE4rRTFBbEZkKzByam5Ya1hCTDcvZ2FyMjFQckdGNjNnVjJzREE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.83/Valkyrie_0.3.83_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWRwVjc0ZTNXRy9mWTBjc29tWGVPYnhiUjVVZkRxNkE4bEw5WDE1NVJQb25mUytCV0dDbEpveXFqQ09JaTRmaGJQZHZIK2ptYk9sWXdxbTNNdCt0MncwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDU2Njc3CWZpbGU6VmFsa3lyaWVfMC4zLjgyX2FtZDY0LkFwcEltYWdlCkJsZVJON1FYWE5IdEdISis1Z1BPYzR4Y0RaZWpEdHdqcGE5N1YxUXJGc0RkK0V5K001LzBSV3NySzYxQncrWFlyVjA4aGxTWmV6YmRxTlF5NC96SUJBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.82/Valkyrie_0.3.82_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWN3YTRGVmFkaVpiN0FrQmM4ZGJDRHNyMkl5R3FuREN4dnZ4djBlck1nR283VTM3c1RJZUtDRkpkVGJta2tCSUZTRVZyVUM2S2l3TWJDVTdLR1FLUmcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDcxMDcyCWZpbGU6VmFsa3lyaWVfMC4zLjgzX2FtZDY0LkFwcEltYWdlCnhJTVcrK1VtTHNOdm9aODE5TFJmd01wSUROVGVSTy95V01naVRsbGxINXV3a3cxYnR6dUVtYms2WkxIV1hBOTBGeU1hUkNTcDNBTXVlUzRhSlllVkFBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.83/Valkyrie_0.3.83_amd64.AppImage"
     }
   }
 }
