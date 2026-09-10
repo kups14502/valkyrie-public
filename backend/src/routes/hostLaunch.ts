@@ -79,6 +79,23 @@ async function callLauncher(path: string, init: { method: string; body?: unknown
   }
 }
 
+// Resolve a :host param to its launcher, or answer for itself. 404 for a name
+// with no launcher, 501 when the token is missing, so the frontend can tell
+// "no such machine" from "that machine needs setting up".
+function resolveLauncher(req: import('express').Request, res: import('express').Response): Launcher | null {
+  const name = String(req.params.host ?? '')
+  const launcher = LAUNCHERS[name]
+  if (!launcher) {
+    res.status(404).json({ error: `no launcher for ${name}` })
+    return null
+  }
+  if (!launcher.token) {
+    res.status(501).json({ error: 'launcher not configured', detail: `${launcher.env} is not set on the api host` })
+    return null
+  }
+  return launcher
+}
+
 // Same call, aimed at a named host rather than the thor constants.
 async function callHostLauncher(
   launcher: Launcher,
@@ -146,35 +163,6 @@ router.post('/hosts/thor/capture', async (_req, res) => {
   }
 })
 
-router.post('/hosts/thor/launch', async (req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
-  const sessionId = String((req.body ?? {}).sessionId ?? '')
-  if (!UUID_RE.test(sessionId)) {
-    return res.status(400).json({ error: 'sessionId must be a uuid' })
-  }
-  // Note what is NOT forwarded: any cwd the caller sent. thor resolves it.
-  try {
-    const r = await callLauncher('/launch', { method: 'POST', body: { sessionId } })
-    return res.status(r.status).json(r.body)
-  } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
-  }
-})
-
-router.post('/hosts/thor/stop', async (req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
-  const sessionId = String((req.body ?? {}).sessionId ?? '')
-  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
-  // Stopping only ends the process. The transcript is untouched, so the session
-  // can be picked straight back up on another machine, which is the point.
-  try {
-    const r = await callLauncher('/stop', { method: 'POST', body: { sessionId } })
-    return res.status(r.status).json(r.body)
-  } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
-  }
-})
-
 router.post('/hosts/thor/restore-desk', async (req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
   const raw = (req.body ?? {}).sessionIds
@@ -201,6 +189,122 @@ router.post('/hosts/thor/restore-desk', async (req, res) => {
 // it does for resume.
 
 const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+
+// A row on the board resumes, stops, lists and dispositions on ITS OWN machine.
+// These four used to be thor-only, which is why merging mimir into the list had
+// to wait: a mimir session id sent to thor resolves to nothing.
+router.post('/hosts/:host/launch', async (req, res) => {
+  const launcher = resolveLauncher(req, res)
+  if (!launcher) return
+  const sessionId = String((req.body ?? {}).sessionId ?? '')
+  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
+  // Note what is NOT forwarded: any cwd the caller sent. The host resolves it.
+  try {
+    const r = await callHostLauncher(launcher, '/launch', { method: 'POST', body: { sessionId } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: `${req.params.host} is not answering`, detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/:host/stop', async (req, res) => {
+  const launcher = resolveLauncher(req, res)
+  if (!launcher) return
+  const sessionId = String((req.body ?? {}).sessionId ?? '')
+  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
+  try {
+    const r = await callHostLauncher(launcher, '/stop', { method: 'POST', body: { sessionId } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: `${req.params.host} is not answering`, detail: (err as Error).message })
+  }
+})
+
+router.get('/hosts/:host/sessions', async (req, res) => {
+  const launcher = resolveLauncher(req, res)
+  if (!launcher) return
+  try {
+    // Reading transcripts is cached on the host but a cold call still walks the
+    // tree, so this gets a longer leash than the other proxies.
+    const r = await callHostLauncher(launcher, '/sessions', { method: 'GET' }, 60_000)
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: `${req.params.host} is not answering`, detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/:host/sessions/disposition', async (req, res) => {
+  const launcher = resolveLauncher(req, res)
+  if (!launcher) return
+  const sessionId = String((req.body ?? {}).sessionId ?? '')
+  const disposition = String((req.body ?? {}).disposition ?? '')
+  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
+  if (!SESSION_DISPOSITIONS.has(disposition)) return res.status(400).json({ error: 'disposition must be open or done' })
+  try {
+    const r = await callHostLauncher(launcher, '/sessions/disposition', { method: 'POST', body: { sessionId, disposition } }, 60_000)
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: `${req.params.host} is not answering`, detail: (err as Error).message })
+  }
+})
+
+// The board's list: thor in full, every other machine only where it is still
+// current. Brendon's rule for the second host, in his words: they should show
+// up in the list, but not old ones. thor is the desk and keeps its own
+// disposition-driven list, where "done" is the only thing that takes a row off.
+const MERGE_DAYS = Number(process.env.SESSION_MERGE_DAYS || 7)
+
+type BoardRow = Record<string, unknown> & { host?: string; live?: boolean; lastActivityUtc?: string | null }
+
+router.get('/session-board', async (_req, res) => {
+  const names = Object.keys(LAUNCHERS)
+  const cutoff = Date.now() - MERGE_DAYS * 86_400_000
+  const results = await Promise.all(names.map(async (name) => {
+    const launcher = LAUNCHERS[name]
+    if (!launcher.token) return { host: name, ok: false, status: 501, rows: [] as BoardRow[], detail: `${launcher.env} is not set on the api host` }
+    try {
+      const r = await callHostLauncher(launcher, '/sessions', { method: 'GET' }, 60_000)
+      const body = (r.body ?? {}) as { sessions?: unknown }
+      if (r.status !== 200 || !Array.isArray(body.sessions)) {
+        return { host: name, ok: false, status: r.status, rows: [] as BoardRow[], detail: 'no session list' }
+      }
+      const rows = (body.sessions as BoardRow[])
+        .map((row) => ({ ...row, host: name }))
+        // thor is the desk: everything open stays. Elsewhere, recent or running.
+        .filter((row) => {
+          if (name === 'thor') return true
+          if (row.live === true) return true
+          const at = row.lastActivityUtc ? Date.parse(String(row.lastActivityUtc)) : NaN
+          return Number.isFinite(at) && at >= cutoff
+        })
+      return { host: name, ok: true, status: 200, rows, detail: null as string | null }
+    } catch (err) {
+      return { host: name, ok: false, status: 502, rows: [] as BoardRow[], detail: (err as Error).message }
+    }
+  }))
+
+  const thor = results.find((r) => r.host === 'thor')
+  // thor failing is the list failing: it holds the desk. Another host failing is
+  // a note on an otherwise complete list, never an error page.
+  if (!thor?.ok) {
+    return res.status(thor?.status === 501 ? 501 : 502).json({
+      error: 'session list unavailable',
+      detail: thor?.detail ?? 'thor is not answering',
+    })
+  }
+
+  const sessions = results
+    .flatMap((r) => r.rows)
+    .sort((a, b) => Date.parse(String(b.lastActivityUtc ?? 0)) - Date.parse(String(a.lastActivityUtc ?? 0)))
+
+  res.json({
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    mergeDays: MERGE_DAYS,
+    hosts: results.map((r) => ({ host: r.host, ok: r.ok, detail: r.detail })),
+    sessions,
+  })
+})
 
 // Which machines can start a session, and what each one can do. The menu draws
 // itself from this rather than assuming thor.
@@ -325,32 +429,6 @@ router.post('/hosts/thor/rgb', async (req, res) => {
 // conversation. One row per session leaves nothing to guess.
 
 const SESSION_DISPOSITIONS = new Set(['open', 'done'])
-
-router.get('/hosts/thor/sessions', async (_req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
-  try {
-    // Reading transcripts is cached on thor but a cold call still walks the
-    // tree, so this gets a longer leash than the other proxies.
-    const r = await callLauncher('/sessions', { method: 'GET' }, 60_000)
-    return res.status(r.status).json(r.body)
-  } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
-  }
-})
-
-router.post('/hosts/thor/sessions/disposition', async (req, res) => {
-  if (!LAUNCHER_TOKEN) return notConfigured(res)
-  const sessionId = String((req.body ?? {}).sessionId ?? '')
-  const disposition = String((req.body ?? {}).disposition ?? '')
-  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
-  if (!SESSION_DISPOSITIONS.has(disposition)) return res.status(400).json({ error: 'disposition must be open or done' })
-  try {
-    const r = await callLauncher('/sessions/disposition', { method: 'POST', body: { sessionId, disposition } }, 60_000)
-    return res.status(r.status).json(r.body)
-  } catch (err) {
-    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
-  }
-})
 
 // ---------------------------------------------------------------- threads ----
 // A thread is the unit above a session: the folder, with every session that ran

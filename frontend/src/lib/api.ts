@@ -628,9 +628,12 @@ export type WorkSession = {
   title: string
   titleFromClaude: boolean
   project: string
-  // work | org-c | server | personal, routed from the cwd by thor out of the
-  // same table the Obsidian capture uses, so the two never disagree.
+  // work | org-c | server | personal, routed from the cwd by the host out of
+  // the same table the Obsidian capture uses, so the two never disagree.
   area: string
+  // The machine this session lives on. Its transcript is local to that machine,
+  // so resume, stop and done all have to go back to the same one.
+  host: string
   cwd: string | null
   lastActivityUtc: string | null
   bytes: number
@@ -659,6 +662,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
     titleFromClaude: r.titleFromClaude === true,
     project: wsStr(r.project) ?? '',
     area: wsStr(r.area) ?? '',
+    host: wsStr(r.host) ?? 'thor',
     cwd: wsStr(r.cwd),
     lastActivityUtc: wsStr(r.lastActivityUtc),
     bytes: wsNum(r.bytes) ?? 0,
@@ -869,14 +873,28 @@ export const fetchThorRgb = async (): Promise<ThorRgbState> => {
 export const setThorRgb = async (mode: ThorRgbMode) =>
   (await api.post<{ ok: boolean; mode?: string; detail?: string }>('/hosts/thor/rgb', { mode })).data
 
+// Every machine's sessions in one list: thor in full, the others only where
+// they are still current (the backend's SESSION_MERGE_DAYS window). Falls back
+// to thor alone against a backend that predates /session-board.
 export const fetchSessionList = async (): Promise<SessionsResult> => {
   let payload: unknown
   try {
-    payload = (await api.get<unknown>('/hosts/thor/sessions')).data
+    payload = (await api.get<unknown>('/session-board')).data
   } catch (e) {
-    const status = missingRouteStatus(e)
-    if (status) return { installed: false, status, detail: apiDetail(e) }
-    throw e
+    const merged = missingRouteStatus(e)
+    if (merged === 404) {
+      try {
+        payload = (await api.get<unknown>('/hosts/thor/sessions')).data
+      } catch (inner) {
+        const status = missingRouteStatus(inner)
+        if (status) return { installed: false, status, detail: apiDetail(inner) }
+        throw inner
+      }
+    } else if (merged) {
+      return { installed: false, status: merged, detail: apiDetail(e) }
+    } else {
+      throw e
+    }
   }
   const p = (payload ?? {}) as Record<string, unknown>
   if (!Array.isArray(p.sessions)) throw new Error(apiDetail(p) ?? 'Invalid sessions response')
@@ -887,8 +905,8 @@ export const fetchSessionList = async (): Promise<SessionsResult> => {
   }
 }
 
-export const setSessionDone = async (sessionId: string, done: boolean) =>
-  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/sessions/disposition', {
+export const setSessionDone = async (sessionId: string, done: boolean, host = 'thor') =>
+  (await api.post<{ ok: boolean; detail?: string }>(`/hosts/${encodeURIComponent(host)}/sessions/disposition`, {
     sessionId, disposition: done ? 'done' : 'open',
   })).data
 
@@ -964,8 +982,8 @@ export const fetchThreads = async (): Promise<ThreadsResult> => {
 // the security boundary.
 // Which machine the app is running on, lowercased, or null in a browser. Lets
 // "open" mean the same thing everywhere: put a terminal in front of me.
-export const stopSessionOnThor = async (sessionId: string) =>
-  (await api.post<{ ok: boolean; detail?: string }>('/hosts/thor/stop', { sessionId })).data
+export const stopSessionOnHost = async (sessionId: string, host = 'thor') =>
+  (await api.post<{ ok: boolean; detail?: string }>(`/hosts/${encodeURIComponent(host)}/stop`, { sessionId })).data
 
 export const localHostname = async (): Promise<string | null> => {
   if (!isTauri()) return null
@@ -1020,9 +1038,9 @@ export type LaunchResult =
   | { ok: true; detail: string | null }
   | { ok: false; notInstalled: true; status: number; detail: string | null }
 
-export const launchSessionOnThor = async (sessionId: string | null, cwd: string): Promise<LaunchResult> => {
+export const launchSessionOnHost = async (sessionId: string | null, cwd: string, host = 'thor'): Promise<LaunchResult> => {
   try {
-    const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>('/hosts/thor/launch', { sessionId, cwd })
+    const r = await api.post<{ ok?: boolean; error?: string; detail?: string }>(`/hosts/${encodeURIComponent(host)}/launch`, { sessionId, cwd })
     if (r.data && r.data.ok === false) throw new Error(r.data.detail || r.data.error || 'launch failed')
     return { ok: true, detail: wsStr(r.data?.detail) }
   } catch (e) {

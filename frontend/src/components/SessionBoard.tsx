@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
-  launchSessionOnThor, localHostname, openSessionHere, openTermSession, setSessionDone,
-  startSessionOnHost, stopSessionOnThor, termPath,
+  launchSessionOnHost, localHostname, openSessionHere, openTermSession, setSessionDone,
+  startSessionOnHost, stopSessionOnHost, termPath,
   type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
 import { isTauri } from '../lib/auth'
@@ -141,6 +141,7 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
           {s.title}
         </div>
         <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-faint)]">
+          {s.host !== HOST && <span className="text-[var(--color-text-dim)]">{s.host} · </span>}
           {s.project} · {relAge(s.lastActivityUtc)} · {fmtSize(s.bytes)}
           {s.activity !== 'closed' && (
             <span style={{ color: TONE[s.activity] }}> · {WORD[s.activity]}</span>
@@ -168,8 +169,9 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
             type="button"
             disabled={opening || busy}
             onClick={() => onOpen(s)}
-            title={inPage
+            title={inPage && s.host === HOST
               ? `Open it here in the page, running on ${HOST}`
+              : s.host !== HOST ? `Open a terminal on ${s.host}, where this session lives`
               : remote ? `Open a terminal here on ${here}, resuming over SSH to ${HOST}` : `Open a terminal on ${HOST}`}
             className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border)] px-2.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
           >
@@ -182,8 +184,8 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
             disabled={stopping || busy}
             onClick={() => onStop(s)}
             title={s.bytes === 0
-              ? `Stop it on ${HOST}. Nothing has been said in this one yet, so there is no transcript to reopen: stopping discards it.`
-              : `Stop it on ${HOST}. The transcript is kept, so it reopens anywhere.`}
+              ? `Stop it on ${s.host}. Nothing has been said in this one yet, so there is no transcript to reopen: stopping discards it.`
+              : `Stop it on ${s.host}. The transcript is kept, so it reopens there whenever you want it.`}
             className="inline-flex min-h-9 items-center gap-1.5 border border-transparent px-2 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
           >
             <Square size={11} /> {stopping ? 'stopping' : 'stop'}
@@ -462,6 +464,10 @@ export function SessionBoard() {
 
   const open = useMutation({
     mutationFn: async (s: WorkSession) => {
+      // A session's transcript is local to the machine it ran on, so resume
+      // goes back to that machine. The in-page terminal is a tmux pane SSHing
+      // into thor and nowhere else, which is why it is thor-only here.
+      if (s.host !== HOST) return void (await launchSessionOnHost(s.sessionId, '', s.host))
       if (inPage) {
         const r = await openTermSession({ mode: 'resume', sessionId: s.sessionId, label: s.title })
         seedTerminal(qc, r)
@@ -469,16 +475,16 @@ export function SessionBoard() {
         return
       }
       if (remote) return openSessionHere(s.sessionId, HOST_IP)
-      await launchSessionOnThor(s.sessionId, '')
+      await launchSessionOnHost(s.sessionId, '', HOST)
     },
     onSettled: () => { setOpeningId(null); refresh() },
   })
   const stop = useMutation({
-    mutationFn: (s: WorkSession) => stopSessionOnThor(s.sessionId),
+    mutationFn: (s: WorkSession) => stopSessionOnHost(s.sessionId, s.host),
     onSettled: () => { setStoppingId(null); refresh() },
   })
   const done = useMutation({
-    mutationFn: (s: WorkSession) => setSessionDone(s.sessionId, !s.done),
+    mutationFn: (s: WorkSession) => setSessionDone(s.sessionId, !s.done, s.host),
     onSuccess: refresh,
   })
 
@@ -514,7 +520,7 @@ export function SessionBoard() {
       // button offered 4 and silently ignored the rest. Time is not what
       // decides whether Brendon still wants a session: done is. Same mistake as
       // the age window that once hid 11 sessions from the board itself.
-      desk: all.filter((s) => !s.live && !s.done),
+      desk: all.filter((s) => !s.live && !s.done && s.host === HOST),
     }
   }, [q.data])
 
@@ -539,7 +545,7 @@ export function SessionBoard() {
       setOpeningId(s.sessionId)
       try {
         if (remote) await openSessionHere(s.sessionId, HOST_IP)
-        else await launchSessionOnThor(s.sessionId, '')
+        else await launchSessionOnHost(s.sessionId, '', HOST)
       } catch { /* one failure must not abandon the rest */ }
       setRecoverDone((n) => n + 1)
       await new Promise((r) => setTimeout(r, 700))

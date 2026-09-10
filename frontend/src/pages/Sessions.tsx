@@ -4,7 +4,7 @@ import { Check, Copy, Lock, Play, RefreshCw, Rocket } from 'lucide-react'
 import { Card } from '../components/Card'
 import { SessionBoard } from '../components/SessionBoard'
 import {
-  fetchWorkspaces, launchSessionOnThor,
+  fetchWorkspaces, launchSessionOnHost,
   type WorkspaceHealth, type WorkspaceHost, type WorkspaceSession, type WorkspaceState,
 } from '../lib/api'
 import { copyText } from '../lib/clipboard'
@@ -346,7 +346,7 @@ export default function Sessions() {
     let launched = 0
     for (const s of rows) {
       setPendingKey(sessionKey(s))
-      const res = await launchSessionOnThor(s.sessionId, s.cwd)
+      const res = await launchSessionOnHost(s.sessionId, s.cwd, s.host)
       if (!res.ok) return { launched, notInstalled: { status: res.status, detail: res.detail } }
       launched += 1
     }
