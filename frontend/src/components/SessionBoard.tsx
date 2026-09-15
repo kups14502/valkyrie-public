@@ -136,15 +136,22 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
         aria-label={`Pick ${s.title}`}
         onClick={() => onPick(s, !picked)}
         title={`${WORD[s.activity] || 'not running'} · click to pick it`}
-        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${
-          picked ? 'border-[var(--color-accent)]' : 'border-transparent group-hover:border-[var(--color-border-strong)]'
-        }`}
+        // The padding is the hit area and the negative margin hands it back to
+        // the layout, so a 16px ring is a 36px target and nothing on the row
+        // moves. A dot you have to aim at is a dot you stop using.
+        className="-m-2.5 flex shrink-0 items-center justify-center p-2.5"
       >
         <span
-          aria-hidden
-          className={`h-2 w-2 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
-          style={{ background: TONE[s.activity] }}
-        />
+          className={`flex h-4 w-4 items-center justify-center rounded-full border transition ${
+            picked ? 'border-[var(--color-accent)]' : 'border-transparent group-hover:border-[var(--color-border-strong)]'
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`h-2 w-2 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
+            style={{ background: TONE[s.activity] }}
+          />
+        </span>
       </button>
 
       {/* The title gets the whole first line on a phone. Four buttons on the
