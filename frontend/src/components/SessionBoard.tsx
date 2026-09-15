@@ -123,44 +123,36 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
 
   return (
     <div className={`group flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--color-border)] py-2.5 last:border-b-0${picked ? ' bg-[rgba(var(--color-accent-rgb),0.06)]' : ''}`}>
-      {/* Checking rows off is how a finished morning gets cleared: one done
-          button per row meant one round trip per row, and the point of the
-          list is emptying it.
-
-          Drawn rather than left native: the OS checkbox is a rounded white
-          tile, and twenty of them down the left edge of a square, dark,
-          terminal-styled list read as damage. Unchecked is a quiet outline
-          that comes up to full strength on hover, so the column reads as
-          empty until you go for it. */}
-      <label className="relative flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center">
-        <input
-          type="checkbox"
-          checked={picked}
-          onChange={(e) => onPick(s, e.target.checked)}
-          aria-label={`Pick ${s.title}`}
-          title="Pick this one for the bulk action"
-          className="peer h-4 w-4 cursor-pointer appearance-none border border-[var(--color-border-strong)] bg-transparent opacity-50 transition hover:opacity-100 checked:border-[var(--color-accent)] checked:bg-[rgba(var(--color-accent-rgb),0.16)] checked:opacity-100 group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
-        />
-        <Check
-          size={11}
-          strokeWidth={3}
+      {/* The status dot IS the checkbox. A square box next to a round dot was
+          two controls where the row has room for one, and the dot already
+          sits where the eye goes: dark when the session is closed, lit in its
+          own colour while it is open, ringed once it is picked. Marking a
+          finished morning done is then one click per row and one call for the
+          lot. */}
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={picked}
+        aria-label={`Pick ${s.title}`}
+        onClick={() => onPick(s, !picked)}
+        title={`${WORD[s.activity] || 'not running'} · click to pick it`}
+        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${
+          picked ? 'border-[var(--color-accent)]' : 'border-transparent group-hover:border-[var(--color-border-strong)]'
+        }`}
+      >
+        <span
           aria-hidden
-          className="pointer-events-none absolute text-[var(--color-accent)] opacity-0 transition peer-checked:opacity-100"
+          className={`h-2 w-2 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
+          style={{ background: TONE[s.activity] }}
         />
-      </label>
-      <span
-        aria-hidden
-        className={`h-1.5 w-1.5 shrink-0 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
-        style={{ background: TONE[s.activity] }}
-        title={WORD[s.activity] || 'not running'}
-      />
+      </button>
 
       {/* The title gets the whole first line on a phone. Four buttons on the
           same line as it left about twenty readable characters, which for a
           list whose entire job is telling one conversation from another is no
           list at all: the basis pushes them onto their own line below, and at
           sm and up the original single row comes back. */}
-      <div className="min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-auto">
+      <div className="min-w-0 flex-1 basis-[calc(100%-1.75rem)] sm:basis-auto">
         <div
           className={`text-sm ${s.done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'} line-clamp-2 sm:truncate`}
           title={s.cwd ?? undefined}
