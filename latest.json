@@ -1,15 +1,15 @@
 {
-  "version": "0.3.89",
-  "notes": "sessions: give the dot a 36px hit area",
-  "pub_date": "2026-09-15T14:22:34Z",
+  "version": "0.3.90",
+  "notes": "vr: a multi-screen workspace for the Steam Frame's browser",
+  "pub_date": "2026-09-15T19:15:49Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVFVjZrNFZScXFpQlBTbER6bVBDek5NRDFSNW9sMVRzc2R5dXdXREJCbFhDRDlnWGpvbGhDN2MrOXFqdGVFNjNLeExwejlSYzJ4N3lBQXIxcXkzS1FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NDgyMTU0CWZpbGU6VmFsa3lyaWVfMC4zLjg5X3g2NC1zZXR1cC5leGUKSXR0TFQxaGFQOVFDQUlTaW1FdFJTRVROWnk1MERaSlAyUG1hVEx0OUI0RDVoZjY3TnhuU05Oa0E0Q3MyUXZ3eVFySjBaTTcyQlRjS1ArTktvVGZFQmc9PQo=",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.89/Valkyrie_0.3.89_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVdnR1BUb2k3QlRSU1NUZkQxYXdqdytzVjVubFp2SHNuWW1EMmczUXU0SWxFRzBjcXR4YUFUT1Y4UUN6cXNHemVmOW95eTRNY0hXOGNHa3lUdUMyZ3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NDk5NzQ5CWZpbGU6VmFsa3lyaWVfMC4zLjkwX3g2NC1zZXR1cC5leGUKR2lmWXR0djFCaElMMStUQ2FUaTBibE5EbmpuSnZzaFRzYmJSMGpLUytpNm84Ym93Z0pxbHJsWjMyS1ZoS3VQeUFsY1BPOXBvNXZiTEg1OHllY1BnQUE9PQo=",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.90/Valkyrie_0.3.90_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVRvVjVvREs3cXVoWXg2TWxNdFhXRmpnUExSdHdqQVYxQlBERk1DRUhwdE5DbW9vOHdZSmhZdGZTeThyVlE3MTF1VzBKNm5sN0Y5a1RtUzlQR1NNcWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NDgyMTA4CWZpbGU6VmFsa3lyaWVfMC4zLjg5X2FtZDY0LkFwcEltYWdlCnZTU3UvRXdab0xOUTkwdSs4alY2RnpaNEhqakhPQnFUbnpsS0dNYnEzdVlPeDZPTUdRUGNkUmZ3bDkySUlzUmN2dkxJQjk3ZUl3QVA5ZDNOMDc3REF3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.89/Valkyrie_0.3.89_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZGY2o2RTdHS2pneWVQQWZWRzRVYkFYNmQ1S216RFpiTG5CSjF6eVd5UDBrYU1oM0NqeFJ3c3ZtTGlsRjN6dGF1YlpqTituNTQ3MUpRczZjVWs2SVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NDk5NzA1CWZpbGU6VmFsa3lyaWVfMC4zLjkwX2FtZDY0LkFwcEltYWdlClpiU2F0OVZsSFYvR2xWa2VPdjY5OXhKNFhzV2R0dzNXOUFFL01HWWpNcllZL0RQdERzWTBtOHk1SXZKaUI3OEJSNWJRaTlQc085WjI2VWRDb00yQ0RBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.90/Valkyrie_0.3.90_amd64.AppImage"
     }
   }
 }
