@@ -905,10 +905,16 @@ export const fetchSessionList = async (): Promise<SessionsResult> => {
   }
 }
 
-export const setSessionDone = async (sessionId: string, done: boolean, host = 'thor') =>
-  (await api.post<{ ok: boolean; detail?: string }>(`/hosts/${encodeURIComponent(host)}/sessions/disposition`, {
-    sessionId, disposition: done ? 'done' : 'open',
+// One call carries the whole selection. The host rewrites its disposition file
+// whole on every write, so a row-per-request fan-out loses marks: each request
+// reads the same copy and the last one back is the only one that survives.
+export const setSessionsDone = async (sessionIds: string[], done: boolean, host = 'thor') =>
+  (await api.post<{ ok: boolean; count?: number; detail?: string }>(`/hosts/${encodeURIComponent(host)}/sessions/disposition`, {
+    sessionIds, disposition: done ? 'done' : 'open',
   })).data
+
+export const setSessionDone = async (sessionId: string, done: boolean, host = 'thor') =>
+  setSessionsDone([sessionId], done, host)
 
 export type ThreadDisposition = 'active' | 'parked' | 'done'
 

@@ -247,15 +247,22 @@ router.get('/hosts/:host/sessions', async (req, res) => {
   }
 })
 
+// One id or a whole checkbox selection. The host rewrites its disposition file
+// whole, so the page has to send the batch in one request: twenty parallel
+// calls each read the same copy of that file and the last write wins.
 router.post('/hosts/:host/sessions/disposition', async (req, res) => {
   const launcher = resolveLauncher(req, res)
   if (!launcher) return
-  const sessionId = String((req.body ?? {}).sessionId ?? '')
-  const disposition = String((req.body ?? {}).disposition ?? '')
-  if (!UUID_RE.test(sessionId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
+  const body = (req.body ?? {}) as { sessionId?: unknown; sessionIds?: unknown; disposition?: unknown }
+  const ids = Array.isArray(body.sessionIds) ? body.sessionIds.map((v) => String(v)) : [String(body.sessionId ?? '')]
+  const disposition = String(body.disposition ?? '')
+  if (ids.length === 0 || ids.length > 200) return res.status(400).json({ error: 'send 1 to 200 session ids' })
+  if (!ids.every((id) => UUID_RE.test(id))) return res.status(400).json({ error: 'sessionId must be a uuid' })
   if (!SESSION_DISPOSITIONS.has(disposition)) return res.status(400).json({ error: 'disposition must be open or done' })
   try {
-    const r = await callHostLauncher(launcher, '/sessions/disposition', { method: 'POST', body: { sessionId, disposition } }, 60_000)
+    // sessionId as well, so a host still running the older agent marks the
+    // first row instead of answering 400.
+    const r = await callHostLauncher(launcher, '/sessions/disposition', { method: 'POST', body: { sessionId: ids[0], sessionIds: ids, disposition } }, 60_000)
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: `${req.params.host} is not answering`, detail: (err as Error).message })

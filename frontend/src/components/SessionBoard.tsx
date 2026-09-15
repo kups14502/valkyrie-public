@@ -5,7 +5,7 @@ import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal
 import {
   fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
   launchSessionOnHost, localHostname, openSessionHere, openTermSession, setSessionDone,
-  startSessionOnHost, stopSessionOnHost, termPath,
+  setSessionsDone, startSessionOnHost, stopSessionOnHost, termPath,
   type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
 import { isTauri } from '../lib/auth'
@@ -93,13 +93,15 @@ const relAge = (iso: string | null): string => {
 const fmtSize = (b: number): string =>
   b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
 
-function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onReattach, opening, stopping, busy }: {
+function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onStop, onDone, onReattach, opening, stopping, busy }: {
   s: WorkSession
   remote: boolean
   here: string | null
   inPage: boolean
   // The in-page terminal already running this conversation, if there is one.
   attachedTo: string | null
+  picked: boolean
+  onPick: (s: WorkSession, next: boolean) => void
   onOpen: (s: WorkSession) => void
   onStop: (s: WorkSession) => void
   onDone: (s: WorkSession) => void
@@ -120,7 +122,19 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
   }
 
   return (
-    <div className="group flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--color-border)] py-2.5 last:border-b-0">
+    <div className={`group flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--color-border)] py-2.5 last:border-b-0${picked ? ' bg-[rgba(var(--color-accent-rgb),0.06)]' : ''}`}>
+      {/* Checking rows off is how a finished morning gets cleared: one done
+          button per row meant one round trip per row, and the point of the
+          list is emptying it. */}
+      <input
+        type="checkbox"
+        checked={picked}
+        onChange={(e) => onPick(s, e.target.checked)}
+        aria-label={`Pick ${s.title}`}
+        title="Pick this one for the bulk action"
+        className="h-4 w-4 shrink-0 cursor-pointer"
+        style={{ accentColor: 'var(--color-accent)' }}
+      />
       <span
         aria-hidden
         className={`h-1.5 w-1.5 shrink-0 rounded-full${s.activity === 'working' ? ' animate-pulse' : ''}`}
@@ -133,7 +147,7 @@ function Row({ s, remote, here, inPage, attachedTo, onOpen, onStop, onDone, onRe
           list whose entire job is telling one conversation from another is no
           list at all: the basis pushes them onto their own line below, and at
           sm and up the original single row comes back. */}
-      <div className="min-w-0 flex-1 basis-[calc(100%-1.5rem)] sm:basis-auto">
+      <div className="min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-auto">
         <div
           className={`text-sm ${s.done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'} line-clamp-2 sm:truncate`}
           title={s.cwd ?? undefined}
@@ -431,6 +445,7 @@ export function SessionBoard() {
   const [recoverDone, setRecoverDone] = useState(0)
   const [showDone, setShowDone] = useState(false)
   const [openMode, setOpenMode] = useState<OpenMode>(readOpenMode)
+  const [picked, setPicked] = useState<Record<string, boolean>>({})
 
   useEffect(() => { void localHostname().then(setHere) }, [])
 
@@ -486,6 +501,17 @@ export function SessionBoard() {
   const done = useMutation({
     mutationFn: (s: WorkSession) => setSessionDone(s.sessionId, !s.done, s.host),
     onSuccess: refresh,
+  })
+  // One call per host, not one per row. thor rewrites its disposition file
+  // whole, so a fan-out of twenty requests has twenty copies of that file in
+  // flight and the last one back erases the other nineteen marks.
+  const doneMany = useMutation({
+    mutationFn: async ({ rows, next }: { rows: WorkSession[]; next: boolean }) => {
+      const byHost = new Map<string, string[]>()
+      for (const s of rows) byHost.set(s.host, [...(byHost.get(s.host) ?? []), s.sessionId])
+      for (const [host, ids] of byHost) await setSessionsDone(ids, next, host)
+    },
+    onSuccess: () => { setPicked({}); refresh() },
   })
 
   // Which conversations are already open in an in-page terminal. A resumed
@@ -555,11 +581,19 @@ export function SessionBoard() {
     refresh()
   }
 
-  const busy = done.isPending
+  const busy = done.isPending || doneMany.isPending
   const shown = showAll ? rest : rest.slice(0, SHOWN_BY_DEFAULT)
   const hidden = rest.length - shown.length
+  // Every row a checkbox is drawn next to right now. "pick all" means what is
+  // on the screen, never the older rows folded away behind "show N older".
+  const onScreen = [...live, ...shown, ...(showDone ? doneList : [])]
+  const pickedRows = onScreen.filter((s) => picked[s.sessionId])
+  const pickedOpen = pickedRows.filter((s) => !s.done)
+  const pickedDone = pickedRows.filter((s) => s.done)
+  const allPicked = onScreen.length > 0 && pickedRows.length === onScreen.length
   const rowProps = {
     remote, here, inPage, busy,
+    onPick: (s: WorkSession, next: boolean) => setPicked((prev) => ({ ...prev, [s.sessionId]: next })),
     onReattach: (terminal: string) => navigate(termPath(terminal)),
     onOpen: (s: WorkSession) => { setOpeningId(s.sessionId); open.mutate(s) },
     onStop: (s: WorkSession) => { setStoppingId(s.sessionId); stop.mutate(s) },
@@ -610,6 +644,52 @@ export function SessionBoard() {
         </div>
       </div>
 
+      {/* The bar only exists once something is checked, so a desk nobody is
+          clearing keeps the list it had. */}
+      {pickedRows.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 border border-[var(--color-accent)]/50 bg-[rgba(var(--color-accent-rgb),0.06)] px-2.5 py-2 text-[11px]">
+          <span className="text-[var(--color-text-dim)]">{pickedRows.length} picked</span>
+          {pickedOpen.length > 0 && (
+            <button
+              type="button"
+              disabled={doneMany.isPending}
+              onClick={() => doneMany.mutate({ rows: pickedOpen, next: true })}
+              title="Mark every picked session done. It goes to the done section, where undo lives."
+              className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-accent)] px-2.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
+            >
+              <Check size={12} /> {doneMany.isPending ? 'marking…' : `mark ${pickedOpen.length} done`}
+            </button>
+          )}
+          {pickedDone.length > 0 && (
+            <button
+              type="button"
+              disabled={doneMany.isPending}
+              onClick={() => doneMany.mutate({ rows: pickedDone, next: false })}
+              title="Put every picked session back on the list"
+              className="inline-flex min-h-9 items-center gap-1.5 border border-[var(--color-border-strong)] px-2.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+            >
+              <Undo2 size={12} /> undo {pickedDone.length}
+            </button>
+          )}
+          {!allPicked && (
+            <button
+              type="button"
+              onClick={() => setPicked(Object.fromEntries(onScreen.map((s) => [s.sessionId, true])))}
+              className="min-h-9 px-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+            >
+              pick all {onScreen.length}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setPicked({})}
+            className="ml-auto min-h-9 px-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
       {/* Grouped by area, work first. A header appears once a block spans more
           than one area: labelling a single-area block adds a line and says
           nothing the row does not. */}
@@ -618,6 +698,7 @@ export function SessionBoard() {
           {groupByArea(live).length > 1 && <AreaHeader area={g.area} count={g.rows.length} />}
           {g.rows.map((s) => (
             <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
+              picked={picked[s.sessionId] === true}
               opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
           ))}
         </div>
@@ -628,6 +709,7 @@ export function SessionBoard() {
           {groupByArea(shown).length > 1 && <AreaHeader area={g.area} count={g.rows.length} />}
           {g.rows.map((s) => (
             <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
+              picked={picked[s.sessionId] === true}
               opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
           ))}
         </div>
@@ -663,14 +745,15 @@ export function SessionBoard() {
         <div className="mt-1 opacity-60">
           {doneList.map((s) => (
             <Row key={s.sessionId} attachedTo={attachedTerminals.get(s.sessionId) ?? null} s={s} {...rowProps}
+              picked={picked[s.sessionId] === true}
               opening={openingId === s.sessionId} stopping={stoppingId === s.sessionId} />
           ))}
         </div>
       )}
 
-      {(open.isError || stop.isError || done.isError) && (
+      {(open.isError || stop.isError || done.isError || doneMany.isError) && (
         <div className="mt-2 text-[11px] text-[var(--color-danger)]">
-          {((open.error ?? stop.error ?? done.error) as Error)?.message}
+          {((open.error ?? stop.error ?? done.error ?? doneMany.error) as Error)?.message}
         </div>
       )}
     </div>
