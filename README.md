@@ -68,9 +68,12 @@ on thor and Valkyrie pages side by side in one window, with a key strip for
 what the SteamOS keyboard lacks. Nothing is streamed from a PC. Each terminal
 screen is the same tmux-over-SSH bridge as the phone terminal, so a session
 opened in the headset shows on the board and survives taking the headset off.
-The `vr` device profile in Settings opens the app there. Design notes, how to
-open it on the Frame, and what to check once the hardware arrives are in
-`docs/vr-mode.md`.
+The `vr` device profile in Settings opens the app there. For the headset itself
+the app is the Android build: every release from v0.3.91 carries a signed
+`Valkyrie_<version>_arm64.apk` to sideload (the Frame runs Android apps natively
+and Valve supports sideloading). `scripts/android-toolchain.sh` sets a machine up
+to build it and `scripts/android-build.sh` builds it. Design notes, the install
+route, and what to check once the hardware arrives are in `docs/vr-mode.md`.
 
 ## Dev
 

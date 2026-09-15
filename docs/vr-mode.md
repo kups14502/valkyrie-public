@@ -88,10 +88,45 @@ dropping to the desktop.
   for three columns of terminal at 18px. If the window is narrower than expected, the
   auto layout still works, it will just choose fewer columns.
 
-## Later, if the browser route is not enough
+## The app (added the same day)
 
-Tauri 2 builds Android APKs, `tauri.conf.json` already has an `android` block, and
-Valve has said the Frame sideloads APKs. That would give a native window without a
-browser chrome. Not worth attempting until the Frame's Android layer is known: a Tauri
-Android app needs a system WebView, and whether Valve's container ships one is not
-public yet.
+Brendon wants an app on the Frame, not a browser tab. The Frame runs Android apps
+natively through Lepton, Valve's fork of Waydroid (an AOSP-based runtime), and
+Valve supports sideloading APKs. So the headset app is the Tauri Android build of
+this same frontend: `Valkyrie_<version>_arm64.apk` on every GitHub release from
+v0.3.91 on. Set the device profile to `vr` in Settings and it opens on the desk.
+
+A Tauri Android app renders in the system WebView. Waydroid images ship the AOSP
+WebView, so the bet is that Lepton does too; that is the single thing that can sink
+this route, and only the hardware can settle it. The fallback is a native Linux
+arm64 build (Flatpak or AppImage) run from desktop mode.
+
+How it is built, all on odin:
+
+- `scripts/android-toolchain.sh` installs Temurin JDK 21, the SDK command-line
+  tools, platform-tools and NDK 28 under `$HOME`, accepts the licenses, and adds the
+  `aarch64-linux-android` Rust target. No root. About 2.8 GB.
+- `scripts/android-env.sh` exports `JAVA_HOME`, `ANDROID_HOME`, `NDK_HOME`.
+- `frontend/src-tauri/gen/android` is the generated project, committed. Its
+  `build.gradle.kts` signs release builds from `keystore.properties`, which
+  `scripts/android-build.sh` writes on each run from `~/.tauri/valkyrie-android.jks`
+  and `~/.tauri/valkyrie-android.pw`, both created once with `keytool` and never
+  committed. Losing that keystore means the next APK cannot update over the old one;
+  it is in the odin backups by virtue of living in `~/.tauri`.
+- `scripts/android-build.sh [--debug]` builds the arm64 APK and prints its path.
+  `release.sh` calls it when the toolchain and keystore exist and uploads the APK
+  next to the installers. There is no updater manifest entry: it is sideloaded, so
+  updating means installing the next release's APK over it.
+- Cleartext HTTP is left on in release so `resolveApiBase()` can find odin on the
+  tailnet; off the tailnet it falls back to the Cloudflare hostname and the app signs
+  in with the app token like the desktop build.
+
+Desktop-only code is gated for mobile: the window-state plugin and the hidden-window
+cold-start recovery in `lib.rs`, and in the frontend the window controls, the header
+padding for them, the updater, and the session board's "on screen" mode
+(`isTauriMobile()` in `lib/auth.ts`).
+
+Installing on the Frame: copy the APK to the headset (USB, or download it in the
+desktop-mode browser from the GitHub release) and install it the way Valve's
+sideloading flow expects; the exact UI is not public before launch. Sideloaded apps
+are expected to show in the Steam library.
