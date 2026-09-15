@@ -59,6 +59,15 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
 }
 
+// The Android build (the phone, and the Steam Frame's Android runtime). It is
+// the Tauri app, so it authenticates with a token like the desktop one, but
+// it has no frameless window to draw controls for, no updater plugin (the APK
+// is sideloaded), and no local terminal to open. Read off the WebView's user
+// agent: Tauri's os plugin would say the same and is one more dependency.
+export function isTauriMobile(): boolean {
+  return isTauri() && typeof navigator !== 'undefined' && /\bAndroid\b|\biPhone\b|\biPad\b/.test(navigator.userAgent)
+}
+
 // Migration-only escape hatch: when the backend isn't strict yet, the user can
 // proceed without a token (the legacy bypass still authorizes them). Scoped to
 // the tab so it never persists past a real cutover.

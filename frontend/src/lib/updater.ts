@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { isTauri } from './auth'
+import { isTauri, isTauriMobile } from './auth'
 
 // Desktop auto-update (Tauri app only) with a custom, Valkyrie-styled flow:
 // check + download the new build in the background (reporting progress), then
@@ -41,7 +41,8 @@ export function useDesktopUpdate(): {
   const setStat = (s: UpdateStatus) => { statusRef.current = s; setStatus(s) }
 
   const runCheck = useCallback(async () => {
-    if (!isTauri()) return
+    // Android sideloads its APK; the updater plugin is not registered there.
+    if (!isTauri() || isTauriMobile()) return
     // Only look when nothing is already in flight or staged.
     if (statusRef.current !== 'idle' && statusRef.current !== 'error') return
     try {
@@ -67,7 +68,8 @@ export function useDesktopUpdate(): {
   }, [])
 
   useEffect(() => {
-    if (!isTauri()) return
+    // Android sideloads its APK; the updater plugin is not registered there.
+    if (!isTauri() || isTauriMobile()) return
     void runCheck()
     const interval = setInterval(() => { void runCheck() }, RECHECK_MS)
     const onFocus = () => { void runCheck() }

@@ -99,6 +99,20 @@ for f in "$APPIMAGE" "$APPIMAGE_SIG" "$SETUP_EXE" "$SETUP_SIG"; do
   [[ -f "$f" ]] || { echo "missing expected artifact: $f" >&2; exit 1; }
 done
 
+# Android APK (arm64), for the Steam Frame and the phone. Sideloaded, so it is
+# uploaded next to the installers and left out of the updater manifest. Built
+# only where the toolchain exists (scripts/android-toolchain.sh); a machine
+# without it still ships the desktop release.
+APK=""
+if [[ -d "$HOME/Android/Sdk/ndk" && -f "$HOME/.tauri/valkyrie-android.jks" ]]; then
+  APK_BUILT="$("$ROOT/scripts/android-build.sh" | tail -1)"
+  [[ -f "$APK_BUILT" ]] || { echo "android build printed no APK: $APK_BUILT" >&2; exit 1; }
+  APK="$FRONTEND/src-tauri/target/Valkyrie_${VERSION}_arm64.apk"
+  cp -f "$APK_BUILT" "$APK"
+else
+  echo "note: no Android toolchain or keystore here; skipping the APK" >&2
+fi
+
 MANIFEST="$ROOT/latest.json"
 PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 APPIMAGE_NAME="$(basename "$APPIMAGE")"
@@ -114,10 +128,12 @@ jq -n \
   '{version:$version, notes:$notes, pub_date:$pub_date, platforms:{"windows-x86_64":{signature:$win_sig,url:$win_url}, "linux-x86_64":{signature:$linux_sig,url:$linux_url}}}' \
   > "$MANIFEST"
 
+ASSETS=("$SETUP_EXE" "$APPIMAGE" "$MANIFEST")
+[[ -n "$APK" ]] && ASSETS+=("$APK")
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  gh release upload "$TAG" "$SETUP_EXE" "$APPIMAGE" "$MANIFEST" --repo "$REPO" --clobber
+  gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
 else
-  gh release create "$TAG" "$SETUP_EXE" "$APPIMAGE" "$MANIFEST" \
+  gh release create "$TAG" "${ASSETS[@]}" \
     --title "Valkyrie v$VERSION" \
     --notes "$NOTES" \
     --repo "$REPO"

@@ -14,7 +14,7 @@ import { UpdateAlarm } from './components/UpdateAlarm'
 import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
-import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
+import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
 import { useProfile } from './lib/deviceMode'
 import { isEmbedded } from './lib/embed'
 import Dashboard from './pages/Dashboard'
@@ -226,7 +226,7 @@ function Shell() {
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
         {/* In the app, reserve the window-controls strip (3 × 44px buttons, see
             TauriTitleBar) so the menu button never slides underneath it. */}
-        <div className={`relative w-full py-0 ${isTauri() ? 'pl-4 pr-[140px] sm:pl-6' : 'px-4 sm:px-6'}`}>
+        <div className={`relative w-full py-0 ${isTauri() && !isTauriMobile() ? 'pl-4 pr-[140px] sm:pl-6' : 'px-4 sm:px-6'}`}>
           {/* Drag layer scoped to the toolbar row ONLY — not the dropdown menu
               below — and sits behind the controls so it never swallows clicks. */}
           <div data-tauri-drag-region aria-hidden className="pointer-events-auto absolute inset-0" />

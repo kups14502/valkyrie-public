@@ -1,4 +1,5 @@
 use tauri::Manager;
+#[cfg(desktop)]
 use tauri_plugin_window_state::StateFlags;
 
 /// This machine's name, lowercased. The page uses it to decide whether a
@@ -116,21 +117,34 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
   }
 }
 
+// Everything about window geometry, visibility and cold-start recovery below is
+// desktop only. On Android (the phone, and the Steam Frame's Android runtime)
+// the activity is the window: there is nothing to remember, hide, or reveal,
+// and the window-state crate is not even a dependency for that target.
+#[cfg(desktop)]
+fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+  // Remember window size/position/maximized across launches — but NOT
+  // visibility. The window starts hidden (see tauri.conf.json) and is
+  // revealed only when the React app actually mounts (main.tsx calls
+  // window.show()). The WebView2 cold-start navigation to tauri.localhost can
+  // fail with ERR_FAILED ("can't reach this page") on the first try; because
+  // the window is hidden and we only reveal on a real mount, that error is
+  // never seen — and the retry in desktop_setup recovers it off-screen.
+  builder.plugin(
+    tauri_plugin_window_state::Builder::default()
+      .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+      .build(),
+  )
+}
+
+#[cfg(not(desktop))]
+fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+  builder
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    // Remember window size/position/maximized across launches — but NOT
-    // visibility. The window starts hidden (see tauri.conf.json) and is
-    // revealed only when the React app actually mounts (main.tsx calls
-    // window.show()). The WebView2 cold-start navigation to tauri.localhost can
-    // fail with ERR_FAILED ("can't reach this page") on the first try; because
-    // the window is hidden and we only reveal on a real mount, that error is
-    // never seen — and the retry below recovers it off-screen.
-    .plugin(
-      tauri_plugin_window_state::Builder::default()
-        .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
-        .build(),
-    )
+  desktop_window_plugins(tauri::Builder::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -147,6 +161,8 @@ pub fn run() {
         app.handle().plugin(tauri_plugin_process::init())?;
       }
 
+      #[cfg(desktop)]
+      {
       if let Some(win) = app.get_webview_window("main") {
         // Recover a failed cold-start navigation without showing the error.
         // The window stays hidden until the app mounts and calls show(); if it
@@ -183,6 +199,7 @@ pub fn run() {
             } catch (e) {}
           })();"#,
         );
+      }
       }
       Ok(())
     })

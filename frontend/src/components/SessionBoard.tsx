@@ -8,7 +8,7 @@ import {
   setSessionsDone, startSessionOnHost, stopSessionOnHost, termPath,
   type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
-import { isTauri } from '../lib/auth'
+import { isTauri, isTauriMobile } from '../lib/auth'
 
 // I open sessions on thor and recover them from anywhere. That is the whole
 // feature, so this is one row per session and one button to get back into it.
@@ -33,7 +33,8 @@ type OpenMode = 'page' | 'screen'
 const OPEN_MODE_KEY = 'valkyrie-session-open-mode'
 
 const readOpenMode = (): OpenMode => {
-  if (!isTauri()) return 'page'
+  // The Android app has no local terminal to open either.
+  if (!isTauri() || isTauriMobile()) return 'page'
   try {
     return localStorage.getItem(OPEN_MODE_KEY) === 'page' ? 'page' : 'screen'
   } catch {
@@ -621,8 +622,8 @@ export function SessionBoard() {
           {inPage ? ' · opens in the page' : remote && here ? ` · opening on ${here}` : ''}
         </div>
         <div className="flex items-center gap-2">
-        {isTauri() && (
-          // Desktop only. A browser has no second option to offer.
+        {isTauri() && !isTauriMobile() && (
+          // Desktop only. A browser or the Android app has no second option to offer.
           <div className="flex items-center border border-[var(--color-border)] text-[10px] uppercase tracking-[0.12em]">
             {(['page', 'screen'] as const).map((mode) => (
               <button

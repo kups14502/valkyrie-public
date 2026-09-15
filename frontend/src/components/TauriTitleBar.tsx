@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Minus, Square, Copy, X } from 'lucide-react'
-import { isTauri } from '../lib/auth'
+import { isTauri, isTauriMobile } from '../lib/auth'
 
 // Window controls (minimize / maximize / close) for the frameless Tauri window.
 // Absolutely positioned flush against the top-right corner of the toolbar ROW
@@ -23,7 +23,7 @@ export function WindowControls() {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || isTauriMobile()) return
     let unlisten: (() => void) | undefined
     void import('@tauri-apps/api/window')
       .then(async ({ getCurrentWindow }) => {
@@ -36,7 +36,8 @@ export function WindowControls() {
     return () => unlisten?.()
   }, [])
 
-  if (!isTauri()) return null
+  // Android has no frameless window to control; the activity is the window.
+  if (!isTauri() || isTauriMobile()) return null
 
   return (
     <div className="absolute right-0 top-0 flex h-full items-stretch">
