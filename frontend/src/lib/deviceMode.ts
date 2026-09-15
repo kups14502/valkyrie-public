@@ -7,13 +7,17 @@ import { useEffect, useState } from 'react'
 // where the header's home button goes), and whether touch controls render at
 // the large "pad" size. Nothing here is cosmetic-only.
 
-export type DeviceMode = 'auto' | 'desktop' | 'iphone' | 'ipad'
+// 'vr' is the Steam Frame (or any headset browser): it opens on the VR
+// workspace and gets the pad-sized controls, because a laser pointer wants
+// targets as big as a finger does. Never auto-detected; a headset browser looks
+// like a desktop to every media query.
+export type DeviceMode = 'auto' | 'desktop' | 'iphone' | 'ipad' | 'vr'
 
 const KEY = 'valkyrie-device-mode'
 const LEGACY_PAD_KEY = 'valkyrie-pad'
 const EVENT = 'valkyrie-device-mode-changed'
 
-const MODES: DeviceMode[] = ['auto', 'desktop', 'iphone', 'ipad']
+const MODES: DeviceMode[] = ['auto', 'desktop', 'iphone', 'ipad', 'vr']
 
 export function getDeviceMode(): DeviceMode {
   try {
@@ -55,8 +59,11 @@ export function resolveProfile(mode: DeviceMode = getDeviceMode()): Profile {
     mode,
     resolved,
     // Each form factor has its own home screen; the desktop keeps the full one.
-    home: resolved === 'desktop' ? '/dashboard' : resolved === 'ipad' ? '/pad' : '/phone',
-    size: resolved === 'ipad' ? 'pad' : 'normal',
+    home: resolved === 'desktop' ? '/dashboard'
+      : resolved === 'ipad' ? '/pad'
+        : resolved === 'vr' ? '/vr'
+          : '/phone',
+    size: resolved === 'ipad' || resolved === 'vr' ? 'pad' : 'normal',
   }
 }
 

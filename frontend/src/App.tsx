@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
-  CalendarDays, UtensilsCrossed,
+  CalendarDays, UtensilsCrossed, Glasses,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -16,6 +16,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri } from './lib/auth'
 import { useProfile } from './lib/deviceMode'
+import { isEmbedded } from './lib/embed'
 import Dashboard from './pages/Dashboard'
 
 const Lights = lazy(() => import('./pages/Lights'))
@@ -30,6 +31,7 @@ const Settings = lazy(() => import('./pages/Settings'))
 const Phone = lazy(() => import('./pages/Phone'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Terminal = lazy(() => import('./pages/Terminal'))
+const Vr = lazy(() => import('./pages/Vr'))
 const Calendar = lazy(() => import('./pages/Calendar'))
 const Meals = lazy(() => import('./pages/Meals'))
 
@@ -60,6 +62,7 @@ const navItems = [
   { to: '/calendar', label: 'calendar', icon: CalendarDays },
   { to: '/meals', label: 'meals', icon: UtensilsCrossed },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
+  { to: '/vr', label: 'vr', icon: Glasses },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -69,11 +72,23 @@ const navItems = [
 
 // The home screens are per form factor, so only show the one that belongs to
 // this device: an iPad has no use for the phone dashboard, and a desktop has no
-// use for either.
-function navFor(resolved: 'desktop' | 'iphone' | 'ipad') {
+// use for either. The VR workspace is in the menu for everyone (a desktop
+// browser is how it gets built and checked), so the vr profile adds nothing.
+function navFor(resolved: 'desktop' | 'iphone' | 'ipad' | 'vr') {
   if (resolved === 'ipad') return [...navItems, { to: '/pad', label: 'ipad home', icon: Tablet }]
   if (resolved === 'iphone') return [...navItems, { to: '/phone', label: 'phone home', icon: Smartphone }]
   return navItems
+}
+
+// "/" lands on the dashboard, unless a same-origin embedder asked for a page
+// by name (?go=/calendar). The VR workspace uses that instead of a deep link
+// because "/" is the one path every build serves: the Tauri asset protocol has
+// no SPA fallback for /calendar, while index.html at the root always loads.
+function RootRedirect() {
+  const [params] = useSearchParams()
+  const go = params.get('go') ?? ''
+  const to = /^\/[a-z0-9/_-]*$/i.test(go) && !go.startsWith('//') ? go : '/dashboard'
+  return <Navigate to={to} replace />
 }
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
@@ -195,15 +210,17 @@ function Shell() {
   // data-kb) so there is exactly one owner; the shell only owns what it
   // renders. Layout effect, not effect, so the menu is already closed in the
   // paint that first shows the terminal.
-  const pinned = location.pathname === '/sessions/terminal'
+  // The VR workspace (/vr) is pinned for the same reason: its panes own the
+  // height and a scrolling main would let a laser-pointer drag shift them.
+  const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr'
   useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
 
   return (
     <div data-shell className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
-      <TitleBar />
+      {!isEmbedded && <TitleBar />}
       {/* The header doubles as the frameless window's draggable title bar in the app.
           shrink-0 so it keeps its height; <main> below is the scroll container. */}
-      <header className="relative z-10 shrink-0 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+      {!isEmbedded && <header className="relative z-10 shrink-0 select-none border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         {/* Full-area drag layer: grab anywhere in the header to move the frameless
             window (double-click toggles maximize). The interactive controls below
             re-enable pointer events so their clicks aren't swallowed by the drag. */}
@@ -245,7 +262,11 @@ function Shell() {
                     title={onHomeScreen ? 'Go to your home screen' : 'Go to dashboard'}
                     className="pointer-events-auto p-2 text-[var(--color-text-dim)] transition hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-accent)]"
                   >
-                    {onHomeScreen ? (profile.resolved === 'ipad' ? <Tablet size={16} /> : <Smartphone size={16} />) : <LayoutDashboard size={16} />}
+                    {onHomeScreen
+                      ? (profile.resolved === 'ipad' ? <Tablet size={16} />
+                        : profile.resolved === 'vr' ? <Glasses size={16} />
+                          : <Smartphone size={16} />)
+                      : <LayoutDashboard size={16} />}
                   </NavLink>
                 )}
                 {/* Pages live in the menu at every width — one consistent layout.
@@ -268,7 +289,7 @@ function Shell() {
           <WindowControls />
         </div>
         {menuOpen && <MobileMenu onClose={() => setMenuOpen(false)} />}
-      </header>
+      </header>}
 
       {/* `relative overflow-hidden` is inside the pinned branch only: making main
           a containing block on every route would re-anchor other pages'
@@ -286,7 +307,7 @@ function Shell() {
               keeps the nav usable; the key resets it when you navigate away. */}
           <ErrorBoundary compact key={location.pathname}>
           <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<RootRedirect />} />
             <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
             <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
             <Route path="/calendar" element={<PageContainer><Calendar /></PageContainer>} />
@@ -298,6 +319,8 @@ function Shell() {
             <Route path="/sessions/terminal" element={<Terminal />} />
             {/* The terminal had its own tab for a day. Bookmarks from then. */}
             <Route path="/terminal" element={<Navigate to="/sessions/terminal" replace />} />
+            {/* The VR workspace: bare like the terminal, its panes fill main. */}
+            <Route path="/vr" element={<Vr />} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />
@@ -311,7 +334,7 @@ function Shell() {
           </ErrorBoundary>
         </Suspense>
       </main>
-      <CommandPalette />
+      {!isEmbedded && <CommandPalette />}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Monitor, RefreshCw, Smartphone, Tablet, Wand2 } from 'lucide-react'
+import { Check, Glasses, Monitor, RefreshCw, Smartphone, Tablet, Wand2 } from 'lucide-react'
 import { ThemePicker } from '../components/ThemePicker'
 import { fetchPlexLibrary, fetchPlexServer } from '../lib/api'
 import {
@@ -12,6 +12,7 @@ const OPTIONS: { mode: DeviceMode; label: string; icon: typeof Monitor; detail: 
   { mode: 'desktop', label: 'desktop', icon: Monitor, detail: 'Opens on the full dashboard. Normal control sizes.' },
   { mode: 'iphone', label: 'iphone', icon: Smartphone, detail: 'Opens on the quick-launch screen at normal control sizes.' },
   { mode: 'ipad', label: 'ipad', icon: Tablet, detail: 'Opens on the quick-launch screen with large, touch-first controls.' },
+  { mode: 'vr', label: 'vr headset', icon: Glasses, detail: 'Opens on the VR workspace: terminals and pages side by side on one big screen, with large controls for a laser pointer.' },
 ]
 
 // Temporary: which link shape lands on the item's page on OUR server (the one

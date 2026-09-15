@@ -7,6 +7,7 @@ import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
 import { resolveProfile } from './lib/deviceMode'
+import { isEmbedded } from './lib/embed'
 
 if (isTauri()) {
   // Mark the document so the custom-title-bar offset (--titlebar-h) applies.
@@ -44,8 +45,14 @@ if (isTauri()) {
 // The device profile decides the landing screen, so rewrite the URL
 // URL before the router reads it. Done here, not in a React effect, so it
 // happens exactly once per page load and can't refire when the gate remounts.
+//
+// Not when the URL names its page with ?go= (the VR workspace loads "/?go=/x"
+// into an iframe and RootRedirect in App.tsx routes from there), and never
+// inside an iframe at all: the embedder chose the page, and a vr profile would
+// otherwise send the embedded copy to /vr, nesting the workspace in itself.
 const startHome = resolveProfile().home
-if (startHome !== '/dashboard' && (location.pathname === '/' || location.pathname === '/dashboard')) {
+const goAsked = new URLSearchParams(location.search).has('go')
+if (!isEmbedded && !goAsked && startHome !== '/dashboard' && (location.pathname === '/' || location.pathname === '/dashboard')) {
   try { history.replaceState(null, '', startHome) } catch { /* ignore */ }
 }
 

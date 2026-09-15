@@ -9,10 +9,12 @@ import {
   CornerDownLeft, Keyboard, MoreHorizontal, Plus, RotateCw, Terminal as TerminalIcon, X,
 } from 'lucide-react'
 import {
-  api, fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
+  fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
   openTermSession, type TermOpen, type TermSession,
 } from '../lib/api'
-import { getToken } from '../lib/auth'
+import {
+  TERM_FONT_FAMILY, errText, readTermTheme as readTheme, relIso, relative, termWsUrl as wsUrl, toCtrl,
+} from '../lib/term'
 
 // Claude Code on thor, from the phone. The session is Claude running on thor in
 // one of Brendon's own directories (personal, work, work2), reached over
@@ -66,82 +68,8 @@ const KB_NONE = 40
 const CRAMPED_H = 72
 const CRAMPED_W = 120
 
-// The app token rides the query string because a browser cannot set headers on
-// a websocket handshake. It is the same trade the existing upgrade path makes;
-// on the tailnet no token is sent at all, since the backend trusts the socket.
-function wsUrl(name: string, cols: number, rows: number): string {
-  const base = api.defaults.baseURL || '/api'
-  const abs = base.startsWith('http') ? base : `${window.location.origin}${base}`
-  const u = new URL(abs)
-  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
-  u.pathname = '/ws/terminal'
-  u.search = ''
-  u.searchParams.set('s', name)
-  u.searchParams.set('cols', String(cols))
-  u.searchParams.set('rows', String(rows))
-  const token = getToken()
-  if (token) u.searchParams.set('token', token)
-  return u.toString()
-}
-
-function readTheme() {
-  const cs = getComputedStyle(document.documentElement)
-  const v = (n: string, d: string) => cs.getPropertyValue(n).trim() || d
-  const accent = v('--color-accent', '#00ff41')
-  const bg = v('--color-bg', '#000000')
-  const fg = v('--color-text', '#b8ffca')
-  const warn = v('--color-accent-2', '#ffe500')
-  const danger = v('--color-danger', '#ff1744')
-  return {
-    background: bg,
-    foreground: fg,
-    cursor: accent,
-    cursorAccent: bg,
-    selectionBackground: 'rgba(255,255,255,0.22)',
-    black: bg,
-    brightBlack: v('--color-text-faint', '#4a8055'),
-    green: accent,
-    brightGreen: accent,
-    yellow: warn,
-    brightYellow: warn,
-    red: danger,
-    brightRed: danger,
-    white: fg,
-    brightWhite: '#ffffff',
-  }
-}
-
-// Ctrl is a modifier no soft keyboard offers, so the bar arms it and the next
-// real keystroke gets folded down into its control code.
-function toCtrl(d: string): string {
-  if (d.length !== 1) return d
-  const c = d.toLowerCase()
-  if (c >= 'a' && c <= 'z') return String.fromCharCode(c.charCodeAt(0) - 96)
-  if (d === '[') return '\x1b'
-  if (d === ' ') return '\x00'
-  return d
-}
-
-const relative = (ms: number) => {
-  if (!ms) return ''
-  const d = Date.now() - ms
-  if (d < 60_000) return 'now'
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m`
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h`
-  return `${Math.floor(d / 86_400_000)}d`
-}
-
-// The board reports ISO strings; the tmux list reports epoch ms.
-const relIso = (iso: string | null) => {
-  if (!iso) return ''
-  const t = Date.parse(iso)
-  return Number.isFinite(t) ? relative(t) : ''
-}
-
-const errText = (e: unknown) =>
-  (e as { response?: { data?: { error?: string } } })?.response?.data?.error
-  || (e as Error)?.message
-  || 'failed'
+// wsUrl, readTheme, toCtrl, relative, relIso and errText live in lib/term.ts,
+// shared with the VR workspace (pages/Vr.tsx).
 
 function isEditableFocused(): boolean {
   const el = document.activeElement
@@ -596,7 +524,7 @@ export default function TerminalPage() {
 
     const term = new XTerm({
       fontSize: fontRef.current,
-      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      fontFamily: TERM_FONT_FAMILY,
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 2_000,

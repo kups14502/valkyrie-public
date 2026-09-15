@@ -317,3 +317,7 @@ html[data-term-pin] header {
 /* Scrollback becomes the only scroller on the route. */
 .xterm .xterm-viewport,
 [data-term-scroll] { overscroll-behavior: contain; }
+
+/* The VR workspace (/vr) in zen: the headset's virtual screen is all panes.
+   The page keeps a single floating button to come back. */
+html[data-vr-zen] [data-shell] > header { display: none; }

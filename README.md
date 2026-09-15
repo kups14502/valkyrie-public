@@ -61,6 +61,17 @@ anything that looks like the published frontend, which is fine for a chart and
 not for a shell. A client only ever sends a session name, a launch-target key,
 or a session id, never a path.
 
+## VR workspace (Steam Frame)
+
+`/vr` is a flat multi-screen desk for the headset's own browser: Claude sessions
+on thor and Valkyrie pages side by side in one window, with a key strip for
+what the SteamOS keyboard lacks. Nothing is streamed from a PC. Each terminal
+screen is the same tmux-over-SSH bridge as the phone terminal, so a session
+opened in the headset shows on the board and survives taking the headset off.
+The `vr` device profile in Settings opens the app there. Design notes, how to
+open it on the Frame, and what to check once the hardware arrives are in
+`docs/vr-mode.md`.
+
 ## Dev
 
 ```bash
