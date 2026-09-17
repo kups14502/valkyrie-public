@@ -158,7 +158,9 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   const items = navFor(useProfile().resolved)
   const { version, build } = useAppVersion()
   return (
-    <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+    // data-app-menu: on the terminal route this becomes an overlay instead of a
+    // block that pushes <main> down (see index.css, html[data-term-pin]).
+    <div data-app-menu className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6">
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           {items.map(({ to, label, icon: Icon }) => {

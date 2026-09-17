@@ -304,12 +304,21 @@ html[data-term-pin] main > :not([data-term-root]) {
   contain: none;
 }
 
-/* Bound the squeeze. <header> is shrink-0 and the mobile menu is several
-   hundred px on a phone, so without a cap it can drive main to zero. */
-html[data-term-pin] header {
-  max-height: 45%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* The menu paints OVER the page on this route instead of pushing it down.
+   <header> is shrink-0, so a menu several hundred px tall squeezes <main>, and
+   squeezing main here is a pty resize and a full TUI repaint on thor. Capping
+   the header traded that for a worse bug: 45% of a phone screen is shorter than
+   the menu, so the menu itself became the scroller and dragged under the
+   finger. An overlay costs neither: the terminal box never changes, and the
+   whole menu is on screen with nothing to scroll. <header> is already
+   position:relative and z-10, so this lands under the toolbar and above the
+   terminal. */
+html[data-term-pin] [data-app-menu] {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
 }
 
 /* iOS pinch-zooms the layout whenever a focused control is under 16px, and
