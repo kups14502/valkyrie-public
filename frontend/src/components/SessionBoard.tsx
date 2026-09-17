@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
@@ -263,15 +263,20 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
   const hostList = hosts.data ?? []
   const launchable = hostList.filter((h) => h.canLaunch)
 
-  const targets = useQuery({
-    queryKey: ['launchTargets', launchable.map((h) => h.host).join(',')],
-    enabled: launchable.length > 0,
-    staleTime: 60_000,
-    queryFn: async () => {
-      const lists = await Promise.all(launchable.map((h) => fetchLaunchTargets(h.host)))
-      return new Map(launchable.map((h, i) => [h.host, lists[i]]))
-    },
+  // One query per host, keyed and shaped exactly like the terminal page's, so
+  // the cache entry is shared for real. A single query holding a Map used to
+  // key on the joined host list, which with thor alone was the string 'thor':
+  // the same key the terminal page reads as an array. Whichever page loaded
+  // first won, and the other crashed on the shape it did not expect.
+  const targetQueries = useQueries({
+    queries: launchable.map((h) => ({
+      queryKey: ['launchTargets', h.host],
+      queryFn: () => fetchLaunchTargets(h.host),
+      staleTime: 60_000,
+    })),
   })
+  const targetsByHost = new Map(launchable.map((h, i) => [h.host, targetQueries[i]?.data ?? []]))
+  const targetsLoading = targetQueries.some((q) => q.isLoading)
 
   // Click-away, so the menu does not sit open over the list.
   useEffect(() => {
@@ -322,7 +327,7 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
       {open && (
         <div className="absolute right-0 z-20 mt-1 min-w-56 border border-[var(--color-border-strong)] bg-[var(--color-surface)] py-1 shadow-lg">
           {hostList.map((h) => {
-            const list = (targets.data?.get(h.host) ?? []).filter((t) => t.exists && (!opensInPage(h) || t.phone))
+            const list = (targetsByHost.get(h.host) ?? []).filter((t) => t.exists && (!opensInPage(h) || t.phone))
             return (
               <div key={h.host} className="border-b border-[var(--color-border)]/50 py-1 last:border-b-0">
                 <div className="flex items-baseline justify-between gap-2 px-3 py-1">
@@ -343,7 +348,7 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
                     </button>
                   )) : (
                     <div className="px-3 py-1.5 text-[10px] text-[var(--color-text-faint)]">
-                      {targets.isLoading ? 'reading targets…' : 'no targets'}
+                      {targetsLoading ? 'reading targets…' : 'no targets'}
                     </div>
                   )
                 ) : (
