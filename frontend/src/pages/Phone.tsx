@@ -5,6 +5,7 @@ import {
 } from '../lib/api'
 import { DownloadsPanel, LightsPanel, RecentStrip, SystemChips } from '../components/HomePanels'
 import { PhoneClock } from '../components/HomePanels'
+import { ThorRgbControl } from '../components/ThorRgbControl'
 
 // iPhone home screen. Same panels as the iPad's (components/HomePanels.tsx) but
 // laid out for one hand on a 390px screen: a single column, two tiles per row,
@@ -69,6 +70,7 @@ export default function Phone() {
         ))}
       </section>
 
+      <ThorRgbControl size="normal" />
       <LightsPanel size="normal" />
       <DownloadsPanel />
       <RecentStrip width="w-24" />

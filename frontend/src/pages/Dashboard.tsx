@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
+import { LightsPanel } from '../components/HomePanels'
 import { useProfile } from '../lib/deviceMode'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
@@ -494,13 +495,16 @@ export default function Dashboard() {
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />
 
-      {/* The desk relight, the same component the Lights page uses. Phone and
-          iPad only: on those the dashboard is what a thumb reaches, and hopping
-          to Lights for one button is the whole friction. The desktop keeps it on
-          the Lights page alone, because thor's own desktop has these two buttons
-          on it already. Gated on the device profile rather than a CSS
-          breakpoint, so a narrow desktop window does not grow a phone control. */}
-      {profile.resolved !== 'desktop' && <ThorRgbControl size={profile.size} />}
+      {/* The desk relight and the room's bulbs, the same controls the Lights
+          page carries, in their compact form. On every profile now, desktop
+          included: the dashboard is the screen that is already open, and hopping
+          to Lights for one button was the whole friction. LightsPanel renders
+          each bulb as a single row until tapped, so the whole room fits here
+          without turning the dashboard into the Lights page. */}
+      <div className="space-y-5">
+        <ThorRgbControl size={profile.size} />
+        <LightsPanel size={profile.size} />
+      </div>
 
       {/* Two columns now that the sessions card is gone: hosts take the wide
           side (the Sessions page owns session state, and this card duplicated
