@@ -146,14 +146,21 @@ function useAppVersion(): { version: string; build: string } {
   return { version, build }
 }
 
+// The menu is the whole navigation at every width, and on a 390px phone it has
+// to fit the screen with no scrolling in either direction. Two rules do that:
+// the tiles stack their icon over the label below sm so three fit a row, and
+// the controls row is icons only below sm. Spelled-out buttons plus a kbd hint
+// came to about 440px on one line, which is where the sideways drag came from.
+const MENU_ICON = 'inline-flex h-10 min-w-10 items-center justify-center gap-2 border border-[var(--color-border)] px-2.5 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition-colors hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] active:border-[var(--color-accent)]'
+
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   const items = navFor(useProfile().resolved)
   const { version, build } = useAppVersion()
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           {items.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to || (to !== '/dashboard' && location.pathname.startsWith(to))
             return (
@@ -161,58 +168,64 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 key={to}
                 to={to}
                 onClick={onClose}
-                className={`flex items-center gap-2 whitespace-nowrap rounded-[3px] border px-3 py-2 text-xs uppercase tracking-[0.12em] transition-colors ${
+                className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-[3px] border px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] transition-colors sm:min-h-0 sm:flex-row sm:justify-start sm:gap-2 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.12em] ${
                   isActive
                     ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
                     : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text)]'
                 }`}
                 style={isActive ? { boxShadow: '0 0 10px rgba(0,255,65,0.22)', textShadow: '0 0 8px var(--color-accent)' } : {}}
               >
-                <Icon size={12} className="shrink-0" />
-                <span>{label}</span>
+                <Icon size={14} className="shrink-0 sm:h-3 sm:w-3" />
+                <span className="max-w-full truncate">{label}</span>
               </NavLink>
             )
           })}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3">
+        <div className="flex items-center gap-2 border-t border-[var(--color-border)] pt-3">
           <button
             type="button"
             onClick={() => { onClose(); openCommandPalette() }}
             title="Search — jump to any page (Ctrl+K)"
-            className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
+            aria-label="Search"
+            className={MENU_ICON}
           >
-            <Search size={12} /> search
-            <kbd className="ml-1 border border-[var(--color-border)] px-1 py-0.5 text-[8px] tracking-[0.1em] text-[var(--color-text-faint)]">ctrl k</kbd>
+            <Search size={14} />
+            <span className="hidden sm:inline">search</span>
+            <kbd className="ml-1 hidden border border-[var(--color-border)] px-1 py-0.5 text-[8px] tracking-[0.1em] text-[var(--color-text-faint)] sm:inline-block">ctrl k</kbd>
           </button>
-          <div className="flex items-center gap-2">
-            <ThemePicker />
-            {/* Added to the home screen, iOS gives no address bar, and the shell
-                sets html{overflow:hidden} so pull-to-refresh can't fire either —
-                this is the only way to force the newest build in that mode. */}
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              title="Reload to get the latest build"
-              className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] active:border-[var(--color-accent)]"
-            >
-              <RefreshCw size={12} /> reload
-            </button>
-            <button
-              type="button"
-              onClick={() => { onClose(); logout() }}
-              className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[var(--color-text-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-            >
-              <LogOut size={12} /> sign out
-            </button>
-          </div>
+          <ThemePicker />
+          {/* Added to the home screen, iOS gives no address bar, and the shell
+              sets html{overflow:hidden} so pull-to-refresh can't fire either —
+              this is the only way to force the newest build in that mode. */}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            title="Reload to get the latest build"
+            aria-label="Reload"
+            className={MENU_ICON}
+          >
+            <RefreshCw size={14} />
+            <span className="hidden sm:inline">reload</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { onClose(); logout() }}
+            aria-label="Sign out"
+            className={`${MENU_ICON} hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]`}
+          >
+            <LogOut size={14} />
+            <span className="hidden sm:inline">sign out</span>
+          </button>
+          {/* The header badge drops the build id on a narrow screen, so this is
+              where the phone checks whether a deploy actually landed. On the
+              same row as the controls, because a line of its own was one more
+              thing pushing the menu past the bottom of the screen. */}
+          {version && (
+            <div className="ml-auto min-w-0 truncate font-mono text-[10px] tracking-[0.12em] text-[var(--color-text-faint)]">
+              {version}{build ? ` · ${build}` : ''}
+            </div>
+          )}
         </div>
-        {/* The header badge drops the build id on a narrow screen, so this is
-            where the phone checks whether a deploy actually landed. */}
-        {version && (
-          <div className="font-mono text-[10px] tracking-[0.12em] text-[var(--color-text-faint)]">
-            valkyrie {version}{build ? ` · ${build}` : ''}
-          </div>
-        )}
       </div>
     </div>
   )
