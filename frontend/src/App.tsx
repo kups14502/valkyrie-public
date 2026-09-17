@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
@@ -19,21 +19,54 @@ import { useProfile } from './lib/deviceMode'
 import { isEmbedded } from './lib/embed'
 import Dashboard from './pages/Dashboard'
 
-const Lights = lazy(() => import('./pages/Lights'))
-const Vault = lazy(() => import('./pages/Vault'))
-const TradeBot = lazy(() => import('./pages/TradeBot'))
-const SlopFactory = lazy(() => import('./pages/SlopFactory'))
-const Services = lazy(() => import('./pages/Services'))
-const Activity = lazy(() => import('./pages/Activity'))
-const Plex = lazy(() => import('./pages/Plex'))
-const Pad = lazy(() => import('./pages/Pad'))
-const Settings = lazy(() => import('./pages/Settings'))
-const Phone = lazy(() => import('./pages/Phone'))
-const Sessions = lazy(() => import('./pages/Sessions'))
-const Terminal = lazy(() => import('./pages/Terminal'))
-const Vr = lazy(() => import('./pages/Vr'))
-const Calendar = lazy(() => import('./pages/Calendar'))
-const Meals = lazy(() => import('./pages/Meals'))
+// Routes are code-split, and a deploy replaces every hashed chunk at once. A
+// tab still running the previous build therefore 404s the moment it opens a
+// route it has not visited yet: the import rejects, React.lazy throws it out of
+// render, and the page boundary shows a crash card. That is what turned "new
+// session" on the board into an error — the session was created, the
+// navigation to the terminal route could not find its chunk — and why a reload
+// always cured it. index.html is served no-cache, so one reload IS the fix;
+// this just does it without making Brendon find the menu.
+//
+// Once per route per tab: a chunk that is genuinely broken still surfaces as a
+// crash card instead of a reload loop. The flag clears on a good load, so a
+// second deploy into the same tab is handled like the first.
+function lazyRoute(name: string, load: () => Promise<{ default: ComponentType }>) {
+  const key = `valkyrie.chunk.${name}`
+  return lazy(async () => {
+    try {
+      const mod = await load()
+      try { sessionStorage.removeItem(key) } catch { /* storage unavailable */ }
+      return mod
+    } catch (err) {
+      let retried = true
+      try {
+        retried = sessionStorage.getItem(key) === '1'
+        if (!retried) sessionStorage.setItem(key, '1')
+      } catch { /* private mode: no second chance, fall through to the card */ }
+      if (retried) throw err
+      window.location.reload()
+      // The page is on its way out; never resolve, so nothing renders behind it.
+      return new Promise<{ default: ComponentType }>(() => {})
+    }
+  })
+}
+
+const Lights = lazyRoute('lights', () => import('./pages/Lights'))
+const Vault = lazyRoute('vault', () => import('./pages/Vault'))
+const TradeBot = lazyRoute('trade', () => import('./pages/TradeBot'))
+const SlopFactory = lazyRoute('slop', () => import('./pages/SlopFactory'))
+const Services = lazyRoute('services', () => import('./pages/Services'))
+const Activity = lazyRoute('activity', () => import('./pages/Activity'))
+const Plex = lazyRoute('plex', () => import('./pages/Plex'))
+const Pad = lazyRoute('pad', () => import('./pages/Pad'))
+const Settings = lazyRoute('settings', () => import('./pages/Settings'))
+const Phone = lazyRoute('phone', () => import('./pages/Phone'))
+const Sessions = lazyRoute('sessions', () => import('./pages/Sessions'))
+const Terminal = lazyRoute('terminal', () => import('./pages/Terminal'))
+const Vr = lazyRoute('vr', () => import('./pages/Vr'))
+const Calendar = lazyRoute('calendar', () => import('./pages/Calendar'))
+const Meals = lazyRoute('meals', () => import('./pages/Meals'))
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,10 +1,29 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { copyText } from '../lib/clipboard'
 
 // `compact` renders an inline card (keeps the surrounding shell/nav visible) —
 // used for the per-route boundary. Default is the full-screen crash page used
 // at the app root.
 type Props = { children: ReactNode; compact?: boolean }
 type State = { hasError: boolean; message?: string }
+
+// A phone cannot select text out of this card reliably, and a crash message
+// that cannot leave the device cannot be reported. Writing the clipboard still
+// works over plain http (copyText falls back to execCommand), unlike reading it.
+function CopyMessage({ message }: { message?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        const btn = e.currentTarget
+        void copyText(message || '').then((ok) => { btn.textContent = ok ? 'copied' : 'copy failed' })
+      }}
+      style={{ marginTop: '12px', padding: '8px 12px', minHeight: '38px', background: 'transparent', border: '1px solid rgba(255,95,114,0.35)', borderRadius: '6px', color: '#ffd3d9', fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase' }}
+    >
+      copy error
+    </button>
+  )
+}
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false }
@@ -27,6 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div style={{ fontSize: '11px', letterSpacing: '0.28em', textTransform: 'uppercase', color: '#ff8b98' }}>Page crashed</div>
             <p style={{ marginTop: '10px', color: '#b9c7d8' }}>This page hit a client-side error. Switch tabs and back, or reload.</p>
             <pre style={{ marginTop: '12px', whiteSpace: 'pre-wrap', color: '#ffd3d9' }}>{this.state.message}</pre>
+            <CopyMessage message={this.state.message} />
           </div>
         )
       }
@@ -37,6 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <h1 style={{ marginTop: '12px', marginBottom: '12px', fontSize: '28px' }}>Frontend render failed</h1>
             <p style={{ color: '#b9c7d8' }}>The dashboard hit a client-side error before it could render.</p>
             <pre style={{ marginTop: '16px', whiteSpace: 'pre-wrap', color: '#ffd3d9' }}>{this.state.message}</pre>
+            <CopyMessage message={this.state.message} />
           </div>
         </div>
       )
