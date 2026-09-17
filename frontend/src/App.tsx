@@ -98,9 +98,11 @@ const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
 // web/PWA we show the release version baked in at build time from
 // tauri.conf.json (see vite.config.ts) plus the short build id, so it's always
 // a real version — never "dev" — and distinct deploys stay distinguishable.
-function useAppVersion(): string {
-  const webVersion = `v${__APP_VERSION__}${BUILD_ID && BUILD_ID !== 'dev' ? ` · ${BUILD_ID.slice(0, 7)}` : ''}`
-  const [version, setVersion] = useState<string>(isTauri() ? '' : webVersion)
+// Returned as two parts, not one string: the header shows the build id only
+// where there is room for it (see the badge), and the menu shows it always.
+function useAppVersion(): { version: string; build: string } {
+  const build = !isTauri() && BUILD_ID && BUILD_ID !== 'dev' ? BUILD_ID.slice(0, 7) : ''
+  const [version, setVersion] = useState<string>(isTauri() ? '' : `v${__APP_VERSION__}`)
   useEffect(() => {
     if (!isTauri()) return
     void import('@tauri-apps/api/app')
@@ -108,12 +110,13 @@ function useAppVersion(): string {
       .then((v) => setVersion(`v${v}`))
       .catch(() => setVersion(`v${__APP_VERSION__}`))
   }, [])
-  return version
+  return { version, build }
 }
 
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
   const items = navFor(useProfile().resolved)
+  const { version, build } = useAppVersion()
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto max-w-[1600px] px-4 py-3 space-y-3 sm:px-6">
@@ -170,6 +173,13 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
+        {/* The header badge drops the build id on a narrow screen, so this is
+            where the phone checks whether a deploy actually landed. */}
+        {version && (
+          <div className="font-mono text-[10px] tracking-[0.12em] text-[var(--color-text-faint)]">
+            valkyrie {version}{build ? ` · ${build}` : ''}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -187,7 +197,7 @@ function PageContainer({ children }: { children: ReactNode }) {
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
-  const version = useAppVersion()
+  const { version, build } = useAppVersion()
 
   // The device profile decides what "home" is: the pad screen on a phone or
   // tablet, the full dashboard on a desktop. The header button hides while
@@ -233,25 +243,36 @@ function Shell() {
           <div className="pointer-events-none relative">
             <div className="pointer-events-none flex items-center gap-3">
               {/* left cluster: brand + version */}
-              <div className="flex shrink-0 items-center gap-2.5">
+              {/* min-w-0, and the brand truncates: this cluster is the one
+                  that gives up width. It used to be shrink-0 next to a
+                  shrink-0 badge, so on a 390px phone the row overflowed and the
+                  home and menu buttons were clipped off the right edge. */}
+              <div className="flex min-w-0 items-center gap-2.5">
                 <div
-                  className="text-base font-bold tracking-widest"
+                  className="min-w-0 truncate text-base font-bold tracking-widest"
                   style={{ color: 'var(--color-accent)', textShadow: '0 0 12px var(--color-accent)' }}
                 >
                   VALKYRIE<span className="opacity-40">//</span>SYS<span className="cursor-blink">_</span>
                 </div>
                 {version && (
                   <span
-                    title={`Valkyrie ${version}`}
+                    title={`Valkyrie ${version}${build ? ` · ${build}` : ''}`}
                     className="shrink-0 rounded-sm border border-[var(--color-accent)]/60 bg-[rgba(0,255,65,0.12)] px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.12em] text-[var(--color-accent)]"
                     style={{ textShadow: '0 0 8px var(--color-accent)' }}
                   >
                     {version}
+                    {/* The build id is the deploy-freshness signal, and it is
+                        ten more characters than a phone header has room for.
+                        It stays here on a wide screen and lives in the menu on
+                        a narrow one. */}
+                    {build && <span className="hidden sm:inline"> · {build}</span>}
                   </span>
                 )}
               </div>
               {/* Right cluster: update alarm (app only), quick dashboard, menu. */}
-              <div className="pointer-events-none ml-auto flex items-center gap-2">
+              {/* shrink-0: these two buttons are the only way out of a page,
+                  so nothing in this row is allowed to push them off screen. */}
+              <div className="pointer-events-none ml-auto flex shrink-0 items-center gap-2">
                 <UpdateAlarm />
                 {/* Quick jump home, shown only when you're not already there.
                     In iPad mode home is the pad screen. */}

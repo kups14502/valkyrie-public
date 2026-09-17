@@ -85,16 +85,23 @@ export function SystemChips() {
   )
 }
 
-const LIGHTS_OPEN_KEY = 'valkyrie-pad-lights-open'
+// The per-bulb rows, not the section. "All lights" is always on screen now, so
+// what this remembers is only whether the individual bulbs are unrolled under
+// it. A new key on purpose: the old one stored "open" for the whole section and
+// every device already had it set, which would have kept the bulbs unrolled
+// against the new default.
+const LIGHTS_BULBS_KEY = 'valkyrie-lights-bulbs-open'
 
 export function LightsPanel({ size }: { size: PanelSize }) {
   const { lights, all, anyOn, availableTargets, litTargets, roomPct, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
+  // Collapsed by default: the dashboards want "all lights" and a count, not
+  // five bulb rows pushing everything else off the screen.
   const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem(LIGHTS_OPEN_KEY) !== '0' } catch { return true }
+    try { return localStorage.getItem(LIGHTS_BULBS_KEY) === '1' } catch { return false }
   })
   const toggle = () => setOpen((v) => {
     const next = !v
-    try { localStorage.setItem(LIGHTS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
+    try { localStorage.setItem(LIGHTS_BULBS_KEY, next ? '1' : '0') } catch { /* ignore */ }
     return next
   })
 
@@ -148,12 +155,14 @@ export function LightsPanel({ size }: { size: PanelSize }) {
         )}
       </div>
 
-      {open && (availableTargets.length === 0 ? (
+      {availableTargets.length === 0 ? (
         <div className="panel p-4 text-sm text-[var(--color-warning)]">
           All lights unavailable. Home Assistant can't reach any bulb.
         </div>
       ) : (
         <div className="space-y-4">
+          {/* Outside the collapse: "all lights" is the control the dashboards
+              exist to carry, and the chevron only unrolls the bulbs under it. */}
           {availableTargets.length > 1 && (
             <AllLightsControl
               size={size}
@@ -167,14 +176,18 @@ export function LightsPanel({ size }: { size: PanelSize }) {
             />
           )}
           {/* compact: each bulb is one row until tapped, so all five are
-              visible at once instead of two expanded cards filling the screen. */}
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {ordered.map((l) => (
-              <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size={size} compact />
-            ))}
-          </div>
+              visible at once instead of two expanded cards filling the screen.
+              With one bulb there is no all-lights control to collapse into, so
+              the row always shows. */}
+          {(open || availableTargets.length <= 1) && (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {ordered.map((l) => (
+                <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size={size} compact />
+              ))}
+            </div>
+          )}
         </div>
-      ))}
+      )}
     </section>
   )
 }
