@@ -15,6 +15,8 @@ import {
 import {
   TERM_FONT_FAMILY, errText, readTermTheme as readTheme, relIso, relative, termWsUrl as wsUrl, toCtrl,
 } from '../lib/term'
+import { readText as readClipboard } from '../lib/clipboard'
+import { PasteSheet } from '../components/PasteSheet'
 
 // Claude Code on thor, from the phone. The session is Claude running on thor in
 // one of Brendon's own directories (personal, work, work2), reached over
@@ -118,6 +120,7 @@ export default function TerminalPage() {
     return v >= FONT_MIN && v <= FONT_MAX ? v : 12
   })
   const [picker, setPicker] = useState(false)
+  const [paste, setPaste] = useState(false)
   const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -424,6 +427,17 @@ export default function TerminalPage() {
     // iOS keyboard unless focus comes straight back.
     termRef.current?.focus()
   }, [])
+
+  // Paste. On the tailnet the page is plain http, where navigator.clipboard
+  // does not exist, so the old one-liner called .then() on undefined: the
+  // button threw inside its own handler and did nothing at all, with no banner
+  // to say so. Read the clipboard where the browser allows it, and otherwise
+  // put a field on screen and let the OS paste menu fill it.
+  const doPaste = useCallback(async () => {
+    const t = await readClipboard()
+    if (t) { send(t); return }
+    setPaste(true)
+  }, [send])
 
   // Ask tmux to move its own view. Nothing here writes a size or a position,
   // so scrolling cannot move the terminal box: it is not capable of
@@ -943,6 +957,13 @@ export default function TerminalPage() {
           </div>
         )}
 
+        {paste && (
+          <PasteSheet
+            onSend={(t) => send(t)}
+            onClose={() => { setPaste(false); focusTerm() }}
+          />
+        )}
+
         {cramped && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-black/85 p-3 text-center">
             <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-accent-2)]">
@@ -974,7 +995,7 @@ export default function TerminalPage() {
           <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] pb-1.5">
             <button
               type="button"
-              onClick={() => { void navigator.clipboard?.readText().then((t) => t && send(t)).catch(() => setError('clipboard blocked')) }}
+              onClick={() => { void doPaste() }}
               className={BTN}
             >
               paste

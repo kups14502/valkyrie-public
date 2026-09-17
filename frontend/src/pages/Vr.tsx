@@ -16,6 +16,8 @@ import {
 import {
   TERM_FONT_FAMILY, TERM_NAME_RE, errText, readTermTheme, relIso, relative, termWsUrl, toCtrl,
 } from '../lib/term'
+import { readText as readClipboard } from '../lib/clipboard'
+import { PasteSheet } from '../components/PasteSheet'
 import { isEmbedded } from '../lib/embed'
 
 // The VR workspace, at /vr. Built for the Steam Frame, which runs SteamOS and
@@ -505,6 +507,7 @@ function Workspace() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ctrlArmed, setCtrlArmed] = useState(false)
+  const [paste, setPaste] = useState(false)
 
   // Same query keys as the phone terminal and the board, so the three never
   // disagree about what is running.
@@ -581,6 +584,14 @@ function Workspace() {
     if (!target) return
     apisRef.current.get(target)?.send(d)
     if (target !== focus) setFocus(target)
+  }
+  // The headset browser serves this page over plain http like the phone does,
+  // so navigator.clipboard is absent there too and reading it is impossible.
+  // Same answer: a field the OS can paste into. See components/PasteSheet.
+  const doPaste = async () => {
+    const t = await readClipboard()
+    if (t) { send(t); return }
+    setPaste(true)
   }
   const scroll = (lines: number) => { if (target) apisRef.current.get(target)?.scroll(lines) }
   const half = () => Math.max(1, Math.floor((target ? apisRef.current.get(target)?.rows() ?? 24 : 24) / 2))
@@ -781,6 +792,10 @@ function Workspace() {
           </div>
         )}
 
+        {paste && (
+          <PasteSheet onSend={(t) => send(t)} onClose={() => setPaste(false)} />
+        )}
+
         {picker && (
           <div className="absolute inset-0 z-30 overflow-y-auto bg-black/90 p-3">
             <div className="panel mx-auto max-w-4xl space-y-5 p-4">
@@ -908,7 +923,7 @@ function Workspace() {
           <span className="w-2" aria-hidden />
           <button
             type="button"
-            onClick={() => { void navigator.clipboard?.readText().then((t) => t && send(t)).catch(() => setError('clipboard blocked')) }}
+            onClick={() => { void doPaste() }}
             className={KEY}
           >
             paste

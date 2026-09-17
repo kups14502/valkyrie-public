@@ -23,3 +23,19 @@ export async function copyText(text: string): Promise<boolean> {
     return false
   }
 }
+
+// Reading is the half that has no fallback. navigator.clipboard only exists in
+// a secure context, and on the tailnet this app is served over plain http, so
+// on the phone and in the headset there is no clipboard object at all and
+// execCommand has no read counterpart. Callers get null and have to put a field
+// on screen instead, where the OS paste menu can do it (see PasteSheet).
+export async function readText(): Promise<string | null> {
+  try {
+    if (!navigator.clipboard?.readText) return null
+    const t = await navigator.clipboard.readText()
+    return t || null
+  } catch {
+    // Denied, or a webview that answers with a rejected promise.
+    return null
+  }
+}
