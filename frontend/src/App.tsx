@@ -168,7 +168,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
                 key={to}
                 to={to}
                 onClick={onClose}
-                className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-[3px] border px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] transition-colors sm:min-h-0 sm:flex-row sm:justify-start sm:gap-2 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.12em] ${
+                className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-[3px] border px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] transition-colors sm:min-h-0 sm:flex-row sm:justify-start sm:gap-2 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.12em] ${
                   isActive
                     ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
                     : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text)]'

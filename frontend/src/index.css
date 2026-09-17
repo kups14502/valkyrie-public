@@ -40,6 +40,12 @@ html, body, #root {
 :root { --ui-zoom: 1; }
 
 html {
+  /* iOS Safari inflates small text inside wide blocks on its own (text
+     autosizing), which is per-page, invisible in every desktop browser, and
+     enough to push a grid of fixed columns past the screen. Sizes here are
+     deliberate; keep them. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   /* Dynamic viewport height: on an iOS Safari browser tab the collapsing
      top/bottom toolbars otherwise leave the app sized to the *large* viewport,
      pushing the bottom (Code Deck's chat input) behind the toolbar with no way
