@@ -16,6 +16,7 @@ import {
   TERM_FONT_FAMILY, errText, readTermTheme as readTheme, relIso, relative, termWsUrl as wsUrl, toCtrl,
 } from '../lib/term'
 import { readText as readClipboard } from '../lib/clipboard'
+import { useProfile } from '../lib/deviceMode'
 import { PasteSheet } from '../components/PasteSheet'
 
 // Claude Code on thor, from the phone. The session is Claude running on thor in
@@ -125,6 +126,12 @@ export default function TerminalPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cramped, setCramped] = useState(false)
+
+  // The key row replaces keys a software keyboard does not have. A desktop
+  // already has them all, so there it is only clutter and stolen height: hide
+  // it and give the rows to the terminal. The pad and VR profiles keep it,
+  // because a finger and a laser pointer have the same problem a thumb does.
+  const showKeys = useProfile().resolved !== 'desktop'
 
   const sessions = useQuery({
     queryKey: ['term', 'sessions'],
@@ -990,6 +997,7 @@ export default function TerminalPage() {
           it was competing for the same thumb as Enter.
           Still flexbox, so the row is reserved and there is no height to
           measure and no magic gap allowance. */}
+      {showKeys && (
       <div className="flex shrink-0 flex-col gap-1.5">
         {more && (
           <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] pb-1.5">
@@ -1078,6 +1086,7 @@ export default function TerminalPage() {
           </button>
         </div>
       </div>
+      )}
     </div>
   )
 }
