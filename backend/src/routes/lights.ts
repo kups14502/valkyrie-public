@@ -12,6 +12,13 @@ const LIGHTS = [
   'light.kitche_light',
 ]
 
+// What the UI calls each bulb, where the HA friendly_name is not the name
+// Brendon uses for the room it is in.
+const DISPLAY_NAMES: Record<string, string> = {
+  'light.dresser': 'Bedroom',
+  'light.nightsand': 'Table',
+}
+
 type HAConfig = { token_id: string; jwt_key: string; ha_url: string }
 let cfgCache: HAConfig | null = null
 
@@ -74,7 +81,7 @@ function rowFrom(entity_id: string, s: HAState | undefined): LightRow {
   const a = s?.attributes ?? {}
   return {
     entity_id,
-    name: a.friendly_name ?? entity_id,
+    name: DISPLAY_NAMES[entity_id] ?? a.friendly_name ?? entity_id,
     on: s?.state === 'on',
     unavailable: !s || s.state === 'unavailable',
     brightness: typeof a.brightness === 'number' ? a.brightness : null,
