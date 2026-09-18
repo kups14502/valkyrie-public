@@ -23,7 +23,7 @@ export const PRESETS: { label: string; rgb: [number, number, number] | null; kel
   { label: 'Warm', rgb: null, kelvin: 2200 },
   { label: 'Neutral', rgb: null, kelvin: 4000 },
   { label: 'Cool', rgb: null, kelvin: 6500 },
-  { label: 'Red', rgb: [255, 60, 60], kelvin: null },
+  { label: 'Red', rgb: [255, 0, 0], kelvin: null },
   { label: 'Amber', rgb: [255, 140, 40], kelvin: null },
   { label: 'Green', rgb: [80, 230, 110], kelvin: null },
   { label: 'Blue', rgb: [70, 130, 255], kelvin: null },
