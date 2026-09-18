@@ -443,6 +443,74 @@ function OpenTerminals() {
   )
 }
 
+// Recover the desk, or just one half of it. The single button reopened work and
+// personal together, which is the wrong move at 9am on a Monday and the wrong
+// move on a Saturday: the split button keeps the whole desk one click away and
+// puts each area behind the chevron. The chevron only appears when the desk
+// actually spans more than one area, since a menu repeating the button is noise.
+function RecoverDesk({ desk, disabled, recovering, done, total, onRecover }: {
+  desk: WorkSession[]
+  disabled: boolean
+  recovering: boolean
+  done: number
+  total: number
+  onRecover: (rows: WorkSession[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const areas = groupByArea(desk)
+  const split = areas.length > 1
+
+  // Click-away, so the menu does not sit open over the list.
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [open])
+
+  return (
+    <div className="relative flex items-stretch" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onRecover(desk)}
+        title={`Reopen the ${desk.length} session(s) still open and not running. Marking one done is what takes it off this list.`}
+        className={`inline-flex min-h-9 items-center gap-2 border border-[var(--color-accent)] px-3 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40${split ? ' border-r-0' : ''}`}
+      >
+        <RotateCcw size={12} /> {recovering ? `recovering ${done}/${total}…` : `recover my desk (${desk.length})`}
+      </button>
+      {split && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen((v) => !v)}
+          aria-label="Recover one area instead of the whole desk"
+          title="Recover one area instead of the whole desk"
+          className="inline-flex min-h-9 items-center border border-[var(--color-accent)] px-1.5 text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
+        >
+          <ChevronDown size={12} />
+        </button>
+      )}
+
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-44 border border-[var(--color-border-strong)] bg-[var(--color-surface)] py-1 shadow-lg">
+          {areas.map((g) => (
+            <button
+              key={g.area}
+              type="button"
+              onClick={() => { setOpen(false); onRecover(g.rows) }}
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
+            >
+              <span>{AREA_LABEL[g.area] ?? g.area}</span>
+              <span className="text-[var(--color-text-faint)]">{g.rows.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AreaHeader({ area, count }: { area: string; count: number }) {
   return (
     <div className="mb-1 mt-1 flex items-baseline gap-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
@@ -461,6 +529,8 @@ export function SessionBoard() {
   const [showAll, setShowAll] = useState(false)
   const [recovering, setRecovering] = useState(false)
   const [recoverDone, setRecoverDone] = useState(0)
+  // What this run is reopening, which is the whole desk or one area of it.
+  const [recoverTotal, setRecoverTotal] = useState(0)
   const [showDone, setShowDone] = useState(false)
   const [openMode, setOpenMode] = useState<OpenMode>(readOpenMode)
   const [picked, setPicked] = useState<Record<string, boolean>>({})
@@ -580,12 +650,14 @@ export function SessionBoard() {
 
   // Serial, with the same pause the launcher uses: Windows Terminal drops tabs
   // when several arrive at once.
-  const recoverDesk = async () => {
+  const recoverDesk = async (rows: WorkSession[]) => {
+    if (rows.length === 0) return
     setRecovering(true)
     setRecoverDone(0)
+    setRecoverTotal(rows.length)
     // 21 sessions is a long silence with no counter, and the earlier version
     // gave none: it just sat on "recovering…" for half a minute.
-    for (const s of desk) {
+    for (const s of rows) {
       setOpeningId(s.sessionId)
       try {
         if (remote) await openSessionHere(s.sessionId, HOST_IP)
@@ -649,15 +721,14 @@ export function SessionBoard() {
         )}
         <NewSession onStarted={refresh} inPage={inPage} />
         {desk.length > 0 && (
-          <button
-            type="button"
+          <RecoverDesk
+            desk={desk}
             disabled={recovering || openingId !== null}
-            onClick={() => void recoverDesk()}
-            title={`Reopen the ${desk.length} session(s) still open and not running. Marking one done is what takes it off this list.`}
-            className="inline-flex min-h-9 items-center gap-2 border border-[var(--color-accent)] px-3 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
-          >
-            <RotateCcw size={12} /> {recovering ? `recovering ${recoverDone}/${desk.length}…` : `recover my desk (${desk.length})`}
-          </button>
+            recovering={recovering}
+            done={recoverDone}
+            total={recoverTotal}
+            onRecover={(rows) => void recoverDesk(rows)}
+          />
         )}
         </div>
       </div>
