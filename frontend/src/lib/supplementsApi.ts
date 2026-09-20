@@ -2,21 +2,20 @@ import { api } from './api'
 
 export type SupplementDayEntry = { date: string; taken: boolean; takenAt: string | null }
 
-export type SupplementDay = {
+export type SupplementWindow = {
+  /** The middle day of the three. */
   date: string
-  taken: boolean
-  takenAt: string | null
+  today: string
+  /** The day before, the day itself, the day after. */
+  days: SupplementDayEntry[]
   streak: number
-  /** Days ticked in the last 30. */
-  last30: number
-  history: SupplementDayEntry[]
 }
 
-export const fetchSupplementDay = async (date: string, history = 14) =>
-  (await api.get<SupplementDay>('/supplements/day', { params: { date, history } })).data
+export const fetchSupplementWindow = async (date: string, today: string) =>
+  (await api.get<SupplementWindow>('/supplements/day', { params: { date, today } })).data
 
-export const logSupplementDay = async (date: string, taken: boolean, history = 14) =>
-  (await api.post<SupplementDay>('/supplements/log', { date, taken, history })).data
+export const logSupplementDay = async (target: string, taken: boolean, date: string, today: string) =>
+  (await api.post<SupplementWindow>('/supplements/log', { target, taken, date, today })).data
 
 /** Today's key in the device's own timezone, which is the day the log uses. */
 export const supplementDateKey = (d = new Date()) =>
@@ -33,9 +32,11 @@ export const parseDateKey = (key: string): Date => {
   return new Date(y, m - 1, d)
 }
 
-/** "today", "yesterday", else "Fri, Sep 19". */
+/** "today", "yesterday", "tomorrow", else "Fri 19". */
 export function dateLabel(key: string, today = supplementDateKey()): string {
   if (key === today) return 'today'
   if (key === shiftDateKey(today, -1)) return 'yesterday'
-  return parseDateKey(key).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+  if (key === shiftDateKey(today, 1)) return 'tomorrow'
+  const d = parseDateKey(key)
+  return `${d.toLocaleDateString([], { weekday: 'short' })} ${d.getDate()}`
 }

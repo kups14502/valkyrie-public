@@ -37,17 +37,16 @@ const takenAtFor = (date: string): string | null => {
 }
 
 /**
- * Consecutive ticked days ending at `date`.
+ * Consecutive ticked days ending at `today`.
  *
  * An untaken today doesn't break the streak, it just hasn't extended it yet:
  * at 9am you have not missed anything.
  */
-function streakEndingAt(date: string, limit = 3650): number {
+function streakEndingAt(today: string, limit = 3650): number {
   let streak = 0
-  let cursor = date
+  let cursor = today
   for (let i = 0; i < limit; i++) {
-    const taken = Boolean(takenAtFor(cursor))
-    if (!taken) {
+    if (!takenAtFor(cursor)) {
       if (i === 0) { cursor = shiftDate(cursor, -1); continue }
       break
     }
@@ -57,50 +56,55 @@ function streakEndingAt(date: string, limit = 3650): number {
   return streak
 }
 
-function view(date: string, days: number) {
-  const from = shiftDate(date, -(days - 1))
-  const rows = db.prepare('SELECT date, takenAt FROM supplement_days WHERE date BETWEEN ? AND ?')
-    .all(from, date) as { date: string; takenAt: string }[]
-  const byDate = new Map(rows.map((r) => [r.date, r.takenAt]))
-  const history = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = shiftDate(date, -i)
-    history.push({ date: d, taken: byDate.has(d), takenAt: byDate.get(d) ?? null })
-  }
-  const taken = byDate.get(date) ?? null
+const entry = (date: string) => {
+  const takenAt = takenAtFor(date)
+  return { date, taken: Boolean(takenAt), takenAt }
+}
+
+/**
+ * The card shows three days: the one before, the one being looked at, and the
+ * one after. `today` is carried separately so the streak stays anchored to the
+ * real today while the window is stepped around.
+ */
+function view(center: string, today: string) {
   return {
-    date,
-    taken: Boolean(taken),
-    takenAt: taken,
-    streak: streakEndingAt(date),
-    // How many of the last 30 days were ticked: the number that says whether
-    // this is actually a habit yet.
-    last30: (db.prepare('SELECT COUNT(*) AS n FROM supplement_days WHERE date BETWEEN ? AND ?')
-      .get(shiftDate(date, -29), date) as { n: number }).n,
-    history,
+    date: center,
+    today,
+    days: [shiftDate(center, -1), center, shiftDate(center, 1)].map(entry),
+    streak: streakEndingAt(today),
   }
 }
 
+/** The window's center and the device's today, or an error string. */
+function readDates(src: Record<string, unknown>): { center: string; today: string } | { error: string } {
+  const center = String(src.date || '')
+  if (!DATE_RE.test(center)) return { error: 'date must be YYYY-MM-DD' }
+  const today = String(src.today || center)
+  if (!DATE_RE.test(today)) return { error: 'today must be YYYY-MM-DD' }
+  return { center, today }
+}
+
 router.get('/supplements/day', (req, res) => {
-  const date = String(req.query.date || '')
-  if (!DATE_RE.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' })
-  const days = Math.max(1, Math.min(90, Number(req.query.history) || 14))
-  res.json(view(date, days))
+  const dates = readDates(req.query as Record<string, unknown>)
+  if ('error' in dates) return res.status(400).json(dates)
+  res.json(view(dates.center, dates.today))
 })
 
 router.post('/supplements/log', (req, res) => {
-  const date = String(req.body?.date || '')
-  if (!DATE_RE.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' })
-  const days = Math.max(1, Math.min(90, Number(req.body?.history) || 14))
+  const dates = readDates(req.body ?? {})
+  if ('error' in dates) return res.status(400).json(dates)
+  // The day being ticked is not always the center of the window: the card can
+  // tick the day either side of it.
+  const target = String(req.body?.target || dates.center)
+  if (!DATE_RE.test(target)) return res.status(400).json({ error: 'target must be YYYY-MM-DD' })
   // Default true: a bare POST of a date means "took them".
-  const taken = req.body?.taken !== false
-  if (taken) {
+  if (req.body?.taken !== false) {
     db.prepare('INSERT INTO supplement_days (date, takenAt) VALUES (?, ?) ON CONFLICT(date) DO NOTHING')
-      .run(date, new Date().toISOString())
+      .run(target, new Date().toISOString())
   } else {
-    db.prepare('DELETE FROM supplement_days WHERE date = ?').run(date)
+    db.prepare('DELETE FROM supplement_days WHERE date = ?').run(target)
   }
-  res.json(view(date, days))
+  res.json(view(dates.center, dates.today))
 })
 
 export default router

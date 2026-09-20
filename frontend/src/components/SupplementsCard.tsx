@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from './Card'
 import { apiErrorText } from '../lib/api'
 import {
-  dateLabel, fetchSupplementDay, logSupplementDay, parseDateKey, supplementDateKey,
-  type SupplementDay, type SupplementDayEntry,
+  dateLabel, fetchSupplementWindow, logSupplementDay, shiftDateKey, supplementDateKey,
+  type SupplementDayEntry, type SupplementWindow,
 } from '../lib/supplementsApi'
 import type { PanelSize } from './HomePanels'
 
-// Supplements: one checkbox a day, not a checklist. The big button answers
-// today; the strip under it is the last two weeks, and every square in it is
-// its own checkbox, which is what makes a 1am "that was yesterday" tap work.
-
-const HISTORY_DAYS = 14
+// Supplements: one checkbox a day, three days on screen. The middle one is
+// today; the day either side of it is there so a 1am tick-off can land on the
+// day that just ended, and so a day can be stepped in either direction.
 
 /** Today's key, re-checked every minute so a tab left open rolls over at midnight. */
 function useToday(): string {
@@ -31,28 +29,51 @@ function useToday(): string {
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
 
-function DayColumn({ entry, today, onToggle }: { entry: SupplementDayEntry; today: string; onToggle: () => void }) {
-  const isToday = entry.date === today
-  const letter = parseDateKey(entry.date).toLocaleDateString([], { weekday: 'narrow' })
+function DayBox({
+  entry, today, center, size, onToggle,
+}: {
+  entry: SupplementDayEntry
+  today: string
+  center: string
+  size: PanelSize
+  onToggle: () => void
+}) {
+  const isCenter = entry.date === center
+  const taken = entry.taken
+  const color = taken ? 'var(--color-success)' : isCenter ? 'var(--color-accent)' : 'var(--color-border)'
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-pressed={entry.taken}
-      title={`${dateLabel(entry.date, today)}${entry.taken ? ` · taken ${fmtTime(entry.takenAt)}` : ' · not logged'}`}
-      className="flex min-w-0 flex-1 flex-col items-center gap-1 py-1"
+      aria-pressed={taken}
+      aria-label={`${dateLabel(entry.date, today)}: ${taken ? 'taken' : 'not taken'}`}
+      className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 border px-1 ${size === 'pad' ? 'py-5' : 'py-4'}`}
+      style={{
+        borderColor: color,
+        backgroundColor: taken ? 'color-mix(in srgb, var(--color-success) 8%, transparent)' : 'transparent',
+        opacity: isCenter || taken ? 1 : 0.75,
+      }}
     >
-      <span className={`text-[9px] uppercase ${isToday ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}>
-        {letter}
+      <span
+        className="truncate text-[10px] font-bold uppercase tracking-[0.14em]"
+        style={{ color: isCenter ? 'var(--color-accent)' : 'var(--color-text-faint)' }}
+      >
+        {dateLabel(entry.date, today)}
       </span>
       <span
-        className={`h-5 w-full border ${isToday ? 'outline outline-1 outline-offset-1 outline-[var(--color-accent)]' : ''}`}
+        className={`flex items-center justify-center border ${size === 'pad' ? 'h-10 w-10' : 'h-8 w-8'}`}
         style={{
-          borderColor: entry.taken ? 'var(--color-success)' : 'var(--color-border)',
-          backgroundColor: entry.taken ? 'var(--color-success)' : 'transparent',
-          boxShadow: entry.taken ? '0 0 8px var(--color-success)' : undefined,
+          borderColor: taken ? 'var(--color-success)' : 'var(--color-border)',
+          color: taken ? 'var(--color-success)' : 'transparent',
+          boxShadow: taken ? '0 0 10px var(--color-success)' : undefined,
         }}
-      />
+        aria-hidden
+      >
+        <Check size={size === 'pad' ? 22 : 18} strokeWidth={3} />
+      </span>
+      <span className="h-3 truncate text-[9px] tabular-nums text-[var(--color-text-faint)]">
+        {taken ? fmtTime(entry.takenAt) : ''}
+      </span>
     </button>
   )
 }
@@ -60,40 +81,45 @@ function DayColumn({ entry, today, onToggle }: { entry: SupplementDayEntry; toda
 export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) {
   const today = useToday()
   const qc = useQueryClient()
-  const key = ['supplements', 'day', today]
+  // null follows today, so a tab left open overnight moves with the clock.
+  // Stepping pins a day and midnight leaves it alone.
+  const [pinned, setPinned] = useState<string | null>(null)
+  const center = pinned ?? today
+  const step = (days: number) => {
+    const next = shiftDateKey(center, days)
+    setPinned(next === today ? null : next)
+  }
+  const key = ['supplements', 'day', center, today]
 
   const day = useQuery({
     queryKey: key,
-    queryFn: () => fetchSupplementDay(today, HISTORY_DAYS),
+    queryFn: () => fetchSupplementWindow(center, today),
     refetchInterval: 5 * 60_000,
   })
 
   const log = useMutation({
-    mutationFn: ({ date, taken }: { date: string; taken: boolean }) => logSupplementDay(date, taken, HISTORY_DAYS),
+    mutationFn: ({ target, taken }: { target: string; taken: boolean }) =>
+      logSupplementDay(target, taken, center, today),
     // Optimistic: the tap has to land instantly on the phone, where the round
     // trip is the slowest part of it.
-    onMutate: async ({ date, taken }) => {
+    onMutate: async ({ target, taken }) => {
       await qc.cancelQueries({ queryKey: key })
-      const prev = qc.getQueryData<SupplementDay>(key)
+      const prev = qc.getQueryData<SupplementWindow>(key)
       if (prev) {
-        const at = taken ? new Date().toISOString() : null
-        qc.setQueryData<SupplementDay>(key, {
+        const takenAt = taken ? new Date().toISOString() : null
+        qc.setQueryData<SupplementWindow>(key, {
           ...prev,
-          taken: date === prev.date ? taken : prev.taken,
-          takenAt: date === prev.date ? at : prev.takenAt,
-          history: prev.history.map((h) => (h.date === date ? { ...h, taken, takenAt: at } : h)),
+          days: prev.days.map((d) => (d.date === target ? { ...d, taken, takenAt } : d)),
         })
       }
       return { prev }
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(key, ctx.prev) },
-    // The server owns the streak and the 30-day count, so take its answer.
+    // The server owns the streak, so take its answer.
     onSuccess: (data) => qc.setQueryData(key, data),
   })
 
   const d = day.data
-  const taken = Boolean(d?.taken)
-  const toggle = (date: string, next: boolean) => log.mutate({ date, taken: next })
 
   return (
     <Card
@@ -110,63 +136,46 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : day.error ? (
         <div className="text-sm text-[var(--color-danger)]">{apiErrorText(day.error, 'supplement log unavailable')}</div>
-      ) : (
-        <div className="space-y-4">
-          {/* Today, as one target big enough to hit without looking. */}
-          <button
-            type="button"
-            onClick={() => toggle(today, !taken)}
-            aria-pressed={taken}
-            className={`flex w-full items-center gap-3 border px-4 text-left transition-colors ${size === 'pad' ? 'min-h-20' : 'min-h-16'} ${
-              taken
-                ? 'border-[var(--color-success)] bg-[color:rgba(255,255,255,0.03)]'
-                : 'border-[var(--color-border)] hover:border-[var(--color-accent)] active:border-[var(--color-accent)]'
-            }`}
-          >
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center border ${
-                taken ? 'border-[var(--color-success)] text-[var(--color-success)]' : 'border-[var(--color-border)] text-transparent'
-              }`}
-              style={taken ? { boxShadow: '0 0 10px var(--color-success)' } : undefined}
-              aria-hidden
+      ) : d ? (
+        <div className="space-y-2">
+          <div className="flex items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              aria-label="earlier days"
+              className="flex w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             >
-              <Check size={18} strokeWidth={3} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span
-                className="block text-sm font-bold uppercase tracking-[0.18em]"
-                style={{ color: taken ? 'var(--color-success)' : 'var(--color-text)' }}
-              >
-                {taken ? 'took them today' : 'took them?'}
-              </span>
-              <span className="block text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-                {taken ? `logged ${fmtTime(d?.takenAt ?? null)} · tap to undo` : 'tap when you take them'}
-              </span>
-            </span>
-          </button>
-
-          {/* Every square is its own checkbox, so a missed day is one tap away
-              and so is last night's dose at 1am. */}
-          {d && (
-            <div>
-              <div className="flex items-stretch gap-1">
-                {d.history.map((entry) => (
-                  <DayColumn
-                    key={entry.date}
-                    entry={entry}
-                    today={today}
-                    onToggle={() => toggle(entry.date, !entry.taken)}
-                  />
-                ))}
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-                <span>{d.last30} of the last 30 days</span>
-                <span>tap any day</span>
-              </div>
-            </div>
-          )}
+              <ChevronLeft size={16} />
+            </button>
+            {d.days.map((entry) => (
+              <DayBox
+                key={entry.date}
+                entry={entry}
+                today={today}
+                center={center}
+                size={size}
+                onToggle={() => log.mutate({ target: entry.date, taken: !entry.taken })}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() => step(1)}
+              aria-label="later days"
+              className="flex w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+            <span>tap the day you took them</span>
+            {center !== today && (
+              <button type="button" onClick={() => setPinned(null)} className="uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                back to today
+              </button>
+            )}
+          </div>
         </div>
-      )}
+      ) : null}
     </Card>
   )
 }
