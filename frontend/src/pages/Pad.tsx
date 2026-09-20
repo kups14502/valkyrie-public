@@ -5,6 +5,7 @@ import {
 } from '../lib/api'
 import { Clock, DownloadsPanel, LightsPanel, RecentStrip, SystemChips } from '../components/HomePanels'
 import { useProfile } from '../lib/deviceMode'
+import { SupplementsCard } from '../components/SupplementsCard'
 
 // iPad home screen: a big-touch dashboard for the wall/coffee-table iPad.
 // Everything is a large target, nothing depends on hover or a keyboard. Lights
@@ -76,6 +77,7 @@ export default function Pad() {
         ))}
       </section>
 
+      <SupplementsCard size={profile.size} />
       <LightsPanel size={profile.size} />
       <DownloadsPanel />
       <RecentStrip />

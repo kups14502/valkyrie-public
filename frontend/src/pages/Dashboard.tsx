@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { LightsPanel } from '../components/HomePanels'
+import { SupplementsCard } from '../components/SupplementsCard'
 import { useProfile } from '../lib/deviceMode'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
@@ -515,6 +516,7 @@ export default function Dashboard() {
         </div>
 
         <div className="order-2 min-w-0 space-y-6 xl:sticky xl:top-24">
+          <SupplementsCard size={profile.size} />
           <TradeBotCard />
         </div>
       </div>
