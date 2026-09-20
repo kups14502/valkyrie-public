@@ -177,7 +177,7 @@ function EditRow({ dose, onDone }: { dose: SupplementDose; onDone: () => void })
   return (
     <div className="space-y-2 border border-[var(--color-border)] p-3">
       <div className="flex flex-wrap gap-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="name" className={`min-w-0 flex-1 ${field}`} />
+        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="name" className={`w-full min-w-0 sm:w-auto sm:flex-1 ${field}`} />
         <input value={draft.dose} onChange={(e) => setDraft({ ...draft, dose: e.target.value })} placeholder="dose" className={`w-28 ${field}`} />
         <select value={draft.slot} onChange={(e) => setDraft({ ...draft, slot: e.target.value as SupplementSlot })} className={field}>
           {SUPPLEMENT_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -228,7 +228,7 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
       onSubmit={(e) => { e.preventDefault(); if (draft.name.trim()) add.mutate() }}
     >
       <div className="flex flex-wrap gap-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="vitamin D3" className={`min-w-0 flex-1 ${field}`} />
+        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="vitamin D3" className={`w-full min-w-0 sm:w-auto sm:flex-1 ${field}`} />
         <input value={draft.dose} onChange={(e) => setDraft({ ...draft, dose: e.target.value })} placeholder="5000 IU" className={`w-28 ${field}`} />
         <select value={draft.slot} onChange={(e) => setDraft({ ...draft, slot: e.target.value as SupplementSlot })} className={field}>
           {SUPPLEMENT_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
