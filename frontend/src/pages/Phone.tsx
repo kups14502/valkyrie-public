@@ -71,11 +71,13 @@ export default function Phone() {
         ))}
       </section>
 
-      <SupplementsCard size="normal" />
       <ThorRgbControl size="normal" />
       <LightsPanel size="normal" />
       <DownloadsPanel />
       <RecentStrip width="w-24" />
+      {/* Last on the phone: it is a once-a-day tap, not something to scroll
+          past every time the screen is opened. */}
+      <SupplementsCard size="normal" />
     </div>
   )
 }
