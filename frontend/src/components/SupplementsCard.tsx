@@ -91,11 +91,29 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
   }
   const key = ['supplements', 'day', center, today]
 
+  // Every screen reads the same rows, so a tick on the phone has to show up on
+  // the desktop. The app turns refetchOnWindowFocus off globally, which left
+  // two open dashboards disagreeing for minutes; this card turns it back on and
+  // polls a minute at a time.
   const day = useQuery({
     queryKey: key,
     queryFn: () => fetchSupplementWindow(center, today),
-    refetchInterval: 5 * 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchOnMount: 'always',
   })
+
+  // A backgrounded tab stops its interval; coming back to it must not show a
+  // stale day. (visibilitychange, not focus: a second window on the same screen
+  // never fires focus.)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void qc.invalidateQueries({ queryKey: ['supplements'] })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [qc])
 
   const log = useMutation({
     mutationFn: ({ target, taken }: { target: string; taken: boolean }) =>
@@ -137,7 +155,9 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
       ) : day.error ? (
         <div className="text-sm text-[var(--color-danger)]">{apiErrorText(day.error, 'supplement log unavailable')}</div>
       ) : d ? (
-        <div className="space-y-2">
+        // Capped: on a 1440px dashboard three full-width boxes would be
+        // billboards. This is the same size the phone gets.
+        <div className="max-w-md space-y-2">
           <div className="flex items-stretch gap-1.5">
             <button
               type="button"

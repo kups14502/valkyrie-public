@@ -493,6 +493,10 @@ export default function Dashboard() {
         <NowBanner />
       </div>
 
+      {/* Above the fold on purpose: a daily habit check is worthless if you
+          have to scroll past the fleet to find it. */}
+      <SupplementsCard size={profile.size} />
+
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />
 
@@ -516,7 +520,6 @@ export default function Dashboard() {
         </div>
 
         <div className="order-2 min-w-0 space-y-6 xl:sticky xl:top-24">
-          <SupplementsCard size={profile.size} />
           <TradeBotCard />
         </div>
       </div>
