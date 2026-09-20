@@ -1,39 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { Card } from './Card'
 import { apiErrorText } from '../lib/api'
 import {
-  createSupplement, dateLabel, daysLabel, deleteSupplement, fetchSupplementDay, logSupplement,
-  logSupplementSlot, shiftDateKey, supplementDateKey, updateSupplement, DAY_LETTERS, SUPPLEMENT_SLOTS,
-  type SupplementDay, type SupplementDose, type SupplementSlot,
+  dateLabel, fetchSupplementDay, logSupplementDay, parseDateKey, supplementDateKey,
+  type SupplementDay, type SupplementDayEntry,
 } from '../lib/supplementsApi'
 import type { PanelSize } from './HomePanels'
 
-// The supplement tracker. One tap per dose, grouped by time of day, with a
-// two-week strip underneath so a missed day is visible without opening
-// anything. The stack itself is edited in place (the pencil), so there is no
-// second page to keep in sync.
-//
-// The day is steppable because doses get ticked off at 1am for the day that
-// just ended. Arrows walk back and forward; a square in the history strip jumps
-// straight to that day.
+// Supplements: one checkbox a day, not a checklist. The big button answers
+// today; the strip under it is the last two weeks, and every square in it is
+// its own checkbox, which is what makes a 1am "that was yesterday" tap work.
 
-const SLOT_LABEL: Record<SupplementSlot, string> = {
-  morning: 'morning',
-  midday: 'midday',
-  evening: 'evening',
-  night: 'night',
-}
-
-/** Which slot a tap right now most likely belongs to, for a new entry. */
-function slotForNow(): SupplementSlot {
-  const h = new Date().getHours()
-  if (h < 11) return 'morning'
-  if (h < 16) return 'midday'
-  if (h < 21) return 'evening'
-  return 'night'
-}
+const HISTORY_DAYS = 14
 
 /** Today's key, re-checked every minute so a tab left open rolls over at midnight. */
 function useToday(): string {
@@ -48,282 +28,82 @@ function useToday(): string {
   return date
 }
 
-const fmtTakenAt = (iso: string | null) =>
+const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
 
-function DoseRow({ dose, size, onToggle }: { dose: SupplementDose; size: PanelSize; onToggle: () => void }) {
-  const taken = dose.taken
+function DayColumn({ entry, today, onToggle }: { entry: SupplementDayEntry; today: string; onToggle: () => void }) {
+  const isToday = entry.date === today
+  const letter = parseDateKey(entry.date).toLocaleDateString([], { weekday: 'narrow' })
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-pressed={taken}
-      className={`flex w-full items-center gap-3 border px-3 text-left transition-colors ${size === 'pad' ? 'min-h-14' : 'min-h-11'} ${
-        taken
-          ? 'border-[var(--color-success)]/50 bg-[color:rgba(255,255,255,0.02)]'
-          : 'border-[var(--color-border)] active:border-[var(--color-accent)] hover:border-[var(--color-accent)]/60'
-      }`}
+      aria-pressed={entry.taken}
+      title={`${dateLabel(entry.date, today)}${entry.taken ? ` · taken ${fmtTime(entry.takenAt)}` : ' · not logged'}`}
+      className="flex min-w-0 flex-1 flex-col items-center gap-1 py-1"
     >
+      <span className={`text-[9px] uppercase ${isToday ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}>
+        {letter}
+      </span>
       <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center border ${
-          taken ? 'border-[var(--color-success)] text-[var(--color-success)]' : 'border-[var(--color-border)] text-transparent'
-        }`}
-        style={taken ? { boxShadow: '0 0 8px var(--color-success)' } : undefined}
-        aria-hidden
-      >
-        <Check size={13} strokeWidth={3} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className={`block truncate text-sm ${taken ? 'text-[var(--color-text-dim)] line-through decoration-[var(--color-text-faint)]' : 'text-[var(--color-text)]'}`}>
-          {dose.name}
-        </span>
-        {(dose.dose || dose.days) && (
-          <span className="block truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-            {[dose.dose, dose.days ? daysLabel(dose.days) : ''].filter(Boolean).join(' · ')}
-          </span>
-        )}
-      </span>
-      <span className="shrink-0 text-[10px] tabular-nums text-[var(--color-text-faint)]">
-        {fmtTakenAt(dose.takenAt)}
-      </span>
+        className={`h-5 w-full border ${isToday ? 'outline outline-1 outline-offset-1 outline-[var(--color-accent)]' : ''}`}
+        style={{
+          borderColor: entry.taken ? 'var(--color-success)' : 'var(--color-border)',
+          backgroundColor: entry.taken ? 'var(--color-success)' : 'transparent',
+          boxShadow: entry.taken ? '0 0 8px var(--color-success)' : undefined,
+        }}
+      />
     </button>
-  )
-}
-
-function HistoryStrip({
-  history, streak, selected, onPick,
-}: {
-  history: SupplementDay['history']
-  streak: number
-  selected: string
-  onPick: (date: string) => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
-      {/* One row, never wrapped: 14 squares plus the streak fit a 332px phone
-          card at this size. */}
-      <div className="flex min-w-0 flex-nowrap gap-0.5">
-        {history.map((d) => {
-          const complete = d.due > 0 && d.taken >= d.due
-          const partial = d.taken > 0 && !complete
-          const title = d.due === 0 ? `${d.date}: nothing scheduled` : `${d.date}: ${d.taken}/${d.due}`
-          return (
-            <button
-              key={d.date}
-              type="button"
-              title={title}
-              aria-label={title}
-              onClick={() => onPick(d.date)}
-              className={`h-3 w-3 shrink-0 border ${d.date === selected ? 'outline outline-1 outline-offset-1 outline-[var(--color-accent)]' : ''}`}
-              style={{
-                borderColor: complete ? 'var(--color-success)' : partial ? 'var(--color-warning)' : 'var(--color-border)',
-                backgroundColor: complete ? 'var(--color-success)' : partial ? 'var(--color-warning)' : 'transparent',
-                opacity: d.due === 0 ? 0.3 : 1,
-              }}
-            />
-          )
-        })}
-      </div>
-      <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
-        {streak} day streak
-      </span>
-    </div>
-  )
-}
-
-const field = 'border border-[var(--color-border)] bg-transparent px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]'
-
-function DayPicker({ days, onChange }: { days: string; onChange: (days: string) => void }) {
-  const set = new Set(days ? days.split(',') : ['0', '1', '2', '3', '4', '5', '6'])
-  const toggle = (n: number) => {
-    const next = new Set(set)
-    if (next.has(String(n))) next.delete(String(n))
-    else next.add(String(n))
-    onChange(next.size === 7 || next.size === 0 ? '' : [...next].sort().join(','))
-  }
-  return (
-    <div className="flex gap-1">
-      {DAY_LETTERS.map((letter, n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => toggle(n)}
-          aria-pressed={set.has(String(n))}
-          className={`h-7 w-7 border text-[10px] uppercase ${
-            set.has(String(n))
-              ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-              : 'border-[var(--color-border)] text-[var(--color-text-faint)]'
-          }`}
-        >
-          {letter}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function EditRow({ dose, onDone }: { dose: SupplementDose; onDone: () => void }) {
-  const qc = useQueryClient()
-  const [draft, setDraft] = useState({ name: dose.name, dose: dose.dose, slot: dose.slot, days: dose.days })
-  const invalidate = () => { void qc.invalidateQueries({ queryKey: ['supplements'] }) }
-  const save = useMutation({
-    mutationFn: () => updateSupplement(dose.id, { ...draft, name: draft.name.trim() }),
-    onSuccess: () => { invalidate(); onDone() },
-  })
-  const remove = useMutation({
-    mutationFn: () => deleteSupplement(dose.id),
-    onSuccess: () => { invalidate(); onDone() },
-  })
-  return (
-    <div className="space-y-2 border border-[var(--color-border)] p-3">
-      <div className="flex flex-wrap gap-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="name" className={`w-full min-w-0 sm:w-auto sm:flex-1 ${field}`} />
-        <input value={draft.dose} onChange={(e) => setDraft({ ...draft, dose: e.target.value })} placeholder="dose" className={`w-28 ${field}`} />
-        <select value={draft.slot} onChange={(e) => setDraft({ ...draft, slot: e.target.value as SupplementSlot })} className={field}>
-          {SUPPLEMENT_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <DayPicker days={draft.days} onChange={(days) => setDraft({ ...draft, days })} />
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => remove.mutate()}
-            className="inline-flex min-h-9 items-center gap-1 border border-[var(--color-border)] px-2 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-          >
-            <Trash2 size={12} /> delete
-          </button>
-          <button type="button" onClick={onDone} className="min-h-9 px-2 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">cancel</button>
-          <button
-            type="button"
-            disabled={!draft.name.trim() || save.isPending}
-            onClick={() => save.mutate()}
-            className="inline-flex min-h-9 items-center gap-1 border border-[var(--color-accent)]/60 px-2 text-[11px] uppercase tracking-[0.14em] text-[var(--color-accent)] disabled:opacity-40"
-          >
-            save
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AddRow({ onAdded }: { onAdded: () => void }) {
-  const qc = useQueryClient()
-  const [draft, setDraft] = useState({ name: '', dose: '', slot: slotForNow() as SupplementSlot, days: '' })
-  const [error, setError] = useState('')
-  const add = useMutation({
-    mutationFn: () => createSupplement({ ...draft, name: draft.name.trim() }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['supplements'] })
-      setDraft({ name: '', dose: '', slot: slotForNow(), days: '' })
-      setError('')
-      onAdded()
-    },
-    onError: (e: unknown) => setError(apiErrorText(e, 'could not add that')),
-  })
-  return (
-    <form
-      className="space-y-2 border border-dashed border-[var(--color-border)] p-3"
-      onSubmit={(e) => { e.preventDefault(); if (draft.name.trim()) add.mutate() }}
-    >
-      <div className="flex flex-wrap gap-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="vitamin D3" className={`w-full min-w-0 sm:w-auto sm:flex-1 ${field}`} />
-        <input value={draft.dose} onChange={(e) => setDraft({ ...draft, dose: e.target.value })} placeholder="5000 IU" className={`w-28 ${field}`} />
-        <select value={draft.slot} onChange={(e) => setDraft({ ...draft, slot: e.target.value as SupplementSlot })} className={field}>
-          {SUPPLEMENT_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <DayPicker days={draft.days} onChange={(days) => setDraft({ ...draft, days })} />
-        <button
-          type="submit"
-          disabled={!draft.name.trim() || add.isPending}
-          className="inline-flex min-h-9 items-center gap-1 border border-[var(--color-accent)]/60 px-3 text-[11px] uppercase tracking-[0.14em] text-[var(--color-accent)] disabled:opacity-40"
-        >
-          <Plus size={12} /> add
-        </button>
-      </div>
-      {error && <div className="text-xs text-[var(--color-danger)]">{error}</div>}
-    </form>
   )
 }
 
 export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) {
   const today = useToday()
   const qc = useQueryClient()
-  const [editing, setEditing] = useState(false)
-  const [editId, setEditId] = useState<string | null>(null)
-  // null means "follow today", so a tab left open overnight moves with the
-  // clock. Stepping back pins an explicit date instead, and midnight leaves it
-  // alone: at 1am you are still ticking off yesterday.
-  const [pinned, setPinned] = useState<string | null>(null)
-  const date = pinned ?? today
-  const isToday = date === today
-  const pick = (next: string) => setPinned(next === today ? null : next)
-  const key = useMemo(() => ['supplements', 'day', date], [date])
+  const key = ['supplements', 'day', today]
 
-  const day = useQuery({ queryKey: key, queryFn: () => fetchSupplementDay(date), refetchInterval: 5 * 60_000 })
+  const day = useQuery({
+    queryKey: key,
+    queryFn: () => fetchSupplementDay(today, HISTORY_DAYS),
+    refetchInterval: 5 * 60_000,
+  })
 
-  const toggle = useMutation({
-    mutationFn: (dose: SupplementDose) => logSupplement(date, dose.id, !dose.taken),
+  const log = useMutation({
+    mutationFn: ({ date, taken }: { date: string; taken: boolean }) => logSupplementDay(date, taken, HISTORY_DAYS),
     // Optimistic: the tap has to land instantly on the phone, where the round
-    // trip over the tailnet is the slowest part of it.
-    onMutate: async (dose) => {
+    // trip is the slowest part of it.
+    onMutate: async ({ date, taken }) => {
       await qc.cancelQueries({ queryKey: key })
       const prev = qc.getQueryData<SupplementDay>(key)
       if (prev) {
-        const items = prev.items.map((i) => i.id === dose.id
-          ? { ...i, taken: !dose.taken, takenAt: !dose.taken ? new Date().toISOString() : null }
-          : i)
-        qc.setQueryData<SupplementDay>(key, { ...prev, items, taken: items.filter((i) => i.taken).length })
+        const at = taken ? new Date().toISOString() : null
+        qc.setQueryData<SupplementDay>(key, {
+          ...prev,
+          taken: date === prev.date ? taken : prev.taken,
+          takenAt: date === prev.date ? at : prev.takenAt,
+          history: prev.history.map((h) => (h.date === date ? { ...h, taken, takenAt: at } : h)),
+        })
       }
       return { prev }
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(key, ctx.prev) },
-    onSuccess: (data) => qc.setQueryData(key, data),
-  })
-
-  const takeAll = useMutation({
-    mutationFn: (slot?: SupplementSlot) => logSupplementSlot(date, slot),
+    // The server owns the streak and the 30-day count, so take its answer.
     onSuccess: (data) => qc.setQueryData(key, data),
   })
 
   const d = day.data
-  const bySlot = useMemo(() => {
-    const groups = new Map<SupplementSlot, SupplementDose[]>()
-    for (const item of d?.items ?? []) {
-      const list = groups.get(item.slot) ?? []
-      list.push(item)
-      groups.set(item.slot, list)
-    }
-    return SUPPLEMENT_SLOTS.map((slot) => ({ slot, items: groups.get(slot) ?? [] })).filter((g) => g.items.length > 0)
-  }, [d])
-
-  const pct = d && d.due > 0 ? Math.round((d.taken / d.due) * 100) : 0
-  const allDone = Boolean(d && d.due > 0 && d.taken === d.due)
+  const taken = Boolean(d?.taken)
+  const toggle = (date: string, next: boolean) => log.mutate({ date, taken: next })
 
   return (
     <Card
       title="Supplements"
       storageKey="supplements"
       collapsible
-      action={(
-        <div className="flex shrink-0 items-center gap-3">
-          {d && d.due > 0 && (
-            <span className={`text-[11px] font-bold uppercase tracking-[0.14em] ${allDone ? 'text-[var(--color-success)]' : 'text-[var(--color-text-dim)]'}`}>
-              {d.taken}/{d.due}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => { setEditing((v) => !v); setEditId(null) }}
-            aria-label={editing ? 'done editing' : 'edit supplements'}
-            className="flex h-8 w-8 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-          >
-            {editing ? <X size={13} /> : <Pencil size={13} />}
-          </button>
-        </div>
+      action={d && (
+        <span className={`shrink-0 text-[11px] font-bold uppercase tracking-[0.14em] ${d.streak > 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}`}>
+          {d.streak} day streak
+        </span>
       )}
     >
       {day.isLoading && !d ? (
@@ -332,104 +112,58 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
         <div className="text-sm text-[var(--color-danger)]">{apiErrorText(day.error, 'supplement log unavailable')}</div>
       ) : (
         <div className="space-y-4">
-          {/* Day stepper. It sits in the body, not the header: on a 390px phone
-              it squeezed the title down to "SUPPLEME…". Forward stops at today,
-              because there is nothing to tick off in advance. */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => pick(shiftDateKey(date, -1))}
-              aria-label="previous day"
-              className="flex h-8 w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          {/* Today, as one target big enough to hit without looking. */}
+          <button
+            type="button"
+            onClick={() => toggle(today, !taken)}
+            aria-pressed={taken}
+            className={`flex w-full items-center gap-3 border px-4 text-left transition-colors ${size === 'pad' ? 'min-h-20' : 'min-h-16'} ${
+              taken
+                ? 'border-[var(--color-success)] bg-[color:rgba(255,255,255,0.03)]'
+                : 'border-[var(--color-border)] hover:border-[var(--color-accent)] active:border-[var(--color-accent)]'
+            }`}
+          >
+            <span
+              className={`flex h-7 w-7 shrink-0 items-center justify-center border ${
+                taken ? 'border-[var(--color-success)] text-[var(--color-success)]' : 'border-[var(--color-border)] text-transparent'
+              }`}
+              style={taken ? { boxShadow: '0 0 10px var(--color-success)' } : undefined}
+              aria-hidden
             >
-              <ChevronLeft size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPinned(null)}
-              disabled={isToday}
-              title={date}
-              className={`min-w-0 flex-1 truncate text-center text-[10px] uppercase tracking-[0.18em] ${isToday ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-accent)]'}`}
-            >
-              {dateLabel(date, today)}
-              {!isToday && <span className="ml-2 text-[var(--color-text-faint)]">back to today</span>}
-            </button>
-            <button
-              type="button"
-              onClick={() => pick(shiftDateKey(date, 1))}
-              disabled={isToday}
-              aria-label="next day"
-              className="flex h-8 w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-25 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
-            >
-              <ChevronRight size={15} />
-            </button>
-          </div>
+              <Check size={18} strokeWidth={3} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className="block text-sm font-bold uppercase tracking-[0.18em]"
+                style={{ color: taken ? 'var(--color-success)' : 'var(--color-text)' }}
+              >
+                {taken ? 'took them today' : 'took them?'}
+              </span>
+              <span className="block text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+                {taken ? `logged ${fmtTime(d?.takenAt ?? null)} · tap to undo` : 'tap when you take them'}
+              </span>
+            </span>
+          </button>
 
-          {d && d.due > 0 && (
-            <div className="h-1.5 w-full bg-[rgba(255,255,255,0.07)]">
-              <div
-                className="h-full transition-[width] duration-300"
-                style={{
-                  width: `${pct}%`,
-                  backgroundColor: allDone ? 'var(--color-success)' : 'var(--color-accent)',
-                  boxShadow: `0 0 8px ${allDone ? 'var(--color-success)' : 'var(--color-accent)'}`,
-                }}
-              />
-            </div>
-          )}
-
-          {d && d.due === 0 && !editing && (
-            <div className="text-sm text-[var(--color-text-dim)]">
-              Nothing scheduled {isToday ? 'today' : `on ${dateLabel(date, today)}`}. Tap the pencil to add what you take.
-            </div>
-          )}
-
-          {bySlot.map(({ slot, items }) => {
-            const remaining = items.filter((i) => !i.taken)
-            return (
-              <div key={slot} className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">{SLOT_LABEL[slot]}</span>
-                  {remaining.length > 1 && !editing && (
-                    <button
-                      type="button"
-                      onClick={() => takeAll.mutate(slot)}
-                      className="min-h-8 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
-                    >
-                      take all {remaining.length}
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  {items.map((item) => (
-                    editing && editId === item.id
-                      ? <EditRow key={item.id} dose={item} onDone={() => setEditId(null)} />
-                      : editing
-                        ? (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => setEditId(item.id)}
-                            className="flex w-full items-center gap-3 border border-[var(--color-border)] px-3 py-2 text-left hover:border-[var(--color-accent)]"
-                          >
-                            <Pencil size={12} className="shrink-0 text-[var(--color-text-faint)]" />
-                            <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">{item.name}</span>
-                            <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-                              {[item.dose, daysLabel(item.days)].filter(Boolean).join(' · ')}
-                            </span>
-                          </button>
-                        )
-                        : <DoseRow key={item.id} dose={item} size={size} onToggle={() => toggle.mutate(item)} />
-                  ))}
-                </div>
+          {/* Every square is its own checkbox, so a missed day is one tap away
+              and so is last night's dose at 1am. */}
+          {d && (
+            <div>
+              <div className="flex items-stretch gap-1">
+                {d.history.map((entry) => (
+                  <DayColumn
+                    key={entry.date}
+                    entry={entry}
+                    today={today}
+                    onToggle={() => toggle(entry.date, !entry.taken)}
+                  />
+                ))}
               </div>
-            )
-          })}
-
-          {editing && <AddRow onAdded={() => { /* list refreshes itself */ }} />}
-
-          {d && d.history.length > 0 && !editing && (
-            <HistoryStrip history={d.history} streak={d.streak} selected={date} onPick={pick} />
+              <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+                <span>{d.last30} of the last 30 days</span>
+                <span>tap any day</span>
+              </div>
+            </div>
           )}
         </div>
       )}
