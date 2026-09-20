@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -23,6 +24,16 @@ const buildId = process.env.VITE_BUILD_ID || process.env.CF_PAGES_COMMIT_SHA || 
 // TAURI_ENV_PLATFORM during beforeBuildCommand, so disable the SW for that
 // build (virtual:pwa-register still resolves to a no-op, keeping imports valid).
 const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM || process.env.VITE_TAURI === '1'
+
+// Push handlers live in public/push-sw.js and are pulled into the generated
+// Workbox worker with importScripts (see the workbox block below). Workbox
+// writes that import as a fixed string, so a change to push-sw.js alone leaves
+// sw.js byte-identical and no browser ever notices the update. Hashing the
+// file into the query string is what makes an edit ship.
+const pushSwRev = createHash('sha1')
+  .update(readFileSync(new URL('./public/push-sw.js', import.meta.url)))
+  .digest('hex')
+  .slice(0, 8)
 
 export default defineConfig({
   define: {
@@ -60,6 +71,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Pulled into sw.js, so precaching it as a page asset would only
+        // duplicate it in the cache.
+        globIgnores: ['push-sw.js'],
+        importScripts: [`/push-sw.js?v=${pushSwRev}`],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // Don't auto-skip-waiting: the new SW stays in "waiting" until the user

@@ -100,7 +100,9 @@ function HistoryStrip({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
-      <div className="flex min-w-0 flex-wrap gap-1">
+      {/* One row, never wrapped: 14 squares plus the streak fit a 332px phone
+          card at this size. */}
+      <div className="flex min-w-0 flex-nowrap gap-0.5">
         {history.map((d) => {
           const complete = d.due > 0 && d.taken >= d.due
           const partial = d.taken > 0 && !complete
@@ -112,7 +114,7 @@ function HistoryStrip({
               title={title}
               aria-label={title}
               onClick={() => onPick(d.date)}
-              className={`h-3.5 w-3.5 border ${d.date === selected ? 'outline outline-1 outline-offset-1 outline-[var(--color-accent)]' : ''}`}
+              className={`h-3 w-3 shrink-0 border ${d.date === selected ? 'outline outline-1 outline-offset-1 outline-[var(--color-accent)]' : ''}`}
               style={{
                 borderColor: complete ? 'var(--color-success)' : partial ? 'var(--color-warning)' : 'var(--color-border)',
                 backgroundColor: complete ? 'var(--color-success)' : partial ? 'var(--color-warning)' : 'transparent',
@@ -307,37 +309,7 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
       storageKey="supplements"
       collapsible
       action={(
-        <div className="flex shrink-0 items-center gap-2">
-          {/* Day stepper. Forward stops at today: there is nothing to tick off
-              in advance. */}
-          <div className="flex items-center">
-            <button
-              type="button"
-              onClick={() => pick(shiftDateKey(date, -1))}
-              aria-label="previous day"
-              className="flex h-8 w-7 items-center justify-center text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
-            >
-              <ChevronLeft size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPinned(null)}
-              disabled={isToday}
-              title={date}
-              className={`min-w-[72px] text-center text-[10px] uppercase tracking-[0.14em] ${isToday ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-accent)]'}`}
-            >
-              {dateLabel(date, today)}
-            </button>
-            <button
-              type="button"
-              onClick={() => pick(shiftDateKey(date, 1))}
-              disabled={isToday}
-              aria-label="next day"
-              className="flex h-8 w-7 items-center justify-center text-[var(--color-text-dim)] hover:text-[var(--color-accent)] disabled:opacity-25 disabled:hover:text-[var(--color-text-dim)]"
-            >
-              <ChevronRight size={15} />
-            </button>
-          </div>
+        <div className="flex shrink-0 items-center gap-3">
           {d && d.due > 0 && (
             <span className={`text-[11px] font-bold uppercase tracking-[0.14em] ${allDone ? 'text-[var(--color-success)]' : 'text-[var(--color-text-dim)]'}`}>
               {d.taken}/{d.due}
@@ -360,6 +332,39 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
         <div className="text-sm text-[var(--color-danger)]">{apiErrorText(day.error, 'supplement log unavailable')}</div>
       ) : (
         <div className="space-y-4">
+          {/* Day stepper. It sits in the body, not the header: on a 390px phone
+              it squeezed the title down to "SUPPLEME…". Forward stops at today,
+              because there is nothing to tick off in advance. */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => pick(shiftDateKey(date, -1))}
+              aria-label="previous day"
+              className="flex h-8 w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setPinned(null)}
+              disabled={isToday}
+              title={date}
+              className={`min-w-0 flex-1 truncate text-center text-[10px] uppercase tracking-[0.18em] ${isToday ? 'text-[var(--color-text-faint)]' : 'text-[var(--color-accent)]'}`}
+            >
+              {dateLabel(date, today)}
+              {!isToday && <span className="ml-2 text-[var(--color-text-faint)]">back to today</span>}
+            </button>
+            <button
+              type="button"
+              onClick={() => pick(shiftDateKey(date, 1))}
+              disabled={isToday}
+              aria-label="next day"
+              className="flex h-8 w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-25 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-dim)]"
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+
           {d && d.due > 0 && (
             <div className="h-1.5 w-full bg-[rgba(255,255,255,0.07)]">
               <div

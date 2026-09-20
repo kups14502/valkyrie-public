@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Glasses, Monitor, RefreshCw, Smartphone, Tablet, Wand2 } from 'lucide-react'
+import { PushSettings } from '../components/PushSettings'
 import { ThemePicker } from '../components/ThemePicker'
 import { fetchPlexLibrary, fetchPlexServer } from '../lib/api'
 import {
@@ -170,6 +171,8 @@ export default function Settings() {
           <span className="text-[11px] text-[var(--color-text-faint)]">Accent color, saved on this device.</span>
         </div>
       </section>
+
+      <PushSettings />
 
       <PlexLinkTest />
 

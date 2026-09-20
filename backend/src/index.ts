@@ -29,6 +29,7 @@ import terminalRoute, { attachTerminalWs } from './routes/terminal.js'
 import calendarRoute from './routes/calendar.js'
 import mealsRoute from './routes/meals.js'
 import supplementsRoute from './routes/supplements.js'
+import pushRoute from './routes/push.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -142,6 +143,7 @@ app.use('/api', terminalRoute)
 app.use('/api', calendarRoute)
 app.use('/api', mealsRoute)
 app.use('/api', supplementsRoute)
+app.use('/api', pushRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
