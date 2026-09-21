@@ -1,6 +1,15 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { pushToAll } from './routes/push.js'
 
+// The health alerts (Claude quota and sign-ins, disk, Vaultwarden) go to the
+// phone as Web Push from this server. They used to be Discord webhook posts,
+// which meant the one place Brendon had to watch for "something is wrong" was
+// a chat channel he had to remember to open.
+//
+// postDiscord stays for the Plex media-request notices in routes/plex.ts.
+// Those are a running record of what was asked for, not something to interrupt
+// a phone over, so they keep the channel.
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
 const POLL_MS = 60_000
 const RESETSAT_JITTER_MS = 30 * 60_000
@@ -63,6 +72,18 @@ export async function postDiscord(content: string): Promise<void> {
   } catch (err) {
     console.error('[alerts] webhook error', (err as Error).message)
   }
+}
+
+/**
+ * Raise one health alert on every subscribed device.
+ *
+ * `tag` is the lock-screen collapse key, and the pairs here are deliberate: a
+ * recovery carries the SAME tag as the problem it clears, so "disk back under
+ * 90%" replaces "disk at 94%" instead of leaving both on the screen.
+ */
+async function alert(title: string, body: string, tag: string, url: string): Promise<void> {
+  const r = await pushToAll({ title, body, tag, url })
+  if (!r.ok) console.error('[alerts] push failed', { title, detail: r.detail })
 }
 
 async function fetchJSON<T>(p: string): Promise<T | null> {
@@ -133,7 +154,11 @@ async function tick(state: AlertState): Promise<AlertState> {
     if (quota) {
       const over = quota.sessionPct >= CLAUDE_THRESHOLD
       if (over && !state.claudeOver90) {
-        await postDiscord(`🔴 **Claude session at ${quota.sessionPct}%** — resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`)
+        await alert(
+          `Claude session at ${quota.sessionPct}%`,
+          `Resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`,
+          'claude-quota', '/dashboard',
+        )
       }
       next.claudeOver90 = over
     }
@@ -148,7 +173,11 @@ async function tick(state: AlertState): Promise<AlertState> {
     for (const c of dead) {
       if (state.signedOut.includes(c.id)) continue
       const who = c.email ? `${c.label ?? c.id} (${c.email})` : (c.label ?? c.id)
-      await postDiscord(`🔴 **Claude sign-in ${c.authError}** — ${who}. Run \`claude /login\` against its config dir on odin.`)
+      await alert(
+        `Claude sign-in ${c.authError}`,
+        `${who}. Run claude /login against its config dir on odin.`,
+        `claude-signin-${c.id}`, '/dashboard',
+      )
     }
     const recovered = state.signedOut.filter((id) => {
       const c = clients.find((x) => x.id === id)
@@ -156,7 +185,7 @@ async function tick(state: AlertState): Promise<AlertState> {
     })
     for (const id of recovered) {
       const c = clients.find((x) => x.id === id)
-      await postDiscord(`🟢 **Claude sign-in restored** — ${c?.label ?? id}.`)
+      await alert('Claude sign-in restored', `${c?.label ?? id}.`, `claude-signin-${id}`, '/dashboard')
     }
     next.signedOut = dead.map((c) => c.id)
   }
@@ -165,9 +194,9 @@ async function tick(state: AlertState): Promise<AlertState> {
     const pct = sys.disk.percent
     const over = pct >= DISK_THRESHOLD
     if (over && !state.diskOver90) {
-      await postDiscord(`🔴 **Disk at ${pct.toFixed(1)}%** — running out of space on /.`)
+      await alert(`Disk at ${pct.toFixed(1)}%`, 'Running out of space on /.', 'disk', '/services')
     } else if (!over && state.diskOver90) {
-      await postDiscord(`🟢 **Disk back under ${DISK_THRESHOLD}%** — now ${pct.toFixed(1)}%.`)
+      await alert(`Disk back under ${DISK_THRESHOLD}%`, `Now ${pct.toFixed(1)}%.`, 'disk', '/services')
     }
     next.diskOver90 = over
   }
@@ -175,17 +204,17 @@ async function tick(state: AlertState): Promise<AlertState> {
   if (vault) {
     const down = !vault.container.running
     if (down && !state.vaultDown) {
-      await postDiscord(`🔴 **Vaultwarden container down.**`)
+      await alert('Vaultwarden is down', 'The container stopped.', 'vault-container', '/vault')
     } else if (!down && state.vaultDown) {
-      await postDiscord(`🟢 **Vaultwarden container back up.**`)
+      await alert('Vaultwarden is back up', 'The container is running again.', 'vault-container', '/vault')
     }
     next.vaultDown = down
 
     const stale = vault.backups.stale
     if (stale && !state.vaultStale) {
-      await postDiscord(`🟡 **Vault backups stale** — last backup is older than 36h.`)
+      await alert('Vault backups are stale', 'The last backup is older than 36 hours.', 'vault-backups', '/vault')
     } else if (!stale && state.vaultStale) {
-      await postDiscord(`🟢 **Vault backups fresh again.**`)
+      await alert('Vault backups are fresh again', 'A backup landed inside the window.', 'vault-backups', '/vault')
     }
     next.vaultStale = stale
   }
@@ -194,10 +223,9 @@ async function tick(state: AlertState): Promise<AlertState> {
 }
 
 export function startAlerts(): void {
-  if (!WEBHOOK_URL) {
-    console.log('[alerts] DISCORD_WEBHOOK_URL not set — alerts disabled')
-    return
-  }
+  // No webhook gate any more: these alerts are push, and the poller has to run
+  // regardless so the state file keeps tracking. Without it, a subscription
+  // arriving later would fire every condition that had been true all along.
   let state = loadState()
   const loop = async () => {
     try {
