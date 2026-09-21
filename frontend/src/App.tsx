@@ -31,6 +31,50 @@ import Dashboard from './pages/Dashboard'
 // Once per route per tab: a chunk that is genuinely broken still surfaces as a
 // crash card instead of a reload loop. The flag clears on a good load, so a
 // second deploy into the same tab is handled like the first.
+
+// A plain reload is the fix in a browser tab, because index.html is served
+// no-cache. In the INSTALLED app it is not: the service worker answers the
+// navigation out of its precache, so the reload hands back the same stale
+// index.html naming the same missing chunk, and every code-split route stays
+// broken while the home screen (bundled, already loaded) keeps working. That
+// is what left the iPhone able to open nothing but its home screen.
+//
+// So escape the old shell before reloading. Activating a worker that is
+// already waiting is the cheap way and keeps the offline cache. Failing that,
+// the precache itself is the stale thing: drop the worker and its caches and
+// let the next load register a fresh one.
+async function refreshShell(): Promise<void> {
+  const takeOver = (regs: readonly ServiceWorkerRegistration[]): boolean => {
+    const waiting = regs.map((r) => r.waiting).filter((w): w is ServiceWorker => Boolean(w))
+    // main.tsx reloads on controllerchange, so activation carries the reload.
+    waiting.forEach((w) => w.postMessage({ type: 'SKIP_WAITING' }))
+    return waiting.length > 0
+  }
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? []
+    if (takeOver(regs)) {
+      // Belt and braces: if controllerchange never fires, reload anyway.
+      window.setTimeout(() => window.location.reload(), 3000)
+      return
+    }
+    await Promise.all(regs.map((r) => r.update().catch(() => {})))
+    if (takeOver((await navigator.serviceWorker?.getRegistrations?.()) ?? [])) {
+      window.setTimeout(() => window.location.reload(), 3000)
+      return
+    }
+    if (regs.length > 0) {
+      await Promise.all(regs.map((r) => r.unregister().catch(() => false)))
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)))
+      }
+    }
+  } catch {
+    // Nothing else to try; the reload below is still worth taking.
+  }
+  window.location.reload()
+}
+
 function lazyRoute(name: string, load: () => Promise<{ default: ComponentType }>) {
   const key = `valkyrie.chunk.${name}`
   return lazy(async () => {
@@ -45,7 +89,7 @@ function lazyRoute(name: string, load: () => Promise<{ default: ComponentType }>
         if (!retried) sessionStorage.setItem(key, '1')
       } catch { /* private mode: no second chance, fall through to the card */ }
       if (retried) throw err
-      window.location.reload()
+      void refreshShell()
       // The page is on its way out; never resolve, so nothing renders behind it.
       return new Promise<{ default: ComponentType }>(() => {})
     }
