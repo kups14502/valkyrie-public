@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 
 const PRESETS = [
   { label: 'Matrix', color: '#00ff41' },
@@ -55,15 +55,52 @@ export function applyAccent(hex: string) {
   localStorage.setItem('valkyrie-accent', hex)
 }
 
+const PANEL_W = 224
+const EDGE = 8
+
 export function ThemePicker() {
   const [open, setOpen] = useState(false)
   const [hex, setHex] = useState(() => localStorage.getItem('valkyrie-accent') ?? localStorage.getItem('mc-accent') ?? '#00ff41')
   const [draft, setDraft] = useState(hex)
   const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  // Where the panel sits, measured rather than declared. It used to be
+  // right-0, which anchors its RIGHT edge to the button's. That is right in
+  // the header, where the button sits near the right of the screen, but the
+  // same component also sits a few pixels from the LEFT edge inside the
+  // phone's hamburger menu, and there a 224px panel hung off the display.
+  const [box, setBox] = useState<{ left: number; width: number } | null>(null)
 
   useEffect(() => {
     applyAccent(hex)
   }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      const btn = btnRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      const vw = document.documentElement.clientWidth
+      const width = Math.min(PANEL_W, vw - EDGE * 2)
+      // Start right-aligned to the button, then push back inside whichever
+      // edge it crossed. `left` is an offset from the anchor, not a page
+      // coordinate.
+      let left = r.width - width
+      const overLeft = EDGE - (r.left + left)
+      if (overLeft > 0) left += overLeft
+      const overRight = (r.left + left + width) - (vw - EDGE)
+      if (overRight > 0) left -= overRight
+      setBox({ left, width })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('orientationchange', place)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('orientationchange', place)
+    }
+  }, [open])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -85,6 +122,7 @@ export function ThemePicker() {
   return (
     <div ref={ref} className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="Theme color"
@@ -98,7 +136,10 @@ export function ThemePicker() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-56 border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div
+          className="absolute top-full z-50 mt-2 border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+          style={box ? { left: box.left, width: box.width } : { left: 0, visibility: 'hidden' }}
+        >
           <div className="mb-3 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">&gt; accent color</div>
 
           <div className="mb-4 grid grid-cols-4 gap-1.5">
