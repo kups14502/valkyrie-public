@@ -151,5 +151,21 @@ App version bump and updater manifest from the v${VERSION} desktop build.
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" || true
 git push origin main
 
+# Rebuild the WEB dist last. `tauri build` runs `npm run build` as its
+# beforeBuildCommand with TAURI_ENV_PLATFORM set, and vite.config.ts disables
+# the PWA plugin for that build on purpose (a service worker inside the
+# desktop app only serves stale UI). So every ship leaves frontend/dist with
+# no sw.js, and that same directory is what this box serves to phones and
+# tablets over the tailnet. Web Push needs the worker, so a shipped release
+# used to silently turn notifications off until someone rebuilt by hand.
+cd "$FRONTEND"
+npm run build >/dev/null
+cd "$ROOT"
+if [[ -f "$FRONTEND/dist/sw.js" ]]; then
+  echo "web dist rebuilt with the service worker"
+else
+  echo "WARNING: frontend/dist/sw.js is missing, push notifications are off" >&2
+fi
+
 echo "release: https://github.com/$REPO/releases/tag/$TAG"
 echo "manifest: $MANIFEST"
