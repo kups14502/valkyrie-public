@@ -665,6 +665,12 @@ type SearchResult = {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
+// MusicBrainz leaves unknown dates as year 0001; that is no year at all.
+function albumYear(a: ArrAlbum): number | null {
+  const y = a.releaseDate ? Number(a.releaseDate.slice(0, 4)) : 0
+  return y > 1000 ? y : null
+}
+
 // How well a candidate matches what was typed. Each service returns its own
 // loosely-sorted list, so without this an exact-title show loses to eight
 // obscure same-word movies. An album also matches on "artist title", which is
@@ -737,7 +743,7 @@ router.get('/plex/request/search', async (req, res) => {
       kind: 'album' as const,
       title: a.title,
       artist: a.artist?.artistName ?? null,
-      year: a.releaseDate ? (Number(a.releaseDate.slice(0, 4)) || null) : null,
+      year: albumYear(a),
       overview: a.albumType ?? '',
       poster: a.remoteCover ?? a.images?.find((i) => i.coverType === 'cover')?.remoteUrl ?? a.images?.[0]?.remoteUrl ?? null,
       tmdbId: null,
@@ -867,7 +873,7 @@ router.post('/plex/request/add', async (req, res) => {
           },
         }),
       })
-      const year = album.releaseDate ? Number(album.releaseDate.slice(0, 4)) || undefined : undefined
+      const year = albumYear(album) ?? undefined
       const label = `${album.artist.artistName}: ${album.title}`
       journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
       void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
