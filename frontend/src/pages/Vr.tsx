@@ -14,7 +14,8 @@ import {
   type TermOpen, type TermSession,
 } from '../lib/api'
 import {
-  TERM_FONT_FAMILY, TERM_NAME_RE, errText, readTermTheme, relIso, relative, termWsUrl, toCtrl,
+  TERM_FONT_FAMILY, TERM_NAME_RE, errText, readTermTheme, readUiZoom, relIso, relative, setTermZoom,
+  termWsUrl, toCtrl,
 } from '../lib/term'
 import { readText as readClipboard } from '../lib/clipboard'
 import { PasteSheet } from '../components/PasteSheet'
@@ -152,6 +153,9 @@ function VrTermPane({
   const fontRef = useRef(font)
   const focusedRef = useRef(focused)
   const missingRef = useRef(missing)
+  // The UI zoom this pane has to cancel for itself, see readUiZoom in lib/term.ts.
+  const zoomRef = useRef(1)
+  const [uiZoom, setUiZoom] = useState(readUiZoom)
   const [gen, setGen] = useState(0)
   const [conn, setConn] = useState<'connecting' | 'live' | 'closed'>('connecting')
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -200,8 +204,15 @@ function VrTermPane({
     const host = hostRef.current
     if (!host) return
 
+    // Cancel the UI zoom for the terminal's own subtree and pay it back in the
+    // font size. Without it xterm maps a pointer with zoomed pixels and a cell
+    // with unzoomed ones, so a click lands rows below the line it was on. See
+    // readUiZoom in lib/term.ts.
+    zoomRef.current = readUiZoom()
+    setTermZoom(host, zoomRef.current)
+
     const term = new XTerm({
-      fontSize: fontRef.current,
+      fontSize: fontRef.current * zoomRef.current,
       fontFamily: TERM_FONT_FAMILY,
       cursorBlink: true,
       allowProposedApi: true,
@@ -268,6 +279,7 @@ function VrTermPane({
       if (wsRef.current === ws) wsRef.current = null
       if (termRef.current === term) termRef.current = null
       if (fitRef.current === fit) fitRef.current = null
+      setTermZoom(host, 1)
     }
   }, [name, gen, safeFit, ctrlRef, onCtrlUsed])
 
@@ -276,10 +288,23 @@ function VrTermPane({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.options.fontSize = font
+    zoomRef.current = uiZoom
+    setTermZoom(hostRef.current, uiZoom)
+    term.options.fontSize = font * uiZoom
     const raf = requestAnimationFrame(() => safeFit())
     return () => cancelAnimationFrame(raf)
-  }, [font, safeFit])
+  }, [font, uiZoom, safeFit])
+
+  // applyZoom dispatches a resize event precisely so measuring listeners can
+  // catch it: `zoom` fires nothing of its own.
+  useEffect(() => {
+    const onZoom = () => setUiZoom((z) => {
+      const next = readUiZoom()
+      return next === z ? z : next
+    })
+    window.addEventListener('resize', onZoom)
+    return () => window.removeEventListener('resize', onZoom)
+  }, [])
 
   // A headset that took the browser off screen can drop the socket. Coming
   // back should reattach, not show a frozen screen. Not for a session that is

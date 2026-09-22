@@ -13,7 +13,8 @@ import {
   openTermSession, termLabel, type TermOpen, type TermSession,
 } from '../lib/api'
 import {
-  TERM_FONT_FAMILY, errText, readTermTheme as readTheme, relIso, relative, termWsUrl as wsUrl, toCtrl,
+  TERM_FONT_FAMILY, errText, readTermTheme as readTheme, readUiZoom, relIso, relative, setTermZoom,
+  termWsUrl as wsUrl, toCtrl,
 } from '../lib/term'
 import { readText as readClipboard } from '../lib/clipboard'
 import { useProfile } from '../lib/deviceMode'
@@ -109,6 +110,11 @@ export default function TerminalPage() {
   const rxRef = useRef(0)
   const probeSentRef = useRef(0)
   const beatsRef = useRef(false)
+  // The UI zoom, which the terminal has to cancel for itself. See readUiZoom in
+  // lib/term.ts for what it breaks. The ref is what the build-the-terminal
+  // effect reads, so a zoom change cannot rebuild the terminal and drop the
+  // socket; the state is what the font effect watches.
+  const zoomRef = useRef(1)
 
   // Geometry lives in refs, never state: a viewport event must not re-render
   // the chip list, the resume list, or the fourteen buttons.
@@ -135,7 +141,14 @@ export default function TerminalPage() {
     const v = Number(localStorage.getItem(FONT_KEY))
     return v >= FONT_MIN && v <= FONT_MAX ? v : 12
   })
+  const [uiZoom, setUiZoom] = useState(readUiZoom)
   const [picker, setPicker] = useState(false)
+  // The phone's session list. It is a sheet rather than a row because a row
+  // cannot hold it: measured at 375px, one chip carrying a real conversation
+  // title is 362px wide and the strip has 257px left after the back and new
+  // buttons, so even ONE session overflowed and every switch became a
+  // sideways drag on a 36px-tall scroller.
+  const [sheet, setSheet] = useState(false)
   const [paste, setPaste] = useState(false)
   const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -582,8 +595,13 @@ export default function TerminalPage() {
     const host = hostRef.current
     if (!active || !host) return
 
+    // Before the first paint, so the terminal is never measured at a scale it
+    // will not keep.
+    zoomRef.current = readUiZoom()
+    setTermZoom(host, zoomRef.current)
+
     const term = new XTerm({
-      fontSize: fontRef.current,
+      fontSize: fontRef.current * zoomRef.current,
       fontFamily: TERM_FONT_FAMILY,
       cursorBlink: true,
       allowProposedApi: true,
@@ -678,6 +696,7 @@ export default function TerminalPage() {
       ws.onerror = null
       ws.close()
       term.dispose()
+      setTermZoom(host, 1)
       if (wsRef.current === ws) wsRef.current = null
       if (termRef.current === term) termRef.current = null
       if (fitRef.current === fit) fitRef.current = null
@@ -685,16 +704,32 @@ export default function TerminalPage() {
   }, [active, gen, safeFit])
 
   // D. A font change alters cell metrics without changing the host's box, so
-  //    the ResizeObserver does not fire and this must fit for itself.
+  //    the ResizeObserver does not fire and this must fit for itself. A zoom
+  //    change is the same kind of event, and is handled here for the same
+  //    reason: the stored font is what Brendon chose, and what xterm is told is
+  //    that times the zoom it is no longer being painted at.
   useEffect(() => {
     const term = termRef.current
     const fit = fitRef.current
     if (!term || !fit) return
-    term.options.fontSize = font
+    zoomRef.current = uiZoom
+    setTermZoom(hostRef.current, uiZoom)
+    term.options.fontSize = font * uiZoom
     try { localStorage.setItem(FONT_KEY, String(font)) } catch { /* private mode */ }
     const id = requestAnimationFrame(() => safeFit())
     return () => cancelAnimationFrame(id)
-  }, [font, safeFit])
+  }, [font, uiZoom, safeFit])
+
+  // D2. applyZoom dispatches a resize event precisely so measuring listeners
+  //     can catch it: `zoom` fires nothing of its own.
+  useEffect(() => {
+    const onZoom = () => setUiZoom((z) => {
+      const next = readUiZoom()
+      return next === z ? z : next
+    })
+    window.addEventListener('resize', onZoom)
+    return () => window.removeEventListener('resize', onZoom)
+  }, [])
 
   // E. iOS suspends a backgrounded socket, and what comes back is worse than a
   //    closed one: a half-open socket reads OPEN, fires no close event, and
@@ -826,6 +861,12 @@ export default function TerminalPage() {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
+  // Which session the phone's one-line switcher is naming, and where it sits
+  // in the list. Both come off `list`, so a session killed from another device
+  // simply stops being found and the bar falls back to "no session open".
+  const activeSession = list.find((s) => s.name === active) ?? null
+  const activeIndex = active ? list.findIndex((s) => s.name === active) + 1 : 0
+
   const dot = conn === 'live'
     ? 'var(--color-accent)'
     : conn === 'connecting'
@@ -845,10 +886,56 @@ export default function TerminalPage() {
       data-term-root
       className="absolute inset-0 z-0 flex touch-manipulation flex-col gap-2 p-2 sm:p-3"
     >
-      {/* Open sessions. Horizontally scrollable so twelve of them still fit one
-          row, and never hidden: 36px is worth less than a switcher that
-          disappears when the keyboard opens. */}
-      <div data-term-scroll className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5">
+      {/* PHONE: one row that cannot overflow, because only one child may grow.
+          The back button, the session it is showing (title, position in the
+          list, and the chevron that opens the sheet), and the connection dot.
+          The list itself is in the sheet below, which is drawn inside the stage
+          and therefore costs the terminal no height at all. */}
+      <div className="flex h-9 shrink-0 items-stretch gap-2 sm:hidden">
+        <button
+          type="button"
+          onClick={() => navigate('/sessions')}
+          aria-label="Back to the session board"
+          title="Back to the session board"
+          className={`${BTN} shrink-0 px-2`}
+        >
+          <ChevronLeft size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSheet((v) => !v); setPicker(false) }}
+          aria-expanded={sheet}
+          aria-label="Open the session list"
+          className={`flex min-w-0 flex-1 items-center gap-2 border px-2.5 text-left ${
+            activeSession
+              ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.12)]'
+              : 'border-[var(--color-border)]'
+          }`}
+        >
+          {sheet ? <ChevronUp size={12} className="shrink-0 text-[var(--color-text-faint)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--color-text-faint)]" />}
+          {/* min-w-0 is load-bearing twice over: a flex item defaults to
+              min-width:auto, so without it neither this span nor the button
+              around it can shrink, truncate never engages, and the row pushes
+              past the screen exactly the way the old strip did. */}
+          <span className={`min-w-0 flex-1 truncate text-[12px] ${
+            activeSession ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'
+          }`}>
+            {activeSession ? termLabel(activeSession, titles) : 'no session open'}
+          </span>
+          {list.length > 0 && (
+            <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+              {activeIndex > 0 ? `${activeIndex}/${list.length}` : `${list.length}`}
+            </span>
+          )}
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5 pl-0.5">
+          <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: dot, boxShadow: `0 0 6px ${dot}` }} />
+        </div>
+      </div>
+
+      {/* DESKTOP: the chips, which fit here, with the label capped so one long
+          title cannot push the rest off the row. */}
+      <div data-term-scroll className="hidden shrink-0 items-center gap-2 overflow-x-auto pb-0.5 sm:flex">
         <button
           type="button"
           onClick={() => navigate('/sessions')}
@@ -873,10 +960,11 @@ export default function TerminalPage() {
               <button
                 type="button"
                 onClick={() => { setActive(s.name); setPicker(false) }}
-                className="flex min-h-9 items-center gap-2 px-2.5 text-left"
+                title={label}
+                className="flex min-h-9 min-w-0 items-center gap-2 px-2.5 text-left"
               >
                 <span
-                  className={`text-[11px] uppercase tracking-[0.12em] ${
+                  className={`max-w-[14rem] truncate text-[11px] ${
                     on ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-dim)]'
                   }`}
                 >
@@ -940,7 +1028,7 @@ export default function TerminalPage() {
               {sessions.isLoading ? 'loading' : 'no session open'}
             </div>
             {!sessions.isLoading && (
-              <div className="text-[10px] text-[var(--color-text-faint)]">tap NEW, or pick one on the board</div>
+              <div className="text-[10px] text-[var(--color-text-faint)]">tap the session bar above, or pick one on the board</div>
             )}
           </div>
         )}
@@ -961,6 +1049,82 @@ export default function TerminalPage() {
                 {!status.data.tmux ? 'tmux is not installed on odin.' : 'ssh is not installed on odin.'}
               </div>
             )}
+          </div>
+        )}
+
+        {/* The phone's session list. An absolutely positioned child of the
+            stage, which is the one place on this page where something can open
+            without changing a single box: no refit, no pty resize, no tmux
+            repaint. Rows are 44px so a thumb cannot miss, and the close button
+            is separated from the row it closes by a border rather than by
+            hoping nobody fat-fingers it. */}
+        {sheet && (
+          <div data-term-scroll className="absolute inset-0 z-30 overflow-y-auto bg-black/90 p-1 sm:hidden">
+            <div className="panel p-2">
+              <div className="mb-1 flex items-baseline justify-between px-1">
+                <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+                  &gt; open sessions
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSheet(false)}
+                  aria-label="Close the session list"
+                  className="min-h-9 px-2 text-[var(--color-text-faint)] active:text-[var(--color-accent)]"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {list.length === 0 && (
+                <div className="px-1 py-3 text-[11px] text-[var(--color-text-faint)]">
+                  nothing open. start one below.
+                </div>
+              )}
+
+              {list.map((s) => {
+                const on = s.name === active
+                const label = termLabel(s, titles)
+                return (
+                  <div
+                    key={s.name}
+                    className={`flex items-stretch border-b border-[var(--color-border)] last:border-b-0 ${
+                      on ? 'bg-[rgba(var(--color-accent-rgb),0.1)]' : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setActive(s.name); setSheet(false) }}
+                      className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 px-2 py-1.5 text-left"
+                    >
+                      <span className={`truncate text-[12px] ${on ? 'text-[var(--color-accent)]' : 'text-[var(--color-text)]'}`}>
+                        {label}
+                      </span>
+                      <span className={`text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+                        {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
+                        {s.activityAt ? ` \u00b7 ${relative(s.activityAt)}` : ''}
+                        {on ? ' \u00b7 open here' : ''}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void closeSession(s.name)}
+                      aria-label={`Close ${label}`}
+                      className="flex min-h-11 w-11 shrink-0 items-center justify-center border-l border-[var(--color-border)] text-[var(--color-text-faint)] active:text-[var(--color-danger)]"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                )
+              })}
+
+              <button
+                type="button"
+                onClick={() => { setSheet(false); setPicker(true) }}
+                className={`${BTN} mt-2 w-full`}
+              >
+                <Plus size={12} /> new session
+              </button>
+            </div>
           </div>
         )}
 

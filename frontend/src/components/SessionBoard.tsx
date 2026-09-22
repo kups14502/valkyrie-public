@@ -423,9 +423,18 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [killing, setKilling] = useState<string | null>(null)
+  const [all, setAll] = useState(false)
   const q = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
   const list = q.data ?? []
   if (list.length === 0) return null
+
+  // A chip is a whole phone width once it carries a real title (measured: 281px
+  // of a 317px row), so on a narrow screen these wrap into one per line. Four
+  // is where the list stops being a header and starts being the page, hence the
+  // fold rather than a scroller: a sideways drag on a 36px bar is the thing
+  // this row is being fixed for.
+  const shown = all ? list : list.slice(0, 4)
+  const hidden = list.length - shown.length
 
   const kill = async (s: TermSession) => {
     setKilling(s.name)
@@ -436,20 +445,20 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
   }
 
   return (
-    <div className="mb-2 flex items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] pb-2">
+    <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] pb-2">
       <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">in page</span>
-      {list.map((s) => {
+      {shown.map((s) => {
         const label = termLabel(s, titles)
         return (
           <div
             key={s.name}
-            className={`flex shrink-0 items-center border ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
+            className={`flex min-w-0 max-w-full flex-1 items-center border sm:max-w-[20rem] sm:flex-none ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
           >
             <button
               type="button"
               onClick={() => navigate(termPath(s.name))}
               title={`Reattach to ${label} on ${s.host}`}
-              className="flex min-h-9 max-w-[16rem] items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
+              className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
             >
               <SquareTerminal size={11} className="shrink-0" />
               <span className="truncate">{label}</span>
@@ -464,13 +473,22 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
               onClick={() => void kill(s)}
               aria-label={`Close ${label}`}
               title="Close this terminal. A Claude session ends on thor; the conversation stays resumable."
-              className="min-h-9 px-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+              className="min-h-9 shrink-0 border-l border-[var(--color-border)] px-2.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
             >
               <X size={11} />
             </button>
           </div>
         )
       })}
+      {(hidden > 0 || all) && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          className="min-h-9 shrink-0 px-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+        >
+          {hidden > 0 ? `+${hidden} more` : 'show fewer'}
+        </button>
+      )}
     </div>
   )
 }
