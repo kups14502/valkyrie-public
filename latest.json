@@ -1,15 +1,15 @@
 {
-  "version": "0.3.102",
-  "notes": "plex: add the music library, played in the page",
-  "pub_date": "2026-09-22T17:25:56Z",
+  "version": "0.3.103",
+  "notes": "plex: no year for an album MusicBrainz dates 0001",
+  "pub_date": "2026-09-22T17:53:30Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlYSXhiYXVsRmk3Mm80ZVR2ZjNmQkplTmZELy92am0zNnovaURCaWx1WGJodk1FUVZEcWgvMnhaTUZsRzBCL3FrTW5xUW8xZlRtZFVsTC81elp3UGc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDk3ODQ0CWZpbGU6VmFsa3lyaWVfMC4zLjEwMl94NjQtc2V0dXAuZXhlCnBGUDcwRHEzZHhXNVcvMVk0V0JIbk1rbXJZc0dONDY3dXNNbFVJWVJKdWNKSXhvVGRWSUdabmRRV1FYbWpPYW5BSVMvS2hubWc2dGNLR2l5UHV0aENRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.102/Valkyrie_0.3.102_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZsdmRXVnBBTXZKTlI1RXZ6c0tNMVVUUVN6VVlSN0h4cVloM0RuN09BcFMyeGNpMkRBdWpYcHI4VlVheU5lVWNzQkl2NEx2VUQ5SmZ0Y2hiY1hXUkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDk5NTI4CWZpbGU6VmFsa3lyaWVfMC4zLjEwM194NjQtc2V0dXAuZXhlCkRmNHFlWE9ZR0R3R2x0bHhlWGVoZkVEWkM3ZlUrYzE4YWhSL2U2YkdsUFE0c3hNUmRVTkZSSVRLM091cnNvK2F5ZnZzSGFFdTgwcnNwK3cyTklPMEJnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.103/Valkyrie_0.3.103_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJKSlg5ZlhadkZRRTRGdnltejBVb3FDOHM5MDZERUZSTm81S1VMTEFzUnl6WktXMWdlY3IxeFUvN0oyeU1oSkdWQldxMGR2Y09OUC9zVFZVNEIxcEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDk3Nzk5CWZpbGU6VmFsa3lyaWVfMC4zLjEwMl9hbWQ2NC5BcHBJbWFnZQppTkl1YUY1SHhsL0l4QXQwK1J5eUZSbm95OGtxWTlVVGJ3WEc3bDRkeDE1dVhmUzhraTNCQ2RuZmt3a3YxbWlrOHkyZjFqdWMvbkp2cC94T3dXRmFEdz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.102/Valkyrie_0.3.102_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVRRdkxxZ2hyaEVDbzRWOC9oWkNiUmdQQ2dNdjBnRVlDUFFOWmlTT01HR01DWEN5U2JjVEpiZm0rT2JUY2hZaHA5Snl4SG9VYjZybldxSUNEd2ZSSUF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDk5NDg0CWZpbGU6VmFsa3lyaWVfMC4zLjEwM19hbWQ2NC5BcHBJbWFnZQpHT0Z5RG1NQ3I5d0l4bTdyTlIzaWgwTlk4V1IwTGZaVVY1TzFWOGJOOXkrZi9lUmZVOElGOTNOTmQrWDBINTZYamZnQkNKM3cwYnZ5NHZmdXRsRi9BUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.103/Valkyrie_0.3.103_amd64.AppImage"
     }
   }
 }
