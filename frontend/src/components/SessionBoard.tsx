@@ -593,7 +593,7 @@ export function SessionBoard() {
         navigate(termPath(r.name))
         return
       }
-      if (remote) return openSessionHere(s.sessionId, HOST_IP)
+      if (remote) return openSessionHere(s.sessionId, HOST_IP, s.launchGroup)
       await launchSessionOnHost(s.sessionId, '', HOST)
     },
     onSettled: () => { setOpeningId(null); refresh() },
@@ -676,7 +676,7 @@ export function SessionBoard() {
     for (const s of rows) {
       setOpeningId(s.sessionId)
       try {
-        if (remote) await openSessionHere(s.sessionId, HOST_IP)
+        if (remote) await openSessionHere(s.sessionId, HOST_IP, s.launchGroup)
         else await launchSessionOnHost(s.sessionId, '', HOST)
       } catch { /* one failure must not abandon the rest */ }
       setRecoverDone((n) => n + 1)

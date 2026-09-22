@@ -631,6 +631,12 @@ export type WorkSession = {
   // work | org-c | server | personal, routed from the cwd by the host out of
   // the same table the Obsidian capture uses, so the two never disagree.
   area: string
+  // Which Windows Terminal window this session reopens into, resolved on its
+  // host from launch-groups.json. NOT the area: Org C work groups into
+  // the work window while its area is 'org-c'. It travels in the payload
+  // because the desktop app opens its own windows, so it cannot ask the host
+  // where a tab belongs.
+  launchGroup: string | null
   // The machine this session lives on. Its transcript is local to that machine,
   // so resume, stop and done all have to go back to the same one.
   host: string
@@ -662,6 +668,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
     titleFromClaude: r.titleFromClaude === true,
     project: wsStr(r.project) ?? '',
     area: wsStr(r.area) ?? '',
+    launchGroup: wsStr(r.launchGroup),
     host: wsStr(r.host) ?? 'thor',
     cwd: wsStr(r.cwd),
     lastActivityUtc: wsStr(r.lastActivityUtc),
@@ -999,10 +1006,18 @@ export const localHostname = async (): Promise<string | null> => {
   } catch { return null }
 }
 
-export const openSessionHere = async (sessionId: string, host = '100.118.7.57'): Promise<void> => {
+// `group` names the Windows Terminal window the tab joins, so recovering a
+// desk on the laptop lands work and personal in their own windows the way it
+// already does on thor. Left out, every tab opened detached and had to be
+// dragged together by hand.
+export const openSessionHere = async (
+  sessionId: string,
+  host = '100.118.7.57',
+  group: string | null = null,
+): Promise<void> => {
   if (!isTauri()) throw new Error('only the desktop app can open a local terminal')
   const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('open_session_ssh', { sessionId, host })
+  await invoke('open_session_ssh', { sessionId, host, group })
 }
 
 export const setThreadDisposition = async (threadId: string, disposition: ThreadDisposition) =>

@@ -23,7 +23,7 @@ fn local_hostname() -> String {
 /// be a uuid and the host must be a tailnet address or a bare hostname, so
 /// nothing a page could say turns into extra arguments or a second command.
 #[tauri::command]
-fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
+fn open_session_ssh(session_id: String, host: String, group: Option<String>) -> Result<(), String> {
   fn is_uuid(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 36
@@ -39,6 +39,22 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
       && s
         .bytes()
         .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+  }
+
+  /// A Windows Terminal window name, which is what makes restored tabs land in
+  /// one window per group instead of scattering. Rejects wt's own reserved
+  /// names: a bare number means "that window id", and `new` and `last` are
+  /// keywords, so a group called any of those would quietly target the wrong
+  /// window. Anything that fails here just means no grouping, never an error:
+  /// a tab Brendon has to drag beats a session that would not open.
+  fn is_group(s: &str) -> bool {
+    !s.is_empty()
+      && s.len() <= 32
+      && s
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+      && !s.bytes().all(|c| c.is_ascii_digit())
+      && !matches!(s.to_ascii_lowercase().as_str(), "new" | "last")
   }
 
   if !is_uuid(&session_id) {
@@ -72,16 +88,24 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
     // WindowsApps folder and launching it produced no window at all, the same
     // way it silently failed from a service on thor. So try it, and if the spawn
     // errors fall back to conhost, which is always present at a fixed path.
+    //
+    // `-w <group>` is what puts work and personal in their own windows. Without
+    // it every restored session opened detached and had to be dragged together
+    // by hand, which the launcher on thor had solved years earlier and this
+    // path had simply never been told about. It has to come from the caller:
+    // the window is created HERE, before any SSH runs, so the host that owns
+    // the rules cannot be consulted. `-w` must precede the subcommand.
+    let title = format!("{host} · claude");
+    let window = group.as_deref().map(str::trim).filter(|g| is_group(g));
+    let mut args: Vec<&str> = Vec::new();
+    if let Some(w) = window {
+      args.push("-w");
+      args.push(w);
+    }
+    args.extend_from_slice(&["new-tab", "--title", &title, "ssh", "-t", &remote, &resume]);
+
     let wt = std::process::Command::new("wt.exe")
-      .args([
-        "new-tab",
-        "--title",
-        &format!("{host} · claude"),
-        "ssh",
-        "-t",
-        &remote,
-        &resume,
-      ])
+      .args(&args)
       .creation_flags(CREATE_NO_WINDOW)
       .spawn();
 
@@ -112,7 +136,7 @@ fn open_session_ssh(session_id: String, host: String) -> Result<(), String> {
 
   #[cfg(not(target_os = "windows"))]
   {
-    let _ = (session_id, host);
+    let _ = (session_id, host, group);
     Err("opening a local terminal is only wired up for Windows".into())
   }
 }
