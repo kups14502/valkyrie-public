@@ -9,10 +9,10 @@ import { signImgToken } from '../auth/token.js'
 //
 // Browsing proxies the local Plex server (same box, loopback) so clients never
 // need the Plex token. Requests ride the existing acquisition stack: movies go
-// to Radarr, shows to Sonarr (lookup -> add -> they search and download, Plex
-// picks the file up). Free-text requests that the automated path can't resolve
-// are journaled and posted to Discord, where the agent (or Brendon) picks them
-// up — that's the "message an agent" path.
+// to Radarr, shows to Sonarr, albums to Lidarr (lookup -> add -> they search
+// and download, Plex picks the file up). Free-text requests that the automated
+// path can't resolve are journaled and posted to Discord, where the agent (or
+// Brendon) picks them up — that's the "message an agent" path.
 
 const router = Router()
 
@@ -28,6 +28,11 @@ const RADARR_URL = process.env.RADARR_URL || 'http://127.0.0.1:7878'
 const RADARR_KEY = process.env.RADARR_API_KEY || ''
 const SONARR_URL = process.env.SONARR_URL || 'http://127.0.0.1:8989'
 const SONARR_KEY = process.env.SONARR_API_KEY || ''
+// Lidarr sits on LogicServer next to the music library, not on this box, and
+// its API is v1 where Radarr and Sonarr are v3. Unset and album requests are
+// simply absent from search.
+const LIDARR_URL = (process.env.LIDARR_URL || '').replace(/\/+$/, '')
+const LIDARR_KEY = process.env.LIDARR_API_KEY || ''
 
 const REQUESTS_LOG = path.join(process.cwd(), 'data', 'media-requests.jsonl')
 
@@ -595,13 +600,15 @@ router.post('/plex/music/scrobble', async (req, res) => {
 
 // ---------- Requests (Radarr / Sonarr + agent journal) ----------
 
-type ArrService = { base: string; key: string }
-const radarr: ArrService = { base: RADARR_URL, key: RADARR_KEY }
-const sonarr: ArrService = { base: SONARR_URL, key: SONARR_KEY }
-const arrConfigured = () => Boolean(RADARR_KEY || SONARR_KEY)
+type ArrService = { name: string; base: string; key: string; api: string }
+const radarr: ArrService = { name: 'radarr', base: RADARR_URL, key: RADARR_KEY, api: '/api/v3' }
+const sonarr: ArrService = { name: 'sonarr', base: SONARR_URL, key: SONARR_KEY, api: '/api/v3' }
+const lidarr: ArrService = { name: 'lidarr', base: LIDARR_URL, key: LIDARR_KEY, api: '/api/v1' }
+const lidarrConfigured = () => Boolean(LIDARR_URL && LIDARR_KEY)
+const arrConfigured = () => Boolean(RADARR_KEY || SONARR_KEY || lidarrConfigured())
 
 async function arrJSON<T>(svc: ArrService, p: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${svc.base}/api/v3${p}`, {
+  const r = await fetch(`${svc.base}${svc.api}${p}`, {
     ...init,
     headers: { 'X-Api-Key': svc.key, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     signal: AbortSignal.timeout(15_000),
@@ -618,44 +625,79 @@ async function arrJSON<T>(svc: ArrService, p: string, init?: RequestInit): Promi
 
 type ArrMovie = { id?: number; title: string; year?: number; tmdbId: number; overview?: string; remotePoster?: string; hasFile?: boolean; monitored?: boolean }
 type ArrSeries = { id?: number; title: string; year?: number; tvdbId: number; overview?: string; remotePoster?: string; statistics?: { episodeFileCount?: number }; monitored?: boolean }
+type ArrArtist = {
+  id?: number
+  artistName: string
+  foreignArtistId: string
+  qualityProfileId?: number
+  metadataProfileId?: number
+  rootFolderPath?: string
+  monitored?: boolean
+  monitorNewItems?: string
+}
+type ArrAlbum = {
+  id?: number
+  title: string
+  // MusicBrainz release-group id: what a request names.
+  foreignAlbumId: string
+  releaseDate?: string
+  albumType?: string
+  remoteCover?: string
+  images?: { coverType?: string; remoteUrl?: string; url?: string }[]
+  artist?: ArrArtist
+  statistics?: { trackFileCount?: number }
+}
 
 type SearchResult = {
-  kind: 'movie' | 'show'
+  kind: 'movie' | 'show' | 'album'
   title: string
+  // Album artist; null for movies and shows.
+  artist: string | null
   year: number | null
   overview: string
   poster: string | null
   tmdbId: number | null
   tvdbId: number | null
+  foreignAlbumId: string | null
   inLibrary: boolean
   downloaded: boolean
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
-// How well a candidate matches what was typed. Radarr and Sonarr each return
-// their own loosely-sorted list, so without this an exact-title show loses to
-// eight obscure same-word movies.
+// How well a candidate matches what was typed. Each service returns its own
+// loosely-sorted list, so without this an exact-title show loses to eight
+// obscure same-word movies. An album also matches on "artist title", which is
+// how people type one.
 function score(r: SearchResult, q: string): number {
   const t = norm(r.title)
+  const full = r.artist ? norm(`${r.artist} ${r.title}`) : t
   let n = 0
-  if (t === q) n += 100
-  else if (t.startsWith(q)) n += 50
-  else if (t.includes(q)) n += 20
+  if (t === q || full === q) n += 100
+  else if (t.startsWith(q) || full.startsWith(q)) n += 50
+  else if (t.includes(q) || full.includes(q)) n += 20
   if (r.poster) n += 5
   if (r.year) n += 3
   return n
 }
 
 router.get('/plex/request/search', async (req, res) => {
-  if (!arrConfigured()) return res.status(503).json({ error: 'radarr/sonarr not configured' })
+  if (!arrConfigured()) return res.status(503).json({ error: 'radarr/sonarr/lidarr not configured' })
   const q = String(req.query.q ?? '').trim().slice(0, 100)
   if (q.length < 2) return res.json({ results: [] })
   const term = encodeURIComponent(q)
-  const [movies, series] = await Promise.all([
+  const [movies, series, albums] = await Promise.all([
     RADARR_KEY ? arrJSON<ArrMovie[]>(radarr, `/movie/lookup?term=${term}`).catch(() => []) : [],
     SONARR_KEY ? arrJSON<ArrSeries[]>(sonarr, `/series/lookup?term=${term}`).catch(() => []) : [],
+    lidarrConfigured() ? arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${term}`).catch(() => []) : [],
   ])
+  // Lidarr's lookup says whether an album is in the library (it has an id) but
+  // not whether its files are down; that takes one more call per known album.
+  const trackFiles = new Map<number, number>()
+  await Promise.all(albums.filter((a) => a.id).slice(0, 6).map(async (a) => {
+    const full = await arrJSON<ArrAlbum>(lidarr, `/album/${a.id}`).catch(() => null)
+    if (full?.id) trackFiles.set(full.id, full.statistics?.trackFileCount ?? 0)
+  }))
   const nq = norm(q)
   const rank = (list: SearchResult[]) => list
     // Drop metadata stubs (no year and no artwork) — they're never the intent.
@@ -666,59 +708,88 @@ router.get('/plex/request/search', async (req, res) => {
   const rankedMovies = rank(movies.map((m) => ({
     kind: 'movie' as const,
     title: m.title,
+    artist: null,
     year: m.year ?? null,
     overview: (m.overview ?? '').slice(0, 300),
     poster: m.remotePoster ?? null,
     tmdbId: m.tmdbId,
     tvdbId: null,
+    foreignAlbumId: null,
     inLibrary: Boolean(m.id),
     downloaded: Boolean(m.hasFile),
   })))
   const rankedShows = rank(series.map((s) => ({
     kind: 'show' as const,
     title: s.title,
+    artist: null,
     year: s.year ?? null,
     overview: (s.overview ?? '').slice(0, 300),
     poster: s.remotePoster ?? null,
     tmdbId: null,
     tvdbId: s.tvdbId,
+    foreignAlbumId: null,
     inLibrary: Boolean(s.id),
     downloaded: (s.statistics?.episodeFileCount ?? 0) > 0,
   })))
+  const rankedAlbums = rank(albums
+    .filter((a) => a.foreignAlbumId && a.artist?.artistName)
+    .map((a) => ({
+      kind: 'album' as const,
+      title: a.title,
+      artist: a.artist?.artistName ?? null,
+      year: a.releaseDate ? (Number(a.releaseDate.slice(0, 4)) || null) : null,
+      overview: a.albumType ?? '',
+      poster: a.remoteCover ?? a.images?.find((i) => i.coverType === 'cover')?.remoteUrl ?? a.images?.[0]?.remoteUrl ?? null,
+      tmdbId: null,
+      tvdbId: null,
+      foreignAlbumId: a.foreignAlbumId,
+      inLibrary: Boolean(a.id),
+      downloaded: a.id ? (trackFiles.get(a.id) ?? 0) > 0 : false,
+    })))
 
-  // Merge highest-score-first, alternating on ties so a movie and a show that
-  // both match exactly are adjacent at the top instead of one kind burying the
-  // other. "severance" then puts the 2022 series in the first two rows.
+  // Merge highest-score-first across the kinds, breaking ties away from the
+  // kind just taken, so a movie, a show, and an album that all match exactly
+  // sit together at the top instead of one kind burying the others.
+  // "severance" then puts the 2022 series in the first two rows.
+  const lists = [rankedMovies, rankedShows, rankedAlbums]
+  const cursors = lists.map(() => 0)
   const results: SearchResult[] = []
-  let i = 0
-  let j = 0
-  let lastKind: 'movie' | 'show' | null = null
-  while (results.length < 12 && (i < rankedMovies.length || j < rankedShows.length)) {
-    const m = rankedMovies[i]
-    const s = rankedShows[j]
-    let takeMovie: boolean
-    if (!s) takeMovie = true
-    else if (!m) takeMovie = false
-    else if (m.s !== s.s) takeMovie = m.s > s.s
-    else takeMovie = lastKind !== 'movie'
-    if (takeMovie && m) { results.push(m.r); lastKind = 'movie'; i += 1 }
-    else if (s) { results.push(s.r); lastKind = 'show'; j += 1 }
+  let lastKind: SearchResult['kind'] | null = null
+  while (results.length < 12) {
+    let pick = -1
+    for (let i = 0; i < lists.length; i += 1) {
+      const c = lists[i][cursors[i]]
+      if (!c) continue
+      if (pick === -1) { pick = i; continue }
+      const best = lists[pick][cursors[pick]]
+      if (c.s > best.s || (c.s === best.s && best.r.kind === lastKind && c.r.kind !== lastKind)) pick = i
+    }
+    if (pick === -1) break
+    const chosen = lists[pick][cursors[pick]]
+    cursors[pick] += 1
+    results.push(chosen.r)
+    lastKind = chosen.r.kind
   }
   res.json({ results })
 })
 
-// Default quality profile + root folder, discovered once from each service.
-const arrDefaults = new Map<string, { at: number; qualityProfileId: number; rootFolderPath: string }>()
-async function getArrDefaults(svc: ArrService, name: string) {
-  const hit = arrDefaults.get(name)
+// Default quality profile + root folder (+ metadata profile, a Lidarr-only
+// concept), discovered once from each service.
+type ArrDefaults = { at: number; qualityProfileId: number; rootFolderPath: string; metadataProfileId: number }
+const arrDefaults = new Map<string, ArrDefaults>()
+async function getArrDefaults(svc: ArrService): Promise<ArrDefaults> {
+  const hit = arrDefaults.get(svc.name)
   if (hit && Date.now() - hit.at < 600_000) return hit
-  const [profiles, roots] = await Promise.all([
+  const isLidarr = svc.api === '/api/v1'
+  const [profiles, roots, metas] = await Promise.all([
     arrJSON<{ id: number }[]>(svc, '/qualityprofile'),
     arrJSON<{ path: string }[]>(svc, '/rootfolder'),
+    isLidarr ? arrJSON<{ id: number }[]>(svc, '/metadataprofile') : Promise.resolve<{ id: number }[]>([]),
   ])
-  if (!profiles.length || !roots.length) throw new Error(`${name}: no quality profile or root folder configured`)
-  const d = { at: Date.now(), qualityProfileId: profiles[0].id, rootFolderPath: roots[0].path }
-  arrDefaults.set(name, d)
+  if (!profiles.length || !roots.length) throw new Error(`${svc.name}: no quality profile or root folder configured`)
+  if (isLidarr && !metas.length) throw new Error(`${svc.name}: no metadata profile configured`)
+  const d: ArrDefaults = { at: Date.now(), qualityProfileId: profiles[0].id, rootFolderPath: roots[0].path, metadataProfileId: metas[0]?.id ?? 0 }
+  arrDefaults.set(svc.name, d)
   return d
 }
 
@@ -732,12 +803,12 @@ function journalAppend(entry: Record<string, unknown>) {
 }
 
 router.post('/plex/request/add', async (req, res) => {
-  const { kind, tmdbId, tvdbId } = (req.body ?? {}) as { kind?: string; tmdbId?: number; tvdbId?: number }
+  const { kind, tmdbId, tvdbId, foreignAlbumId } = (req.body ?? {}) as { kind?: string; tmdbId?: number; tvdbId?: number; foreignAlbumId?: string }
   try {
     if (kind === 'movie' && typeof tmdbId === 'number' && RADARR_KEY) {
       const [movie] = await arrJSON<ArrMovie[]>(radarr, `/movie/lookup/tmdb?tmdbId=${tmdbId}`).then((m) => (Array.isArray(m) ? m : [m]))
       if (!movie) return res.status(404).json({ error: 'movie not found' })
-      const d = await getArrDefaults(radarr, 'radarr')
+      const d = await getArrDefaults(radarr)
       await arrJSON(radarr, '/movie', {
         method: 'POST',
         body: JSON.stringify({
@@ -755,7 +826,7 @@ router.post('/plex/request/add', async (req, res) => {
     if (kind === 'show' && typeof tvdbId === 'number' && SONARR_KEY) {
       const [series] = await arrJSON<ArrSeries[]>(sonarr, `/series/lookup?term=${encodeURIComponent(`tvdb:${tvdbId}`)}`)
       if (!series) return res.status(404).json({ error: 'show not found' })
-      const d = await getArrDefaults(sonarr, 'sonarr')
+      const d = await getArrDefaults(sonarr)
       await arrJSON(sonarr, '/series', {
         method: 'POST',
         body: JSON.stringify({
@@ -771,7 +842,38 @@ router.post('/plex/request/add', async (req, res) => {
       void postDiscord(`📺 media request: **${series.title}**${series.year ? ` (${series.year})` : ''} → sonarr, searching now`)
       return res.json({ ok: true, detail: `${series.title} sent to sonarr — episodes will appear in Plex as they download` })
     }
-    return res.status(400).json({ error: 'invalid request', detail: 'need kind=movie+tmdbId or kind=show+tvdbId' })
+    if (kind === 'album' && typeof foreignAlbumId === 'string' && /^[0-9a-f-]{36}$/i.test(foreignAlbumId) && lidarrConfigured()) {
+      const [album] = await arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(`lidarr:${foreignAlbumId}`)}`)
+      if (!album?.artist) return res.status(404).json({ error: 'album not found' })
+      if (album.id) return res.status(409).json({ error: 'already added', detail: 'it is already in the library or being tracked' })
+      const d = await getArrDefaults(lidarr)
+      // Lidarr adds an album by taking its artist along: a new artist is created
+      // with only this album monitored; an existing artist just gains the album.
+      // Verified against LogicServer's Lidarr 3.1 with a throwaway add.
+      await arrJSON(lidarr, '/album', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...album,
+          monitored: true,
+          addOptions: { searchForNewAlbum: true },
+          artist: {
+            ...album.artist,
+            qualityProfileId: album.artist.qualityProfileId || d.qualityProfileId,
+            metadataProfileId: album.artist.metadataProfileId || d.metadataProfileId,
+            rootFolderPath: album.artist.rootFolderPath || d.rootFolderPath,
+            monitored: true,
+            monitorNewItems: album.artist.monitorNewItems || 'none',
+            addOptions: { monitor: 'none', searchForMissingAlbums: false },
+          },
+        }),
+      })
+      const year = album.releaseDate ? Number(album.releaseDate.slice(0, 4)) || undefined : undefined
+      const label = `${album.artist.artistName}: ${album.title}`
+      journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
+      void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
+      return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
+    }
+    return res.status(400).json({ error: 'invalid request', detail: 'need kind=movie+tmdbId, kind=show+tvdbId, or kind=album+foreignAlbumId' })
   } catch (err) {
     const e = err as Error & { status?: number; body?: string }
     // Radarr/Sonarr answer 400 with a validation array when the item exists.
@@ -820,19 +922,27 @@ router.get('/plex/downloads', async (_req, res) => {
     movie?: { title?: string; year?: number }
     series?: { title?: string }
     episode?: { seasonNumber?: number; episodeNumber?: number }
+    album?: { title?: string }
+    artist?: { artistName?: string }
   }
   type Queue = { records?: QueueRecord[] }
-  const [rq, sq] = await Promise.all([
+  const [rq, sq, lq] = await Promise.all([
     RADARR_KEY ? arrJSON<Queue>(radarr, '/queue?pageSize=20&includeMovie=true').catch(() => null) : null,
     SONARR_KEY ? arrJSON<Queue>(sonarr, '/queue?pageSize=20&includeSeries=true&includeEpisode=true').catch(() => null) : null,
+    lidarrConfigured() ? arrJSON<Queue>(lidarr, '/queue?pageSize=20&includeArtist=true&includeAlbum=true').catch(() => null) : null,
   ])
-  const norm = (r: QueueRecord, kind: 'movie' | 'show') => ({
+  const queueTitle = (r: QueueRecord, kind: 'movie' | 'show' | 'album'): string => {
+    if (kind === 'movie' && r.movie?.title) return `${r.movie.title}${r.movie.year ? ` (${r.movie.year})` : ''}`
+    if (kind === 'show' && r.series?.title) {
+      const ep = r.episode ? ` S${String(r.episode.seasonNumber ?? 0).padStart(2, '0')}E${String(r.episode.episodeNumber ?? 0).padStart(2, '0')}` : ''
+      return `${r.series.title}${ep}`
+    }
+    if (kind === 'album' && r.album?.title) return `${r.artist?.artistName ? `${r.artist.artistName}: ` : ''}${r.album.title}`
+    return r.title ?? 'unknown'
+  }
+  const norm = (r: QueueRecord, kind: 'movie' | 'show' | 'album') => ({
     kind,
-    title: kind === 'movie'
-      ? (r.movie?.title ? `${r.movie.title}${r.movie.year ? ` (${r.movie.year})` : ''}` : r.title ?? 'unknown')
-      : (r.series?.title
-        ? `${r.series.title}${r.episode ? ` S${String(r.episode.seasonNumber ?? 0).padStart(2, '0')}E${String(r.episode.episodeNumber ?? 0).padStart(2, '0')}` : ''}`
-        : r.title ?? 'unknown'),
+    title: queueTitle(r, kind),
     status: r.status ?? 'unknown',
     progress: r.size && r.size > 0 ? Math.round((1 - (r.sizeleft ?? 0) / r.size) * 100) : 0,
     timeleft: r.timeleft ?? null,
@@ -841,6 +951,7 @@ router.get('/plex/downloads', async (_req, res) => {
     downloads: [
       ...(rq?.records ?? []).map((r) => norm(r, 'movie')),
       ...(sq?.records ?? []).map((r) => norm(r, 'show')),
+      ...(lq?.records ?? []).map((r) => norm(r, 'album')),
     ],
   })
 })

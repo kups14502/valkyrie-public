@@ -432,7 +432,7 @@ function Requests() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="movie or show name…"
+            placeholder="movie, show, or album…"
             className="min-w-0 flex-1 bg-transparent text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] sm:text-sm"
           />
           {results.isFetching && <Loader2 size={14} className="animate-spin text-[var(--color-text-faint)]" />}
@@ -444,15 +444,21 @@ function Requests() {
               <li className="py-3 text-xs text-[var(--color-text-faint)]">nothing found — try the agent below</li>
             )}
             {results.data.map((r) => (
-              <li key={`${r.kind}-${r.tmdbId ?? r.tvdbId}`} className="flex items-center gap-3 py-3">
-                <div className="h-16 w-11 shrink-0 overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                  {r.poster ? <img src={r.poster} alt="" loading="lazy" className="h-full w-full object-cover" /> : <Clapperboard size={16} className="m-auto mt-5 text-[var(--color-text-faint)]" />}
+              <li key={`${r.kind}-${r.tmdbId ?? r.tvdbId ?? r.foreignAlbumId}`} className="flex items-center gap-3 py-3">
+                <div className={`shrink-0 overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-2)] ${r.kind === 'album' ? 'h-14 w-14' : 'h-16 w-11'}`}>
+                  {r.poster
+                    ? <img src={r.poster} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    : r.kind === 'album'
+                      ? <Disc3 size={16} className="m-auto mt-5 text-[var(--color-text-faint)]" />
+                      : <Clapperboard size={16} className="m-auto mt-5 text-[var(--color-text-faint)]" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm text-[var(--color-text)]">
                     {r.title} {r.year && <span className="text-[var(--color-text-faint)]">({r.year})</span>}
                   </div>
-                  <div className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{r.kind === 'movie' ? 'movie' : 'tv show'}</div>
+                  <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+                    {r.kind === 'movie' ? 'movie' : r.kind === 'show' ? 'tv show' : `album · ${r.artist ?? ''}`}
+                  </div>
                 </div>
                 {r.inLibrary ? (
                   <span className="shrink-0 border border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
@@ -533,7 +539,7 @@ function Requests() {
               <li key={`${r.at}-${i}`} className="flex items-center gap-3 py-2.5 text-xs">
                 <span className="shrink-0 text-[var(--color-text-faint)]">{new Date(r.at).toLocaleDateString()}</span>
                 <span className="min-w-0 flex-1 truncate text-[var(--color-text)]">
-                  {r.kind === 'message' ? `"${r.message}"` : `${r.title}${r.year ? ` (${r.year})` : ''}`}
+                  {r.kind === 'message' ? `"${r.message}"` : `${r.artist ? `${r.artist}: ` : ''}${r.title}${r.year ? ` (${r.year})` : ''}`}
                 </span>
                 <span className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
                   {r.kind === 'message' ? 'agent' : r.status ?? r.kind}

@@ -1268,28 +1268,32 @@ export type PlexItem = {
 export type PlexLibraryPage = { total: number; offset: number; items: PlexItem[] }
 
 export type MediaSearchResult = {
-  kind: 'movie' | 'show'
+  kind: 'movie' | 'show' | 'album'
   title: string
+  // Album artist; null for movies and shows.
+  artist: string | null
   year: number | null
   overview: string
   poster: string | null
   tmdbId: number | null
   tvdbId: number | null
+  foreignAlbumId: string | null
   inLibrary: boolean
   downloaded: boolean
 }
 
 export type MediaRequestEntry = {
   at: string
-  kind: 'movie' | 'show' | 'message'
+  kind: 'movie' | 'show' | 'album' | 'message'
   title?: string
+  artist?: string
   year?: number
   message?: string
   status?: string
 }
 
 export type MediaDownload = {
-  kind: 'movie' | 'show'
+  kind: 'movie' | 'show' | 'album'
   title: string
   status: string
   progress: number
@@ -1427,6 +1431,7 @@ export const addMediaRequest = async (r: MediaSearchResult) =>
     kind: r.kind,
     tmdbId: r.tmdbId ?? undefined,
     tvdbId: r.tvdbId ?? undefined,
+    foreignAlbumId: r.foreignAlbumId ?? undefined,
   })).data
 export const sendMediaMessage = async (message: string) =>
   (await api.post<{ ok: boolean; detail: string }>('/plex/request/message', { message })).data
