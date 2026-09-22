@@ -671,16 +671,29 @@ export function SessionBoard() {
     setRecovering(true)
     setRecoverDone(0)
     setRecoverTotal(rows.length)
+    // Same group together, so each Windows Terminal window is created once and
+    // every later tab of that group attaches to one that already exists.
+    // Interleaved, the first two work sessions raced: `wt -w work` looks for a
+    // window by name, and a window still starting up has not registered its
+    // name yet, so the second call made a SECOND work window. Order inside a
+    // group is untouched, which is the only order that shows.
+    const ordered = [...rows].sort((a, b) => (a.launchGroup ?? '').localeCompare(b.launchGroup ?? ''))
     // 21 sessions is a long silence with no counter, and the earlier version
     // gave none: it just sat on "recovering…" for half a minute.
-    for (const s of rows) {
+    let lastGroup: string | null = null
+    for (const s of ordered) {
       setOpeningId(s.sessionId)
       try {
         if (remote) await openSessionHere(s.sessionId, HOST_IP, s.launchGroup)
         else await launchSessionOnHost(s.sessionId, '', HOST)
       } catch { /* one failure must not abandon the rest */ }
       setRecoverDone((n) => n + 1)
-      await new Promise((r) => setTimeout(r, 700))
+      // The tab that opens a window waits longer than one joining it: a cold
+      // Windows Terminal takes seconds to appear, and 700ms was measured
+      // against a window that was already up.
+      const opensWindow = remote && s.launchGroup !== lastGroup
+      lastGroup = s.launchGroup
+      await new Promise((r) => setTimeout(r, opensWindow ? 3000 : 700))
     }
     setOpeningId(null)
     setRecovering(false)

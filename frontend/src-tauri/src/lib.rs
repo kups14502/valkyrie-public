@@ -47,6 +47,7 @@ fn open_session_ssh(session_id: String, host: String, group: Option<String>) -> 
   /// keywords, so a group called any of those would quietly target the wrong
   /// window. Anything that fails here just means no grouping, never an error:
   /// a tab Brendon has to drag beats a session that would not open.
+  #[cfg(target_os = "windows")]
   fn is_group(s: &str) -> bool {
     !s.is_empty()
       && s.len() <= 32
