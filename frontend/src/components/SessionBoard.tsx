@@ -441,34 +441,34 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
       {list.map((s) => {
         const label = termLabel(s, titles)
         return (
-        <div
-          key={s.name}
-          className={`flex shrink-0 items-center border ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
-        >
-          <button
-            type="button"
-            onClick={() => navigate(termPath(s.name))}
-            title={`Reattach to ${label} on ${s.host}`}
-            className="flex min-h-9 max-w-[16rem] items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
+          <div
+            key={s.name}
+            className={`flex shrink-0 items-center border ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
           >
-            <SquareTerminal size={11} className="shrink-0" />
-            <span className="truncate">{label}</span>
-            <span className={`shrink-0 text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
-              {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
-              {s.activityAt > 0 ? ` · ${relAge(new Date(s.activityAt).toISOString())}` : ''}
-            </span>
-          </button>
-          <button
-            type="button"
-            disabled={killing === s.name}
-            onClick={() => void kill(s)}
-            aria-label={`Close ${label}`}
-            title="Close this terminal. A Claude session ends on thor; the conversation stays resumable."
-            className="min-h-9 px-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
-          >
-            <X size={11} />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => navigate(termPath(s.name))}
+              title={`Reattach to ${label} on ${s.host}`}
+              className="flex min-h-9 max-w-[16rem] items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
+            >
+              <SquareTerminal size={11} className="shrink-0" />
+              <span className="truncate">{label}</span>
+              <span className={`shrink-0 text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+                {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
+                {s.activityAt > 0 ? ` · ${relAge(new Date(s.activityAt).toISOString())}` : ''}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={killing === s.name}
+              onClick={() => void kill(s)}
+              aria-label={`Close ${label}`}
+              title="Close this terminal. A Claude session ends on thor; the conversation stays resumable."
+              className="min-h-9 px-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+            >
+              <X size={11} />
+            </button>
+          </div>
         )
       })}
     </div>
