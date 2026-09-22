@@ -91,6 +91,9 @@ const relAge = (iso: string | null): string => {
   return `${Math.round(h / 24)}d ago`
 }
 
+const httpStatus = (e: unknown): number | null =>
+  (e as { response?: { status?: number } } | null)?.response?.status ?? null
+
 const fmtSize = (b: number): string =>
   b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
 
@@ -534,8 +537,21 @@ export function SessionBoard() {
   const [showDone, setShowDone] = useState(false)
   const [openMode, setOpenMode] = useState<OpenMode>(readOpenMode)
   const [picked, setPicked] = useState<Record<string, boolean>>({})
+  const [stoppingAll, setStoppingAll] = useState(false)
+  const [stopAllDone, setStopAllDone] = useState(0)
+  const [stopAllTotal, setStopAllTotal] = useState(0)
+  const [stopAllFailed, setStopAllFailed] = useState(0)
+  // One click arms it, a second within a few seconds fires. Every running
+  // session at once is the one thing on this page a second click cannot undo,
+  // so it costs two clicks where everything else costs one.
+  const [stopAllArmed, setStopAllArmed] = useState(false)
 
   useEffect(() => { void localHostname().then(setHere) }, [])
+  useEffect(() => {
+    if (!stopAllArmed) return
+    const t = setTimeout(() => setStopAllArmed(false), 4000)
+    return () => clearTimeout(t)
+  }, [stopAllArmed])
 
   // Poll: whether a session is running changes the moment a terminal closes,
   // and a list frozen at page load once left a closed session reading "running"
@@ -671,7 +687,42 @@ export function SessionBoard() {
     refresh()
   }
 
-  const busy = done.isPending || doneMany.isPending
+  // Serial, and that is not a style choice. A stop on an SSH-opened session
+  // runs elevated, and thor escalates it through ONE kill-request.json handed
+  // to a single scheduled task. Two stops in flight overwrite that file, so a
+  // fan-out would kill one session and silently drop the rest.
+  const stopAll = async (rows: WorkSession[]) => {
+    if (rows.length === 0) return
+    setStopAllArmed(false)
+    setStoppingAll(true)
+    setStopAllDone(0)
+    setStopAllFailed(0)
+    setStopAllTotal(rows.length)
+    let failed = 0
+    for (const s of rows) {
+      setStoppingId(s.sessionId)
+      try {
+        await stopSessionOnHost(s.sessionId, s.host)
+      } catch (e) {
+        // An elevated stop takes up to 12s and can still come back refused.
+        // One that does must not abandon the sessions behind it.
+        //
+        // 404 is not a refusal: it means nothing is running under that id. The
+        // list is a 10-second poll, so a session that exited on its own is
+        // still drawn as live and would otherwise be reported as a failure.
+        if (httpStatus(e) !== 404) {
+          failed += 1
+          setStopAllFailed(failed)
+        }
+      }
+      setStopAllDone((n) => n + 1)
+    }
+    setStoppingId(null)
+    setStoppingAll(false)
+    refresh()
+  }
+
+  const busy = done.isPending || doneMany.isPending || stoppingAll
   const shown = showAll ? rest : rest.slice(0, SHOWN_BY_DEFAULT)
   const hidden = rest.length - shown.length
   // Every row a checkbox is drawn next to right now. "pick all" means what is
@@ -718,6 +769,24 @@ export function SessionBoard() {
               </button>
             ))}
           </div>
+        )}
+        {live.length > 0 && (
+          <button
+            type="button"
+            disabled={stoppingAll || recovering}
+            onClick={() => (stopAllArmed ? void stopAll(live) : setStopAllArmed(true))}
+            title={stopAllArmed
+              ? `Click again to stop all ${live.length}`
+              : `Stop every running session. Transcripts are kept, so each one reopens whenever you want it.`}
+            className={`inline-flex min-h-9 items-center gap-1.5 border px-2.5 text-[10px] uppercase tracking-[0.1em] transition disabled:opacity-40 ${stopAllArmed
+              ? 'border-[var(--color-danger)] bg-[var(--color-danger)]/10 text-[var(--color-danger)]'
+              : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]'}`}
+          >
+            <Square size={11} />
+            {stoppingAll
+              ? `stopping ${stopAllDone}/${stopAllTotal}`
+              : stopAllArmed ? `stop all ${live.length}?` : `stop all ${live.length}`}
+          </button>
         )}
         <NewSession onStarted={refresh} inPage={inPage} />
         {desk.length > 0 && (
@@ -840,6 +909,14 @@ export function SessionBoard() {
         </div>
       )}
 
+      {/* A sweep that refused some sessions must say so. The rows themselves
+          go back to "running" on the next poll, which reads as nothing having
+          happened at all. */}
+      {!stoppingAll && stopAllFailed > 0 && (
+        <div className="mt-2 text-[11px] text-[var(--color-danger)]">
+          {stopAllFailed} of {stopAllTotal} would not stop. They are still running.
+        </div>
+      )}
       {(open.isError || stop.isError || done.isError || doneMany.isError) && (
         <div className="mt-2 text-[11px] text-[var(--color-danger)]">
           {((open.error ?? stop.error ?? done.error ?? doneMany.error) as Error)?.message}
