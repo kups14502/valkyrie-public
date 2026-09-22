@@ -452,7 +452,7 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
         return (
           <div
             key={s.name}
-            className={`flex min-w-0 max-w-full flex-1 items-center border sm:max-w-[20rem] sm:flex-none ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
+            className={`flex w-full min-w-0 items-center border sm:w-auto sm:max-w-[20rem] ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
           >
             <button
               type="button"
@@ -461,7 +461,7 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
               className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
             >
               <SquareTerminal size={11} className="shrink-0" />
-              <span className="truncate">{label}</span>
+              <span className="min-w-0 flex-1 truncate">{label}</span>
               <span className={`shrink-0 text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
                 {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
                 {s.activityAt > 0 ? ` · ${relAge(new Date(s.activityAt).toISOString())}` : ''}
@@ -841,7 +841,7 @@ export function SessionBoard() {
   return (
     <div>
       <OpenTerminals titles={titleById} />
-      <div className="mb-1 flex items-center justify-between gap-3">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="text-[11px] text-[var(--color-text-faint)]">
           {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
           {inPage ? ' · opens in the page' : remote && here ? ` · opening on ${here}` : ''}
