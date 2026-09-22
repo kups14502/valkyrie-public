@@ -645,6 +645,7 @@ type ArrAlbum = {
   remoteCover?: string
   images?: { coverType?: string; remoteUrl?: string; url?: string }[]
   artist?: ArrArtist
+  monitored?: boolean
   statistics?: { trackFileCount?: number }
 }
 
@@ -671,6 +672,76 @@ function albumYear(a: ArrAlbum): number | null {
   return y > 1000 ? y : null
 }
 
+// Lidarr's text search runs against its own metadata mirror, which trails
+// MusicBrainz by weeks for new releases: the exact thing people request. So
+// MusicBrainz is asked too, and any release group Lidarr's search missed is
+// pulled through Lidarr by id, which it can do even when its search cannot.
+const MB_UA = 'Valkyrie/1.0 (+https://valkyrie.brendonkupsch.com)'
+async function musicBrainzReleaseGroupIds(q: string): Promise<string[]> {
+  // Lucene syntax on the other end: strip its operators from what was typed.
+  const words = q.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ').trim()
+  if (!words) return []
+  const url = new URL('https://musicbrainz.org/ws/2/release-group/')
+  url.searchParams.set('query', `(${words}) AND (primarytype:album OR primarytype:ep)`)
+  url.searchParams.set('fmt', 'json')
+  url.searchParams.set('limit', '5')
+  const r = await fetch(url, { headers: { 'User-Agent': MB_UA, Accept: 'application/json' }, signal: AbortSignal.timeout(6_000) })
+  if (!r.ok) return []
+  const body = (await r.json()) as { 'release-groups'?: { id: string; score?: number }[] }
+  return (body['release-groups'] ?? []).filter((g) => (g.score ?? 0) >= 80).map((g) => g.id)
+}
+
+async function lidarrAlbumsFor(q: string): Promise<ArrAlbum[]> {
+  const [own, mbIds] = await Promise.all([
+    arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(q)}`).catch(() => [] as ArrAlbum[]),
+    musicBrainzReleaseGroupIds(q).catch(() => [] as string[]),
+  ])
+  const seen = new Set(own.map((a) => a.foreignAlbumId))
+  const extra = await Promise.all(mbIds.filter((id) => !seen.has(id)).slice(0, 4).map((id) =>
+    arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(`lidarr:${id}`)}`).then((r) => r[0] ?? null).catch(() => null),
+  ))
+  return [...own, ...extra.filter((a): a is ArrAlbum => Boolean(a?.foreignAlbumId))]
+}
+
+// Lidarr drops an album whose type the artist's metadata profile excludes on
+// the next refresh, and every artist here sits on "Standard" (Albums only).
+// Requesting an EP or single therefore moves the artist to a profile that is
+// the same plus that type, created from the base on first use.
+type MetadataProfile = {
+  id?: number
+  name: string
+  primaryAlbumTypes: { albumType: { id: number; name: string }; allowed: boolean }[]
+  secondaryAlbumTypes: unknown[]
+  releaseStatuses: unknown[]
+}
+async function metadataProfileAllowing(artist: ArrArtist, albumType: string | undefined, d: ArrDefaults): Promise<number> {
+  const baseId = artist.metadataProfileId || d.metadataProfileId
+  if (!albumType) return baseId
+  const profiles = await arrJSON<MetadataProfile[]>(lidarr, '/metadataprofile')
+  const base = profiles.find((p) => p.id === baseId) ?? profiles[0]
+  if (!base) return baseId
+  const allows = (p: MetadataProfile) => p.primaryAlbumTypes.some((t) => t.allowed && t.albumType.name === albumType)
+  if (allows(base)) return base.id ?? baseId
+  const name = `${base.name} + ${albumType}`
+  let target = profiles.find((p) => p.name === name && allows(p))
+  if (!target) {
+    const clone: MetadataProfile = {
+      ...base,
+      id: undefined,
+      name,
+      primaryAlbumTypes: base.primaryAlbumTypes.map((t) => (t.albumType.name === albumType ? { ...t, allowed: true } : t)),
+    }
+    delete clone.id
+    target = await arrJSON<MetadataProfile>(lidarr, '/metadataprofile', { method: 'POST', body: JSON.stringify(clone) })
+    console.log(`[plex] lidarr: created metadata profile "${name}"`)
+  }
+  if (artist.id && target.id) {
+    const full = await arrJSON<ArrArtist>(lidarr, `/artist/${artist.id}`)
+    await arrJSON(lidarr, `/artist/${artist.id}`, { method: 'PUT', body: JSON.stringify({ ...full, metadataProfileId: target.id }) })
+  }
+  return target.id ?? baseId
+}
+
 // How well a candidate matches what was typed. Each service returns its own
 // loosely-sorted list, so without this an exact-title show loses to eight
 // obscure same-word movies. An album also matches on "artist title", which is
@@ -695,14 +766,16 @@ router.get('/plex/request/search', async (req, res) => {
   const [movies, series, albums] = await Promise.all([
     RADARR_KEY ? arrJSON<ArrMovie[]>(radarr, `/movie/lookup?term=${term}`).catch(() => []) : [],
     SONARR_KEY ? arrJSON<ArrSeries[]>(sonarr, `/series/lookup?term=${term}`).catch(() => []) : [],
-    lidarrConfigured() ? arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${term}`).catch(() => []) : [],
+    lidarrConfigured() ? lidarrAlbumsFor(q) : [],
   ])
-  // Lidarr's lookup says whether an album is in the library (it has an id) but
-  // not whether its files are down; that takes one more call per known album.
-  const trackFiles = new Map<number, number>()
+  // Lidarr's lookup says whether it knows an album (it has an id) but not
+  // whether the files are down or the album is even monitored; that takes one
+  // more call per known album. An album an artist brought along unmonitored
+  // is still requestable, so "in library" means files or monitoring.
+  const known = new Map<number, { files: number; monitored: boolean }>()
   await Promise.all(albums.filter((a) => a.id).slice(0, 6).map(async (a) => {
     const full = await arrJSON<ArrAlbum>(lidarr, `/album/${a.id}`).catch(() => null)
-    if (full?.id) trackFiles.set(full.id, full.statistics?.trackFileCount ?? 0)
+    if (full?.id) known.set(full.id, { files: full.statistics?.trackFileCount ?? 0, monitored: Boolean(full.monitored) })
   }))
   const nq = norm(q)
   const rank = (list: SearchResult[]) => list
@@ -749,8 +822,8 @@ router.get('/plex/request/search', async (req, res) => {
       tmdbId: null,
       tvdbId: null,
       foreignAlbumId: a.foreignAlbumId,
-      inLibrary: Boolean(a.id),
-      downloaded: a.id ? (trackFiles.get(a.id) ?? 0) > 0 : false,
+      inLibrary: Boolean(a.id && ((known.get(a.id)?.files ?? 0) > 0 || known.get(a.id)?.monitored)),
+      downloaded: Boolean(a.id && (known.get(a.id)?.files ?? 0) > 0),
     })))
 
   // Merge highest-score-first across the kinds, breaking ties away from the
@@ -851,8 +924,23 @@ router.post('/plex/request/add', async (req, res) => {
     if (kind === 'album' && typeof foreignAlbumId === 'string' && /^[0-9a-f-]{36}$/i.test(foreignAlbumId) && lidarrConfigured()) {
       const [album] = await arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(`lidarr:${foreignAlbumId}`)}`)
       if (!album?.artist) return res.status(404).json({ error: 'album not found' })
-      if (album.id) return res.status(409).json({ error: 'already added', detail: 'it is already in the library or being tracked' })
+      const year = albumYear(album) ?? undefined
+      const label = `${album.artist.artistName}: ${album.title}`
+      if (album.id) {
+        // Lidarr already knows it. With files it is in the library; monitored
+        // it is already wanted; otherwise it came along with its artist under
+        // "monitor none", and monitoring it plus one search is the request.
+        const current = await arrJSON<ArrAlbum>(lidarr, `/album/${album.id}`)
+        if ((current.statistics?.trackFileCount ?? 0) > 0) return res.status(409).json({ error: 'already added', detail: 'it is already in the library' })
+        if (current.monitored) return res.status(409).json({ error: 'already added', detail: 'it is already being tracked — check downloads' })
+        await arrJSON(lidarr, `/album/${album.id}`, { method: 'PUT', body: JSON.stringify({ ...current, monitored: true }) })
+        await arrJSON(lidarr, '/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [album.id] }) })
+        journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
+        void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
+        return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
+      }
       const d = await getArrDefaults(lidarr)
+      const metadataProfileId = await metadataProfileAllowing(album.artist, album.albumType, d)
       // Lidarr adds an album by taking its artist along: a new artist is created
       // with only this album monitored; an existing artist just gains the album.
       // Verified against LogicServer's Lidarr 3.1 with a throwaway add.
@@ -865,7 +953,7 @@ router.post('/plex/request/add', async (req, res) => {
           artist: {
             ...album.artist,
             qualityProfileId: album.artist.qualityProfileId || d.qualityProfileId,
-            metadataProfileId: album.artist.metadataProfileId || d.metadataProfileId,
+            metadataProfileId,
             rootFolderPath: album.artist.rootFolderPath || d.rootFolderPath,
             monitored: true,
             monitorNewItems: album.artist.monitorNewItems || 'none',
@@ -873,8 +961,6 @@ router.post('/plex/request/add', async (req, res) => {
           },
         }),
       })
-      const year = albumYear(album) ?? undefined
-      const label = `${album.artist.artistName}: ${album.title}`
       journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
       void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
       return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
