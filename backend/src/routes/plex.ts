@@ -926,44 +926,56 @@ router.post('/plex/request/add', async (req, res) => {
       if (!album?.artist) return res.status(404).json({ error: 'album not found' })
       const year = albumYear(album) ?? undefined
       const label = `${album.artist.artistName}: ${album.title}`
-      if (album.id) {
-        // Lidarr already knows it. With files it is in the library; monitored
-        // it is already wanted; otherwise it came along with its artist under
-        // "monitor none", and monitoring it plus one search is the request.
-        const current = await arrJSON<ArrAlbum>(lidarr, `/album/${album.id}`)
-        if ((current.statistics?.trackFileCount ?? 0) > 0) return res.status(409).json({ error: 'already added', detail: 'it is already in the library' })
-        if (current.monitored) return res.status(409).json({ error: 'already added', detail: 'it is already being tracked — check downloads' })
-        await arrJSON(lidarr, `/album/${album.id}`, { method: 'PUT', body: JSON.stringify({ ...current, monitored: true }) })
-        await arrJSON(lidarr, '/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [album.id] }) })
-        journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
+      const done = () => {
+        journalAppend({ kind: 'album', title: album.title, artist: album.artist?.artistName, year, foreignAlbumId, status: 'queued' })
         void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
         return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
       }
+      // Lidarr already knows it. With files it is in the library; monitored it
+      // is already wanted; otherwise it came along with its artist under
+      // "monitor none", and monitoring it plus one search is the request.
+      const requestKnown = async (albumId: number) => {
+        const current = await arrJSON<ArrAlbum>(lidarr, `/album/${albumId}`)
+        if ((current.statistics?.trackFileCount ?? 0) > 0) return res.status(409).json({ error: 'already added', detail: 'it is already in the library' })
+        if (current.monitored) return res.status(409).json({ error: 'already added', detail: 'it is already being tracked — check downloads' })
+        await arrJSON(lidarr, `/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...current, monitored: true }) })
+        await arrJSON(lidarr, '/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) })
+        return done()
+      }
+      if (album.id) return requestKnown(album.id)
       const d = await getArrDefaults(lidarr)
       const metadataProfileId = await metadataProfileAllowing(album.artist, album.albumType, d)
       // Lidarr adds an album by taking its artist along: a new artist is created
       // with only this album monitored; an existing artist just gains the album.
       // Verified against LogicServer's Lidarr 3.1 with a throwaway add.
-      await arrJSON(lidarr, '/album', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...album,
-          monitored: true,
-          addOptions: { searchForNewAlbum: true },
-          artist: {
-            ...album.artist,
-            qualityProfileId: album.artist.qualityProfileId || d.qualityProfileId,
-            metadataProfileId,
-            rootFolderPath: album.artist.rootFolderPath || d.rootFolderPath,
+      try {
+        await arrJSON(lidarr, '/album', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...album,
             monitored: true,
-            monitorNewItems: album.artist.monitorNewItems || 'none',
-            addOptions: { monitor: 'none', searchForMissingAlbums: false },
-          },
-        }),
-      })
-      journalAppend({ kind: 'album', title: album.title, artist: album.artist.artistName, year, foreignAlbumId, status: 'queued' })
-      void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
-      return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
+            addOptions: { searchForNewAlbum: true },
+            artist: {
+              ...album.artist,
+              qualityProfileId: album.artist.qualityProfileId || d.qualityProfileId,
+              metadataProfileId,
+              rootFolderPath: album.artist.rootFolderPath || d.rootFolderPath,
+              monitored: true,
+              monitorNewItems: album.artist.monitorNewItems || 'none',
+              addOptions: { monitor: 'none', searchForMissingAlbums: false },
+            },
+          }),
+        })
+      } catch (err) {
+        // A profile change refreshes the artist, and that refresh can add the
+        // album (unmonitored) before this POST lands. Then it is simply known.
+        const e = err as Error & { status?: number; body?: string }
+        if (!(e.status === 400 && /already/i.test(e.body ?? ''))) throw err
+        const [again] = await arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(`lidarr:${foreignAlbumId}`)}`)
+        if (!again?.id) throw err
+        return requestKnown(again.id)
+      }
+      return done()
     }
     return res.status(400).json({ error: 'invalid request', detail: 'need kind=movie+tmdbId, kind=show+tvdbId, or kind=album+foreignAlbumId' })
   } catch (err) {
