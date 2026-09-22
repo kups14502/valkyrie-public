@@ -631,6 +631,11 @@ export function SessionBoard() {
     return m
   }, [terms.data])
 
+  // What "stop all" closes besides the session rows. A dead one is a pane tmux
+  // is holding open so its last screen can be read, so there is nothing left in
+  // it to stop.
+  const liveTerminals = useMemo(() => (terms.data ?? []).filter((t) => !t.dead), [terms.data])
+
   const { live, rest, doneList, desk } = useMemo(() => {
     const all = q.data?.installed ? q.data.sessions : []
     return {
@@ -704,14 +709,37 @@ export function SessionBoard() {
   // runs elevated, and thor escalates it through ONE kill-request.json handed
   // to a single scheduled task. Two stops in flight overwrite that file, so a
   // fan-out would kill one session and silently drop the rest.
-  const stopAll = async (rows: WorkSession[]) => {
-    if (rows.length === 0) return
+  const stopAll = async (rows: WorkSession[], terminals: TermSession[]) => {
+    if (rows.length + terminals.length === 0) return
     setStopAllArmed(false)
     setStoppingAll(true)
     setStopAllDone(0)
     setStopAllFailed(0)
-    setStopAllTotal(rows.length)
+    setStopAllTotal(rows.length + terminals.length)
     let failed = 0
+    const bumpFailed = (e: unknown) => {
+      // 404 is not a refusal: it means nothing is running under that id. Both
+      // lists are polls (10s for sessions, 15s for terminals), so something
+      // that exited on its own is still drawn as running and would otherwise
+      // be reported as a failure.
+      if (httpStatus(e) === 404) return
+      failed += 1
+      setStopAllFailed(failed)
+    }
+
+    // Terminals first. An in-page terminal is a tmux session whose pane runs
+    // Claude on thor, so closing it ends that Claude too: doing these first
+    // means the session sweep below finds them already gone and absorbs the
+    // 404, rather than killing Claude and leaving an empty terminal behind.
+    for (const t of terminals) {
+      try {
+        await killTermSession(t.name)
+      } catch (e) {
+        bumpFailed(e)
+      }
+      setStopAllDone((n) => n + 1)
+    }
+
     for (const s of rows) {
       setStoppingId(s.sessionId)
       try {
@@ -719,22 +747,20 @@ export function SessionBoard() {
       } catch (e) {
         // An elevated stop takes up to 12s and can still come back refused.
         // One that does must not abandon the sessions behind it.
-        //
-        // 404 is not a refusal: it means nothing is running under that id. The
-        // list is a 10-second poll, so a session that exited on its own is
-        // still drawn as live and would otherwise be reported as a failure.
-        if (httpStatus(e) !== 404) {
-          failed += 1
-          setStopAllFailed(failed)
-        }
+        bumpFailed(e)
       }
       setStopAllDone((n) => n + 1)
     }
     setStoppingId(null)
     setStoppingAll(false)
     refresh()
+    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
   }
 
+  // Both lists are things Brendon can see running: the chips in the "in page"
+  // row and the live session rows. A resume terminal and its session row are
+  // two of those, and stopping both is one no-op 404, which the sweep absorbs.
+  const stopAllCount = live.length + liveTerminals.length
   const busy = done.isPending || doneMany.isPending || stoppingAll
   const shown = showAll ? rest : rest.slice(0, SHOWN_BY_DEFAULT)
   const hidden = rest.length - shown.length
@@ -783,14 +809,16 @@ export function SessionBoard() {
             ))}
           </div>
         )}
-        {live.length > 0 && (
+        {stopAllCount > 0 && (
           <button
             type="button"
             disabled={stoppingAll || recovering}
-            onClick={() => (stopAllArmed ? void stopAll(live) : setStopAllArmed(true))}
+            onClick={() => (stopAllArmed ? void stopAll(live, liveTerminals) : setStopAllArmed(true))}
             title={stopAllArmed
-              ? `Click again to stop all ${live.length}`
-              : `Stop every running session. Transcripts are kept, so each one reopens whenever you want it.`}
+              ? `Click again to stop all ${stopAllCount}`
+              : liveTerminals.length > 0
+                ? `Stop every running session and close every terminal open in the page. Transcripts are kept, so each one reopens whenever you want it.`
+                : `Stop every running session. Transcripts are kept, so each one reopens whenever you want it.`}
             className={`inline-flex min-h-9 items-center gap-1.5 border px-2.5 text-[10px] uppercase tracking-[0.1em] transition disabled:opacity-40 ${stopAllArmed
               ? 'border-[var(--color-danger)] bg-[var(--color-danger)]/10 text-[var(--color-danger)]'
               : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]'}`}
@@ -798,7 +826,7 @@ export function SessionBoard() {
             <Square size={11} />
             {stoppingAll
               ? `stopping ${stopAllDone}/${stopAllTotal}`
-              : stopAllArmed ? `stop all ${live.length}?` : `stop all ${live.length}`}
+              : stopAllArmed ? `stop all ${stopAllCount}?` : `stop all ${stopAllCount}`}
           </button>
         )}
         <NewSession onStarted={refresh} inPage={inPage} />
