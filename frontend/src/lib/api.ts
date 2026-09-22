@@ -1242,7 +1242,10 @@ export const markTiktokPosted = async (renderId: number) => {
 
 // ---------- Plex ----------
 
-export type PlexSection = { key: string; title: string; type: 'movie' | 'show'; count: number }
+// Movies and TV are on odin's Plex ("main"); music is on LogicServer ("music"),
+// a second server the backend reaches over the tailnet.
+export type PlexServerName = 'main' | 'music'
+export type PlexSection = { key: string; title: string; type: 'movie' | 'show' | 'artist'; count: number; server: PlexServerName }
 
 export type PlexItem = {
   ratingKey: string
@@ -1305,11 +1308,16 @@ export const fetchImgToken = async () => {
   return r.data
 }
 
-export const plexImg = (path: string, w = 300): string => {
+export const plexImg = (path: string, w = 300, opts: { server?: PlexServerName; h?: number } = {}): string => {
   const params = new URLSearchParams({ path, w: String(w) })
+  if (opts.h) params.set('h', String(opts.h))
+  if (opts.server === 'music') params.set('server', 'music')
   if (imgToken && imgToken.expiresAt > Date.now() + 60_000) params.set('token', imgToken.token)
   return `${baseURL}/plex/img?${params.toString()}`
 }
+
+// Album art and artist photos: square, off the music server.
+export const musicImg = (path: string, w = 300): string => plexImg(path, w, { server: 'music', h: w })
 
 export type PlexServer = { machineIdentifier: string; friendlyName: string; version: string }
 
@@ -1426,6 +1434,98 @@ export const fetchMediaRequests = async () =>
   (await api.get<{ requests: MediaRequestEntry[] }>('/plex/requests')).data.requests
 export const fetchMediaDownloads = async () =>
   (await api.get<{ downloads: MediaDownload[] }>('/plex/downloads')).data.downloads
+
+// ---------- Music ----------
+//
+// Plex's hierarchy as the backend normalizes it: artist -> album -> track.
+// Tracks carry a streamKey for /plex/music/stream, which the in-page player
+// (lib/player.ts) direct-plays; nothing here hands off to the Plex app.
+
+export type MusicArtist = {
+  ratingKey: string
+  title: string
+  thumb: string | null
+  art: string | null
+  summary: string
+  genres: string[]
+  albumCount: number | null
+  addedAt: number | null
+  lastPlayedAt: number | null
+}
+
+export type MusicAlbum = {
+  ratingKey: string
+  title: string
+  artist: string
+  artistKey: string | null
+  year: number | null
+  thumb: string | null
+  trackCount: number | null
+  genres: string[]
+  addedAt: number | null
+  lastPlayedAt: number | null
+}
+
+export type MusicTrack = {
+  ratingKey: string
+  title: string
+  index: number | null
+  disc: number | null
+  album: string
+  albumKey: string | null
+  artist: string
+  artistKey: string | null
+  // The per-track artist on compilations; null when it is the album artist.
+  trackArtist: string | null
+  year: number | null
+  duration: number | null
+  thumb: string | null
+  // Null when Plex knows the track but has no file for it.
+  streamKey: string | null
+  container: string | null
+  codec: string | null
+  bitrate: number | null
+}
+
+export type MusicPage<T> = { total: number; offset: number; items: T[] }
+export type MusicSearchResults = { artists: MusicArtist[]; albums: MusicAlbum[]; tracks: MusicTrack[] }
+export type MusicRecent = { played: MusicArtist[]; added: MusicAlbum[] }
+
+export const MUSIC_PAGE = 60
+
+export const fetchMusicArtists = async (offset: number, opts: { search?: string; sort?: string } = {}) =>
+  (await api.get<MusicPage<MusicArtist>>('/plex/music/artists', {
+    params: { offset, limit: MUSIC_PAGE, search: opts.search || undefined, sort: opts.sort || undefined },
+  })).data
+export const fetchMusicArtist = async (key: string) =>
+  (await api.get<MusicArtist>('/plex/music/artist', { params: { key } })).data
+export const fetchMusicAlbums = async (offset: number, opts: { search?: string; sort?: string } = {}) =>
+  (await api.get<MusicPage<MusicAlbum>>('/plex/music/albums', {
+    params: { offset, limit: MUSIC_PAGE, search: opts.search || undefined, sort: opts.sort || undefined },
+  })).data
+export const fetchArtistAlbums = async (artistKey: string) =>
+  (await api.get<MusicPage<MusicAlbum>>('/plex/music/albums', { params: { artist: artistKey } })).data.items
+export const fetchAlbumTracks = async (albumKey: string) =>
+  (await api.get<{ items: MusicTrack[] }>('/plex/music/tracks', { params: { album: albumKey } })).data.items
+export const fetchArtistTracks = async (artistKey: string) =>
+  (await api.get<{ items: MusicTrack[] }>('/plex/music/tracks', { params: { artist: artistKey } })).data.items
+export const searchMusic = async (q: string) =>
+  (await api.get<MusicSearchResults>('/plex/music/search', { params: { q } })).data
+export const fetchMusicRecent = async () =>
+  (await api.get<MusicRecent>('/plex/music/recent', { params: { count: 12 } })).data
+export const scrobbleMusic = async (ratingKey: string) => {
+  await api.post('/plex/music/scrobble', { ratingKey })
+}
+
+// The <audio> src. Like posters, an audio element can't send a header, so off
+// the tailnet the same short-lived media token rides the URL. Built against the
+// resolved API base so the desktop app on the tailnet streams from odin
+// directly.
+export const musicStreamUrl = (streamKey: string): string => {
+  const params = new URLSearchParams({ key: streamKey })
+  if (imgToken && imgToken.expiresAt > Date.now() + 60_000) params.set('token', imgToken.token)
+  return `${api.defaults.baseURL ?? baseURL}/plex/music/stream?${params.toString()}`
+}
 
 /** The message an API rejection carries, if it carries one. */
 export function apiErrorText(err: unknown, fallback: string): string {

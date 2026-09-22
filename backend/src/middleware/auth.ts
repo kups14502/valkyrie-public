@@ -100,6 +100,10 @@ async function verifyCfAccessToken(token: string | undefined): Promise<jwt.JwtPa
   }
 }
 
+// Routes a media-scoped token (see auth/token.ts signImgToken) may open. Both
+// stream bytes to a browser element that cannot send headers.
+const MEDIA_TOKEN_PATHS = new Set(['/plex/img', '/plex/music/stream'])
+
 function bearer(req: Pick<IncomingMessage, 'headers'>): string | undefined {
   const h = String(req.headers['authorization'] || '')
   return h.startsWith('Bearer ') ? h.slice(7).trim() : undefined
@@ -108,12 +112,13 @@ function bearer(req: Pick<IncomingMessage, 'headers'>): string | undefined {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (isLoopbackReq(req) || isTailnetReq(req)) return next()
 
-  // 1a. Image-scoped query token, honored ONLY for the poster proxy. <img>
-  //     tags can't set headers, so the token rides the URL — which lands in
-  //     proxy logs and browser caches. That's why it's a separate short-lived
-  //     token that grants nothing but this route (and why the full app token
-  //     is never accepted from a query string).
-  if (req.method === 'GET' && req.path === '/plex/img'
+  // 1a. Media-scoped query token, honored ONLY for the poster proxy and the
+  //     music stream. <img> and <audio> tags can't set headers, so the token
+  //     rides the URL — which lands in proxy logs and browser caches. That's
+  //     why it's a separate short-lived token that grants nothing but these
+  //     routes (and why the full app token is never accepted from a query
+  //     string).
+  if (req.method === 'GET' && MEDIA_TOKEN_PATHS.has(req.path)
     && typeof req.query.token === 'string' && verifyImgToken(req.query.token)) {
     return next()
   }

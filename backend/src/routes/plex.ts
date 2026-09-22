@@ -18,6 +18,12 @@ const router = Router()
 
 const PLEX_URL = process.env.PLEX_URL || 'http://127.0.0.1:32400'
 const PLEX_TOKEN = process.env.PLEX_TOKEN || ''
+// The music library lives on a second Plex server (LogicServer, reached over
+// the tailnet), not on odin's own. Same account owns both, so its token
+// defaults to the main one. Unset PLEX_MUSIC_URL and the music routes answer
+// 503 and no music tab appears.
+const PLEX_MUSIC_URL = (process.env.PLEX_MUSIC_URL || '').replace(/\/+$/, '')
+const PLEX_MUSIC_TOKEN = process.env.PLEX_MUSIC_TOKEN || PLEX_TOKEN
 const RADARR_URL = process.env.RADARR_URL || 'http://127.0.0.1:7878'
 const RADARR_KEY = process.env.RADARR_API_KEY || ''
 const SONARR_URL = process.env.SONARR_URL || 'http://127.0.0.1:8989'
@@ -25,15 +31,22 @@ const SONARR_KEY = process.env.SONARR_API_KEY || ''
 
 const REQUESTS_LOG = path.join(process.cwd(), 'data', 'media-requests.jsonl')
 
+type PlexTarget = { name: 'main' | 'music'; url: string; token: string }
+const mainServer: PlexTarget = { name: 'main', url: PLEX_URL, token: PLEX_TOKEN }
+const musicServer: PlexTarget = { name: 'music', url: PLEX_MUSIC_URL, token: PLEX_MUSIC_TOKEN }
+
 const plexConfigured = () => Boolean(PLEX_TOKEN)
+const musicConfigured = () => Boolean(PLEX_MUSIC_URL && PLEX_MUSIC_TOKEN)
+// Which server a client-supplied ?server= names. Anything but "music" is main.
+const targetFor = (name: unknown): PlexTarget => (name === 'music' ? musicServer : mainServer)
 
 // ---------- Plex ----------
 
-async function plexJSON<T>(p: string, params?: Record<string, string>, containerStart?: number, containerSize?: number): Promise<T> {
-  const url = new URL(`${PLEX_URL}${p}`)
+async function plexJSON<T>(srv: PlexTarget, p: string, params?: Record<string, string>, containerStart?: number, containerSize?: number): Promise<T> {
+  const url = new URL(`${srv.url}${p}`)
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, v)
   const headers: Record<string, string> = {
-    'X-Plex-Token': PLEX_TOKEN,
+    'X-Plex-Token': srv.token,
     Accept: 'application/json',
   }
   if (containerSize !== undefined) {
@@ -73,6 +86,23 @@ type PlexMetadata = {
   grandparentSlug?: string
   index?: number
   parentIndex?: number
+  // Music. A track's parent is its album and grandparent its artist;
+  // originalTitle is the per-track artist on compilations; parentYear is the
+  // album year as seen from a track.
+  parentRatingKey?: string
+  grandparentRatingKey?: string
+  originalTitle?: string
+  parentYear?: number
+  lastViewedAt?: number
+  viewCount?: number
+  Genre?: { tag: string }[]
+  Media?: {
+    duration?: number
+    bitrate?: number
+    audioCodec?: string
+    container?: string
+    Part?: { key?: string; container?: string; size?: number }[]
+  }[]
 }
 type PlexContainer<T> = { MediaContainer: { totalSize?: number; size?: number; Directory?: T[]; Metadata?: T[] } }
 
@@ -122,25 +152,51 @@ function normalizeItem(m: PlexMetadata) {
 export type PlexItem = ReturnType<typeof normalizeItem>
 
 // Section list changes rarely; totals are a separate cheap call. Cache 5 min.
-let sectionsCache: { at: number; data: { key: string; title: string; type: string; count: number }[] } | null = null
+type SectionSummary = { key: string; title: string; type: string; count: number; server: PlexTarget['name'] }
+let sectionsCache: { at: number; data: SectionSummary[] } | null = null
+
+// Every music section on the music server, with its artist count. Fails soft:
+// the movie/tv tabs must not disappear because LogicServer is asleep.
+async function musicSections(): Promise<SectionSummary[]> {
+  if (!musicConfigured()) return []
+  try {
+    const dirs = (await plexJSON<PlexContainer<PlexDirectory>>(musicServer, '/library/sections')).MediaContainer.Directory ?? []
+    return await Promise.all(
+      dirs
+        .filter((d) => d.type === 'artist')
+        .map(async (d) => {
+          const c = await plexJSON<PlexContainer<never>>(musicServer, `/library/sections/${d.key}/all`, { type: '8' }, 0, 0)
+            .catch(() => null)
+          return { key: d.key, title: d.title, type: d.type, count: c?.MediaContainer.totalSize ?? 0, server: 'music' as const }
+        }),
+    )
+  } catch (err) {
+    console.warn('[plex] music server unreachable:', (err as Error).message)
+    return []
+  }
+}
 
 router.get('/plex/sections', async (_req, res) => {
   if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured', detail: 'set PLEX_URL / PLEX_TOKEN' })
   try {
     if (sectionsCache && Date.now() - sectionsCache.at < 300_000) return res.json(sectionsCache.data)
-    const dirs = (await plexJSON<PlexContainer<PlexDirectory>>('/library/sections')).MediaContainer.Directory ?? []
+    const [dirs, music] = await Promise.all([
+      plexJSON<PlexContainer<PlexDirectory>>(mainServer, '/library/sections').then((c) => c.MediaContainer.Directory ?? []),
+      musicSections(),
+    ])
     const sections = await Promise.all(
       dirs
         .filter((d) => d.type === 'movie' || d.type === 'show')
-        .map(async (d) => {
+        .map(async (d): Promise<SectionSummary> => {
           // Zero-size page returns just the container header with totalSize.
-          const c = await plexJSON<PlexContainer<never>>(`/library/sections/${d.key}/all`, {}, 0, 0)
+          const c = await plexJSON<PlexContainer<never>>(mainServer, `/library/sections/${d.key}/all`, {}, 0, 0)
             .catch(() => null)
-          return { key: d.key, title: d.title, type: d.type, count: c?.MediaContainer.totalSize ?? 0 }
+          return { key: d.key, title: d.title, type: d.type, count: c?.MediaContainer.totalSize ?? 0, server: 'main' }
         }),
     )
-    sectionsCache = { at: Date.now(), data: sections }
-    res.json(sections)
+    const data = [...sections, ...music]
+    sectionsCache = { at: Date.now(), data }
+    res.json(data)
   } catch (err) {
     res.status(503).json({ error: 'plex unreachable', detail: (err as Error).message })
   }
@@ -154,7 +210,7 @@ router.get('/plex/server', async (_req, res) => {
   if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured' })
   try {
     if (serverCache && Date.now() - serverCache.at < 3600_000) return res.json(serverCache.data)
-    const c = await plexJSON<{ MediaContainer: { machineIdentifier?: string; friendlyName?: string; version?: string } }>('/')
+    const c = await plexJSON<{ MediaContainer: { machineIdentifier?: string; friendlyName?: string; version?: string } }>(mainServer, '/')
     const mc = c.MediaContainer
     if (!mc.machineIdentifier) throw new Error('no machineIdentifier in response')
     const data = {
@@ -187,7 +243,7 @@ router.get('/plex/library', async (req, res) => {
   try {
     const params: Record<string, string> = { sort }
     if (search) params.title = search
-    const c = await plexJSON<PlexContainer<PlexMetadata>>(`/library/sections/${section}/all`, params, offset, limit)
+    const c = await plexJSON<PlexContainer<PlexMetadata>>(mainServer, `/library/sections/${section}/all`, params, offset, limit)
     const mc = c.MediaContainer
     res.json({
       total: mc.totalSize ?? mc.size ?? 0,
@@ -203,7 +259,7 @@ router.get('/plex/recent', async (req, res) => {
   if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured' })
   const limit = Math.min(60, Math.max(1, Number(req.query.limit) || 24))
   try {
-    const c = await plexJSON<PlexContainer<PlexMetadata>>('/library/recentlyAdded', {}, 0, limit)
+    const c = await plexJSON<PlexContainer<PlexMetadata>>(mainServer, '/library/recentlyAdded', {}, 0, limit)
     res.json({ items: (c.MediaContainer.Metadata ?? []).map(normalizeItem) })
   } catch (err) {
     res.status(503).json({ error: 'plex unreachable', detail: (err as Error).message })
@@ -212,22 +268,24 @@ router.get('/plex/recent', async (req, res) => {
 
 // Poster/art proxy. Streams Plex's photo transcoder so clients get right-sized
 // JPEGs without ever seeing the Plex token. Path is restricted to Plex image
-// paths (no arbitrary proxying).
+// paths (no arbitrary proxying). ?server=music reads album art and artist
+// photos off the music server instead.
 router.get('/plex/img', async (req, res) => {
-  if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured' })
+  const srv = targetFor(req.query.server)
+  if (srv === musicServer ? !musicConfigured() : !plexConfigured()) return res.status(503).json({ error: 'plex not configured' })
   const p = String(req.query.path ?? '')
   if (!/^\/(library|photo)\/[\w\-/:.]+$/.test(p)) return res.status(400).json({ error: 'invalid path' })
   const w = Math.min(1200, Math.max(60, Number(req.query.w) || 300))
   const h = Math.min(1800, Math.max(60, Number(req.query.h) || Math.round(w * 1.5)))
   try {
-    const url = new URL(`${PLEX_URL}/photo/:/transcode`)
+    const url = new URL(`${srv.url}/photo/:/transcode`)
     url.searchParams.set('width', String(w))
     url.searchParams.set('height', String(h))
     url.searchParams.set('minSize', '1')
     url.searchParams.set('upscale', '1')
     url.searchParams.set('url', p)
     const r = await fetch(url, {
-      headers: { 'X-Plex-Token': PLEX_TOKEN },
+      headers: { 'X-Plex-Token': srv.token },
       signal: AbortSignal.timeout(15_000),
     })
     if (!r.ok || !r.body) return res.status(502).json({ error: 'image fetch failed', status: r.status })
@@ -256,6 +314,283 @@ router.get('/plex/img', async (req, res) => {
 // requireAuth). Tailnet clients never need it.
 router.get('/plex/img-token', (_req, res) => {
   res.json(signImgToken())
+})
+
+// ---------- Music (second server) ----------
+//
+// Browsing follows Plex's own hierarchy: artist (type 8) -> album (9) ->
+// track (10). Playback does not hand off to the Plex app the way movies do:
+// tracks are direct-played in the page through /plex/music/stream, a
+// range-aware proxy of the file part, so the browser's <audio> element can seek
+// and the Plex token never leaves this box.
+
+const MUSIC_TYPES = { artist: '8', album: '9', track: '10' } as const
+
+// The one artist-type section on the music server, cached for an hour.
+let musicSectionCache: { at: number; key: string; title: string } | null = null
+async function musicSection(): Promise<{ key: string; title: string }> {
+  if (musicSectionCache && Date.now() - musicSectionCache.at < 3600_000) return musicSectionCache
+  const dirs = (await plexJSON<PlexContainer<PlexDirectory>>(musicServer, '/library/sections')).MediaContainer.Directory ?? []
+  const d = dirs.find((x) => x.type === 'artist')
+  if (!d) throw new Error('the music server has no music library')
+  musicSectionCache = { at: Date.now(), key: d.key, title: d.title }
+  return musicSectionCache
+}
+
+const genres = (m: PlexMetadata) => (m.Genre ?? []).map((g) => g.tag).filter(Boolean).slice(0, 4)
+
+function normalizeArtist(m: PlexMetadata) {
+  return {
+    ratingKey: m.ratingKey ?? '',
+    title: m.title || 'unknown artist',
+    thumb: m.thumb ?? null,
+    art: m.art ?? null,
+    summary: m.summary ?? '',
+    genres: genres(m),
+    albumCount: m.childCount ?? null,
+    addedAt: m.addedAt ?? null,
+    lastPlayedAt: m.lastViewedAt ?? null,
+  }
+}
+export type MusicArtist = ReturnType<typeof normalizeArtist>
+
+function normalizeAlbum(m: PlexMetadata) {
+  return {
+    ratingKey: m.ratingKey ?? '',
+    title: m.title || 'untitled',
+    artist: m.parentTitle ?? '',
+    artistKey: m.parentRatingKey ?? null,
+    year: m.year ?? null,
+    thumb: m.thumb || m.parentThumb || null,
+    trackCount: m.leafCount ?? null,
+    genres: genres(m),
+    addedAt: m.addedAt ?? null,
+    lastPlayedAt: m.lastViewedAt ?? null,
+  }
+}
+export type MusicAlbum = ReturnType<typeof normalizeAlbum>
+
+function normalizeTrack(m: PlexMetadata) {
+  const media = m.Media?.[0]
+  const part = media?.Part?.[0]
+  return {
+    ratingKey: m.ratingKey ?? '',
+    title: m.title || 'untitled',
+    index: m.index ?? null,
+    disc: m.parentIndex ?? null,
+    album: m.parentTitle ?? '',
+    albumKey: m.parentRatingKey ?? null,
+    artist: m.grandparentTitle ?? '',
+    artistKey: m.grandparentRatingKey ?? null,
+    // Set on compilations, where the album artist is "Various Artists".
+    trackArtist: m.originalTitle ?? null,
+    year: m.parentYear ?? null,
+    duration: m.duration ?? null,
+    thumb: m.thumb || m.parentThumb || m.grandparentThumb || null,
+    // What /plex/music/stream takes. Null for a track Plex knows but has no
+    // file for.
+    streamKey: part?.key ?? null,
+    container: part?.container ?? media?.container ?? null,
+    codec: media?.audioCodec ?? null,
+    bitrate: media?.bitrate ?? null,
+  }
+}
+export type MusicTrack = ReturnType<typeof normalizeTrack>
+
+const MUSIC_SORTS: Record<string, string> = {
+  title: 'titleSort:asc',
+  added: 'addedAt:desc',
+  played: 'lastViewedAt:desc',
+  year: 'year:desc',
+}
+
+const pageParams = (req: { query: Record<string, unknown> }) => ({
+  offset: Math.max(0, Number(req.query.offset) || 0),
+  limit: Math.min(120, Math.max(1, Number(req.query.limit) || 60)),
+  search: String(req.query.search ?? '').slice(0, 100),
+  sort: MUSIC_SORTS[String(req.query.sort ?? '')],
+})
+
+function musicGate(res: import('express').Response): boolean {
+  if (musicConfigured()) return true
+  res.status(503).json({ error: 'music not configured', detail: 'set PLEX_MUSIC_URL' })
+  return false
+}
+
+const musicFail = (res: import('express').Response, err: unknown) =>
+  res.status(503).json({ error: 'music server unreachable', detail: (err as Error).message })
+
+router.get('/plex/music/artists', async (req, res) => {
+  if (!musicGate(res)) return
+  const { offset, limit, search, sort } = pageParams(req)
+  try {
+    const sec = await musicSection()
+    const params: Record<string, string> = { type: MUSIC_TYPES.artist, sort: sort ?? MUSIC_SORTS.title }
+    if (search) params.title = search
+    const mc = (await plexJSON<PlexContainer<PlexMetadata>>(musicServer, `/library/sections/${sec.key}/all`, params, offset, limit)).MediaContainer
+    res.json({ total: mc.totalSize ?? mc.size ?? 0, offset, items: (mc.Metadata ?? []).map(normalizeArtist) })
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// One artist by key, for the header of an artist page reached from an album
+// (where only the name was known).
+router.get('/plex/music/artist', async (req, res) => {
+  if (!musicGate(res)) return
+  const key = String(req.query.key ?? '')
+  if (!/^\d+$/.test(key)) return res.status(400).json({ error: 'invalid key' })
+  try {
+    const m = (await plexJSON<PlexContainer<PlexMetadata>>(musicServer, `/library/metadata/${key}`)).MediaContainer.Metadata?.[0]
+    if (!m || m.type !== 'artist') return res.status(404).json({ error: 'artist not found' })
+    res.json(normalizeArtist(m))
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// ?artist=<key> lists that artist's albums; otherwise a page of every album.
+router.get('/plex/music/albums', async (req, res) => {
+  if (!musicGate(res)) return
+  const artist = String(req.query.artist ?? '')
+  const { offset, limit, search, sort } = pageParams(req)
+  try {
+    if (artist) {
+      if (!/^\d+$/.test(artist)) return res.status(400).json({ error: 'invalid artist' })
+      const mc = (await plexJSON<PlexContainer<PlexMetadata>>(musicServer, `/library/metadata/${artist}/children`)).MediaContainer
+      const items = (mc.Metadata ?? []).filter((m) => m.type === 'album').map(normalizeAlbum)
+      return res.json({ total: items.length, offset: 0, items })
+    }
+    const sec = await musicSection()
+    const params: Record<string, string> = { type: MUSIC_TYPES.album, sort: sort ?? MUSIC_SORTS.added }
+    if (search) params.title = search
+    const mc = (await plexJSON<PlexContainer<PlexMetadata>>(musicServer, `/library/sections/${sec.key}/all`, params, offset, limit)).MediaContainer
+    res.json({ total: mc.totalSize ?? mc.size ?? 0, offset, items: (mc.Metadata ?? []).map(normalizeAlbum) })
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// ?album=<key> is that album's tracks in order; ?artist=<key> is every track
+// the artist has (Plex's allLeaves), which is what "play all" and shuffle use.
+router.get('/plex/music/tracks', async (req, res) => {
+  if (!musicGate(res)) return
+  const album = String(req.query.album ?? '')
+  const artist = String(req.query.artist ?? '')
+  try {
+    let p: string
+    if (/^\d+$/.test(album)) p = `/library/metadata/${album}/children`
+    else if (/^\d+$/.test(artist)) p = `/library/metadata/${artist}/allLeaves`
+    else return res.status(400).json({ error: 'need album or artist' })
+    const mc = (await plexJSON<PlexContainer<PlexMetadata>>(musicServer, p)).MediaContainer
+    res.json({ items: (mc.Metadata ?? []).filter((m) => m.type === 'track').map(normalizeTrack) })
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// Substring title match across all three levels at once. Plex's hub search
+// only surfaced tracks for music, so this asks each type directly.
+router.get('/plex/music/search', async (req, res) => {
+  if (!musicGate(res)) return
+  const q = String(req.query.q ?? '').trim().slice(0, 100)
+  if (q.length < 2) return res.json({ artists: [], albums: [], tracks: [] })
+  try {
+    const sec = await musicSection()
+    const find = (type: string, sort: string) => plexJSON<PlexContainer<PlexMetadata>>(
+      musicServer, `/library/sections/${sec.key}/all`, { type, title: q, sort }, 0, 12,
+    ).then((c) => c.MediaContainer.Metadata ?? []).catch(() => [])
+    const [artists, albums, tracks] = await Promise.all([
+      find(MUSIC_TYPES.artist, MUSIC_SORTS.title),
+      find(MUSIC_TYPES.album, MUSIC_SORTS.title),
+      find(MUSIC_TYPES.track, MUSIC_SORTS.title),
+    ])
+    res.json({
+      artists: artists.map(normalizeArtist),
+      albums: albums.map(normalizeAlbum),
+      tracks: tracks.map(normalizeTrack),
+    })
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// Plex's own music hubs for the section: recently played artists and recently
+// added albums. That is the landing view.
+router.get('/plex/music/recent', async (req, res) => {
+  if (!musicGate(res)) return
+  const count = Math.min(24, Math.max(1, Number(req.query.count) || 12))
+  try {
+    const sec = await musicSection()
+    type Hub = { hubIdentifier?: string; type?: string; Metadata?: PlexMetadata[] }
+    const hubs = (await plexJSON<{ MediaContainer: { Hub?: Hub[] } }>(musicServer, `/hubs/sections/${sec.key}`, { count: String(count) })).MediaContainer.Hub ?? []
+    const pick = (prefix: string) => hubs.find((h) => h.hubIdentifier?.startsWith(prefix))?.Metadata ?? []
+    res.json({
+      played: pick('music.recent.played').filter((m) => m.type === 'artist').map(normalizeArtist),
+      added: pick('music.recent.added').filter((m) => m.type === 'album').map(normalizeAlbum),
+    })
+  } catch (err) {
+    musicFail(res, err)
+  }
+})
+
+// The audio itself. Forwards the browser's Range header and hands back Plex's
+// 200/206 with its Content-Range, so <audio> can seek and resume. The key is
+// pinned to Plex's part-file shape, so this can't be turned into a general
+// proxy. No overall timeout: a long track streams at the client's pace, and a
+// client that leaves tears the upstream fetch down through the abort.
+const STREAM_KEY = /^\/library\/parts\/\d+\/\d+\/file\.[a-z0-9]{2,5}$/i
+
+router.get('/plex/music/stream', async (req, res) => {
+  if (!musicGate(res)) return
+  const key = String(req.query.key ?? '')
+  if (!STREAM_KEY.test(key)) return res.status(400).json({ error: 'invalid key' })
+  const ctl = new AbortController()
+  res.on('close', () => ctl.abort())
+  try {
+    const headers: Record<string, string> = { 'X-Plex-Token': musicServer.token }
+    if (typeof req.headers.range === 'string') headers.Range = req.headers.range
+    const r = await fetch(`${musicServer.url}${key}`, { headers, signal: ctl.signal })
+    if ((r.status !== 200 && r.status !== 206) || !r.body) {
+      return res.status(r.status === 404 ? 404 : 502).json({ error: 'stream fetch failed', status: r.status })
+    }
+    res.status(r.status)
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const v = r.headers.get(h)
+      if (v) res.setHeader(h, v)
+    }
+    // Part keys carry the file's version stamp, so a day of private caching is
+    // safe; the URL may carry the media token, so never a shared cache.
+    res.setHeader('Cache-Control', 'private, max-age=86400')
+    pipeline(
+      Readable.fromWeb(r.body as import('node:stream/web').ReadableStream),
+      res,
+      (err) => {
+        if (err && !ctl.signal.aborted) console.warn('[plex] music stream aborted:', (err as Error).message)
+      },
+    )
+  } catch (err) {
+    if (ctl.signal.aborted || res.headersSent) return
+    res.status(502).json({ error: 'stream fetch failed', detail: (err as Error).message })
+  }
+})
+
+// Mark a track played when it finishes, so Plex's own "recently played" (and
+// this page's landing view) reflect what was played here.
+router.post('/plex/music/scrobble', async (req, res) => {
+  if (!musicGate(res)) return
+  const key = String((req.body ?? {}).ratingKey ?? '')
+  if (!/^\d+$/.test(key)) return res.status(400).json({ error: 'invalid key' })
+  try {
+    const url = new URL(`${musicServer.url}/:/scrobble`)
+    url.searchParams.set('key', key)
+    url.searchParams.set('identifier', 'com.plexapp.plugins.library')
+    const r = await fetch(url, { headers: { 'X-Plex-Token': musicServer.token }, signal: AbortSignal.timeout(10_000) })
+    if (!r.ok) throw new Error(`scrobble -> ${r.status}`)
+    res.json({ ok: true })
+  } catch (err) {
+    musicFail(res, err)
+  }
 })
 
 // ---------- Requests (Radarr / Sonarr + agent journal) ----------

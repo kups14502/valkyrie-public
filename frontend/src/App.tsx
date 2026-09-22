@@ -17,6 +17,7 @@ import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
 import { useProfile } from './lib/deviceMode'
 import { isEmbedded } from './lib/embed'
+import PlayerBar from './components/PlayerBar'
 import Dashboard from './pages/Dashboard'
 
 // Routes are code-split, and a deploy replaces every hashed chunk at once. A
@@ -447,6 +448,10 @@ function Shell() {
           </ErrorBoundary>
         </Suspense>
       </main>
+      {/* Music now-playing bar. Empty (renders nothing) until a track is queued;
+          shrink-0 like the header, so main gives up the height instead of
+          being overlapped. */}
+      {!isEmbedded && <PlayerBar />}
       {!isEmbedded && <CommandPalette />}
     </div>
   )
