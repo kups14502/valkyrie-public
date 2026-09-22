@@ -683,7 +683,10 @@ const parseSession = (raw: unknown): WorkSession | null => {
 
 // `phone` is thor's own flag in launch-targets.json: the targets the phone
 // terminal offers (personal, work, work2). The desktop dropdown lists all.
-export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean }
+// `group` is the Windows Terminal window a session started in this target
+// joins. It matters off thor: the desktop app opens that window on ITS OWN
+// screen, so the grouping rule has to travel with the target.
+export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean; group: string | null }
 
 export const fetchLaunchTargets = async (host = 'thor'): Promise<LaunchTarget[]> => {
   try {
@@ -693,7 +696,9 @@ export const fetchLaunchTargets = async (host = 'thor'): Promise<LaunchTarget[]>
       .map((raw) => {
         const r = (raw ?? {}) as Record<string, unknown>
         const key = wsStr(r.key)
-        return key ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false, phone: r.phone === true } : null
+        return key
+          ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false, phone: r.phone === true, group: wsStr(r.group) }
+          : null
       })
       .filter((x): x is LaunchTarget => x !== null)
   } catch {
@@ -758,6 +763,10 @@ export type TermSession = {
   host: string
   // The launch-target key for new/shell, the conversation id for resume.
   target: string
+  // The conversation running in the pane, for new as well as resume: a new
+  // terminal is given its session id up front. Empty for a shell, and for any
+  // terminal opened before the backend did this.
+  sessionId: string
   createdAt: number
   activityAt: number
   clients: number
@@ -793,6 +802,7 @@ const parseTermSession = (raw: unknown): TermSession | null => {
     mode: (TERM_MODES as string[]).includes(mode ?? '') ? (mode as TermMode) : 'shell',
     host: wsStr(r.host) ?? 'thor',
     target: wsStr(r.target) ?? '',
+    sessionId: wsStr(r.sessionId) ?? '',
     createdAt: wsNum(r.createdAt) ?? 0,
     activityAt: wsNum(r.activityAt) ?? 0,
     clients: wsNum(r.clients) ?? 0,
@@ -805,6 +815,17 @@ export const fetchTermSessions = async (): Promise<TermSession[]> => {
   const d = (await api.get<unknown>('/terminal/sessions')).data
   if (!Array.isArray(d)) throw new Error('Invalid terminal sessions response')
   return d.map(parseTermSession).filter((s): s is TermSession => s !== null)
+}
+
+// What a terminal is called on screen. The board's title for the conversation
+// in the pane wins, because that is the only name that follows what the session
+// turned out to be about. The label stored on the tmux session is fixed at
+// creation: a terminal opened on the personal target read "personal" for its
+// whole life, and only closing and reopening it ever picked up a real title.
+export const termLabel = (s: TermSession, titles: Map<string, string>): string => {
+  const id = s.sessionId || (s.mode === 'resume' ? s.target : '')
+  const live = id ? titles.get(id) : undefined
+  return live || s.label || s.name
 }
 
 export const fetchTermStatus = async () => (await api.get<TermStatus>('/terminal/status')).data
@@ -1018,6 +1039,21 @@ export const openSessionHere = async (
   if (!isTauri()) throw new Error('only the desktop app can open a local terminal')
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('open_session_ssh', { sessionId, host, group })
+}
+
+// Start a NEW session in front of me, rather than on the machine that hosts it.
+// "New session" always asked the host's own agent, which opens the window on
+// THAT host: pressing it at mimir put a tab on thor's screen and left mimir
+// with a row in the list and nothing to type into. Resume had a local path
+// from the start; this is the same hop for a target key instead of an id.
+export const openNewSessionHere = async (
+  target: string,
+  host = '100.118.7.57',
+  group: string | null = null,
+): Promise<void> => {
+  if (!isTauri()) throw new Error('only the desktop app can open a local terminal')
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('open_new_ssh', { target, host, group })
 }
 
 export const setThreadDisposition = async (threadId: string, disposition: ThreadDisposition) =>

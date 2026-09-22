@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal as XTerm } from '@xterm/xterm'
@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
-  openTermSession, type TermOpen, type TermSession,
+  openTermSession, termLabel, type TermOpen, type TermSession,
 } from '../lib/api'
 import {
   TERM_FONT_FAMILY, errText, readTermTheme as readTheme, relIso, relative, termWsUrl as wsUrl, toCtrl,
@@ -71,6 +71,15 @@ const KB_NONE = 40
 const CRAMPED_H = 72
 const CRAMPED_W = 120
 
+// Liveness. The server sends a readable heartbeat every 25s and answers a
+// probe with one, so this much silence means the stream is broken however
+// healthy readyState looks. A socket iOS suspended in the background comes back
+// OPEN and delivers nothing at all: that is the frozen terminal that used to
+// need a reload.
+const SILENT_MS = 45_000
+// How long a probe may go unanswered before the socket is treated as dead.
+const PROBE_MS = 8_000
+
 // wsUrl, readTheme, toCtrl, relative, relIso and errText live in lib/term.ts,
 // shared with the VR workspace (pages/Vr.tsx).
 
@@ -94,6 +103,12 @@ export default function TerminalPage() {
   const wsRef = useRef<WebSocket | null>(null)
   const ctrlRef = useRef(false)
   const fontRef = useRef(12)
+  // When the socket last delivered anything, when an unanswered probe went out,
+  // and whether this server heartbeats at all (an older API does not, and a
+  // watchdog that fires on its silence would reconnect on a loop).
+  const rxRef = useRef(0)
+  const probeSentRef = useRef(0)
+  const beatsRef = useRef(false)
 
   // Geometry lives in refs, never state: a viewport event must not re-render
   // the chip list, the resume list, or the fourteen buttons.
@@ -150,15 +165,24 @@ export default function TerminalPage() {
   // thor, hook runs already filtered out there. Live ones are left out because
   // a conversation open on thor's desk has to be stopped before it can move
   // here, and done ones because Brendon said he was finished with them.
+  // Also the source of the chip titles below, which is why it is no longer
+  // gated on the picker being open.
   const recent = useQuery({
     queryKey: ['sessionList'],
     queryFn: fetchSessionList,
-    enabled: picker,
     staleTime: 10_000,
+    refetchInterval: 30_000,
   })
-  const resumable = recent.data?.installed
-    ? recent.data.sessions.filter((s) => !s.live && !s.done).slice(0, 40)
-    : []
+  const boardRows = useMemo(() => (recent.data?.installed ? recent.data.sessions : []), [recent.data])
+  const resumable = boardRows.filter((s) => !s.live && !s.done).slice(0, 40)
+  // What the board calls each conversation. A chip opened on a target was
+  // labelled with the target key for the life of the terminal, so a session
+  // only ever showed its real title after being closed and reopened.
+  const titles = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of boardRows) if (s.title) m.set(s.sessionId, s.title)
+    return m
+  }, [boardRows])
 
   const list = sessions.data ?? EMPTY
 
@@ -456,6 +480,15 @@ export default function TerminalPage() {
     ws.send(JSON.stringify({ t: 's', lines }))
   }, [])
 
+  // Back to the live bottom of the pane. A swipe puts tmux in copy-mode, where
+  // the view stops following output: the session looks paused, and stays that
+  // way until something makes it leave. Typing did that; tapping did not, which
+  // is why it sometimes came back on a click and sometimes did not.
+  const leaveScroll = useCallback(() => {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'se' }))
+  }, [])
+
   const halfScreen = useCallback(() => Math.max(1, Math.floor((termRef.current?.rows ?? 24) / 2)), [])
 
   const focusTerm = useCallback(() => { termRef.current?.focus() }, [])
@@ -523,7 +556,13 @@ export default function TerminalPage() {
       }
     }
 
-    const onEnd = () => { id = null; dragging = false; acc = 0 }
+    // A tap, not a drag: the finger is asking to type, so the pane goes back to
+    // following output. A real drag leaves copy-mode alone, because scrolling
+    // back and being yanked to the bottom is worse than useless.
+    const onEnd = () => {
+      if (id !== null && !dragging) leaveScroll()
+      id = null; dragging = false; acc = 0
+    }
 
     host.addEventListener('touchstart', onStart, { passive: true })
     host.addEventListener('touchmove', onMove, { passive: false })
@@ -535,7 +574,7 @@ export default function TerminalPage() {
       host.removeEventListener('touchend', onEnd)
       host.removeEventListener('touchcancel', onEnd)
     }
-  }, [scrollBy])
+  }, [scrollBy, leaveScroll])
 
   // C. One terminal + one socket per selected session. `gen` is the reconnect
   //    handle: bumping it tears the pair down and builds them again.
@@ -584,6 +623,12 @@ export default function TerminalPage() {
 
     ws.onopen = () => {
       setConn('live')
+      rxRef.current = Date.now()
+      // One probe up front, both to prove the socket end to end and to find out
+      // whether this API heartbeats at all. A server that never answers simply
+      // turns the watchdog off (see the effect below).
+      probeSentRef.current = Date.now()
+      try { ws.send(JSON.stringify({ t: 'p' })) } catch { /* the watchdog has it */ }
       // Resizing straight after attach makes tmux repaint the pane in full.
       // Without it a reattach shows whatever the last client's geometry left
       // behind, which after a rotation is a half-drawn screen.
@@ -591,10 +636,15 @@ export default function TerminalPage() {
       term.focus()
     }
     ws.onmessage = (e) => {
+      // Anything at all answers an outstanding probe: the point is traffic, not
+      // which frame it was.
+      rxRef.current = Date.now()
+      probeSentRef.current = 0
       if (typeof e.data === 'string') {
         try {
           const m = JSON.parse(e.data) as { t?: string; d?: string }
-          if (m.t === 'detached') term.write('\r\n\x1b[2m-- session ended --\x1b[0m\r\n')
+          if (m.t === 'hb') beatsRef.current = true
+          else if (m.t === 'detached') term.write('\r\n\x1b[2m-- session ended --\x1b[0m\r\n')
           else if (m.t === 'err') term.write(`\r\n\x1b[31m${m.d ?? 'error'}\x1b[0m\r\n`)
         } catch { /* not a control frame we know */ }
         return
@@ -646,27 +696,68 @@ export default function TerminalPage() {
     return () => cancelAnimationFrame(id)
   }, [font, safeFit])
 
-  // E. iOS suspends a backgrounded socket. Coming back to a dead one should
-  //    reattach rather than show a frozen screen. Debounced, because an iOS
-  //    focus burst would otherwise double-bump gen and rebuild twice.
+  // E. iOS suspends a backgrounded socket, and what comes back is worse than a
+  //    closed one: a half-open socket reads OPEN, fires no close event, and
+  //    delivers nothing, which on screen is a session that simply stopped. A
+  //    closed socket was already handled here; silence was not, and that is the
+  //    freeze that used to need a reload.
+  //
+  //    So: a closed socket reconnects, and an open one is asked to prove
+  //    itself. The probe is only trusted once this server has been seen to
+  //    heartbeat, so an older API is never reconnected on a loop for a frame it
+  //    does not send.
   useEffect(() => {
     let timer = 0
-    const revive = () => {
+
+    const reconnect = () => {
+      probeSentRef.current = 0
+      setGen((g) => g + 1)
+    }
+
+    const check = () => {
+      if (document.visibilityState !== 'visible') return
+      const ws = wsRef.current
+      if (!ws) return
+      if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) return reconnect()
+      if (ws.readyState !== WebSocket.OPEN) return
+
+      const now = Date.now()
+      const sent = probeSentRef.current
+      if (sent) {
+        // Unanswered long enough to count as gone — but only where a reply was
+        // ever coming.
+        if (beatsRef.current && now - sent > PROBE_MS) reconnect()
+        return
+      }
+      if (now - rxRef.current < SILENT_MS) return
+      probeSentRef.current = now
+      try { ws.send(JSON.stringify({ t: 'p' })) } catch { reconnect() }
+    }
+
+    // Coming back from the background is the moment this matters, and it is
+    // debounced because an iOS focus burst would otherwise probe several times.
+    const wake = () => {
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         if (document.visibilityState !== 'visible') return
         const ws = wsRef.current
-        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-          setGen((g) => g + 1)
-        }
+        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) return reconnect()
+        if (ws.readyState !== WebSocket.OPEN) return
+        probeSentRef.current = probeSentRef.current || Date.now()
+        try { ws.send(JSON.stringify({ t: 'p' })) } catch { reconnect() }
       }, 300)
     }
-    document.addEventListener('visibilitychange', revive)
-    window.addEventListener('focus', revive)
+
+    const beat = window.setInterval(check, 5_000)
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('focus', wake)
+    window.addEventListener('pageshow', wake)
     return () => {
       window.clearTimeout(timer)
-      document.removeEventListener('visibilitychange', revive)
-      window.removeEventListener('focus', revive)
+      window.clearInterval(beat)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('focus', wake)
+      window.removeEventListener('pageshow', wake)
     }
   }, [])
 
@@ -769,6 +860,7 @@ export default function TerminalPage() {
         </button>
         {list.map((s) => {
           const on = s.name === active
+          const label = termLabel(s, titles)
           return (
             <div
               key={s.name}
@@ -788,7 +880,7 @@ export default function TerminalPage() {
                     on ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-dim)]'
                   }`}
                 >
-                  {s.label}
+                  {label}
                 </span>
                 <span className={`text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
                   {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
@@ -798,7 +890,7 @@ export default function TerminalPage() {
               <button
                 type="button"
                 onClick={() => void closeSession(s.name)}
-                aria-label={`Close ${s.label}`}
+                aria-label={`Close ${label}`}
                 className="min-h-9 px-1.5 text-[var(--color-text-faint)] active:text-[var(--color-danger)]"
               >
                 <X size={11} />

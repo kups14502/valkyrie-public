@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
 import ptyModule from 'node-pty'
 import { homedir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { requireStrongAuth, authorizeStrongUpgrade } from '../middleware/auth.js'
 import {
   MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
@@ -70,6 +71,7 @@ router.post('/terminal/sessions', async (req, res) => {
 
   let target: string | undefined
   let resumeId: string | undefined
+  let newId: string | undefined
   let label: string
 
   if (mode === 'resume') {
@@ -80,11 +82,18 @@ router.post('/terminal/sessions', async (req, res) => {
     target = String(body.target ?? '')
     if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
     label = cleanLabel(body.label, target)
+    // The conversation id is minted HERE and handed to claude, rather than read
+    // back afterwards. A chip opened on a target could otherwise never name the
+    // conversation running in it: the label froze at 'personal' for the life of
+    // the terminal, and only closing and reopening it as a resume picked up the
+    // real title. Never taken from the request: a client choosing session ids
+    // could collide with a conversation that already exists.
+    if (mode === 'new') newId = randomUUID()
   }
 
   try {
     const name = await createSession({
-      mode, target, resumeId, label,
+      mode, target, resumeId, newId, label,
       cols: Number(body.cols), rows: Number(body.rows),
     })
     const session = (await listSessions()).find((s) => s.name === name) ?? null
@@ -167,6 +176,12 @@ type ClientMsg =
   // the view is a tmux copy-mode command, see scrollPane.
   | { t: 's'; lines: number }
   | { t: 'se' }
+  // "are you still there". A phone that comes back from the background cannot
+  // tell a working socket from one the network dropped while it slept: the
+  // readyState is OPEN either way, and a half-open socket looks exactly like a
+  // session with nothing to say. This is the client asking for proof, and the
+  // 'hb' below is the proof.
+  | { t: 'p' }
 
 function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
   const env: Record<string, string> = {}
@@ -205,6 +220,22 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
     ws.close(1000, 'detached')
   })
 
+  // A websocket ping is invisible to a browser: the reply is handled by the
+  // socket itself and no JavaScript ever sees it, so a page cannot use one to
+  // decide whether its connection still works. This says the same thing in a
+  // frame the page can read.
+  const beat = () => {
+    if (ws.readyState !== ws.OPEN) return
+    try { ws.send(JSON.stringify({ t: 'hb' })) } catch { /* already gone */ }
+  }
+
+  // Copy-mode belongs to the PANE, not to this socket, so it outlives the
+  // client that entered it. A phone that swiped, then dropped its connection,
+  // came back to a pane still in copy-mode: frozen on old output, with every
+  // keystroke read as a copy-mode command. Reloading the page did not help,
+  // because the mode was never on this side. Every attach therefore starts live.
+  void endScroll(name)
+
   // Scrolling puts the pane in copy-mode, where keys are copy-mode commands
   // rather than input, so a keystroke has to leave it first. That exit is an
   // async tmux call, so everything the client sends is serialized through one
@@ -240,6 +271,10 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
       leaveCopy()
       return
     }
+    if (msg.t === 'p') {
+      beat()
+      return
+    }
     if (msg.t === 'r') {
       const c = clampInt(String(msg.cols), 20, 400, cols)
       const r = clampInt(String(msg.rows), 8, 200, rows)
@@ -248,7 +283,9 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
   })
 
   const ping = setInterval(() => {
-    if (ws.readyState === ws.OPEN) ws.ping()
+    if (ws.readyState !== ws.OPEN) return
+    ws.ping()
+    beat()
   }, PING_MS)
 
   ws.on('close', () => {

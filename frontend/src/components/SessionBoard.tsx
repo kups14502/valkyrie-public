@@ -4,8 +4,8 @@ import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } f
 import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
-  launchSessionOnHost, localHostname, openSessionHere, openTermSession, setSessionDone,
-  setSessionsDone, startSessionOnHost, stopSessionOnHost, termPath,
+  launchSessionOnHost, localHostname, openNewSessionHere, openSessionHere, openTermSession,
+  setSessionDone, setSessionsDone, startSessionOnHost, stopSessionOnHost, termLabel, termPath,
   type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
 import { isTauri, isTauriMobile } from '../lib/auth'
@@ -255,7 +255,14 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
 //
 // In-page mode offers only the targets the host flagged for the phone
 // (personal, work, work2); on its own screen the full list applies.
-function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: boolean }) {
+//
+// "On screen" means THE SCREEN IN FRONT OF BRENDON, which is not always the
+// host's. Starting a session posted to the host's own launcher agent, and that
+// agent opens the tab where it runs: pressed at mimir, the session appeared in
+// the list and the window appeared on thor. Resume has had a local path since
+// the desktop app existed (openSessionHere); this is the same hop for a target
+// key, so the machine the board is running on opens the terminal itself.
+function NewSession({ onStarted, inPage, remote }: { onStarted: () => void; inPage: boolean; remote: boolean }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -294,14 +301,24 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
   // In-page means the tmux pane on odin, which SSHes into thor and nowhere
   // else, so a host that cannot host one opens on its own screen instead.
   const opensInPage = (h: SessionHost) => inPage && h.canPage
+  // Opened by this machine rather than by the host: only thor can be reached
+  // over SSH from here, and only when the board is not already sitting on it.
+  const opensHere = (h: SessionHost) => !opensInPage(h) && remote && h.host === HOST
 
-  const start = async (h: SessionHost, key: string, label: string) => {
+  const start = async (h: SessionHost, key: string, label: string, group: string | null) => {
     setBusy(`${h.host}:${key}`); setErr(null)
     try {
       if (opensInPage(h)) {
         const r = await openTermSession({ mode: 'new', target: key, label })
         seedTerminal(qc, r)
         navigate(termPath(r.name))
+        return
+      }
+      if (opensHere(h)) {
+        // The group has to come from the host: the window is created here,
+        // before any SSH runs, so nothing local knows which one this belongs in.
+        await openNewSessionHere(key, HOST_IP, group)
+        setTimeout(onStarted, 2_500)
         return
       }
       const r = await startSessionOnHost(h.host, key)
@@ -336,7 +353,9 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
                 <div className="flex items-baseline justify-between gap-2 px-3 py-1">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text)]">{h.host}</span>
                   <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
-                    {h.canLaunch ? (opensInPage(h) ? 'in the page' : 'on its screen') : 'unavailable'}
+                    {h.canLaunch
+                      ? opensInPage(h) ? 'in the page' : opensHere(h) ? 'on this screen' : 'on its screen'
+                      : 'unavailable'}
                   </span>
                 </div>
                 {h.canLaunch ? (
@@ -344,7 +363,7 @@ function NewSession({ onStarted, inPage }: { onStarted: () => void; inPage: bool
                     <button
                       key={t.key}
                       type="button"
-                      onClick={() => void start(h, t.key, t.label)}
+                      onClick={() => void start(h, t.key, t.label, t.group)}
                       className="block w-full px-3 py-2 text-left text-[11px] text-[var(--color-text-dim)] transition hover:bg-[rgba(var(--color-accent-rgb),0.1)] hover:text-[var(--color-accent)]"
                     >
                       {t.label}
@@ -393,7 +412,14 @@ function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession |
 // running Claude (or a shell) on thor. A tap reattaches; the X closes it, which
 // ends the Claude process on thor and leaves the conversation resumable. Hidden
 // when there are none, so a desk with no phone terminals never sees the row.
-function OpenTerminals() {
+//
+// `titles` maps a conversation id to what the board calls it, so a chip says
+// what the session is about rather than what it was opened with. The label
+// stored on the tmux session is fixed at creation: a terminal started on the
+// personal target read "personal" for its whole life, and only closing and
+// reopening it (as a resume, which passes the row's title) ever picked the real
+// one up.
+function OpenTerminals({ titles }: { titles: Map<string, string> }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [killing, setKilling] = useState<string | null>(null)
@@ -412,7 +438,9 @@ function OpenTerminals() {
   return (
     <div className="mb-2 flex items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] pb-2">
       <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-faint)]">in page</span>
-      {list.map((s) => (
+      {list.map((s) => {
+        const label = termLabel(s, titles)
+        return (
         <div
           key={s.name}
           className={`flex shrink-0 items-center border ${s.dead ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'}`}
@@ -420,12 +448,12 @@ function OpenTerminals() {
           <button
             type="button"
             onClick={() => navigate(termPath(s.name))}
-            title={`Reattach to ${s.label} on ${s.host}`}
-            className="flex min-h-9 items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
+            title={`Reattach to ${label} on ${s.host}`}
+            className="flex min-h-9 max-w-[16rem] items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
           >
-            <SquareTerminal size={11} />
-            {s.label}
-            <span className={`text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+            <SquareTerminal size={11} className="shrink-0" />
+            <span className="truncate">{label}</span>
+            <span className={`shrink-0 text-[9px] uppercase tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
               {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
               {s.activityAt > 0 ? ` · ${relAge(new Date(s.activityAt).toISOString())}` : ''}
             </span>
@@ -434,14 +462,15 @@ function OpenTerminals() {
             type="button"
             disabled={killing === s.name}
             onClick={() => void kill(s)}
-            aria-label={`Close ${s.label}`}
+            aria-label={`Close ${label}`}
             title="Close this terminal. A Claude session ends on thor; the conversation stays resumable."
             className="min-h-9 px-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
           >
             <X size={11} />
           </button>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -626,10 +655,21 @@ export function SessionBoard() {
   const attachedTerminals = useMemo(() => {
     const m = new Map<string, string>()
     for (const t of terms.data ?? []) {
-      if (t.mode === 'resume' && t.target && !t.dead) m.set(t.target, t.name)
+      // sessionId covers a terminal opened on a target, which knows its
+      // conversation id from the moment it is created; target is where a
+      // resume has always kept it.
+      const id = t.sessionId || (t.mode === 'resume' ? t.target : '')
+      if (id && !t.dead) m.set(id, t.name)
     }
     return m
   }, [terms.data])
+
+  // What the board calls each conversation, for the chips above to borrow.
+  const titleById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of (q.data?.installed ? q.data.sessions : [])) if (s.title) m.set(s.sessionId, s.title)
+    return m
+  }, [q.data])
 
   // What "stop all" closes besides the session rows. A dead one is a pane tmux
   // is holding open so its last screen can be read, so there is nothing left in
@@ -782,7 +822,7 @@ export function SessionBoard() {
 
   return (
     <div>
-      <OpenTerminals />
+      <OpenTerminals titles={titleById} />
       <div className="mb-1 flex items-center justify-between gap-3">
         <div className="text-[11px] text-[var(--color-text-faint)]">
           {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
@@ -829,7 +869,7 @@ export function SessionBoard() {
               : stopAllArmed ? `stop all ${stopAllCount}?` : `stop all ${stopAllCount}`}
           </button>
         )}
-        <NewSession onStarted={refresh} inPage={inPage} />
+        <NewSession onStarted={refresh} inPage={inPage} remote={remote} />
         {desk.length > 0 && (
           <RecoverDesk
             desk={desk}

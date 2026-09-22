@@ -158,6 +158,7 @@ const FORMAT = [
   '#{@vk_host}',
   '#{@vk_mode}',
   '#{@vk_target}',
+  '#{@vk_sid}',
   '#{pane_dead}',
   '#{window_width}x#{window_height}',
 ].join(SEP)
@@ -169,6 +170,12 @@ export type TermSession = {
   host: string
   // The launch-target key for new/shell sessions, the session id for a resume.
   target: string
+  // The conversation running in this pane, for new and resume alike. A new
+  // session is TOLD its id (claude --session-id) rather than asked for one
+  // afterwards, so the chip can carry the session's own title from the first
+  // poll instead of the target key it was opened with. Empty for a shell, and
+  // for any terminal opened before this existed.
+  sessionId: string
   createdAt: number
   activityAt: number
   clients: number
@@ -200,11 +207,12 @@ export async function listSessions(): Promise<TermSession[]> {
         host: f[5] || 'thor',
         mode: f[6] || 'shell',
         target: f[7] || '',
+        sessionId: f[8] || '',
         createdAt: (Number(f[1]) || 0) * 1000,
         activityAt: (Number(f[2]) || 0) * 1000,
         clients: Number(f[3]) || 0,
-        dead: f[8] === '1',
-        size: f[9] || '',
+        dead: f[9] === '1',
+        size: f[10] || '',
       }
     })
     .filter((s) => SESSION_NAME_RE.test(s.name))
@@ -287,6 +295,9 @@ export type CreateOpts = {
   target?: string
   // A conversation id (resume) — validated against UUID_RE by the route.
   resumeId?: string
+  // The id a NEW session is told to use — minted by the route, never sent by a
+  // client. Same shape, so the same regex guards it.
+  newId?: string
   label: string
   cols?: number
   rows?: number
@@ -306,7 +317,7 @@ async function setOpt(name: string, option: string, value: string): Promise<void
 // line (PowerShell is thor's sshd default shell), and every variable part of
 // it has already been matched against a regex that admits only [a-z0-9-] or a
 // uuid, so there is nothing here for a shell on either side to interpret.
-export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'>): string {
+export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId'>): string {
   const parts = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', REMOTE_SCRIPT, '-Mode', o.mode]
   if (o.mode === 'resume') {
     if (!o.resumeId || !UUID_RE.test(o.resumeId)) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
@@ -314,6 +325,10 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
   } else {
     if (!o.target || !TARGET_RE.test(o.target)) throw Object.assign(new Error('target must be a launch-target key'), { status: 400 })
     parts.push('-Target', o.target)
+    // `claude --session-id` on the far end. A shell has no conversation, and a
+    // thor that still runs the older script ignores the argument rather than
+    // failing: the parameter has always existed there for resume.
+    if (o.mode === 'new' && o.newId && UUID_RE.test(o.newId)) parts.push('-SessionId', o.newId)
   }
   return parts.join(' ')
 }
@@ -398,6 +413,7 @@ export async function createSession(o: CreateOpts): Promise<string> {
     setOpt(name, '@vk_host', 'thor'),
     setOpt(name, '@vk_mode', o.mode),
     setOpt(name, '@vk_target', o.mode === 'resume' ? (o.resumeId ?? '') : (o.target ?? '')),
+    setOpt(name, '@vk_sid', o.mode === 'resume' ? (o.resumeId ?? '') : (o.mode === 'new' ? (o.newId ?? '') : '')),
   ])
 
   return name

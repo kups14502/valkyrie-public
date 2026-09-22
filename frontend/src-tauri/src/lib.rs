@@ -13,51 +13,125 @@ fn local_hostname() -> String {
     .to_lowercase()
 }
 
-/// Open a Claude session in a terminal on THIS machine, over SSH to the host
+/// Shapes the page is allowed to hand this file. Nothing here ever becomes a
+/// path: a session id is a uuid, a target is a key from thor's own list, and
+/// the host is a tailnet address, so no input can grow an extra argument or a
+/// second command.
+fn is_uuid(s: &str) -> bool {
+  let b = s.as_bytes();
+  b.len() == 36
+    && b.iter().enumerate().all(|(i, c)| match i {
+      8 | 13 | 18 | 23 => *c == b'-',
+      _ => c.is_ascii_hexdigit(),
+    })
+}
+
+/// A launch-target key, the same shape thor's agent and Remote-Session.ps1
+/// enforce on their own side.
+fn is_target(s: &str) -> bool {
+  let b = s.as_bytes();
+  !b.is_empty()
+    && b.len() <= 32
+    && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+    && b
+      .iter()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+/// A tailnet IP, or a plain hostname. No spaces, quotes or shell characters.
+fn is_host(s: &str) -> bool {
+  !s.is_empty()
+    && s.len() <= 64
+    && s
+      .bytes()
+      .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+}
+
+/// A Windows Terminal window name, which is what makes tabs land in one window
+/// per group instead of scattering. Rejects wt's own reserved names: a bare
+/// number means "that window id", and `new` and `last` are keywords, so a group
+/// called any of those would quietly target the wrong window. Anything that
+/// fails here just means no grouping, never an error: a tab Brendon has to drag
+/// beats a session that would not open.
+#[cfg(target_os = "windows")]
+fn is_group(s: &str) -> bool {
+  !s.is_empty()
+    && s.len() <= 32
+    && s
+      .bytes()
+      .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    && !s.bytes().all(|c| c.is_ascii_digit())
+    && !matches!(s.to_ascii_lowercase().as_str(), "new" | "last")
+}
+
+/// Open a terminal HERE, running one command over SSH on `host`.
+///
+/// Prefer Windows Terminal for the tab, but never depend on it. wt.exe is a
+/// Store app-execution alias: on mimir it resolves into a different user's
+/// WindowsApps folder and launching it produced no window at all, the same way
+/// it silently failed from a service on thor. So try it, and if the spawn
+/// errors fall back to conhost, which is always present at a fixed path.
+///
+/// `-w <group>` is what puts work and personal in their own windows. Without it
+/// every session opened detached and had to be dragged together by hand, which
+/// the launcher on thor had solved years earlier and this path had simply never
+/// been told about. It has to come from the caller: the window is created HERE,
+/// before any SSH runs, so the host that owns the rules cannot be consulted.
+/// `-w` must precede the subcommand.
+#[cfg(target_os = "windows")]
+fn open_terminal(host: &str, title: &str, command: &str, group: Option<String>) -> Result<(), String> {
+  use std::os::windows::process::CommandExt;
+  const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+  const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+  let remote = format!("brendon@{host}");
+  let window = group.as_deref().map(str::trim).filter(|g| is_group(g));
+  let mut args: Vec<&str> = Vec::new();
+  if let Some(w) = window {
+    args.push("-w");
+    args.push(w);
+  }
+  args.extend_from_slice(&["new-tab", "--title", title, "ssh", "-t", &remote, command]);
+
+  let wt = std::process::Command::new("wt.exe")
+    .args(&args)
+    .creation_flags(CREATE_NO_WINDOW)
+    .spawn();
+
+  if wt.is_ok() {
+    return Ok(());
+  }
+
+  // ssh.exe lives in System32\OpenSSH on every supported build. Spawned with
+  // its own console so there is a visible window to type into, and -t forces
+  // the pty the TUI needs.
+  let ssh = std::path::Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
+    .join("System32")
+    .join("OpenSSH")
+    .join("ssh.exe");
+  let exe = if ssh.exists() {
+    ssh.to_string_lossy().into_owned()
+  } else {
+    "ssh.exe".into()
+  };
+
+  std::process::Command::new(exe)
+    .args(["-t", &remote, command])
+    .creation_flags(CREATE_NEW_CONSOLE)
+    .spawn()
+    .map(|_| ())
+    .map_err(|e| format!("could not open a terminal: {e}"))
+}
+
+/// Resume a Claude session in a terminal on THIS machine, over SSH to the host
 /// that owns it.
 ///
 /// Deliberately a hand-written command rather than tauri-plugin-shell. The
 /// plugin would give the webview a general "run a program" capability that then
 /// has to be fenced off with scope rules; this can do exactly one thing, and
-/// both of its inputs are validated against a fixed shape. The session id must
-/// be a uuid and the host must be a tailnet address or a bare hostname, so
-/// nothing a page could say turns into extra arguments or a second command.
+/// every input is validated against a fixed shape.
 #[tauri::command]
 fn open_session_ssh(session_id: String, host: String, group: Option<String>) -> Result<(), String> {
-  fn is_uuid(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 36
-      && b.iter().enumerate().all(|(i, c)| match i {
-        8 | 13 | 18 | 23 => *c == b'-',
-        _ => c.is_ascii_hexdigit(),
-      })
-  }
-  // A tailnet IP, or a plain hostname. No spaces, quotes or shell characters.
-  fn is_host(s: &str) -> bool {
-    !s.is_empty()
-      && s.len() <= 64
-      && s
-        .bytes()
-        .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
-  }
-
-  /// A Windows Terminal window name, which is what makes restored tabs land in
-  /// one window per group instead of scattering. Rejects wt's own reserved
-  /// names: a bare number means "that window id", and `new` and `last` are
-  /// keywords, so a group called any of those would quietly target the wrong
-  /// window. Anything that fails here just means no grouping, never an error:
-  /// a tab Brendon has to drag beats a session that would not open.
-  #[cfg(target_os = "windows")]
-  fn is_group(s: &str) -> bool {
-    !s.is_empty()
-      && s.len() <= 32
-      && s
-        .bytes()
-        .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-      && !s.bytes().all(|c| c.is_ascii_digit())
-      && !matches!(s.to_ascii_lowercase().as_str(), "new" | "last")
-  }
-
   if !is_uuid(&session_id) {
     return Err("session id is not a uuid".into());
   }
@@ -67,11 +141,6 @@ fn open_session_ssh(session_id: String, host: String, group: Option<String>) -> 
 
   #[cfg(target_os = "windows")]
   {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-
-    let remote = format!("brendon@{host}");
     // NOT a bare `claude -r`. An SSH login starts in the home directory, so that
     // resumed the session in the wrong place: it prompted to trust the folder,
     // relative paths resolved somewhere unexpected, and the session's registry
@@ -83,61 +152,50 @@ fn open_session_ssh(session_id: String, host: String, group: Option<String>) -> 
     let resume = format!(
       "powershell -NoProfile -ExecutionPolicy Bypass -File {RESUME_PS1} -SessionId {session_id}"
     );
-
-    // Prefer Windows Terminal for the tab, but never depend on it. wt.exe is a
-    // Store app-execution alias: on mimir it resolves into a different user's
-    // WindowsApps folder and launching it produced no window at all, the same
-    // way it silently failed from a service on thor. So try it, and if the spawn
-    // errors fall back to conhost, which is always present at a fixed path.
-    //
-    // `-w <group>` is what puts work and personal in their own windows. Without
-    // it every restored session opened detached and had to be dragged together
-    // by hand, which the launcher on thor had solved years earlier and this
-    // path had simply never been told about. It has to come from the caller:
-    // the window is created HERE, before any SSH runs, so the host that owns
-    // the rules cannot be consulted. `-w` must precede the subcommand.
-    let title = format!("{host} · claude");
-    let window = group.as_deref().map(str::trim).filter(|g| is_group(g));
-    let mut args: Vec<&str> = Vec::new();
-    if let Some(w) = window {
-      args.push("-w");
-      args.push(w);
-    }
-    args.extend_from_slice(&["new-tab", "--title", &title, "ssh", "-t", &remote, &resume]);
-
-    let wt = std::process::Command::new("wt.exe")
-      .args(&args)
-      .creation_flags(CREATE_NO_WINDOW)
-      .spawn();
-
-    if wt.is_ok() {
-      return Ok(());
-    }
-
-    // ssh.exe lives in System32\OpenSSH on every supported build. Spawned with
-    // its own console so there is a visible window to type into, and -t forces
-    // the pty the TUI needs.
-    let ssh = std::path::Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
-      .join("System32")
-      .join("OpenSSH")
-      .join("ssh.exe");
-    let exe = if ssh.exists() {
-      ssh.to_string_lossy().into_owned()
-    } else {
-      "ssh.exe".into()
-    };
-
-    std::process::Command::new(exe)
-      .args(["-t", &remote, &resume])
-      .creation_flags(CREATE_NEW_CONSOLE)
-      .spawn()
-      .map(|_| ())
-      .map_err(|e| format!("could not open a terminal: {e}"))
+    let title = format!("{host} \u{b7} claude");
+    open_terminal(&host, &title, &resume, group)
   }
 
   #[cfg(not(target_os = "windows"))]
   {
     let _ = (session_id, host, group);
+    Err("opening a local terminal is only wired up for Windows".into())
+  }
+}
+
+/// Start a NEW Claude session in a terminal on THIS machine, in one of thor's
+/// launch targets.
+///
+/// The counterpart to open_session_ssh, and the one thing the board could not
+/// do from another machine: "new session" always posted to the host's own
+/// launcher agent, which opens the tab on THAT host's screen. Pressed at mimir,
+/// the row appeared in the list and the window appeared on thor.
+///
+/// A KEY crosses the wire, never a path. Remote-Session.ps1 resolves it on thor
+/// out of thor's own launch-targets.json, the same rule the launcher agent
+/// follows, so this cannot open a session anywhere Brendon has not listed.
+#[tauri::command]
+fn open_new_ssh(target: String, host: String, group: Option<String>) -> Result<(), String> {
+  if !is_target(&target) {
+    return Err("target is not a launch-target key".into());
+  }
+  if !is_host(&host) {
+    return Err("host is not a plain hostname or address".into());
+  }
+
+  #[cfg(target_os = "windows")]
+  {
+    const REMOTE_PS1: &str = r"C:\Thor\tools\session-board\Remote-Session.ps1";
+    let start = format!(
+      "powershell -NoProfile -ExecutionPolicy Bypass -File {REMOTE_PS1} -Mode new -Target {target}"
+    );
+    let title = format!("{host} \u{b7} {target}");
+    open_terminal(&host, &title, &start, group)
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = (target, host, group);
     Err("opening a local terminal is only wired up for Windows".into())
   }
 }
@@ -228,7 +286,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![open_session_ssh, local_hostname])
+    .invoke_handler(tauri::generate_handler![open_session_ssh, open_new_ssh, local_hostname])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
