@@ -870,9 +870,10 @@ export default function TerminalPage() {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
-  // Which session the phone's one-line switcher is naming, and where it sits
-  // in the list. Both come off `list`, so a session killed from another device
-  // simply stops being found and the bar falls back to "no session open".
+  // Which session the phone's one-line switcher is naming, and where it sits in
+  // the list it is counting against. Both come off `ordered`, so the position
+  // is the one the sheet shows, and a session killed from another device simply
+  // stops being found and the bar falls back to "no session open".
   const activeSession = ordered.find((s) => s.name === active) ?? null
   const activeIndex = active ? ordered.findIndex((s) => s.name === active) + 1 : 0
 
