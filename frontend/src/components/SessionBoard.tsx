@@ -425,7 +425,9 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
   const [killing, setKilling] = useState<string | null>(null)
   const [all, setAll] = useState(false)
   const q = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
-  const list = q.data ?? []
+  // Oldest first, not the server's last-activity order: a terminal that printed
+  // a line should not jump to the front of a list Brendon is about to tap.
+  const list = [...(q.data ?? [])].sort((a, b) => a.createdAt - b.createdAt)
   if (list.length === 0) return null
 
   // A chip is a whole phone width once it carries a real title (measured: 281px

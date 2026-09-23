@@ -199,6 +199,15 @@ export default function TerminalPage() {
 
   const list = sessions.data ?? EMPTY
 
+  // What the switcher, the sheet and the chips are drawn from. The server sorts
+  // by last activity (backend/src/terminal/tmux.ts), which is right for landing
+  // on the newest session and wrong for a list you pick from: a terminal that
+  // printed a line jumps to the front, so the row under your thumb is not the
+  // one you meant and "2/5" changes while you are reading it. Oldest first is
+  // stable for as long as a session exists. `list` keeps the server's order,
+  // because effect F lands on list[0] and that must stay the most recent one.
+  const ordered = useMemo(() => [...list].sort((a, b) => a.createdAt - b.createdAt), [list])
+
   // The single fit entry point, and the only pty resize in the app. Every
   // guard here is a case where fitting would make things worse than not
   // fitting: a hidden route, a squeezed box, or a grid that has not changed.
@@ -864,8 +873,8 @@ export default function TerminalPage() {
   // Which session the phone's one-line switcher is naming, and where it sits
   // in the list. Both come off `list`, so a session killed from another device
   // simply stops being found and the bar falls back to "no session open".
-  const activeSession = list.find((s) => s.name === active) ?? null
-  const activeIndex = active ? list.findIndex((s) => s.name === active) + 1 : 0
+  const activeSession = ordered.find((s) => s.name === active) ?? null
+  const activeIndex = active ? ordered.findIndex((s) => s.name === active) + 1 : 0
 
   const dot = conn === 'live'
     ? 'var(--color-accent)'
@@ -922,9 +931,9 @@ export default function TerminalPage() {
           }`}>
             {activeSession ? termLabel(activeSession, titles) : 'no session open'}
           </span>
-          {list.length > 0 && (
+          {ordered.length > 0 && (
             <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-              {activeIndex > 0 ? `${activeIndex}/${list.length}` : `${list.length}`}
+              {activeIndex > 0 ? `${activeIndex}/${ordered.length}` : `${ordered.length}`}
             </span>
           )}
         </button>
@@ -945,7 +954,7 @@ export default function TerminalPage() {
         >
           <ChevronLeft size={13} />
         </button>
-        {list.map((s) => {
+        {ordered.map((s) => {
           const on = s.name === active
           const label = termLabel(s, titles)
           return (
@@ -1075,13 +1084,13 @@ export default function TerminalPage() {
                 </button>
               </div>
 
-              {list.length === 0 && (
+              {ordered.length === 0 && (
                 <div className="px-1 py-3 text-[11px] text-[var(--color-text-faint)]">
                   nothing open. start one below.
                 </div>
               )}
 
-              {list.map((s) => {
+              {ordered.map((s) => {
                 const on = s.name === active
                 const label = termLabel(s, titles)
                 return (
