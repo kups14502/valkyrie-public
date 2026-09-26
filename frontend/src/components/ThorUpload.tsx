@@ -28,7 +28,7 @@ export function ThorUploadPanel() {
         <div className="min-w-0">
           <div className="truncate text-base leading-tight text-[var(--color-text)]">send to thor</div>
           <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
-            {up.busy ? 'uploading…' : 'photos and videos to C:\\Thor\\uploads'}
+            {up.busy ? 'uploading…' : 'into C:\\Thor\\uploads'}
           </div>
         </div>
       </div>
