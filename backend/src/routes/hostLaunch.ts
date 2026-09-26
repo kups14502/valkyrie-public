@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { Agent, fetch as undiciFetch } from 'undici'
 
 // Proxy to thor's session launcher agent.
@@ -439,6 +439,59 @@ router.post('/hosts/thor/rgb', async (req, res) => {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
   }
 })
+
+// ---------------------------------------------------------------- uploads ----
+// Photos and videos from the phone into C:\Thor\uploads, so a Claude session on
+// thor can read them by path. The page sends a file in 8 MB chunks
+// (frontend/src/lib/upload.ts) and thor appends them (Receive-UploadChunk in
+// Start-LauncherAgent.ps1). Same rule as the launch routes: the client names a
+// FILE, never a folder. thor picks the folder and cuts the name down again.
+//
+// Each chunk is buffered here before it goes on, on purpose. The agent serves
+// one request at a time, and the slow leg is the phone's uplink: streaming it
+// through would hold the session list and every launch for as long as a
+// cellular upload takes. Buffered, thor spends well under a second per chunk.
+
+const UPLOAD_ID_RE = /^[0-9a-f]{32}$/
+const UPLOAD_CHUNK_MAX = 8 * 1024 * 1024
+const UPLOAD_MAX = 8 * 1024 ** 3
+
+router.post(
+  '/hosts/thor/upload',
+  express.raw({ type: () => true, limit: UPLOAD_CHUNK_MAX + 64 * 1024 }),
+  async (req, res) => {
+    if (!LAUNCHER_TOKEN) return notConfigured(res)
+    const id = String(req.query.id ?? '')
+    const name = String(req.query.name ?? '')
+    const offset = Number(req.query.offset)
+    const total = Number(req.query.total)
+    const chunk = Buffer.isBuffer(req.body) ? req.body : null
+    if (!UPLOAD_ID_RE.test(id)) return res.status(400).json({ error: 'id must be 32 hex characters' })
+    if (!name || name.length > 255) return res.status(400).json({ error: 'name is required' })
+    if (!Number.isSafeInteger(offset) || offset < 0) return res.status(400).json({ error: 'bad offset' })
+    if (!Number.isSafeInteger(total) || total <= 0 || total > UPLOAD_MAX) return res.status(400).json({ error: 'bad total' })
+    if (!chunk || chunk.length === 0) return res.status(400).json({ error: 'empty chunk' })
+    const qs = new URLSearchParams({ id, name, offset: String(offset), total: String(total) })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 60_000)
+    try {
+      const r = await undiciFetch(`${BASE}/upload?${qs}`, {
+        method: 'POST',
+        signal: controller.signal,
+        dispatcher: agent,
+        headers: { Authorization: `Bearer ${LAUNCHER_TOKEN}`, 'Content-Type': 'application/octet-stream' },
+        body: chunk,
+      })
+      let body: unknown = null
+      try { body = await r.json() } catch { body = null }
+      return res.status(r.status).json(body)
+    } catch (err) {
+      return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+    } finally {
+      clearTimeout(timer)
+    }
+  },
+)
 
 // --------------------------------------------------------------- sessions ----
 // The list the page draws: real sessions, newest first, one row per session.

@@ -5,8 +5,8 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, ChevronLeft, ChevronUp,
-  CornerDownLeft, Keyboard, MoreHorizontal, Plus, RotateCw, Terminal as TerminalIcon, X,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp,
+  CornerDownLeft, ImageUp, Keyboard, MoreHorizontal, Plus, RotateCw, Terminal as TerminalIcon, X,
 } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
@@ -19,6 +19,7 @@ import {
 import { readText as readClipboard } from '../lib/clipboard'
 import { useProfile } from '../lib/deviceMode'
 import { PasteSheet } from '../components/PasteSheet'
+import { uploadLine, useThorUpload } from '../lib/useThorUpload'
 
 // Claude Code on thor, from the phone. The session is Claude running on thor in
 // one of Brendon's own directories (personal, work, work2), reached over
@@ -492,6 +493,27 @@ export default function TerminalPage() {
     setPaste(true)
   }, [send])
 
+  // Photos and videos to C:\Thor\uploads, then each saved path typed into the
+  // prompt with no Enter, so the message about it is still Brendon's to write.
+  // Only into the session the picker was opened from: the camera can take
+  // longer than a switch, and a path landing in the wrong conversation is
+  // worse than one that did not land. The picker can also outlast the socket
+  // (iOS suspends it behind the camera), so a path that finds it closed waits
+  // for the reconnect instead of being dropped.
+  const activeRef = useRef(active)
+  useLayoutEffect(() => { activeRef.current = active }, [active])
+  const pendingRef = useRef<{ session: string; text: string } | null>(null)
+  const up = useThorUpload<string | null>({
+    clearAfterMs: 8_000,
+    onDone: (done, session) => {
+      if (!session || session !== activeRef.current) return
+      const text = done.map((d) => d.path).join(' ') + ' '
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) send(text)
+      else pendingRef.current = { session, text }
+    },
+  })
+
   // Ask tmux to move its own view. Nothing here writes a size or a position,
   // so scrolling cannot move the terminal box: it is not capable of
   // re-entering the position-feeds-size loop this page was rewritten to
@@ -661,6 +683,12 @@ export default function TerminalPage() {
       // behind, which after a rotation is a half-drawn screen.
       resize(term.cols, term.rows)
       term.focus()
+      // An upload path that finished while the socket was down.
+      const held = pendingRef.current
+      if (held && held.session === active) {
+        pendingRef.current = null
+        ws.send(JSON.stringify({ t: 'i', d: held.text }))
+      }
     }
     ws.onmessage = (e) => {
       // Anything at all answers an outstanding probe: the point is traffic, not
@@ -883,7 +911,7 @@ export default function TerminalPage() {
       ? 'var(--color-accent-2)'
       : 'var(--color-text-faint)'
 
-  const showBanners = Boolean(error) || Boolean(status.data && !status.data.ok)
+  const showBanners = Boolean(error) || Boolean(status.data && !status.data.ok) || up.items.length > 0
 
   return (
     // absolute inset-0, not h-full: it resolves against main's padding box and
@@ -896,6 +924,8 @@ export default function TerminalPage() {
       data-term-root
       className="absolute inset-0 z-0 flex touch-manipulation flex-col gap-2 p-2 sm:p-3"
     >
+      {/* display:none, so they take no part in the flex layout. */}
+      {up.inputs}
       {/* PHONE: one row that cannot overflow, because only one child may grow.
           The back button, the session it is showing (title, position in the
           list, and the chevron that opens the sheet), and the connection dot.
@@ -937,6 +967,26 @@ export default function TerminalPage() {
               {activeIndex > 0 ? `${activeIndex}/${ordered.length}` : `${ordered.length}`}
             </span>
           )}
+        </button>
+        {/* Fixed width, so the session title above stays the one child that
+            grows and truncates. */}
+        <button
+          type="button"
+          onClick={() => up.openCamera(active)}
+          aria-label="Take a photo or video for thor"
+          title="camera to thor"
+          className={`${BTN} shrink-0 px-2 ${up.busy ? 'border-[var(--color-accent)]/60 text-[var(--color-accent)]' : ''}`}
+        >
+          <Camera size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => up.openFiles(active)}
+          aria-label="Send photos or videos to thor"
+          title="upload to thor"
+          className={`${BTN} shrink-0 px-2`}
+        >
+          <ImageUp size={13} />
         </button>
         <div className="flex shrink-0 items-center gap-1.5 pl-0.5">
           <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: dot, boxShadow: `0 0 6px ${dot}` }} />
@@ -1002,6 +1052,14 @@ export default function TerminalPage() {
         </button>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+          {showKeys && (
+            <button type="button" onClick={() => up.openCamera(active)} aria-label="Take a photo or video for thor" title="camera to thor" className={`${BTN} px-2`}>
+              <Camera size={13} />
+            </button>
+          )}
+          <button type="button" onClick={() => up.openFiles(active)} aria-label="Send photos or videos to thor" title="upload to thor" className={`${BTN} px-2`}>
+            <ImageUp size={13} />
+          </button>
           <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: dot, boxShadow: `0 0 6px ${dot}` }} />
           <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{conn}</span>
         </div>
@@ -1059,6 +1117,25 @@ export default function TerminalPage() {
                 {!status.data.tmux ? 'tmux is not installed on odin.' : 'ssh is not installed on odin.'}
               </div>
             )}
+            {/* Uploads, over the terminal rather than beside it: this box is
+                absolute, so a row coming and going costs no refit. Tap one to
+                dismiss it; a saved one leaves by itself. */}
+            {up.items.map((i) => (
+              <div
+                key={i.key}
+                onClick={() => up.dismiss(i.key)}
+                title="dismiss"
+                className={`truncate border bg-[var(--color-bg)] px-3 py-2 text-[11px] ${
+                  i.state === 'err'
+                    ? 'border-[var(--color-danger)]/60 text-[var(--color-danger)]'
+                    : i.state === 'done'
+                      ? 'border-[var(--color-accent)]/60 text-[var(--color-accent)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
+                }`}
+              >
+                {i.state === 'done' ? `on thor: ${i.path}` : `to thor ${uploadLine(i)}`}
+              </div>
+            ))}
           </div>
         )}
 
