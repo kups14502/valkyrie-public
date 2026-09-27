@@ -53,58 +53,74 @@ const targetFor = (name: unknown): PlexTarget => (name === 'music' ? musicServer
 // is offline its address swallows the SYN: every call to it waited out undici's
 // 10 s connect timeout, which put 10 s on each downloads poll, 10 s on the tab
 // list, and 20 s on every request search. So connects give up after 3 s, and an
-// origin whose connect hung is refused on the spot until a background TCP probe
-// (at most one per 10 s) finds it listening again. Only the slow failures trip
-// this: a refused port or an unknown name fails in milliseconds on its own, and
-// gating those would keep a restarted Radarr refused after it came back.
+// origin whose connect hung is refused on the spot. While any origin is marked,
+// a TCP probe runs every 10 s whether or not anyone is calling, and clears the
+// mark once the port stops hanging. Only slow failures mark an origin: a
+// refused port or an unknown name fails in milliseconds on its own, and gating
+// those would keep a restarted service refused after it came back.
 
 const upstreamAgent = new Agent({ connect: { timeout: 3_000 } })
 const SLOW_CONNECT_ERRORS = new Set([
   'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT', 'EHOSTUNREACH', 'EHOSTDOWN', 'ENETUNREACH', 'EAI_AGAIN',
 ])
 const PROBE_EVERY_MS = 10_000
-const unreachable = new Map<string, { since: number; checkedAt: number; probing: boolean }>()
+// origin -> when it was marked down
+const unreachable = new Map<string, number>()
+let prober: NodeJS.Timeout | undefined
+let reprobing = false
 
-function probe(origin: string): Promise<boolean> {
-  const u = new URL(origin)
-  const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
+// Null when the port accepts a connection, otherwise why it did not: 'timeout'
+// or the socket error's code.
+function probe(origin: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const s = net.connect({ host: u.hostname, port })
-    const done = (ok: boolean) => { s.destroy(); resolve(ok) }
-    s.setTimeout(3_000, () => done(false))
-    s.once('connect', () => done(true))
-    s.once('error', () => done(false))
+    let u: URL
+    try { u = new URL(origin) } catch { return resolve('EINVAL') }
+    const s = net.connect({
+      host: u.hostname.replace(/^\[(.*)\]$/, '$1'),
+      port: Number(u.port) || (u.protocol === 'https:' ? 443 : 80),
+    })
+    const done = (why: string | null) => { s.destroy(); resolve(why) }
+    s.setTimeout(3_000, () => done('timeout'))
+    s.once('connect', () => done(null))
+    s.once('error', (e: NodeJS.ErrnoException) => done(e.code ?? 'error'))
   })
+}
+
+const isSlow = (why: string | null) => why === 'timeout' || (why !== null && SLOW_CONNECT_ERRORS.has(why))
+
+async function reprobe() {
+  if (reprobing) return
+  reprobing = true
+  await Promise.all([...unreachable.keys()].map(async (origin) => {
+    const why = await probe(origin)
+    if (isSlow(why)) return
+    unreachable.delete(origin)
+    console.log(`[plex] ${origin} answering again (${why ?? 'connected'})`)
+  }))
+  reprobing = false
+  if (!unreachable.size && prober) {
+    clearInterval(prober)
+    prober = undefined
+  }
 }
 
 function markDown(origin: string, why: string) {
   if (unreachable.has(origin)) return
-  unreachable.set(origin, { since: Date.now(), checkedAt: Date.now(), probing: false })
+  unreachable.set(origin, Date.now())
   console.warn(`[plex] ${origin} unreachable (${why}), refusing calls to it until a probe connects`)
+  if (!prober) {
+    prober = setInterval(() => void reprobe(), PROBE_EVERY_MS)
+    prober.unref()
+  }
 }
 
-// Throws while the origin is marked down, and starts the next probe when one
-// is due. The caller never waits on the probe.
 function refuseIfDown(origin: string) {
-  const d = unreachable.get(origin)
-  if (!d) return
-  if (!d.probing && Date.now() - d.checkedAt >= PROBE_EVERY_MS) {
-    d.probing = true
-    void probe(origin).then((ok) => {
-      if (ok) {
-        unreachable.delete(origin)
-        console.log(`[plex] ${origin} reachable again`)
-        return
-      }
-      d.checkedAt = Date.now()
-      d.probing = false
-    })
-  }
-  throw new Error(`${origin} unreachable since ${new Date(d.since).toISOString()}`)
+  const since = unreachable.get(origin)
+  if (since !== undefined) throw new Error(`${origin} unreachable since ${new Date(since).toISOString()}`)
 }
 
 const upstreamUp = (url: string) => {
-  try { refuseIfDown(new URL(url).origin); return true } catch { return false }
+  try { return !unreachable.has(new URL(url).origin) } catch { return true }
 }
 
 async function upstream(url: string | URL, init: NonNullable<Parameters<typeof undiciFetch>[1]> = {}) {
@@ -122,9 +138,10 @@ async function upstream(url: string | URL, init: NonNullable<Parameters<typeof u
 
 // Learn LogicServer's state at startup instead of on the first page load.
 for (const u of [PLEX_MUSIC_URL, LIDARR_URL]) {
-  if (!u) continue
+  if (!URL.canParse(u)) continue
   const origin = new URL(u).origin
-  void probe(origin).then((ok) => { if (!ok) markDown(origin, 'startup probe') })
+  if (origin === 'null') continue
+  void probe(origin).then((why) => { if (isSlow(why)) markDown(origin, `startup probe: ${why}`) })
 }
 
 // ---------- Plex ----------
@@ -238,13 +255,15 @@ function normalizeItem(m: PlexMetadata) {
 }
 export type PlexItem = ReturnType<typeof normalizeItem>
 
-// Section list changes rarely; totals are a separate cheap call. Cache 5 min.
+// Section list changes rarely; totals are a separate cheap call. Cache 5 min,
+// or 20 s when the music server failed, so its tab returns soon after it does.
 type SectionSummary = { key: string; title: string; type: string; count: number; server: PlexTarget['name'] }
-let sectionsCache: { at: number; data: SectionSummary[] } | null = null
+let sectionsCache: { at: number; ttl: number; data: SectionSummary[] } | null = null
 
-// Every music section on the music server, with its artist count. Fails soft:
-// the movie/tv tabs must not disappear because LogicServer is asleep.
-async function musicSections(): Promise<SectionSummary[]> {
+// Every music section on the music server, with its artist count; null when
+// the server did not answer. Fails soft: the movie/tv tabs must not disappear
+// because LogicServer is asleep.
+async function musicSections(): Promise<SectionSummary[] | null> {
   if (!musicConfigured()) return []
   try {
     const dirs = (await plexJSON<PlexContainer<PlexDirectory>>(musicServer, '/library/sections')).MediaContainer.Directory ?? []
@@ -259,14 +278,14 @@ async function musicSections(): Promise<SectionSummary[]> {
     )
   } catch (err) {
     console.warn('[plex] music server unreachable:', (err as Error).message)
-    return []
+    return null
   }
 }
 
 router.get('/plex/sections', async (_req, res) => {
   if (!plexConfigured()) return res.status(503).json({ error: 'plex not configured', detail: 'set PLEX_URL / PLEX_TOKEN' })
   try {
-    if (sectionsCache && Date.now() - sectionsCache.at < 300_000) return res.json(sectionsCache.data)
+    if (sectionsCache && Date.now() - sectionsCache.at < sectionsCache.ttl) return res.json(sectionsCache.data)
     const [dirs, music] = await Promise.all([
       plexJSON<PlexContainer<PlexDirectory>>(mainServer, '/library/sections').then((c) => c.MediaContainer.Directory ?? []),
       musicSections(),
@@ -281,8 +300,8 @@ router.get('/plex/sections', async (_req, res) => {
           return { key: d.key, title: d.title, type: d.type, count: c?.MediaContainer.totalSize ?? 0, server: 'main' }
         }),
     )
-    const data = [...sections, ...music]
-    sectionsCache = { at: Date.now(), data }
+    const data = [...sections, ...(music ?? [])]
+    sectionsCache = { at: Date.now(), ttl: music ? 300_000 : 20_000, data }
     res.json(data)
   } catch (err) {
     res.status(503).json({ error: 'plex unreachable', detail: (err as Error).message })
