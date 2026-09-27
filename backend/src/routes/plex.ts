@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import { Readable, pipeline } from 'node:stream'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
+import { Agent, fetch as undiciFetch } from 'undici'
 import { postDiscord } from '../alerts.js'
 import { signImgToken } from '../auth/token.js'
 
@@ -45,6 +47,86 @@ const musicConfigured = () => Boolean(PLEX_MUSIC_URL && PLEX_MUSIC_TOKEN)
 // Which server a client-supplied ?server= names. Anything but "music" is main.
 const targetFor = (name: unknown): PlexTarget => (name === 'music' ? musicServer : mainServer)
 
+// ---------- Upstream reachability ----------
+//
+// LogicServer (the music Plex and Lidarr) sits across the tailnet, and when it
+// is offline its address swallows the SYN: every call to it waited out undici's
+// 10 s connect timeout, which put 10 s on each downloads poll, 10 s on the tab
+// list, and 20 s on every request search. So connects give up after 3 s, and an
+// origin whose connect hung is refused on the spot until a background TCP probe
+// (at most one per 10 s) finds it listening again. Only the slow failures trip
+// this: a refused port or an unknown name fails in milliseconds on its own, and
+// gating those would keep a restarted Radarr refused after it came back.
+
+const upstreamAgent = new Agent({ connect: { timeout: 3_000 } })
+const SLOW_CONNECT_ERRORS = new Set([
+  'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT', 'EHOSTUNREACH', 'EHOSTDOWN', 'ENETUNREACH', 'EAI_AGAIN',
+])
+const PROBE_EVERY_MS = 10_000
+const unreachable = new Map<string, { since: number; checkedAt: number; probing: boolean }>()
+
+function probe(origin: string): Promise<boolean> {
+  const u = new URL(origin)
+  const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
+  return new Promise((resolve) => {
+    const s = net.connect({ host: u.hostname, port })
+    const done = (ok: boolean) => { s.destroy(); resolve(ok) }
+    s.setTimeout(3_000, () => done(false))
+    s.once('connect', () => done(true))
+    s.once('error', () => done(false))
+  })
+}
+
+function markDown(origin: string, why: string) {
+  if (unreachable.has(origin)) return
+  unreachable.set(origin, { since: Date.now(), checkedAt: Date.now(), probing: false })
+  console.warn(`[plex] ${origin} unreachable (${why}), refusing calls to it until a probe connects`)
+}
+
+// Throws while the origin is marked down, and starts the next probe when one
+// is due. The caller never waits on the probe.
+function refuseIfDown(origin: string) {
+  const d = unreachable.get(origin)
+  if (!d) return
+  if (!d.probing && Date.now() - d.checkedAt >= PROBE_EVERY_MS) {
+    d.probing = true
+    void probe(origin).then((ok) => {
+      if (ok) {
+        unreachable.delete(origin)
+        console.log(`[plex] ${origin} reachable again`)
+        return
+      }
+      d.checkedAt = Date.now()
+      d.probing = false
+    })
+  }
+  throw new Error(`${origin} unreachable since ${new Date(d.since).toISOString()}`)
+}
+
+const upstreamUp = (url: string) => {
+  try { refuseIfDown(new URL(url).origin); return true } catch { return false }
+}
+
+async function upstream(url: string | URL, init: NonNullable<Parameters<typeof undiciFetch>[1]> = {}) {
+  const origin = new URL(url).origin
+  refuseIfDown(origin)
+  try {
+    return await undiciFetch(url, { ...init, dispatcher: upstreamAgent })
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string; errors?: { code?: string }[] } }).cause
+    const code = cause?.code ?? cause?.errors?.[0]?.code
+    if (code && SLOW_CONNECT_ERRORS.has(code)) markDown(origin, code)
+    throw err
+  }
+}
+
+// Learn LogicServer's state at startup instead of on the first page load.
+for (const u of [PLEX_MUSIC_URL, LIDARR_URL]) {
+  if (!u) continue
+  const origin = new URL(u).origin
+  void probe(origin).then((ok) => { if (!ok) markDown(origin, 'startup probe') })
+}
+
 // ---------- Plex ----------
 
 async function plexJSON<T>(srv: PlexTarget, p: string, params?: Record<string, string>, containerStart?: number, containerSize?: number): Promise<T> {
@@ -58,7 +140,7 @@ async function plexJSON<T>(srv: PlexTarget, p: string, params?: Record<string, s
     headers['X-Plex-Container-Start'] = String(containerStart ?? 0)
     headers['X-Plex-Container-Size'] = String(containerSize)
   }
-  const r = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) })
+  const r = await upstream(url, { headers, signal: AbortSignal.timeout(10_000) })
   if (!r.ok) throw new Error(`plex ${p} -> ${r.status} ${await r.text().catch(() => '')}`)
   return (await r.json()) as T
 }
@@ -289,7 +371,7 @@ router.get('/plex/img', async (req, res) => {
     url.searchParams.set('minSize', '1')
     url.searchParams.set('upscale', '1')
     url.searchParams.set('url', p)
-    const r = await fetch(url, {
+    const r = await upstream(url, {
       headers: { 'X-Plex-Token': srv.token },
       signal: AbortSignal.timeout(15_000),
     })
@@ -555,7 +637,7 @@ router.get('/plex/music/stream', async (req, res) => {
   try {
     const headers: Record<string, string> = { 'X-Plex-Token': musicServer.token }
     if (typeof req.headers.range === 'string') headers.Range = req.headers.range
-    const r = await fetch(`${musicServer.url}${key}`, { headers, signal: ctl.signal })
+    const r = await upstream(`${musicServer.url}${key}`, { headers, signal: ctl.signal })
     if ((r.status !== 200 && r.status !== 206) || !r.body) {
       return res.status(r.status === 404 ? 404 : 502).json({ error: 'stream fetch failed', status: r.status })
     }
@@ -590,7 +672,7 @@ router.post('/plex/music/scrobble', async (req, res) => {
     const url = new URL(`${musicServer.url}/:/scrobble`)
     url.searchParams.set('key', key)
     url.searchParams.set('identifier', 'com.plexapp.plugins.library')
-    const r = await fetch(url, { headers: { 'X-Plex-Token': musicServer.token }, signal: AbortSignal.timeout(10_000) })
+    const r = await upstream(url, { headers: { 'X-Plex-Token': musicServer.token }, signal: AbortSignal.timeout(10_000) })
     if (!r.ok) throw new Error(`scrobble -> ${r.status}`)
     res.json({ ok: true })
   } catch (err) {
@@ -607,10 +689,10 @@ const lidarr: ArrService = { name: 'lidarr', base: LIDARR_URL, key: LIDARR_KEY, 
 const lidarrConfigured = () => Boolean(LIDARR_URL && LIDARR_KEY)
 const arrConfigured = () => Boolean(RADARR_KEY || SONARR_KEY || lidarrConfigured())
 
-async function arrJSON<T>(svc: ArrService, p: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${svc.base}${svc.api}${p}`, {
+async function arrJSON<T>(svc: ArrService, p: string, init?: { method?: string; body?: string }): Promise<T> {
+  const r = await upstream(`${svc.base}${svc.api}${p}`, {
     ...init,
-    headers: { 'X-Api-Key': svc.key, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { 'X-Api-Key': svc.key, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(15_000),
   })
   const text = await r.text()
@@ -692,6 +774,8 @@ async function musicBrainzReleaseGroupIds(q: string): Promise<string[]> {
 }
 
 async function lidarrAlbumsFor(q: string): Promise<ArrAlbum[]> {
+  // MusicBrainz ids are only worth fetching when Lidarr can resolve them.
+  if (!upstreamUp(LIDARR_URL)) return []
   const [own, mbIds] = await Promise.all([
     arrJSON<ArrAlbum[]>(lidarr, `/album/lookup?term=${encodeURIComponent(q)}`).catch(() => [] as ArrAlbum[]),
     musicBrainzReleaseGroupIds(q).catch(() => [] as string[]),
