@@ -14,7 +14,7 @@ import type { PanelSize } from './HomePanels'
 // day that just ended, and so a day can be stepped in either direction.
 
 /** Today's key, re-checked every minute so a tab left open rolls over at midnight. */
-function useToday(): string {
+export function useToday(): string {
   const [date, setDate] = useState(() => supplementDateKey())
   useEffect(() => {
     const t = setInterval(() => setDate((d) => {
@@ -186,14 +186,13 @@ export function SupplementsCard({ size = 'normal' }: { size?: PanelSize } = {}) 
               <ChevronRight size={16} />
             </button>
           </div>
-          <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-            <span>tap the day you took them</span>
-            {center !== today && (
+          {center !== today && (
+            <div className="flex justify-end text-[10px] uppercase tracking-[0.14em]">
               <button type="button" onClick={() => setPinned(null)} className="uppercase tracking-[0.14em] text-[var(--color-accent)]">
                 back to today
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       ) : null}
     </Card>

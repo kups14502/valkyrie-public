@@ -7,6 +7,7 @@ import { DownloadsPanel, LightsPanel, RecentStrip, SystemChips } from '../compon
 import { PhoneClock } from '../components/HomePanels'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { SupplementsCard } from '../components/SupplementsCard'
+import { ExerciseCard } from '../components/ExerciseCard'
 import { ThorUploadPanel } from '../components/ThorUpload'
 
 // iPhone home screen. Same panels as the iPad's (components/HomePanels.tsx) but
@@ -80,6 +81,7 @@ export default function Phone() {
       {/* Last on the phone: it is a once-a-day tap, not something to scroll
           past every time the screen is opened. */}
       <SupplementsCard size="normal" />
+      <ExerciseCard size="normal" />
     </div>
   )
 }
