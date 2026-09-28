@@ -206,7 +206,7 @@ router.post('/push/test', async (_req, res) => {
   res.status(r.ok ? 200 : 502).json(r)
 })
 
-// The hook's endpoint. Strong auth (no legacy origin bypass): thor reaches it
+// The hook's endpoint. Strong auth: thor reaches it
 // over the tailnet, which isStrongAuth already trusts by socket address.
 //
 // The title is "Session waiting" or "Session complete" and the body is the

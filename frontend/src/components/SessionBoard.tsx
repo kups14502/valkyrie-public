@@ -44,11 +44,11 @@ const readOpenMode = (): OpenMode => {
 
 // Work and personal do not belong in one interleaved list. thor routes every
 // session to an area out of the same table the Obsidian capture uses, so this
-// only has to order and name them.
-const AREA_ORDER = ['work', 'org-c', 'server', 'personal']
+// only has to order and name them. An area outside these three comes from the
+// host's own config and is shown by its own name, right after work.
+const AREA_ORDER = ['work', 'server', 'personal']
 const AREA_LABEL: Record<string, string> = {
   work: 'work',
-  org-c: 'org-c',
   server: 'server',
   personal: 'personal',
 }
@@ -61,9 +61,12 @@ function groupByArea(rows: WorkSession[]): { area: string; rows: WorkSession[] }
     if (held) held.push(s)
     else buckets.set(key, [s])
   }
-  const ordered = AREA_ORDER.filter((a) => buckets.has(a))
-  const rest = [...buckets.keys()].filter((a) => !AREA_ORDER.includes(a)).sort()
-  return [...ordered, ...rest].map((area) => ({ area, rows: buckets.get(area) ?? [] }))
+  const known = AREA_ORDER.filter((a) => buckets.has(a))
+  const extra = [...buckets.keys()].filter((a) => !AREA_ORDER.includes(a) && a !== 'other').sort()
+  const at = known[0] === 'work' ? 1 : 0
+  const ordered = [...known.slice(0, at), ...extra, ...known.slice(at)]
+  if (buckets.has('other')) ordered.push('other')
+  return ordered.map((area) => ({ area, rows: buckets.get(area) ?? [] }))
 }
 
 const TONE: Record<SessionActivity, string> = {

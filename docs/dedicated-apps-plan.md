@@ -9,8 +9,9 @@
 
 ## Progress log
 - Code Deck AskUserQuestion picker — commit d1a56df.
-- Part 1 (backend auth + WS token) — commit 6e79d01. AUTH_STRICT gates the
-  legacy no-token bypass; still OFF (default) for migration.
+- Part 1 (backend auth + WS token) — commit 6e79d01.
+- Part 4, auth half (2026-09-28): the migration-era no-token bypass is gone
+  from the code, so the API accepts only real credentials.
 - Part 2 (frontend login/setup UI + token wiring) — commit 9b94b0e.
 - Part 3a (Tauri 2 desktop scaffold + GitHub Actions CI) — commit 46fae23;
   skip-hatch hidden in-app — d31a5f0. CI builds Windows/macOS/Linux installers

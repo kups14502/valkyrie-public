@@ -547,7 +547,7 @@ router.post('/hosts/thor/threads/label', async (req, res) => {
   if (!THREAD_ID_RE.test(threadId)) return res.status(400).json({ error: 'threadId must be hex' })
   if (label.length > 60) return res.status(400).json({ error: 'label too long' })
   // eslint-disable-next-line no-control-regex
-  if (/[ -]/.test(label)) return res.status(400).json({ error: 'label has control characters' })
+  if (/[\x00-]/.test(label)) return res.status(400).json({ error: 'label has control characters' })
   try {
     const r = await callLauncher('/threads/label', { method: 'POST', body: { threadId, label } }, 30_000)
     return res.status(r.status).json(r.body)

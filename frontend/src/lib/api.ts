@@ -492,7 +492,8 @@ export const fetchHosts = async () => {
 // another machine, and one bad record must not take the page down.
 
 export type WorkspaceState = 'running' | 'asking' | 'idle' | 'closed'
-export type WorkspaceArea = 'personal' | 'server' | 'work' | 'org-c'
+// personal, server, work, or one more area the host's config defines.
+export type WorkspaceArea = string
 export type WorkspaceHealth = 'healthy' | 'stale' | 'unhealthy' | 'suspicious'
 
 export type WorkspaceSession = {
@@ -545,7 +546,7 @@ export type WorkspacesResult =
   | { installed: false; status: number; detail: string | null }
 
 const WS_STATES: WorkspaceState[] = ['running', 'asking', 'idle', 'closed']
-const WS_AREAS: WorkspaceArea[] = ['personal', 'server', 'work', 'org-c']
+const WS_AREA_RE = /^[a-z][a-z0-9-]{0,23}$/
 const WS_HEALTHS: WorkspaceHealth[] = ['healthy', 'stale', 'unhealthy', 'suspicious']
 
 const wsStr = (v: unknown): string | null => (typeof v === 'string' && v.trim().length > 0 ? v : null)
@@ -568,7 +569,7 @@ function parseWorkspaceSession(raw: unknown, index: number): WorkspaceSession | 
     title: redacted ? null : wsStr(r.title),
     cwd,
     project: wsStr(r.project) ?? leafFolder(cwd),
-    area: WS_AREAS.includes(r.area as WorkspaceArea) ? (r.area as WorkspaceArea) : 'personal',
+    area: typeof r.area === 'string' && WS_AREA_RE.test(r.area) ? r.area : 'personal',
     state: WS_STATES.includes(r.state as WorkspaceState) ? (r.state as WorkspaceState) : 'idle',
     lastActivityUtc: wsStr(r.lastActivityUtc),
     startedAtUtc: wsStr(r.startedAtUtc),
@@ -628,12 +629,12 @@ export type WorkSession = {
   title: string
   titleFromClaude: boolean
   project: string
-  // work | org-c | server | personal, routed from the cwd by the host out of
+  // work, server, personal or a host-defined area, routed from the cwd by the host out of
   // the same table the Obsidian capture uses, so the two never disagree.
   area: string
   // Which Windows Terminal window this session reopens into, resolved on its
-  // host from launch-groups.json. NOT the area: the second business groups into
-  // the work window while its area is 'org-c'. It travels in the payload
+  // host from launch-groups.json. NOT the area: two areas can share one
+  // window. It travels in the payload
   // because the desktop app opens its own windows, so it cannot ask the host
   // where a tab belongs.
   launchGroup: string | null

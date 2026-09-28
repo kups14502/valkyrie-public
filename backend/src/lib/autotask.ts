@@ -13,7 +13,7 @@ import { homedir } from 'node:os'
 // out rather than left inside a backup of a deleted feature.
 const ENV_PATH = path.join(homedir(), '.config', 'valkyrie', 'autotask.env')
 
-type AutotaskCreds = { zone: string; code: string; user: string; secret: string }
+type AutotaskCreds = { zone: string; code: string; user: string; secret: string; queueID: number | null }
 
 function readCreds(): AutotaskCreds | null {
   try {
@@ -29,7 +29,8 @@ function readCreds(): AutotaskCreds | null {
     const user = env.AUTOTASK_USERNAME || ''
     const secret = env.AUTOTASK_SECRET || ''
     if (!zone || !code || !user || !secret) return null
-    return { zone, code, user, secret }
+    const queue = Number(env.AUTOTASK_QUEUE_ID)
+    return { zone, code, user, secret, queueID: Number.isInteger(queue) && queue > 0 ? queue : null }
   } catch {
     return null
   }
@@ -86,7 +87,7 @@ export async function createTicket(input: {
     description: input.description.slice(0, 8000),
     status: 1,        // New
     priority: 2,      // Medium
-    queueID: 0, // Triage
+    ...(c.queueID ? { queueID: c.queueID } : {}),
     dueDateTime: due,
   })
   const resp = await fetch(`${c.zone}/Tickets`, { method: 'POST', headers: headers(c), body })

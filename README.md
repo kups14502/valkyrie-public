@@ -56,10 +56,9 @@ and put odin's `~/.ssh/id_ed25519.pub` in thor's
 (`THOR_LAUNCHER_HOST`, `brendon`, the script path above).
 
 The routes and the `/ws/terminal` socket are behind `requireStrongAuth`, not the
-app-wide `requireAuth`: that one still honours a legacy no-token bypass for
-anything that looks like the published frontend, which is fine for a chart and
-not for a shell. A client only ever sends a session name, a launch-target key,
-or a session id, never a path.
+app-wide `requireAuth`, so the short-lived media token that opens a poster can
+never open a shell. A client only ever sends a session name, a launch-target
+key, or a session id, never a path.
 
 ## VR workspace (Steam Frame)
 

@@ -48,8 +48,8 @@ const UUID_RE = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/
 // A cwd is echoed back to clients and pasted into a resume command, so refuse
 // the characters that would let a writer of thor.json break out of either.
 const UNSAFE_CWD_RE = /["'`;\r\n$|&<>]/
-// Client work and the separate second business never leave the machine
-// they run on. thor's collector already redacts these, but it is not the
+// Client work never leaves the machine
+// it runs on. thor's collector already redacts these, but it is not the
 // trust boundary: anything running as brendon can write thor.json, so the
 // rule is enforced again here on the cwd we actually publish.
 //
@@ -88,9 +88,12 @@ const REDACT_RES: RegExp[] = [
   ...loadRedactPatterns(),
 ]
 
-const AREAS = ['personal', 'server', 'work', 'org-c'] as const
+// An area is whatever the producer routed the cwd to: personal, server, work,
+// or one more the host's own config defines. It is only ever a label and a
+// grouping key, so any short lowercase token is accepted.
+const AREA_RE = /^[a-z][a-z0-9-]{0,23}$/
 const STATES = ['running', 'asking', 'idle', 'closed'] as const
-type Area = (typeof AREAS)[number]
+type Area = string
 type SessionState = (typeof STATES)[number]
 type HostHealth = 'healthy' | 'stale' | 'unhealthy' | 'suspicious'
 
@@ -215,9 +218,7 @@ function validateThorSession(raw: unknown): WorkspaceSession | null {
     : null
   if (!state) return null
 
-  const area = typeof raw.area === 'string' && (AREAS as readonly string[]).includes(raw.area)
-    ? raw.area as Area
-    : null
+  const area = typeof raw.area === 'string' && AREA_RE.test(raw.area) ? raw.area : null
   if (!area) return null
 
   let pid: number | null = null
@@ -377,13 +378,34 @@ async function collectThor(): Promise<{ status: HostStatus; sessions: WorkspaceS
 // -------------------------------------------------------------- odin's own
 
 // Mirrors the routing thor's collector applies, translated to odin's layout.
-// First match wins.
-const ODIN_AREA_RULES: Array<{ area: Area; re: RegExp }> = [
-  { area: 'org-c', re: /^\/home\/brendon\/(org-c|halopsa-mcp|ninjaone-mcp)(\/|$)/i },
-  { area: 'work', re: /^\/home\/brendon\/(msp-platform|work)(\/|$)/i },
-  { area: 'personal', re: /^\/home\/brendon\/(side-proj|trade-bot|trading|proj-c|game|slop-factory|docs)(\/|$)/ },
-  { area: 'server', re: /^\/home\/brendon\/(valkyrie|infra|maintenance|memory|skills|ThorRGB|crashguesser|wallpaperengine|home-ai-install|bifrost)(\/|$)/i },
-]
+// The table names private project folders, so it lives in ODIN_AREAS_FILE
+// (default ~/.config/valkyrie/odin-areas.json), a JSON array of
+// { area, pattern, flags? } where pattern is a regex source matched against
+// the cwd. First match wins. Without the file every odin session is 'server'.
+function loadOdinAreaRules(): Array<{ area: Area; re: RegExp }> {
+  const file = process.env.ODIN_AREAS_FILE || path.join(homedir(), '.config', 'valkyrie', 'odin-areas.json')
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return []
+  }
+  const out: Array<{ area: Area; re: RegExp }> = []
+  try {
+    const rows = JSON.parse(raw) as unknown
+    if (!Array.isArray(rows)) throw new Error('not an array')
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const area = typeof row?.area === 'string' && AREA_RE.test(row.area) ? row.area : null
+      if (!area || typeof row.pattern !== 'string') continue
+      out.push({ area, re: new RegExp(row.pattern, typeof row.flags === 'string' ? row.flags : '') })
+    }
+  } catch (err) {
+    console.error(`[workspaces] ignoring ${file}: ${(err as Error).message}`)
+    return []
+  }
+  return out
+}
+const ODIN_AREA_RULES = loadOdinAreaRules()
 
 function odinArea(cwd: string): Area {
   for (const rule of ODIN_AREA_RULES) if (rule.re.test(cwd)) return rule.area

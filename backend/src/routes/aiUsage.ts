@@ -117,8 +117,8 @@ function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
 // Refreshing rotates the token: the refresh token dies the moment it is
 // exchanged, and posting a spent one again is what an OAuth server reads as a
 // stolen token, so it revokes the whole family and the account needs a fresh
-// `claude /login`. Two accounts have died exactly that way (acct-c on
-// 2026-08-07, acct-d on 2026-08-28), and nothing but this backend has
+// `claude /login`. Two accounts have died exactly that way (one on 2026-08-07,
+// another on 2026-08-28), and nothing but this backend has
 // touched those profile dirs since July, so the loss came from here.
 //
 // Three rules stop it:

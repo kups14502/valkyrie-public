@@ -9,37 +9,17 @@ import { verifyAppToken, verifyImgToken } from '../auth/token.js'
 //      the dedicated desktop/mobile apps use this.
 //   2. Cloudflare Access JWT (cf-access-jwt-assertion header) — transitional,
 //      still active until the Access policy is retired in the cutover.
-//   3. Loopback requests in dev (not forwarded by Cloudflare).
-//   4. LEGACY (only when AUTH_STRICT is off): the old "trusted frontend/api
-//      pairing" bypass that lets requests through with NO token. This is a
-//      known hole — the API host isn't actually behind Access, so today's live
-//      app depends on it. It stays as the default ONLY so deploying this auth
-//      work doesn't break the running dashboard before the apps send tokens.
-//      Set AUTH_STRICT=1 in the cutover to remove it.
+//   3. Loopback and tailnet peers, decided on the socket address.
+// Nothing else gets in. The migration-era origin/host pairing that let a
+// request through with no credential was removed on 2026-09-28: Origin and
+// Host are set by the caller, so they prove nothing.
 
 const TEAM_DOMAIN = process.env.CF_ACCESS_TEAM_DOMAIN
 const AUD = process.env.CF_ACCESS_AUD
 const ALLOW_LOCAL = process.env.NODE_ENV !== 'production'
-// When true, only real credentials (app token / cf-access / loopback) are
-// accepted — the legacy no-token bypass is disabled. Flip on at cutover.
-const AUTH_STRICT = /^(1|true|yes)$/i.test(process.env.AUTH_STRICT || '')
-export function isAuthStrict(): boolean { return AUTH_STRICT }
-
-// The legacy trusted frontend↔api origin pairing (no token). Kept only as the
-// non-strict fallback during migration.
-function isTrustedLegacyPair(req: Pick<IncomingMessage, 'headers'>): boolean {
-  const origin = String(req.headers['origin'] || '')
-  const host = String(req.headers['host'] || '')
-  const trustedPagesPreview = /^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)
-  // Old hostnames stay accepted until every device/bookmark has moved over.
-  const trustedFrontend = origin === 'https://valkyrie.brendonkupsch.com'
-    || origin === 'https://master-control.brendonkupsch.com'
-    || trustedPagesPreview
-  const trustedApiHost = host === 'valkyrie-api.brendonkupsch.com'
-    || host === 'master-control-api.brendonkupsch.com'
-    || host === 'api.brendonkupsch.com'
-  return trustedFrontend && trustedApiHost
-}
+// Always true now. /api/auth/status still reports it, because clients built
+// before the cutover read it to decide whether to offer a no-token skip.
+export function isAuthStrict(): boolean { return true }
 
 let cachedClient: ReturnType<typeof jwksClient> | null = null
 const getClient = () => {
@@ -146,46 +126,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: 'invalid token' })
   }
 
-  // 4. Legacy no-token bypass (migration only). Removed when AUTH_STRICT is on.
-  if (!AUTH_STRICT && isTrustedLegacyPair(req)) {
-    console.warn('[auth] LEGACY no-token bypass (set AUTH_STRICT=1 to disable)', { path: req.path, origin: req.headers.origin, host: req.headers.host })
-    return next()
-  }
-
   if (ALLOW_LOCAL) console.warn('[auth] unauthorized', { path: req.path, method: req.method, origin: req.headers.origin, host: req.headers.host })
   return res.status(401).json({ error: 'unauthorized' })
 }
 
-// Authorize a WebSocket upgrade. Accepts an app token via ?token=, a Cloudflare
-// Access JWT header (transitional), or a loopback dev connection.
-export async function authorizeUpgrade(req: IncomingMessage): Promise<boolean> {
-  if (isLoopbackReq(req) || isTailnetReq(req)) return true
-  try {
-    const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
-    if (verifyAppToken(token)) return true
-  } catch { /* malformed url */ }
-  if (verifyAppToken(bearer(req))) return true
-  const cfToken = req.headers['cf-access-jwt-assertion'] as string | undefined
-  if (cfToken && (await verifyCfAccessToken(cfToken))) return true
-  // Legacy: WS was previously unauthenticated at the app layer (edge-protected
-  // only). Keep that until cutover so live Code Deck connections don't drop.
-  if (!AUTH_STRICT) {
-    console.warn('[auth] LEGACY ws upgrade without token (set AUTH_STRICT=1 to enforce)')
-    return true
-  }
-  return false
-}
-
 // ------------------------------------------------------- strong auth ----
-// Same credentials as requireAuth MINUS the legacy no-token bypass.
-//
-// That bypass lets a request through with no credential at all as long as its
-// Origin and Host look like the published frontend talking to the published
-// API, both of which a caller sets freely. For a chart that is a cosmetic
-// risk. For /api/terminal it would be a shell on this box for anyone who can
-// reach the hostname, so these two are what the terminal routes and the
-// terminal websocket use, and they stay strict whether or not AUTH_STRICT is
-// on.
+// The terminal's check. It takes requireAuth's credentials except the
+// media-scoped query token, which must never open a shell, and it also reads
+// the app token from ?token=, because a browser websocket cannot send headers.
+// The terminal routes and the terminal websocket use these two.
 
 export async function isStrongAuth(req: Pick<IncomingMessage, 'socket' | 'headers' | 'url'>): Promise<boolean> {
   if (isLoopbackReq(req) || isTailnetReq(req)) return true

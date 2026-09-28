@@ -22,11 +22,10 @@ import {
 // phone) and the conversations to resume from the session board
 // (GET /hosts/thor/sessions). This file never reads a transcript.
 //
-// Every route in here is behind requireStrongAuth, NOT the app-wide requireAuth.
-// requireAuth still honours the legacy no-token bypass for a request that looks
-// like it came from the published frontend, which is fine for reading a chart
-// and absolutely not fine for a shell. This asks for a real credential: the
-// tailnet, loopback, an app token, or a Cloudflare Access JWT.
+// Every route in here is behind requireStrongAuth, NOT the app-wide requireAuth,
+// so the media-scoped query token that opens a poster can never open a shell.
+// It asks for a real credential: the tailnet, loopback, an app token, or a
+// Cloudflare Access JWT.
 
 const router = Router()
 
