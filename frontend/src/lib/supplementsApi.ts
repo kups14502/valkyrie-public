@@ -1,21 +1,24 @@
 import { api } from './api'
 
-export type SupplementDayEntry = { date: string; taken: boolean; takenAt: string | null }
+/** A one-checkbox-a-day tracker; each is its own path on the API. */
+export type TrackerName = 'supplements' | 'sf'
 
-export type SupplementWindow = {
+export type TrackerDayEntry = { date: string; taken: boolean; takenAt: string | null }
+
+export type TrackerWindow = {
   /** The middle day of the three. */
   date: string
   today: string
   /** The day before, the day itself, the day after. */
-  days: SupplementDayEntry[]
+  days: TrackerDayEntry[]
   streak: number
 }
 
-export const fetchSupplementWindow = async (date: string, today: string) =>
-  (await api.get<SupplementWindow>('/supplements/day', { params: { date, today } })).data
+export const fetchTrackerWindow = async (tracker: TrackerName, date: string, today: string) =>
+  (await api.get<TrackerWindow>(`/${tracker}/day`, { params: { date, today } })).data
 
-export const logSupplementDay = async (target: string, taken: boolean, date: string, today: string) =>
-  (await api.post<SupplementWindow>('/supplements/log', { target, taken, date, today })).data
+export const logTrackerDay = async (tracker: TrackerName, target: string, taken: boolean, date: string, today: string) =>
+  (await api.post<TrackerWindow>(`/${tracker}/log`, { target, taken, date, today })).data
 
 /** Today's key in the device's own timezone, which is the day the log uses. */
 export const supplementDateKey = (d = new Date()) =>

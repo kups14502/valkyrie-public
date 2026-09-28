@@ -3,8 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { LightsPanel } from '../components/HomePanels'
-import { SupplementsCard } from '../components/SupplementsCard'
-import { ExerciseCard } from '../components/ExerciseCard'
+import { DailyTrackerCard } from '../components/DailyTrackerCard'
 import { useProfile } from '../lib/deviceMode'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
@@ -496,21 +495,20 @@ export default function Dashboard() {
 
       {/* Above the fold on purpose: a daily habit check is worthless if you
           have to scroll past the fleet to find it. */}
-      <SupplementsCard size={profile.size} />
-      <ExerciseCard size={profile.size} />
+      <DailyTrackerCard size={profile.size} />
 
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />
 
-      {/* The desk relight and the room's bulbs, the same controls the Lights
+      {/* The room's bulbs and the desk relight, the same controls the Lights
           page carries, in their compact form. On every profile now, desktop
           included: the dashboard is the screen that is already open, and hopping
           to Lights for one button was the whole friction. LightsPanel renders
           each bulb as a single row until tapped, so the whole room fits here
           without turning the dashboard into the Lights page. */}
       <div className="space-y-5">
-        <ThorRgbControl size={profile.size} />
         <LightsPanel size={profile.size} />
+        <ThorRgbControl size={profile.size} />
       </div>
 
       {/* Two columns now that the sessions card is gone: hosts take the wide
