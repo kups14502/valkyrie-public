@@ -317,7 +317,7 @@ function SourcesCard({ sources }: { sources: CalendarSource[] }) {
           </div>
           {error && <div className="text-xs text-[var(--color-danger)]">{error}</div>}
           <p className="text-[11px] leading-relaxed text-[var(--color-text-dim)]">
-            Outlook Web → Calendar → Share → the Work calendar → Publish a calendar → permission
+            Outlook Web → Calendar → Share → your calendar → Publish a calendar → permission
             "Can view all details" → copy the <span className="font-mono">.ics</span> link. Read-only:
             events are shown here, edits still happen in Outlook.
           </p>
@@ -417,7 +417,7 @@ export default function Calendar() {
             <div className="space-y-1">
               <div className="text-[var(--color-text)]">No calendar connected yet.</div>
               <div className="text-[var(--color-text-dim)]">
-                Open the calendars card above and paste the published ICS link for the Work calendar.
+                Open the calendars card above and paste the published ICS link for your calendar.
               </div>
             </div>
           </div>

@@ -10,7 +10,7 @@ const exec = promisify(execFile)
 // Durable terminal sessions, so Claude Code on THOR can be driven from the phone.
 //
 // The session Brendon sees is Claude Code running on thor (his Windows
-// workstation) in one of his own directories: personal, work, work2. This
+// workstation) in one of his own directories: personal and work. This
 // box holds none of that work. What lives here is a tmux session whose pane is
 // an SSH client into thor, and tmux is what makes the phone usable rather than
 // a demo:

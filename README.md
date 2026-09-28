@@ -12,7 +12,7 @@ Personal server control dashboard. Single pane for server health, AI usage, acti
 
 `/sessions/terminal` runs Claude Code on **thor** from any browser, phone
 included. The Sessions tab is the way in. In a browser, "new session" opens a
-launch target in the page (personal, work, work2: the entries thor flags
+launch target in the page (personal and work: the entries thor flags
 `"phone": true` in `C:\Thor\var\session-board\launch-targets.json`) and "open"
 on a board row resumes that conversation in the page. In the desktop app both
 still open a Windows Terminal tab on thor's screen.

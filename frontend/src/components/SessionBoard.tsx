@@ -48,7 +48,7 @@ const readOpenMode = (): OpenMode => {
 const AREA_ORDER = ['work', 'org-c', 'server', 'personal']
 const AREA_LABEL: Record<string, string> = {
   work: 'work',
-  org-c: 'org c',
+  org-c: 'org-c',
   server: 'server',
   personal: 'personal',
 }
@@ -254,7 +254,7 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
 // with no agent is listed with the reason rather than hidden.
 //
 // In-page mode offers only the targets the host flagged for the phone
-// (personal, work, work2); on its own screen the full list applies.
+// (personal and work); on its own screen the full list applies.
 //
 // "On screen" means THE SCREEN IN FRONT OF BRENDON, which is not always the
 // host's. Starting a session posted to the host's own launcher agent, and that

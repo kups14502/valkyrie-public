@@ -6,7 +6,7 @@ import { parseIcs, type IcsEvent } from '../lib/ics.js'
 const router = Router()
 
 // Calendars are read from published ICS feeds, one row per feed. Read-only by
-// design: the Work calendar's authority is Exchange, and a published feed is
+// design: a work calendar's authority is Exchange, and a published feed is
 // the one way to read it that needs no app registration in the tenant.
 //
 // The feed URL is a bearer secret (anyone holding it reads the calendar), so it
@@ -54,13 +54,13 @@ const getCache = (id: string): CacheRow | undefined =>
 
 // One-time seed so a deployment that already knows the URL comes up working.
 function seedFromEnv(): void {
-  const url = process.env.WORK_ICS_URL
+  const url = process.env.CALENDAR_SEED_ICS_URL
   if (!url) return
   const already = db.prepare('SELECT COUNT(*) AS n FROM calendar_sources WHERE url = ?').get(url) as { n: number }
   if (already.n > 0) return
   db.prepare(`INSERT INTO calendar_sources (id, label, url, color, tz, enabled, sortOrder, createdAt)
     VALUES (?, ?, ?, ?, '', 1, 0, ?)`)
-    .run(randomUUID(), process.env.WORK_ICS_LABEL || 'Work', url, '#00ff41', new Date().toISOString())
+    .run(randomUUID(), process.env.CALENDAR_SEED_LABEL || 'Work', url, '#00ff41', new Date().toISOString())
 }
 seedFromEnv()
 

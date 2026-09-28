@@ -22,7 +22,7 @@ import { PasteSheet } from '../components/PasteSheet'
 import { uploadLine, useThorUpload } from '../lib/useThorUpload'
 
 // Claude Code on thor, from the phone. The session is Claude running on thor in
-// one of Brendon's own directories (personal, work, work2), reached over
+// one of Brendon's own directories (personal and work), reached over
 // SSH from a tmux session on odin, so this page is only a screen and a keyboard
 // for it: closing the tab, locking the phone, or deploying the API all just
 // detach, and coming back reattaches to the same running session. It lives

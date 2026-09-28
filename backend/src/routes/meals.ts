@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { openDb } from '../lib/db.js'
-import { CLAUDE_ACCOUNTS } from './aiUsage.js'
+import { CLAUDE_ACCOUNTS } from '../lib/claudeAccounts.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -345,7 +345,7 @@ function extractJson(text: string): unknown | null {
 async function estimateViaCli(mime: string, base64: string, hint: string): Promise<Estimated> {
   const cli = CLI_CANDIDATES.find((candidate) => existsSync(candidate))
   if (!cli) throw new Error('no Claude credential: set ANTHROPIC_API_KEY, or install the claude CLI on this host')
-  const accountId = process.env.MEALS_CLAUDE_ACCOUNT || 'claude-acct-a'
+  const accountId = process.env.MEALS_CLAUDE_ACCOUNT
   const account = CLAUDE_ACCOUNTS.find((a) => a.id === accountId) ?? CLAUDE_ACCOUNTS[0]
   if (!account) throw new Error('no Claude profile configured')
 

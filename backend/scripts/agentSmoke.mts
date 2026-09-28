@@ -57,7 +57,7 @@ const record = (name: string, ok: boolean, detail = '') => { results.push({ name
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function testMultiToolAndBusy() {
-  const id = createSession('main-claude')
+  const id = createSession('work-claude')
   const s = session(id)
   await s.open
   const busyLog: boolean[] = []
@@ -88,7 +88,7 @@ async function testResume(id: string) {
 }
 
 async function testInterrupt() {
-  const id = createSession('main-claude')
+  const id = createSession('work-claude')
   const s = session(id)
   await s.open
   s.send({ t: 'user', text: 'Use the Bash tool to run exactly: sleep 25 && echo WOKE. Then tell me it is done.' })
@@ -101,7 +101,7 @@ async function testInterrupt() {
 }
 
 async function testAttachmentPath() {
-  const id = createSession('main-claude')
+  const id = createSession('work-claude')
   const s = session(id)
   await s.open
   s.send({ t: 'user', text: 'look at this', attachments: ['/tmp/smoke-attachment-xyz.png'] })
@@ -112,7 +112,7 @@ async function testAttachmentPath() {
 }
 
 async function testCodexRejected() {
-  const id = createSession('main-codex')
+  const id = createSession('work-codex')
   const s = session(id)
   await s.open
   s.send({ t: 'user', text: 'hello' })
@@ -122,7 +122,7 @@ async function testCodexRejected() {
 }
 
 async function testReconnect() {
-  const id = createSession('main-claude')
+  const id = createSession('work-claude')
   const s1 = session(id); await s1.open
   const ready1 = await s1.waitFor((e) => e.t === 'ready', 8000)
   s1.close()

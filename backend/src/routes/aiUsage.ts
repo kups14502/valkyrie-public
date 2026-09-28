@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { writeFileSync, readFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
+import { CLAUDE_ACCOUNTS, DEFAULT_CLAUDE_DIR } from '../lib/claudeAccounts.js'
 
 const exec = promisify(execFile)
 const router = Router()
@@ -27,14 +28,6 @@ type ClaudeQuota = {
   sessionResetsAt: string | null
   weeklyResetsAt: string | null
   status?: string | null
-}
-
-type ClaudeAccount = {
-  id: string
-  label: string
-  email: string
-  subscription: string
-  configDir: string
 }
 
 const emptyBucket = (): Bucket => ({ tokens: 0, costUSD: 0, messages: 0 })
@@ -103,19 +96,6 @@ async function getClaudeAIOrgUUID(sessionKey: string): Promise<string | null> {
     return null
   }
 }
-
-const DEFAULT_CLAUDE_DIR = '/home/brendon/.claude'
-
-export const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
-  { id: 'claude-acct-a', label: 'Account A', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-a' },
-  { id: 'claude-acct-b', label: 'Account B', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-b' },
-  // acct-c signs in at the DEFAULT dir on odin (~/.claude, 292M of transcripts). The
-  // .claude-accounts/acct-c profile is the same account but effectively unused (8K, last
-  // written 2026-07-16), so this card reads the default dir instead.
-  { id: 'claude-acct-c', label: 'Account C', email: 'user@example.com', subscription: 'Claude plan', configDir: DEFAULT_CLAUDE_DIR },
-  { id: 'claude-acct-d', label: 'Account D', email: 'user@example.com', subscription: 'Claude plan', configDir: '/home/brendon/.claude-accounts/acct-d' },
-  { id: 'claude-acct-e', label: 'Account E', email: 'user@example.com', subscription: 'Claude Pro', configDir: '/home/brendon/.claude-accounts/acct-e' },
-]
 
 function parseClaudeRateLimitHeaders(headers: Headers): ClaudeQuota | null {
   const sessionUtil = headers.get('anthropic-ratelimit-unified-5h-utilization')

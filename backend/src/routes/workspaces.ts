@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { promises as fs, createReadStream } from 'node:fs'
+import { promises as fs, createReadStream, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -48,19 +48,44 @@ const UUID_RE = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/
 // A cwd is echoed back to clients and pasted into a resume command, so refuse
 // the characters that would let a writer of thor.json break out of either.
 const UNSAFE_CWD_RE = /["'`;\r\n$|&<>]/
-// Client work and the separate Org C business never leave the machine
+// Client work and the separate second business never leave the machine
 // they run on. thor's collector already redacts these, but it is not the
 // trust boundary: anything running as brendon can write thor.json, so the
 // rule is enforced again here on the cwd we actually publish.
+//
+// Built in, so the rule holds with no config at all: the folder OneDrive
+// creates under the profile for an organization's synced SharePoint (named
+// after the tenant, which is a legal entity), any SharePoint library root, and
+// a business OneDrive. The organization names themselves live in
+// REDACT_PATHS_FILE (one case-insensitive regex per line), so the same folders
+// reached by any other route (UNC, a mapped drive, odin-side copies) are caught
+// too without the names being in this repo.
+function loadRedactPatterns(): RegExp[] {
+  const file = process.env.REDACT_PATHS_FILE || path.join(homedir(), '.config', 'valkyrie', 'redact-paths.txt')
+  let text: string
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch {
+    return []
+  }
+  const out: RegExp[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const src = line.trim()
+    if (!src || src.startsWith('#')) continue
+    try {
+      out.push(new RegExp(src, 'i'))
+    } catch {
+      console.error(`[workspaces] ignoring bad pattern in ${file}: ${src}`)
+    }
+  }
+  return out
+}
+
 const REDACT_RES: RegExp[] = [
-  /^C:\\Users\\Brendon\\Org A\\/i,
-  /^C:\\Users\\Brendon\\Org B\\/i,
-  /^C:\\Users\\Brendon\\Org C\\/i,
-  // Same folders reached by any other route (UNC, a mapped drive, odin-side
-  // copies): match on the client name itself, not just the drive-letter path.
-  /Org A/i,
-  /Org B/i,
-  /Org C/i,
+  /^[A-Z]:\\Users\\[^\\]+\\[^\\]+ (Inc|LLC|LLP|Corp|Corporation|Ltd|PC|PLLC)\.?(\\|$)/i,
+  / - Documents(\\|\/|$)/i,
+  /(^|\\|\/)OneDrive - (?!Personal(\\|\/|$))[^\\/]+(\\|\/|$)/i,
+  ...loadRedactPatterns(),
 ]
 
 const AREAS = ['personal', 'server', 'work', 'org-c'] as const

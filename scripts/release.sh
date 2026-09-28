@@ -50,6 +50,8 @@ restore_branch() {
 trap restore_branch EXIT
 git checkout main
 git pull --ff-only
+# The repo is public: refuse before anything is tagged, pushed or built.
+"$ROOT/scripts/public-guard.sh" HEAD
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   git tag "$TAG"
   git push origin "$TAG"

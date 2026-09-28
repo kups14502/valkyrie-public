@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { pushToAll } from './routes/push.js'
+import { CLAUDE_ACCOUNTS } from './lib/claudeAccounts.js'
 
 // The health alerts (Claude quota and sign-ins, disk, Vaultwarden) go to the
 // phone as Web Push from this server. They used to be Discord webhook posts,
@@ -134,9 +135,9 @@ async function tick(state: AlertState): Promise<AlertState> {
   const next = { ...state }
   const now = Date.now()
 
-  const acct-a = ai?.aiClients?.find((c) => c.id === 'claude-acct-a')
-  const quota = acct-a?.quota
-  const sessionReset = acct-a?.session?.isActive ? acct-a.session.endTime : null
+  const watched = ai?.aiClients?.find((c) => c.id === CLAUDE_ACCOUNTS[0].id)
+  const quota = watched?.quota
+  const sessionReset = watched?.session?.isActive ? watched.session.endTime : null
   const resetSource = quota?.sessionResetsAt ?? sessionReset
   if (resetSource) {
     const resetsAt = resetSource
@@ -165,7 +166,7 @@ async function tick(state: AlertState): Promise<AlertState> {
   }
 
   // A dead sign-in used to sit on the dashboard unnoticed for weeks:
-  // acct-c went out on 2026-08-07 and nobody was told. Say it once, name
+  // one account went out on 2026-08-07 and nobody was told. Say it once, name
   // the address to sign in with, and say it again only if it comes back and dies.
   const clients = ai?.aiClients ?? []
   if (clients.length > 0) {

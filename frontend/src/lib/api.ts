@@ -632,7 +632,7 @@ export type WorkSession = {
   // the same table the Obsidian capture uses, so the two never disagree.
   area: string
   // Which Windows Terminal window this session reopens into, resolved on its
-  // host from launch-groups.json. NOT the area: Org C work groups into
+  // host from launch-groups.json. NOT the area: the second business groups into
   // the work window while its area is 'org-c'. It travels in the payload
   // because the desktop app opens its own windows, so it cannot ask the host
   // where a tab belongs.
@@ -682,7 +682,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
 }
 
 // `phone` is thor's own flag in launch-targets.json: the targets the phone
-// terminal offers (personal, work, work2). The desktop dropdown lists all.
+// terminal offers (personal and work). The desktop dropdown lists all.
 // `group` is the Windows Terminal window a session started in this target
 // joins. It matters off thor: the desktop app opens that window on ITS OWN
 // screen, so the grouping rule has to travel with the target.
