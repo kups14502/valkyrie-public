@@ -20,7 +20,7 @@ import {
 // Two honesty rules this page exists to keep:
 //  1. Total-value change is NOT performance. history.change_usd is the
 //     deposit-adjusted trading P&L; net_flows_usd is transfers and is shown
-//     separately. A $N deposit is never dressed up as a gain.
+//     separately. A deposit is never dressed up as a gain.
 //  2. Nothing is invented. Zero positions and zero v2 trades render as an
 //     explicit empty state, never as a placeholder row or an approximation.
 //
@@ -168,8 +168,8 @@ function Empty({ children }: { children: ReactNode }) {
 
 /**
  * Total account value over the status window. Deliberately labelled "total
- * value", not performance: the series includes transfers, and the $N -> $N
- * step in it is a deposit. The trading P&L figure beside it is the honest one.
+ * value", not performance: the series includes transfers, and a step up
+ * from a deposit sits in it. The trading P&L figure beside it is the honest one.
  *
  * Non-uniform SVG scaling is used for the polyline only (with a non-scaling
  * stroke); the markers are HTML so they stay round at any container width.
@@ -186,8 +186,8 @@ function EquityChart({ points }: { points: { ts: string; total: number }[] }) {
   const values = rows.map((p) => p.total)
   // The real data range. This is what the label below reports, and it is kept
   // apart from the axis on purpose: padding the axis and then printing the padded
-  // numbers claimed a $N–$N spread for a week that never left
-  // $N. The axis may be invented; the range may not.
+  // numbers claimed a two-dollar spread for a week that never moved a
+  // cent. The axis may be invented; the range may not.
   const min = Math.min(...values)
   const max = Math.max(...values)
   // Axis bounds, geometry only. A flat series has no range to scale against, so
