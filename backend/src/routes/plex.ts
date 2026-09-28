@@ -763,9 +763,31 @@ type ArrAlbum = {
   albumType?: string
   remoteCover?: string
   images?: { coverType?: string; remoteUrl?: string; url?: string }[]
+  artistId?: number
   artist?: ArrArtist
   monitored?: boolean
   statistics?: { trackFileCount?: number; trackCount?: number }
+}
+
+// Lidarr grabs an album only while the album AND its artist are monitored.
+// A new artist comes out of its post-add refresh unmonitored whatever the add
+// asked for, and a change made before that refresh ends is overwritten. So
+// this waits for the artist's commands to finish, then monitors both and
+// searches. Measured on odin's Lidarr 3.1: the refresh settles in about 2 s.
+async function monitorAndSearch(artistId: number, albumId: number) {
+  const deadline = Date.now() + 30_000
+  for (;;) {
+    const cmds = await arrJSON<{ status?: string; body?: { artistId?: number; artistIds?: number[] } }[]>(lidarr, '/command')
+    const mine = cmds.filter((c) => c.body?.artistId === artistId || c.body?.artistIds?.includes(artistId))
+    if (!mine.some((c) => c.status === 'queued' || c.status === 'started')) break
+    if (Date.now() > deadline) throw new Error(`lidarr: artist ${artistId} refresh still running after 30 s`)
+    await new Promise((r) => setTimeout(r, 1_000))
+  }
+  const artist = await arrJSON<ArrArtist>(lidarr, `/artist/${artistId}`)
+  if (!artist.monitored) await arrJSON(lidarr, `/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...artist, monitored: true }) })
+  const album = await arrJSON<ArrAlbum>(lidarr, `/album/${albumId}`)
+  if (!album.monitored) await arrJSON(lidarr, `/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...album, monitored: true }) })
+  await arrJSON(lidarr, '/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) })
 }
 
 type QueueRecord = {
@@ -1102,38 +1124,44 @@ router.post('/plex/request/add', async (req, res) => {
         void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
         return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
       }
-      // Lidarr already knows it. With files it is in the library; monitored it
-      // is already wanted; otherwise it came along with its artist under
-      // "monitor none", and monitoring it plus one search is the request.
+      // Lidarr already knows it. With files it is in the library; monitored
+      // with a monitored artist it is already wanted; otherwise it came along
+      // with its artist unmonitored, and monitoring both plus one search is
+      // the request.
       const requestKnown = async (albumId: number) => {
         const current = await arrJSON<ArrAlbum>(lidarr, `/album/${albumId}`)
         if ((current.statistics?.trackFileCount ?? 0) > 0) return res.status(409).json({ error: 'already added', detail: 'it is already in the library' })
-        if (current.monitored) return res.status(409).json({ error: 'already added', detail: 'it is already being tracked — check downloads' })
-        await arrJSON(lidarr, `/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...current, monitored: true }) })
-        await arrJSON(lidarr, '/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) })
+        const artistId = current.artistId ?? current.artist?.id
+        if (!artistId) throw new Error(`lidarr: album ${albumId} has no artist`)
+        const artist = await arrJSON<ArrArtist>(lidarr, `/artist/${artistId}`)
+        if (current.monitored && artist.monitored) return res.status(409).json({ error: 'already added', detail: 'it is already being tracked — check downloads' })
+        await monitorAndSearch(artistId, albumId)
         return done()
       }
       if (album.id) return requestKnown(album.id)
       const d = await getArrDefaults(lidarr)
       const metadataProfileId = await metadataProfileAllowing(album.artist, album.albumType, d)
       // Lidarr adds an album by taking its artist along: a new artist is created
-      // with only this album monitored; an existing artist just gains the album.
-      // Verified against LogicServer's Lidarr 3.1 with a throwaway add.
+      // with only this album monitored (albumsToMonitor; "monitor none" alone
+      // unmonitors every album, this one included); an existing artist just
+      // gains the album. The search waits for the post-add refresh, see
+      // monitorAndSearch. Verified on odin's Lidarr 3.1 with a throwaway add.
+      let added: ArrAlbum
       try {
-        await arrJSON(lidarr, '/album', {
+        added = await arrJSON<ArrAlbum>(lidarr, '/album', {
           method: 'POST',
           body: JSON.stringify({
             ...album,
             monitored: true,
-            addOptions: { searchForNewAlbum: true },
+            addOptions: { searchForNewAlbum: false },
             artist: {
               ...album.artist,
               qualityProfileId: album.artist.qualityProfileId || d.qualityProfileId,
               metadataProfileId,
               rootFolderPath: album.artist.rootFolderPath || d.rootFolderPath,
               monitored: true,
-              monitorNewItems: album.artist.monitorNewItems || 'none',
-              addOptions: { monitor: 'none', searchForMissingAlbums: false },
+              monitorNewItems: 'none',
+              addOptions: { monitor: 'none', albumsToMonitor: [foreignAlbumId], searchForMissingAlbums: false },
             },
           }),
         })
@@ -1146,6 +1174,9 @@ router.post('/plex/request/add', async (req, res) => {
         if (!again?.id) throw err
         return requestKnown(again.id)
       }
+      const artistId = added.artistId ?? added.artist?.id
+      if (!added.id || !artistId) throw new Error('lidarr: add returned no album or artist id')
+      await monitorAndSearch(artistId, added.id)
       return done()
     }
     return res.status(400).json({ error: 'invalid request', detail: 'need kind=movie+tmdbId, kind=show+tvdbId, or kind=album+foreignAlbumId' })
@@ -1351,7 +1382,8 @@ function liveStatus(e: JournalEntry, l: Lookups): LiveStatus {
     if (count > 0 && files >= count) return { status: 'in library', tone: 'done' }
     const q = pickQueue(l.albumQueue.filter((r) => r.albumId === a.id))
     if (q) return fromQueue(q, false)
-    if (a.monitored) return { status: 'searching', tone: 'waiting' }
+    // An unmonitored artist keeps a monitored album out of wanted.
+    if (a.monitored && a.artist?.monitored !== false) return { status: 'searching', tone: 'waiting' }
     return { status: 'unmonitored', tone: 'stuck' }
   }
   return unknown
