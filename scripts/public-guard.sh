@@ -41,13 +41,13 @@ check() { # <tip> <rev-list args...>
     HITS=1
   fi
   if out="$(git log -p --format='commit %H%nAuthor: %an <%ae>%nCommitter: %cn <%ce>%n%n%B' "$@" \
-      | grep -n -i -E -f "$PATTERNS")"; then
+      | grep -a -n -i -E -f "$PATTERNS")"; then
     echo "public-guard: denylisted text in commits not yet on GitHub:" >&2
     echo "$out" | head -40 >&2
     HITS=1
   fi
   if out="$(git for-each-ref --points-at "$tip" --format='%(refname:short): %(contents)' refs/tags \
-      | grep -i -E -f "$PATTERNS")"; then
+      | grep -a -i -E -f "$PATTERNS")"; then
     echo "public-guard: denylisted text in a tag message:" >&2
     echo "$out" >&2
     HITS=1
