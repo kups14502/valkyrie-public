@@ -178,7 +178,7 @@ function CheckStrip({
 // Exercise: a fixed five-day rotation counted from the day it started, so every
 // screen agrees on the day without a server.
 const ROTATION = ['chest', 'back', 'shoulders', 'legs', 'rest'] as const
-const ROTATION_START = '2026-09-28' // chest
+const ROTATION_START = '2026-09-27' // chest, so 2026-09-28 is back
 
 /** The workout for a date key. Rounded because a DST day is 23 or 25 hours. */
 function workoutFor(key: string): (typeof ROTATION)[number] {
