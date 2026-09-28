@@ -66,8 +66,12 @@ if [[ "$(basename "$0")" == "pre-push" ]]; then
   done
 else
   TIP="${1:-HEAD}"
-  if git rev-parse -q --verify origin/main >/dev/null; then
-    check "$TIP" "origin/main..$TIP"
+  BASE=""
+  for ref in public/main origin/main; do
+    if git rev-parse -q --verify "$ref" >/dev/null; then BASE="$ref"; break; fi
+  done
+  if [[ -n "$BASE" ]]; then
+    check "$TIP" "$BASE..$TIP"
   else
     check "$TIP" "$TIP"
   fi

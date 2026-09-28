@@ -50,15 +50,15 @@ restore_branch() {
 trap restore_branch EXIT
 git checkout main
 git pull --ff-only
-# A public repo must never receive private text: refuse before anything is
-# tagged, pushed or built. Only a repo GitHub confirms as PRIVATE skips this,
-# so a failed lookup still runs the guard.
-if [[ "$(gh repo view "$REPO" --json visibility -q .visibility 2>/dev/null || true)" != "PRIVATE" ]]; then
-  "$ROOT/scripts/public-guard.sh" HEAD
-fi
+# Every commit also goes to the public mirror (the `public` remote,
+# kups14502/valkyrie-public), so refuse before anything is tagged, pushed or
+# built. The guard reads a private denylist and fails closed without it.
+git fetch -q public main || echo "note: could not fetch the public remote; the guard scans from an older base" >&2
+"$ROOT/scripts/public-guard.sh" HEAD
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   git tag "$TAG"
   git push origin "$TAG"
+  git push public "$TAG" || echo "warning: $TAG did not reach the public repo; run: git push public $TAG" >&2
 fi
 
 cd "$FRONTEND"
@@ -156,6 +156,7 @@ App version bump and updater manifest from the v${VERSION} desktop build.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" || true
 git push origin main
+git push public main || echo "warning: main did not reach the public repo; run: git push public main" >&2
 
 # Rebuild the WEB dist last. `tauri build` runs `npm run build` as its
 # beforeBuildCommand with TAURI_ENV_PLATFORM set, and vite.config.ts disables
