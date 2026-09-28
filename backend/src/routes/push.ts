@@ -209,11 +209,11 @@ router.post('/push/test', async (_req, res) => {
 // The hook's endpoint. Strong auth (no legacy origin bypass): thor reaches it
 // over the tailnet, which isStrongAuth already trusts by socket address.
 //
-// The whole alert is one line: "<session> is waiting on you" or "<session> is
-// complete", with no body. Brendon asked for exactly that on 2026-09-28. The
-// old shape put "Claude is waiting on you" in the title and the session under
-// it with Claude's own notification text, so every alert opened the same way
-// and none said whether the session had finished or was blocked.
+// The title is "Session waiting" or "Session complete" and the body is the
+// session's name, nothing else (Brendon's call, 2026-09-28). The body must not
+// be empty: iOS fills an empty one with "from Valkyrie". The old shape put
+// "Claude is waiting on you" over a folder name and Claude's own notification
+// text, so none said whether the session had finished or was blocked.
 router.post('/push/session-waiting', requireStrongAuth, async (req, res) => {
   const b = (req.body ?? {}) as { label?: string; kind?: string; host?: string }
   const label = String(b.label ?? '').trim().replace(/\s+/g, ' ').slice(0, 80) || 'A session'
@@ -223,8 +223,8 @@ router.post('/push/session-waiting', requireStrongAuth, async (req, res) => {
   const done = String(b.kind ?? '') === 'complete'
 
   const r = await pushToAll({
-    title: done ? `${label} is complete` : `${label} is waiting on you`,
-    body: '',
+    title: done ? 'Session complete' : 'Session waiting',
+    body: label,
     // One tag per session label, so a second alert for the same session
     // replaces the first on the lock screen instead of stacking.
     tag: `session-${createHash('sha256').update(`${host}:${label}`).digest('hex').slice(0, 10)}`,
