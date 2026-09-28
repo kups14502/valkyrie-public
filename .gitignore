@@ -4,6 +4,8 @@ build/
 .env
 .env.local
 .env.*.local
+.env.bak*
+*.env.bak*
 *.log
 .DS_Store
 .vite/
