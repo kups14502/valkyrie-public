@@ -4,15 +4,15 @@ import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from './Card'
 import { apiErrorText } from '../lib/api'
 import {
-  dateLabel, fetchTrackerWindow, logTrackerDay, parseDateKey, shiftDateKey, supplementDateKey,
+  dateLabel, fetchDailyStreak, fetchTrackerWindow, logTrackerDay, parseDateKey, shiftDateKey, supplementDateKey,
   type TrackerDayEntry, type TrackerName, type TrackerWindow,
 } from '../lib/supplementsApi'
 import type { PanelSize } from './HomePanels'
 
-// Daily tracker: Supplements, Exercise and SF in one card. Each box is a strip
-// of three days. The middle one is today; the day either side of it is there
-// so a 1am tick-off can land on the day that just ended, and so a day can be
-// stepped in either direction.
+// Daily tracker: Supplements, Exercise and SF in one box under one streak.
+// Each row is a strip of three days that step together. The middle one is
+// today; the day either side of it is there so a 1am tick-off can land on the
+// day that just ended, and so a day can be stepped in either direction.
 
 /** Today's key, re-checked every minute so a tab left open rolls over at midnight. */
 function useToday(): string {
@@ -27,60 +27,36 @@ function useToday(): string {
   return date
 }
 
-/**
- * The day in the middle of a strip. null follows today, so a tab left open
- * overnight moves with the clock. Stepping pins a day and midnight leaves it
- * alone.
- */
-function useCenter(today: string) {
-  const [pinned, setPinned] = useState<string | null>(null)
-  const center = pinned ?? today
-  const step = (days: number) => {
-    const next = shiftDateKey(center, days)
-    setPinned(next === today ? null : next)
-  }
-  return { center, step, reset: () => setPinned(null) }
-}
+// Every screen reads the same rows, so a tick on the phone has to show up on
+// the desktop. The app turns refetchOnWindowFocus off globally, which left two
+// open dashboards disagreeing for minutes; this card turns it back on and polls
+// a minute at a time.
+const LIVE = {
+  refetchInterval: 60_000,
+  refetchOnWindowFocus: true,
+  refetchOnReconnect: true,
+  refetchOnMount: 'always',
+} as const
 
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
 
 const STEP_BUTTON = 'flex w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]'
 
-/** One tracker's box: a heading, the day strip, and the way back to today. */
-function TrackerBox({
-  title, action, today, center, step, reset, children,
-}: {
-  title: string
-  action?: ReactNode
-  today: string
-  center: string
-  step: (days: number) => void
-  reset: () => void
-  children: ReactNode
-}) {
+/** One row of the tracker: its label and the day strip. */
+function Strip({ title, step, children }: { title: string; step: (days: number) => void; children: ReactNode }) {
   return (
-    <div className="min-w-0 space-y-2 border border-[var(--color-border)] p-3">
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <h3 className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent)]">{title}</h3>
-        {action}
-      </div>
-      <div className="flex items-stretch gap-1.5">
-        <button type="button" onClick={() => step(-1)} aria-label={`${title}: earlier days`} className={STEP_BUTTON}>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <h3 className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)]">{title}</h3>
+      <div className="flex flex-1 items-stretch gap-1.5">
+        <button type="button" onClick={() => step(-1)} aria-label="earlier days" className={STEP_BUTTON}>
           <ChevronLeft size={16} />
         </button>
         {children}
-        <button type="button" onClick={() => step(1)} aria-label={`${title}: later days`} className={STEP_BUTTON}>
+        <button type="button" onClick={() => step(1)} aria-label="later days" className={STEP_BUTTON}>
           <ChevronRight size={16} />
         </button>
       </div>
-      {center !== today && (
-        <div className="flex justify-end text-[10px] uppercase tracking-[0.14em]">
-          <button type="button" onClick={reset} className="uppercase tracking-[0.14em] text-[var(--color-accent)]">
-            back to today
-          </button>
-        </div>
-      )}
     </div>
   )
 }
@@ -134,35 +110,21 @@ function CheckDay({
   )
 }
 
-/** A one-checkbox-a-day tracker backed by the API, with its streak. */
-function CheckTracker({ tracker, title, today, size }: { tracker: TrackerName; title: string; today: string; size: PanelSize }) {
+/** A one-checkbox-a-day row backed by the API. */
+function CheckStrip({
+  tracker, title, center, today, size, step,
+}: {
+  tracker: TrackerName
+  title: string
+  center: string
+  today: string
+  size: PanelSize
+  step: (days: number) => void
+}) {
   const qc = useQueryClient()
-  const { center, step, reset } = useCenter(today)
-  const key = [tracker, 'day', center, today]
+  const key = ['daily', tracker, center, today]
 
-  // Every screen reads the same rows, so a tick on the phone has to show up on
-  // the desktop. The app turns refetchOnWindowFocus off globally, which left
-  // two open dashboards disagreeing for minutes; this card turns it back on and
-  // polls a minute at a time.
-  const day = useQuery({
-    queryKey: key,
-    queryFn: () => fetchTrackerWindow(tracker, center, today),
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    refetchOnMount: 'always',
-  })
-
-  // A backgrounded tab stops its interval; coming back to it must not show a
-  // stale day. (visibilitychange, not focus: a second window on the same screen
-  // never fires focus.)
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void qc.invalidateQueries({ queryKey: [tracker] })
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [qc, tracker])
+  const day = useQuery({ queryKey: key, queryFn: () => fetchTrackerWindow(tracker, center, today), ...LIVE })
 
   const log = useMutation({
     mutationFn: ({ target, taken }: { target: string; taken: boolean }) =>
@@ -182,25 +144,17 @@ function CheckTracker({ tracker, title, today, size }: { tracker: TrackerName; t
       return { prev }
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(key, ctx.prev) },
-    // The server owns the streak, so take its answer.
-    onSuccess: (data) => qc.setQueryData(key, data),
+    // The server owns the streak, so ask it again once the tick has landed.
+    onSuccess: (data) => {
+      qc.setQueryData(key, data)
+      void qc.invalidateQueries({ queryKey: ['daily', 'streak'] })
+    },
   })
 
   const d = day.data
 
   return (
-    <TrackerBox
-      title={title}
-      today={today}
-      center={center}
-      step={step}
-      reset={reset}
-      action={d && (
-        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${d.streak > 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}`}>
-          {d.streak} day streak
-        </span>
-      )}
-    >
+    <Strip title={title} step={step}>
       {day.isLoading && !d ? (
         <div className="flex flex-1 items-center justify-center py-4 text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : day.error ? (
@@ -217,7 +171,7 @@ function CheckTracker({ tracker, title, today, size }: { tracker: TrackerName; t
           />
         ))
       ) : null}
-    </TrackerBox>
+    </Strip>
   )
 }
 
@@ -263,28 +217,64 @@ function WorkoutDay({ date, today, center, size }: { date: string; today: string
   )
 }
 
-function ExerciseTracker({ today, size }: { today: string; size: PanelSize }) {
-  const { center, step, reset } = useCenter(today)
-  return (
-    <TrackerBox title="Exercise" today={today} center={center} step={step} reset={reset}>
-      {[-1, 0, 1].map((n) => {
-        const date = shiftDateKey(center, n)
-        return <WorkoutDay key={date} date={date} today={today} center={center} size={size} />
-      })}
-    </TrackerBox>
-  )
-}
-
 export function DailyTrackerCard({ size = 'normal' }: { size?: PanelSize } = {}) {
   const today = useToday()
+  const qc = useQueryClient()
+  // null follows today, so a tab left open overnight moves with the clock.
+  // Stepping pins a day and midnight leaves it alone. All three rows share it.
+  const [pinned, setPinned] = useState<string | null>(null)
+  const center = pinned ?? today
+  const step = (days: number) => {
+    const next = shiftDateKey(center, days)
+    setPinned(next === today ? null : next)
+  }
+
+  const streak = useQuery({ queryKey: ['daily', 'streak', today], queryFn: () => fetchDailyStreak(today), ...LIVE })
+
+  // A backgrounded tab stops its interval; coming back to it must not show a
+  // stale day. (visibilitychange, not focus: a second window on the same screen
+  // never fires focus.)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void qc.invalidateQueries({ queryKey: ['daily'] })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [qc])
+
+  const n = streak.data?.streak
+
   return (
-    <Card title="Daily tracker" storageKey="daily-tracker" collapsible>
-      {/* Side by side when there is room, stacked on the phone. Each box is
-          capped: on a 1440px dashboard a full-width strip would be a billboard. */}
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),28rem))]">
-        <CheckTracker tracker="supplements" title="Supplements" today={today} size={size} />
-        <ExerciseTracker today={today} size={size} />
-        <CheckTracker tracker="sf" title="SF" today={today} size={size} />
+    <Card
+      title="Daily tracker"
+      storageKey="daily-tracker"
+      collapsible
+      action={n != null && (
+        <span className={`shrink-0 text-[11px] font-bold uppercase tracking-[0.14em] ${n > 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-text-faint)]'}`}>
+          {n} day streak
+        </span>
+      )}
+    >
+      <div className="space-y-2">
+        {/* Three across when there is room, stacked on the phone. Capped so an
+            ultrawide does not stretch each strip into a billboard. */}
+        <div className="grid max-w-7xl gap-x-5 gap-y-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
+          <CheckStrip tracker="supplements" title="Supplements" center={center} today={today} size={size} step={step} />
+          <Strip title="Exercise" step={step}>
+            {[-1, 0, 1].map((k) => {
+              const date = shiftDateKey(center, k)
+              return <WorkoutDay key={date} date={date} today={today} center={center} size={size} />
+            })}
+          </Strip>
+          <CheckStrip tracker="sf" title="SF" center={center} today={today} size={size} step={step} />
+        </div>
+        {center !== today && (
+          <div className="flex max-w-7xl justify-end text-[10px] uppercase tracking-[0.14em]">
+            <button type="button" onClick={() => setPinned(null)} className="uppercase tracking-[0.14em] text-[var(--color-accent)]">
+              back to today
+            </button>
+          </div>
+        )}
       </div>
     </Card>
   )

@@ -46,32 +46,47 @@ function readDates(src: Record<string, unknown>): { center: string; today: strin
   return { center, today }
 }
 
+const takenAtIn = (table: string, date: string): string | null => {
+  const row = db.prepare(`SELECT takenAt FROM ${table} WHERE date = ?`).get(date) as { takenAt: string } | undefined
+  return row?.takenAt ?? null
+}
+
+/**
+ * Consecutive done days ending at `today`.
+ *
+ * An unfinished today doesn't break the streak, it just hasn't extended it
+ * yet: at 9am you have not missed anything.
+ */
+function streakEndingAt(today: string, done: (date: string) => boolean, limit = 3650): number {
+  let streak = 0
+  let cursor = today
+  for (let i = 0; i < limit; i++) {
+    if (!done(cursor)) {
+      if (i === 0) { cursor = shiftDate(cursor, -1); continue }
+      break
+    }
+    streak++
+    cursor = shiftDate(cursor, -1)
+  }
+  return streak
+}
+
+// The dashboard shows one streak for the whole daily tracker: a day counts
+// when supplements and SF are both ticked. SF started on SF_START, so the days
+// before it count on supplements alone and the streak carried over.
+const SF_START = '2026-09-28'
+const dailyDone = (date: string) =>
+  Boolean(takenAtIn('supplement_days', date)) && (date < SF_START || Boolean(takenAtIn('sf_days', date)))
+
+router.get('/daily/streak', (req, res) => {
+  const today = String(req.query.today || '')
+  if (!DATE_RE.test(today)) return res.status(400).json({ error: 'today must be YYYY-MM-DD' })
+  res.json({ today, streak: streakEndingAt(today, dailyDone) })
+})
+
 /** GET `${path}/day` and POST `${path}/log`, backed by `table`. */
 function tracker(path: string, table: string) {
-  const takenAtFor = (date: string): string | null => {
-    const row = db.prepare(`SELECT takenAt FROM ${table} WHERE date = ?`).get(date) as { takenAt: string } | undefined
-    return row?.takenAt ?? null
-  }
-
-  /**
-   * Consecutive ticked days ending at `today`.
-   *
-   * An untaken today doesn't break the streak, it just hasn't extended it yet:
-   * at 9am you have not missed anything.
-   */
-  function streakEndingAt(today: string, limit = 3650): number {
-    let streak = 0
-    let cursor = today
-    for (let i = 0; i < limit; i++) {
-      if (!takenAtFor(cursor)) {
-        if (i === 0) { cursor = shiftDate(cursor, -1); continue }
-        break
-      }
-      streak++
-      cursor = shiftDate(cursor, -1)
-    }
-    return streak
-  }
+  const takenAtFor = (date: string) => takenAtIn(table, date)
 
   const entry = (date: string) => {
     const takenAt = takenAtFor(date)
@@ -88,7 +103,7 @@ function tracker(path: string, table: string) {
       date: center,
       today,
       days: [shiftDate(center, -1), center, shiftDate(center, 1)].map(entry),
-      streak: streakEndingAt(today),
+      streak: streakEndingAt(today, (date) => Boolean(takenAtFor(date))),
     }
   }
 

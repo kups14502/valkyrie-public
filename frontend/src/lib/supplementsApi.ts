@@ -17,6 +17,10 @@ export type TrackerWindow = {
 export const fetchTrackerWindow = async (tracker: TrackerName, date: string, today: string) =>
   (await api.get<TrackerWindow>(`/${tracker}/day`, { params: { date, today } })).data
 
+/** The one streak the daily tracker shows: supplements and SF both done. */
+export const fetchDailyStreak = async (today: string) =>
+  (await api.get<{ today: string; streak: number }>('/daily/streak', { params: { today } })).data
+
 export const logTrackerDay = async (tracker: TrackerName, target: string, taken: boolean, date: string, today: string) =>
   (await api.post<TrackerWindow>(`/${tracker}/log`, { target, taken, date, today })).data
 
