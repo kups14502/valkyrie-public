@@ -5,8 +5,8 @@ const router = Router()
 
 // Daily trackers: one checkbox a day. The question is "did I do it", not what
 // or how much, so a day is a single row and there is no stack to maintain.
-// Supplements was the first; SF is the same shape in its own table, under its
-// own path.
+// Supplements was the first; exercise and SF are the same shape, each in its
+// own table under its own path.
 //
 // The client owns the calendar date (it sends 'YYYY-MM-DD' from the device's
 // own clock) so a server in UTC can't push an 11pm dose into tomorrow, and so
@@ -14,6 +14,10 @@ const router = Router()
 
 const db = openDb('supplements', `
   CREATE TABLE IF NOT EXISTS supplement_days (
+    date TEXT PRIMARY KEY,
+    takenAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS exercise_days (
     date TEXT PRIMARY KEY,
     takenAt TEXT NOT NULL
   );
@@ -72,11 +76,9 @@ function streakEndingAt(today: string, done: (date: string) => boolean, limit = 
 }
 
 // The dashboard shows one streak for the whole daily tracker: a day counts
-// when supplements and SF are both ticked. SF started on SF_START, so the days
-// before it count on supplements alone and the streak carried over.
-const SF_START = '2026-09-28'
-const dailyDone = (date: string) =>
-  Boolean(takenAtIn('supplement_days', date)) && (date < SF_START || Boolean(takenAtIn('sf_days', date)))
+// only when all three are ticked. A rest day is ticked like any other.
+const DAILY_TABLES = ['supplement_days', 'exercise_days', 'sf_days']
+const dailyDone = (date: string) => DAILY_TABLES.every((table) => Boolean(takenAtIn(table, date)))
 
 router.get('/daily/streak', (req, res) => {
   const today = String(req.query.today || '')
@@ -132,6 +134,7 @@ function tracker(path: string, table: string) {
 }
 
 tracker('/supplements', 'supplement_days')
+tracker('/exercise', 'exercise_days')
 tracker('/sf', 'sf_days')
 
 export default router

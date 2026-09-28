@@ -62,12 +62,14 @@ function Strip({ title, step, children }: { title: string; step: (days: number) 
 }
 
 function CheckDay({
-  entry, today, center, size, onToggle,
+  entry, today, center, size, detail, onToggle,
 }: {
   entry: TrackerDayEntry
   today: string
   center: string
   size: PanelSize
+  /** A line under the date, e.g. the day's workout. */
+  detail?: ReactNode
   onToggle: () => void
 }) {
   const isCenter = entry.date === center
@@ -92,6 +94,7 @@ function CheckDay({
       >
         {dateLabel(entry.date, today)}
       </span>
+      {detail}
       <span
         className={`flex items-center justify-center border ${size === 'pad' ? 'h-10 w-10' : 'h-8 w-8'}`}
         style={{
@@ -112,7 +115,7 @@ function CheckDay({
 
 /** A one-checkbox-a-day row backed by the API. */
 function CheckStrip({
-  tracker, title, center, today, size, step,
+  tracker, title, center, today, size, step, detail,
 }: {
   tracker: TrackerName
   title: string
@@ -120,6 +123,7 @@ function CheckStrip({
   today: string
   size: PanelSize
   step: (days: number) => void
+  detail?: (date: string, isCenter: boolean) => ReactNode
 }) {
   const qc = useQueryClient()
   const key = ['daily', tracker, center, today]
@@ -167,6 +171,7 @@ function CheckStrip({
             today={today}
             center={center}
             size={size}
+            detail={detail?.(entry.date, entry.date === center)}
             onToggle={() => log.mutate({ target: entry.date, taken: !entry.taken })}
           />
         ))
@@ -186,34 +191,20 @@ function workoutFor(key: string): (typeof ROTATION)[number] {
   return ROTATION[((days % ROTATION.length) + ROTATION.length) % ROTATION.length]
 }
 
-function WorkoutDay({ date, today, center, size }: { date: string; today: string; center: string; size: PanelSize }) {
-  const isCenter = date === center
+/** The workout name inside an exercise day box. A rest day is ticked like any other. */
+function workoutLabel(date: string, isCenter: boolean, size: PanelSize) {
   const workout = workoutFor(date)
   const rest = workout === 'rest'
   return (
-    <div
-      className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 border px-1 ${size === 'pad' ? 'py-5' : 'py-4'}`}
+    <span
+      className={`truncate font-bold uppercase tracking-[0.14em] ${size === 'pad' ? 'text-base' : 'text-sm'}`}
       style={{
-        borderColor: isCenter ? 'var(--color-accent)' : 'var(--color-border)',
-        opacity: isCenter ? 1 : 0.75,
+        color: rest ? 'var(--color-text-faint)' : isCenter ? 'var(--color-text)' : 'var(--color-text-dim)',
+        textShadow: isCenter && !rest ? '0 0 8px var(--color-accent)' : undefined,
       }}
     >
-      <span
-        className="truncate text-[10px] font-bold uppercase tracking-[0.14em]"
-        style={{ color: isCenter ? 'var(--color-accent)' : 'var(--color-text-faint)' }}
-      >
-        {dateLabel(date, today)}
-      </span>
-      <span
-        className={`truncate font-bold uppercase tracking-[0.14em] ${size === 'pad' ? 'text-base' : 'text-sm'}`}
-        style={{
-          color: rest ? 'var(--color-text-faint)' : isCenter ? 'var(--color-text)' : 'var(--color-text-dim)',
-          textShadow: isCenter && !rest ? '0 0 8px var(--color-accent)' : undefined,
-        }}
-      >
-        {workout}
-      </span>
-    </div>
+      {workout}
+    </span>
   )
 }
 
@@ -260,12 +251,15 @@ export function DailyTrackerCard({ size = 'normal' }: { size?: PanelSize } = {})
             ultrawide does not stretch each strip into a billboard. */}
         <div className="grid max-w-7xl gap-x-5 gap-y-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
           <CheckStrip tracker="supplements" title="Supplements" center={center} today={today} size={size} step={step} />
-          <Strip title="Exercise" step={step}>
-            {[-1, 0, 1].map((k) => {
-              const date = shiftDateKey(center, k)
-              return <WorkoutDay key={date} date={date} today={today} center={center} size={size} />
-            })}
-          </Strip>
+          <CheckStrip
+            tracker="exercise"
+            title="Exercise"
+            center={center}
+            today={today}
+            size={size}
+            step={step}
+            detail={(date, isCenter) => workoutLabel(date, isCenter, size)}
+          />
           <CheckStrip tracker="sf" title="SF" center={center} today={today} size={size} step={step} />
         </div>
         {center !== today && (

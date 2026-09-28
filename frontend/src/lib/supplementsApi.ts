@@ -1,7 +1,7 @@
 import { api } from './api'
 
 /** A one-checkbox-a-day tracker; each is its own path on the API. */
-export type TrackerName = 'supplements' | 'sf'
+export type TrackerName = 'supplements' | 'exercise' | 'sf'
 
 export type TrackerDayEntry = { date: string; taken: boolean; takenAt: string | null }
 
@@ -17,7 +17,7 @@ export type TrackerWindow = {
 export const fetchTrackerWindow = async (tracker: TrackerName, date: string, today: string) =>
   (await api.get<TrackerWindow>(`/${tracker}/day`, { params: { date, today } })).data
 
-/** The one streak the daily tracker shows: supplements and SF both done. */
+/** The one streak the daily tracker shows: a day counts when all three are done. */
 export const fetchDailyStreak = async (today: string) =>
   (await api.get<{ today: string; streak: number }>('/daily/streak', { params: { today } })).data
 
