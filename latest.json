@@ -1,15 +1,15 @@
 {
-  "version": "0.3.113",
-  "notes": "dashboard: add an exercise rotation card, drop the supplements hint",
-  "pub_date": "2026-09-28T04:20:01Z",
+  "version": "0.3.114",
+  "notes": "dashboard: daily tracker is one box under one streak",
+  "pub_date": "2026-09-28T04:30:53Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNmUzliTHNvd0JpSElkSmNreG9iZnJqNjJVYzlDdm1JUHlQWVBsMDVBNWEvWklncTMreFArcWkzNXpENURhOWV0eDg0aWRZYld1U2NqZlJCanZMa1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTY5MDg5CWZpbGU6VmFsa3lyaWVfMC4zLjExM194NjQtc2V0dXAuZXhlCjhuM05jenRCblRUQzY3a2U5YnYrQWlXRFhRbTVIMjlmOWlXUmRPbGp2ZEVGVHNKTDlnb2ZwZW5wdE9VSytMaTllWGh1RXZXaWgxamVNWFU3TzFJSkRnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.113/Valkyrie_0.3.113_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVwaGZXZzdLdzFHQ204OUwwYS9uSWxTaXY3RG91OWFRTUVUWEJDT0FmWURkMVlXZTMwNS8xdmdVL3JGa09yQ2xySTZIY21qNGVqK3RlRXFRenZUQUFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTY5NzY5CWZpbGU6VmFsa3lyaWVfMC4zLjExNF94NjQtc2V0dXAuZXhlCmlNVFNLQ2U0NGorRHJhQkJVY2lMVVdnMU9YSzYwVHFGTFkyM2pSS2VZaUx2WFdySUhmVndZcG4yK3Z5N3ViNkU5T1grMzVEMzBuWjRwVmxibEtVeENRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.114/Valkyrie_0.3.114_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFuZlhsVDBLM3VaNXlqbExGd21wQjFuTklsUUpQeUVaUHBTQW5QaVhTRVdUMGZEbWtCMlJGajhhRkpDYk1EMWQ5RU1RTGxNUkoycW5aU3VNT0N6QUFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTY5MDQxCWZpbGU6VmFsa3lyaWVfMC4zLjExM19hbWQ2NC5BcHBJbWFnZQpKYS8vd1lWY2dzUi91ZEx3RGozM1ZHeU1UQ0FQN044eDdwVno3eU1QVEhiM0JuSHlIM0EvQkxLeXhiMW9wVVhSaXNjaHVuc25MNStGa3JuWTBGYUJDUT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.113/Valkyrie_0.3.113_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJCbDVkRjUrREZSN2xNTWVhRE93bVlmcmhMT0Fzd0VnSlhtUXRhdU9KNHJmYW5GZVFRMWRKamFZWmppNFBxd0tILzJnZGp0MzQzSmtVb1ZOUkFsWkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTY5NzIzCWZpbGU6VmFsa3lyaWVfMC4zLjExNF9hbWQ2NC5BcHBJbWFnZQpFL3k1b3FWTFdnYlpVaFpVQ3Ridld2Z216ZkMyMGNrdnV3QVNQQk5DRmx2bVVYTlpscTZoY3cxeGNRSEN6T2JrYjVQdWJOODdyM24yWXpsVWJ3ZzhEZz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.114/Valkyrie_0.3.114_amd64.AppImage"
     }
   }
 }
