@@ -11,7 +11,7 @@ import {
   fetchMusicRecent, fetchPlexLibrary, fetchPlexRecent, fetchPlexSections, fetchPlexServer, musicImg,
   onTailnet, openInApp, plexAppItemLink, plexImg, plexWatchLink, plexWebItemLink, searchMediaRequests,
   searchMusic, sendMediaMessage, shouldDeferAppClick,
-  type MusicAlbum, type MusicArtist, type MusicTrack, type PlexItem, type PlexSection,
+  type MediaRequestEntry, type MusicAlbum, type MusicArtist, type MusicTrack, type PlexItem, type PlexSection,
 } from '../lib/api'
 import { playQueue, playShuffled, toggle, useIsPlaying, useNowPlayingKey } from '../lib/player'
 
@@ -370,6 +370,13 @@ function PlayInPlex({ ratingKey, watchPath }: { ratingKey: string; watchPath: st
 
 // ---------- requests ----------
 
+const REQUEST_TONE: Record<NonNullable<MediaRequestEntry['tone']>, string> = {
+  done: 'border-[var(--color-success)]/60 text-[var(--color-success)]',
+  active: 'border-[var(--color-accent-2)]/60 text-[var(--color-accent-2)]',
+  stuck: 'border-[var(--color-danger)]/60 text-[var(--color-danger)]',
+  waiting: 'border-[var(--color-border)] text-[var(--color-text-dim)]',
+}
+
 function Requests() {
   const queryClient = useQueryClient()
   const [q, setQ] = useState('')
@@ -518,11 +525,15 @@ function Requests() {
               <li key={`${d.title}-${i}`}>
                 <div className="flex items-baseline justify-between gap-3 text-xs">
                   <span className="min-w-0 truncate text-[var(--color-text)]">{d.title}</span>
-                  <span className="shrink-0 text-[var(--color-text-faint)]">{d.progress}%{d.timeleft ? ` · ${d.timeleft}` : ''}</span>
+                  {d.stuck
+                    ? <span className="shrink-0 text-[var(--color-danger)]" title={d.message}>import stuck</span>
+                    : <span className="shrink-0 text-[var(--color-text-faint)]">{d.progress}%{d.timeleft ? ` · ${d.timeleft}` : ''}</span>}
                 </div>
-                <div className="mt-1 h-1.5 w-full bg-[var(--color-surface-2)]">
-                  <div className="h-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]" style={{ width: `${d.progress}%` }} />
-                </div>
+                {!d.stuck && (
+                  <div className="mt-1 h-1.5 w-full bg-[var(--color-surface-2)]">
+                    <div className="h-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]" style={{ width: `${d.progress}%` }} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -541,7 +552,7 @@ function Requests() {
                 <span className="min-w-0 flex-1 truncate text-[var(--color-text)]">
                   {r.kind === 'message' ? `"${r.message}"` : `${r.artist ? `${r.artist}: ` : ''}${r.title}${r.year ? ` (${r.year})` : ''}`}
                 </span>
-                <span className="shrink-0 border border-[var(--color-border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
+                <span className={`shrink-0 border px-2 py-1 text-[9px] uppercase tracking-[0.12em] ${r.tone ? REQUEST_TONE[r.tone] : 'border-[var(--color-border)] text-[var(--color-text-faint)]'}`}>
                   {r.kind === 'message' ? 'agent' : r.status ?? r.kind}
                 </span>
               </li>

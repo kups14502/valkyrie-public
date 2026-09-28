@@ -290,11 +290,15 @@ export function DownloadsPanel() {
           <li key={`${d.title}-${i}`}>
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="min-w-0 truncate text-[var(--color-text)]">{d.title}</span>
-              <span className="shrink-0 tabular-nums text-[var(--color-text-faint)]">{d.progress}%</span>
+              {d.stuck
+                ? <span className="shrink-0 text-[var(--color-danger)]" title={d.message}>import stuck</span>
+                : <span className="shrink-0 tabular-nums text-[var(--color-text-faint)]">{d.progress}%</span>}
             </div>
-            <div className="mt-1 h-2 w-full bg-[var(--color-surface-2)]">
-              <div className="h-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]" style={{ width: `${d.progress}%` }} />
-            </div>
+            {!d.stuck && (
+              <div className="mt-1 h-2 w-full bg-[var(--color-surface-2)]">
+                <div className="h-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]" style={{ width: `${d.progress}%` }} />
+              </div>
+            )}
           </li>
         ))}
       </ul>

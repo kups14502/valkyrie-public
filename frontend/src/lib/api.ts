@@ -1340,7 +1340,12 @@ export type MediaRequestEntry = {
   artist?: string
   year?: number
   message?: string
+  // Live, from the *arrs and Plex. An item with no tone had its lookup fail,
+  // so its status is still the journal's.
   status?: string
+  tone?: 'done' | 'active' | 'stuck' | 'waiting'
+  progress?: number
+  journalStatus?: string
 }
 
 export type MediaDownload = {
@@ -1349,6 +1354,10 @@ export type MediaDownload = {
   status: string
   progress: number
   timeleft: string | null
+  // trackedDownloadState, and whether the *arr cannot import it by itself.
+  state?: string
+  stuck?: boolean
+  message?: string
 }
 
 // Poster URLs need auth, but an <img> tag can't set an Authorization header —

@@ -35,6 +35,11 @@ const SONARR_KEY = process.env.SONARR_API_KEY || ''
 // simply absent from search.
 const LIDARR_URL = (process.env.LIDARR_URL || '').replace(/\/+$/, '')
 const LIDARR_KEY = process.env.LIDARR_API_KEY || ''
+// Quality profile each service adds with, by name. Unset, or not found, and
+// the service's first profile is used.
+const RADARR_PROFILE = (process.env.RADARR_QUALITY_PROFILE || '').trim()
+const SONARR_PROFILE = (process.env.SONARR_QUALITY_PROFILE || '').trim()
+const LIDARR_PROFILE = (process.env.LIDARR_QUALITY_PROFILE || '').trim()
 
 const REQUESTS_LOG = path.join(process.cwd(), 'data', 'media-requests.jsonl')
 
@@ -200,6 +205,8 @@ type PlexMetadata = {
   lastViewedAt?: number
   viewCount?: number
   Genre?: { tag: string }[]
+  // External ids ("tmdb://765"), only with includeGuids=1.
+  Guid?: { id: string }[]
   Media?: {
     duration?: number
     bitrate?: number
@@ -701,10 +708,10 @@ router.post('/plex/music/scrobble', async (req, res) => {
 
 // ---------- Requests (Radarr / Sonarr + agent journal) ----------
 
-type ArrService = { name: string; base: string; key: string; api: string }
-const radarr: ArrService = { name: 'radarr', base: RADARR_URL, key: RADARR_KEY, api: '/api/v3' }
-const sonarr: ArrService = { name: 'sonarr', base: SONARR_URL, key: SONARR_KEY, api: '/api/v3' }
-const lidarr: ArrService = { name: 'lidarr', base: LIDARR_URL, key: LIDARR_KEY, api: '/api/v1' }
+type ArrService = { name: string; base: string; key: string; api: string; profile: string }
+const radarr: ArrService = { name: 'radarr', base: RADARR_URL, key: RADARR_KEY, api: '/api/v3', profile: RADARR_PROFILE }
+const sonarr: ArrService = { name: 'sonarr', base: SONARR_URL, key: SONARR_KEY, api: '/api/v3', profile: SONARR_PROFILE }
+const lidarr: ArrService = { name: 'lidarr', base: LIDARR_URL, key: LIDARR_KEY, api: '/api/v1', profile: LIDARR_PROFILE }
 const lidarrConfigured = () => Boolean(LIDARR_URL && LIDARR_KEY)
 const arrConfigured = () => Boolean(RADARR_KEY || SONARR_KEY || lidarrConfigured())
 
@@ -724,8 +731,19 @@ async function arrJSON<T>(svc: ArrService, p: string, init?: { method?: string; 
   return (text ? JSON.parse(text) : null) as T
 }
 
-type ArrMovie = { id?: number; title: string; year?: number; tmdbId: number; overview?: string; remotePoster?: string; hasFile?: boolean; monitored?: boolean }
-type ArrSeries = { id?: number; title: string; year?: number; tvdbId: number; overview?: string; remotePoster?: string; statistics?: { episodeFileCount?: number }; monitored?: boolean }
+type ArrMovie = {
+  id?: number
+  title: string
+  year?: number
+  tmdbId: number
+  overview?: string
+  remotePoster?: string
+  hasFile?: boolean
+  monitored?: boolean
+  isAvailable?: boolean
+  movieFile?: { relativePath?: string; quality?: { quality?: { name?: string } } }
+}
+type ArrSeries = { id?: number; title: string; year?: number; tvdbId: number; overview?: string; remotePoster?: string; statistics?: { episodeFileCount?: number; episodeCount?: number }; monitored?: boolean }
 type ArrArtist = {
   id?: number
   artistName: string
@@ -747,8 +765,42 @@ type ArrAlbum = {
   images?: { coverType?: string; remoteUrl?: string; url?: string }[]
   artist?: ArrArtist
   monitored?: boolean
-  statistics?: { trackFileCount?: number }
+  statistics?: { trackFileCount?: number; trackCount?: number }
 }
+
+type QueueRecord = {
+  title?: string
+  status?: string
+  trackedDownloadStatus?: string
+  trackedDownloadState?: string
+  statusMessages?: { title?: string; messages?: string[] }[]
+  errorMessage?: string
+  sizeleft?: number
+  size?: number
+  timeleft?: string
+  movieId?: number
+  seriesId?: number
+  albumId?: number
+  movie?: { title?: string; year?: number }
+  series?: { title?: string }
+  episode?: { seasonNumber?: number; episodeNumber?: number }
+  album?: { title?: string }
+  artist?: { artistName?: string }
+}
+type Queue = { records?: QueueRecord[] }
+
+// Downloaded but not importable: the *arr is waiting on something it will not
+// fix by itself (an archive, a name it cannot match, a failed import).
+const IMPORT_PROBLEM = new Set(['importPending', 'importBlocked', 'failedPending'])
+const queueProgress = (r: QueueRecord) => (r.size && r.size > 0 ? Math.round((1 - (r.sizeleft ?? 0) / r.size) * 100) : 0)
+const queueText = (r: QueueRecord) =>
+  [r.errorMessage, ...(r.statusMessages ?? []).flatMap((m) => [m.title, ...(m.messages ?? [])])].filter(Boolean).join(' ')
+
+// A BR-DISK rip is a disc folder or image that Plex cannot play, so it counts
+// as no file.
+const isDiscImage = (m: ArrMovie | undefined) => Boolean(m?.hasFile && (
+  m.movieFile?.quality?.quality?.name === 'BR-DISK' || /\.(iso|img)$/i.test(m.movieFile?.relativePath ?? '')
+))
 
 type SearchResult = {
   kind: 'movie' | 'show' | 'album'
@@ -866,10 +918,13 @@ router.get('/plex/request/search', async (req, res) => {
   const q = String(req.query.q ?? '').trim().slice(0, 100)
   if (q.length < 2) return res.json({ results: [] })
   const term = encodeURIComponent(q)
-  const [movies, series, albums] = await Promise.all([
+  // Radarr's lookup carries no hasFile (and not always movieFile), so what is
+  // on disk, disc images included, comes from its own movie list.
+  const [movies, series, albums, ownMovies] = await Promise.all([
     RADARR_KEY ? arrJSON<ArrMovie[]>(radarr, `/movie/lookup?term=${term}`).catch(() => []) : [],
     SONARR_KEY ? arrJSON<ArrSeries[]>(sonarr, `/series/lookup?term=${term}`).catch(() => []) : [],
     lidarrConfigured() ? lidarrAlbumsFor(q) : [],
+    radarrMovies(),
   ])
   // Lidarr's lookup says whether it knows an album (it has an id) but not
   // whether the files are down or the album is even monitored; that takes one
@@ -887,6 +942,10 @@ router.get('/plex/request/search', async (req, res) => {
     .map((r) => ({ r, s: score(r, nq) }))
     .sort((a, b) => b.s - a.s)
 
+  const onDisk = (m: ArrMovie) => {
+    const own = ownMovies?.get(m.tmdbId)
+    return own ? Boolean(own.hasFile) && !isDiscImage(own) : Boolean(m.hasFile)
+  }
   const rankedMovies = rank(movies.map((m) => ({
     kind: 'movie' as const,
     title: m.title,
@@ -898,7 +957,7 @@ router.get('/plex/request/search', async (req, res) => {
     tvdbId: null,
     foreignAlbumId: null,
     inLibrary: Boolean(m.id),
-    downloaded: Boolean(m.hasFile),
+    downloaded: onDisk(m),
   })))
   const rankedShows = rank(series.map((s) => ({
     kind: 'show' as const,
@@ -955,22 +1014,28 @@ router.get('/plex/request/search', async (req, res) => {
   res.json({ results })
 })
 
-// Default quality profile + root folder (+ metadata profile, a Lidarr-only
-// concept), discovered once from each service.
+// Default quality profile (the named one when set) + root folder (+ metadata
+// profile, a Lidarr-only concept), discovered once from each service.
 type ArrDefaults = { at: number; qualityProfileId: number; rootFolderPath: string; metadataProfileId: number }
 const arrDefaults = new Map<string, ArrDefaults>()
+const profileWarned = new Set<string>()
 async function getArrDefaults(svc: ArrService): Promise<ArrDefaults> {
   const hit = arrDefaults.get(svc.name)
   if (hit && Date.now() - hit.at < 600_000) return hit
   const isLidarr = svc.api === '/api/v1'
   const [profiles, roots, metas] = await Promise.all([
-    arrJSON<{ id: number }[]>(svc, '/qualityprofile'),
+    arrJSON<{ id: number; name: string }[]>(svc, '/qualityprofile'),
     arrJSON<{ path: string }[]>(svc, '/rootfolder'),
     isLidarr ? arrJSON<{ id: number }[]>(svc, '/metadataprofile') : Promise.resolve<{ id: number }[]>([]),
   ])
   if (!profiles.length || !roots.length) throw new Error(`${svc.name}: no quality profile or root folder configured`)
   if (isLidarr && !metas.length) throw new Error(`${svc.name}: no metadata profile configured`)
-  const d: ArrDefaults = { at: Date.now(), qualityProfileId: profiles[0].id, rootFolderPath: roots[0].path, metadataProfileId: metas[0]?.id ?? 0 }
+  const named = svc.profile ? profiles.find((p) => p.name.toLowerCase() === svc.profile.toLowerCase()) : undefined
+  if (svc.profile && !named && !profileWarned.has(svc.name)) {
+    profileWarned.add(svc.name)
+    console.warn(`[plex] ${svc.name}: no quality profile named "${svc.profile}", using "${profiles[0].name}"`)
+  }
+  const d: ArrDefaults = { at: Date.now(), qualityProfileId: (named ?? profiles[0]).id, rootFolderPath: roots[0].path, metadataProfileId: metas[0]?.id ?? 0 }
   arrDefaults.set(svc.name, d)
   return d
 }
@@ -998,6 +1063,9 @@ router.post('/plex/request/add', async (req, res) => {
           qualityProfileId: d.qualityProfileId,
           rootFolderPath: d.rootFolderPath,
           monitored: true,
+          // The lookup carries 'tba', which lets Radarr grab a cam the day a
+          // movie is announced.
+          minimumAvailability: 'released',
           addOptions: { searchForMovie: true },
         }),
       })
@@ -1102,41 +1170,231 @@ router.post('/plex/request/message', async (req, res) => {
   res.json({ ok: true, detail: 'sent — the agent will take it from here' })
 })
 
-router.get('/plex/requests', (_req, res) => {
-  try {
-    if (!existsSync(REQUESTS_LOG)) return res.json({ requests: [] })
-    const lines = readFileSync(REQUESTS_LOG, 'utf8').trim().split('\n')
-    const requests = lines
-      .slice(-50)
-      .map((l) => { try { return JSON.parse(l) } catch { return null } })
-      .filter(Boolean)
-      .reverse()
-    res.json({ requests })
-  } catch (err) {
-    res.status(500).json({ error: 'journal unreadable', detail: (err as Error).message })
+// ---------- Live request status ----------
+//
+// The journal only records that a request was sent. The history shows where
+// each item stands now, read from the *arrs and Plex and cached 30 s. A failed
+// lookup is not cached, so the next poll asks again, and until one answers its
+// entries keep the journal's status.
+
+type JournalEntry = {
+  at: string
+  kind: 'movie' | 'show' | 'album' | 'message'
+  title?: string
+  tmdbId?: number
+  tvdbId?: number
+  foreignAlbumId?: string
+  status?: string
+  message?: string
+}
+type Tone = 'done' | 'active' | 'stuck' | 'waiting'
+type LiveStatus = { status: string; tone?: Tone; progress?: number }
+type Lookups = {
+  // Keyed by tmdbId / tvdbId / foreignAlbumId. An album missing from the map
+  // failed its lookup; null means Lidarr does not have it.
+  movies: Map<number, ArrMovie> | null
+  movieQueue: QueueRecord[] | null
+  series: Map<number, ArrSeries> | null
+  seriesQueue: QueueRecord[] | null
+  albums: Map<string, ArrAlbum | null>
+  albumQueue: QueueRecord[] | null
+  plex: { tmdb: Set<number>; tvdb: Set<number> } | null
+}
+
+// notBefore is the newest journal time the data has to cover. A request added
+// after the cached copy was read (the search right before an add reads the
+// Radarr list) would otherwise show as missing for up to 30 s.
+const lookupCache = new Map<string, { at: number; data: unknown }>()
+async function cachedLookup<T>(key: string, load: () => Promise<T>, notBefore = 0): Promise<T | null> {
+  const hit = lookupCache.get(key)
+  if (hit && hit.at >= notBefore && Date.now() - hit.at < 30_000) return hit.data as T
+  const data = await load().catch(() => null)
+  if (data !== null) lookupCache.set(key, { at: Date.now(), data })
+  return data
+}
+
+const byKey = <K, T>(list: T[], key: (t: T) => K) => new Map(list.map((t) => [key(t), t]))
+const radarrMovies = (notBefore = 0) => (RADARR_KEY
+  ? cachedLookup('radarr-movies', () => arrJSON<ArrMovie[]>(radarr, '/movie').then((l) => byKey(l, (m) => m.tmdbId)), notBefore)
+  : Promise.resolve(null))
+const arrQueue = (svc: ArrService, p: string, notBefore = 0) =>
+  cachedLookup(`${svc.name}-queue`, () => arrJSON<Queue>(svc, p).then((q) => q.records ?? []), notBefore)
+
+// Lidarr 3.1's /album takes a foreignAlbumId filter. The id is matched again
+// here, so a build that ignores the filter still resolves the right album.
+const lidarrAlbum = (foreignAlbumId: string, notBefore = 0) => cachedLookup(`lidarr-album:${foreignAlbumId}`, async () => {
+  const list = await arrJSON<ArrAlbum[]>(lidarr, `/album?foreignAlbumId=${encodeURIComponent(foreignAlbumId)}`)
+  const hit = list.find((a) => a.id && a.foreignAlbumId === foreignAlbumId)
+  if (hit?.id && !hit.statistics) return { album: await arrJSON<ArrAlbum>(lidarr, `/album/${hit.id}`) }
+  return { album: hit ?? null }
+}, notBefore)
+
+// External ids of everything in the main server's movie and show sections.
+// Movies carry tvdb guids too, so each set only takes its own section type.
+async function plexGuids() {
+  const dirs = (await plexJSON<PlexContainer<PlexDirectory>>(mainServer, '/library/sections')).MediaContainer.Directory ?? []
+  const tmdb = new Set<number>()
+  const tvdb = new Set<number>()
+  await Promise.all(dirs.filter((d) => d.type === 'movie' || d.type === 'show').map(async (d) => {
+    const items = (await plexJSON<PlexContainer<PlexMetadata>>(mainServer, `/library/sections/${d.key}/all`, { includeGuids: '1' })).MediaContainer.Metadata ?? []
+    const scheme = d.type === 'movie' ? 'tmdb://' : 'tvdb://'
+    const into = d.type === 'movie' ? tmdb : tvdb
+    for (const m of items) {
+      for (const g of m.Guid ?? []) if (g.id.startsWith(scheme)) into.add(Number(g.id.slice(scheme.length)))
+    }
+  }))
+  return { tmdb, tvdb }
+}
+
+async function gatherLookups(entries: JournalEntry[]): Promise<Lookups> {
+  const has = (kind: JournalEntry['kind']) => entries.some((e) => e.kind === kind)
+  const newest = (match: (e: JournalEntry) => boolean) =>
+    Math.max(0, ...entries.filter(match).map((e) => Date.parse(e.at)).filter(Number.isFinite))
+  const since = (kind: JournalEntry['kind']) => newest((e) => e.kind === kind)
+  const albumIds = [...new Set(entries.flatMap((e) => (e.kind === 'album' && e.foreignAlbumId ? [e.foreignAlbumId] : [])))]
+  const [movies, movieQueue, series, seriesQueue, albumQueue, plex, albums] = await Promise.all([
+    has('movie') ? radarrMovies(since('movie')) : null,
+    has('movie') && RADARR_KEY ? arrQueue(radarr, '/queue?pageSize=200&includeMovie=true', since('movie')) : null,
+    has('show') && SONARR_KEY ? cachedLookup('sonarr-series', () => arrJSON<ArrSeries[]>(sonarr, '/series').then((l) => byKey(l, (s) => s.tvdbId)), since('show')) : null,
+    has('show') && SONARR_KEY ? arrQueue(sonarr, '/queue?pageSize=200&includeSeries=true', since('show')) : null,
+    albumIds.length && lidarrConfigured() ? arrQueue(lidarr, '/queue?pageSize=200&includeAlbum=true', since('album')) : null,
+    (has('movie') || has('show')) && plexConfigured() ? cachedLookup('plex-guids', plexGuids) : null,
+    lidarrConfigured()
+      ? Promise.all(albumIds.map(async (id) => [id, await lidarrAlbum(id, newest((e) => e.kind === 'album' && e.foreignAlbumId === id))] as const))
+      : [],
+  ])
+  const albumMap = new Map<string, ArrAlbum | null>()
+  for (const [id, hit] of albums) if (hit) albumMap.set(id, hit.album)
+  return { movies, movieQueue, series, seriesQueue, albums: albumMap, albumQueue, plex }
+}
+
+// The queue record that says the most: an import problem, then a live
+// download, then whatever is left.
+const pickQueue = (records: QueueRecord[]) =>
+  records.find((r) => IMPORT_PROBLEM.has(r.trackedDownloadState ?? '')) ?? records.find((r) => r.status === 'downloading') ?? records[0]
+
+const QUEUE_WORDS: Record<string, string> = {
+  queued: 'queued', paused: 'paused', delay: 'delayed', completed: 'completed', failed: 'failed',
+  downloadClientUnavailable: 'client offline', fallback: 'fallback',
+}
+// A record that is neither stuck on import nor downloading. A stalled torrent
+// comes back as status 'warning' with trackedDownloadStatus 'ok', so the
+// status counts toward stuck as well.
+function queueState(r: QueueRecord): LiveStatus {
+  const status = r.status === 'warning' ? (/stalled/i.test(queueText(r)) ? 'stalled' : 'warning')
+    : r.trackedDownloadState === 'importing' ? 'importing'
+    : QUEUE_WORDS[r.status ?? ''] ?? (r.status ?? 'unknown').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(' ').slice(0, 2).join(' ')
+  const bad = ['warning', 'error'].includes(r.trackedDownloadStatus ?? '') || r.status === 'warning' || r.status === 'failed'
+  return { status, tone: bad ? 'stuck' : 'active' }
+}
+
+function fromQueue(r: QueueRecord, archiveHint: boolean): LiveStatus {
+  if (IMPORT_PROBLEM.has(r.trackedDownloadState ?? '')) {
+    return { status: archiveHint && /archive/i.test(queueText(r)) ? 'import stuck: archive' : 'import stuck', tone: 'stuck' }
   }
+  if (r.status === 'downloading') {
+    const progress = queueProgress(r)
+    return { status: `downloading ${progress}%`, tone: 'active', progress }
+  }
+  return queueState(r)
+}
+
+// The low-grade qualities the Valkyrie profile disallows. Unknown stays out:
+// playable m2ts files come in as Unknown.
+const CAM_QUALITIES = new Set(['WORKPRINT', 'CAM', 'TELESYNC', 'TELECINE', 'REGIONAL', 'DVDSCR'])
+
+function liveStatus(e: JournalEntry, l: Lookups): LiveStatus {
+  const unknown: LiveStatus = { status: e.status ?? e.kind }
+  if (e.kind === 'message') return { status: 'agent' }
+  if (e.kind === 'movie') {
+    if (!l.movies || !l.movieQueue || !l.plex || typeof e.tmdbId !== 'number') return unknown
+    const m = l.movies.get(e.tmdbId)
+    if (l.plex.tmdb.has(e.tmdbId)) {
+      const cam = m?.hasFile && CAM_QUALITIES.has(m.movieFile?.quality?.quality?.name ?? '')
+      if (!cam) return { status: 'in plex', tone: 'done' }
+      // The real release that replaces a cam shows its download.
+      const cq = m ? pickQueue(l.movieQueue.filter((r) => r.movieId === m.id)) : undefined
+      return cq ? fromQueue(cq, true) : { status: 'in plex · cam', tone: 'waiting' }
+    }
+    if (!m) return { status: 'not in radarr', tone: 'stuck' }
+    const q = pickQueue(l.movieQueue.filter((r) => r.movieId === m.id))
+    if (q) return fromQueue(q, true)
+    if (isDiscImage(m)) return { status: 'disc image', tone: 'stuck' }
+    if (m.hasFile) return { status: 'downloaded', tone: 'active' }
+    if (!m.isAvailable) return { status: 'not out yet', tone: 'waiting' }
+    if (m.monitored) return { status: 'searching', tone: 'waiting' }
+    return { status: 'unmonitored', tone: 'stuck' }
+  }
+  if (e.kind === 'show') {
+    if (!l.series || !l.seriesQueue || !l.plex || typeof e.tvdbId !== 'number') return unknown
+    const s = l.series.get(e.tvdbId)
+    if (!s) return { status: 'not in sonarr', tone: 'stuck' }
+    const files = s.statistics?.episodeFileCount ?? 0
+    const count = s.statistics?.episodeCount ?? 0
+    if (count > 0 && files >= count) {
+      return l.plex.tvdb.has(e.tvdbId) ? { status: 'in plex', tone: 'done' } : { status: 'downloaded', tone: 'active' }
+    }
+    const eps = `${files}/${count} eps`
+    const q = pickQueue(l.seriesQueue.filter((r) => r.seriesId === s.id))
+    if (!q) return s.monitored ? { status: `${eps} · searching`, tone: 'waiting' } : { status: `${eps} · unmonitored`, tone: 'stuck' }
+    if (IMPORT_PROBLEM.has(q.trackedDownloadState ?? '')) return { status: `${eps} · import stuck`, tone: 'stuck' }
+    if (q.status === 'downloading') return { status: `${eps} · downloading`, tone: 'active' }
+    const other = queueState(q)
+    return { status: `${eps} · ${other.status}`, tone: other.tone }
+  }
+  if (e.kind === 'album') {
+    if (!l.albumQueue || !e.foreignAlbumId || !l.albums.has(e.foreignAlbumId)) return unknown
+    const a = l.albums.get(e.foreignAlbumId)
+    if (!a?.id) return { status: 'not in lidarr', tone: 'stuck' }
+    const files = a.statistics?.trackFileCount ?? 0
+    const count = a.statistics?.trackCount ?? 0
+    if (count > 0 && files >= count) return { status: 'in library', tone: 'done' }
+    const q = pickQueue(l.albumQueue.filter((r) => r.albumId === a.id))
+    if (q) return fromQueue(q, false)
+    if (a.monitored) return { status: 'searching', tone: 'waiting' }
+    return { status: 'unmonitored', tone: 'stuck' }
+  }
+  return unknown
+}
+
+// Newest first, one row per item: a repeat request of the same movie, show, or
+// album drops the older rows. Messages are never merged.
+function readJournal(): JournalEntry[] {
+  if (!existsSync(REQUESTS_LOG)) return []
+  const seen = new Set<string>()
+  return readFileSync(REQUESTS_LOG, 'utf8').trim().split('\n')
+    .slice(-50)
+    .map((l) => { try { return JSON.parse(l) as JournalEntry } catch { return null } })
+    .filter((e): e is JournalEntry => Boolean(e && typeof e === 'object' && e.kind))
+    .reverse()
+    .filter((e) => {
+      const id = e.kind === 'movie' ? e.tmdbId : e.kind === 'show' ? e.tvdbId : e.kind === 'album' ? e.foreignAlbumId : undefined
+      if (id === undefined) return true
+      const key = `${e.kind}:${id}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+router.get('/plex/requests', async (_req, res) => {
+  let entries: JournalEntry[]
+  try {
+    entries = readJournal()
+  } catch (err) {
+    return res.status(500).json({ error: 'journal unreadable', detail: (err as Error).message })
+  }
+  const lookups = await gatherLookups(entries)
+  res.json({ requests: entries.map((e) => ({ ...e, ...liveStatus(e, lookups), journalStatus: e.status })) })
 })
 
 // Live download queue across both services, for the requests tab + pad mode.
 router.get('/plex/downloads', async (_req, res) => {
   if (!arrConfigured()) return res.json({ downloads: [] })
-  type QueueRecord = {
-    title?: string
-    status?: string
-    sizeleft?: number
-    size?: number
-    timeleft?: string
-    movie?: { title?: string; year?: number }
-    series?: { title?: string }
-    episode?: { seasonNumber?: number; episodeNumber?: number }
-    album?: { title?: string }
-    artist?: { artistName?: string }
-  }
-  type Queue = { records?: QueueRecord[] }
   const [rq, sq, lq] = await Promise.all([
-    RADARR_KEY ? arrJSON<Queue>(radarr, '/queue?pageSize=20&includeMovie=true').catch(() => null) : null,
-    SONARR_KEY ? arrJSON<Queue>(sonarr, '/queue?pageSize=20&includeSeries=true&includeEpisode=true').catch(() => null) : null,
-    lidarrConfigured() ? arrJSON<Queue>(lidarr, '/queue?pageSize=20&includeArtist=true&includeAlbum=true').catch(() => null) : null,
+    RADARR_KEY ? arrJSON<Queue>(radarr, '/queue?pageSize=200&includeMovie=true').catch(() => null) : null,
+    SONARR_KEY ? arrJSON<Queue>(sonarr, '/queue?pageSize=200&includeSeries=true&includeEpisode=true').catch(() => null) : null,
+    lidarrConfigured() ? arrJSON<Queue>(lidarr, '/queue?pageSize=200&includeArtist=true&includeAlbum=true').catch(() => null) : null,
   ])
   const queueTitle = (r: QueueRecord, kind: 'movie' | 'show' | 'album'): string => {
     if (kind === 'movie' && r.movie?.title) return `${r.movie.title}${r.movie.year ? ` (${r.movie.year})` : ''}`
@@ -1151,8 +1409,12 @@ router.get('/plex/downloads', async (_req, res) => {
     kind,
     title: queueTitle(r, kind),
     status: r.status ?? 'unknown',
-    progress: r.size && r.size > 0 ? Math.round((1 - (r.sizeleft ?? 0) / r.size) * 100) : 0,
+    progress: queueProgress(r),
     timeleft: r.timeleft ?? null,
+    state: r.trackedDownloadState,
+    stuck: IMPORT_PROBLEM.has(r.trackedDownloadState ?? '') || r.trackedDownloadStatus === 'warning' || r.trackedDownloadStatus === 'error',
+    // Sonarr puts a stalled torrent's reason in errorMessage, not statusMessages.
+    message: (r.statusMessages?.find((m) => m.messages?.length)?.messages?.[0] ?? r.errorMessage)?.slice(0, 120),
   })
   res.json({
     downloads: [
