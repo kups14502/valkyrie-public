@@ -197,7 +197,8 @@ function workoutLabel(date: string, isCenter: boolean, size: PanelSize) {
   const rest = workout === 'rest'
   return (
     <span
-      className={`truncate font-bold uppercase tracking-[0.14em] ${size === 'pad' ? 'text-base' : 'text-sm'}`}
+      // A phone box is about 70px inside, which "shoulders" at text-sm overruns.
+      className={`max-w-full truncate font-bold uppercase ${size === 'pad' ? 'text-base tracking-[0.14em]' : 'text-[11px] tracking-[0.06em] sm:text-sm sm:tracking-[0.14em]'}`}
       style={{
         color: rest ? 'var(--color-text-faint)' : isCenter ? 'var(--color-text)' : 'var(--color-text-dim)',
         textShadow: isCenter && !rest ? '0 0 8px var(--color-accent)' : undefined,
