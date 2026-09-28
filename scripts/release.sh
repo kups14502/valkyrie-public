@@ -50,8 +50,12 @@ restore_branch() {
 trap restore_branch EXIT
 git checkout main
 git pull --ff-only
-# The repo is public: refuse before anything is tagged, pushed or built.
-"$ROOT/scripts/public-guard.sh" HEAD
+# A public repo must never receive private text: refuse before anything is
+# tagged, pushed or built. Only a repo GitHub confirms as PRIVATE skips this,
+# so a failed lookup still runs the guard.
+if [[ "$(gh repo view "$REPO" --json visibility -q .visibility 2>/dev/null || true)" != "PRIVATE" ]]; then
+  "$ROOT/scripts/public-guard.sh" HEAD
+fi
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   git tag "$TAG"
   git push origin "$TAG"
