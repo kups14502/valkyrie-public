@@ -772,6 +772,10 @@ export type TermSession = {
   clients: number
   // The command failed and tmux kept the pane so its last screen can be read.
   dead: boolean
+  // For a dead pane: ssh's exit status (255 is ssh's own failure) and the last
+  // lines it printed. Null and empty on a live one, and on an older API.
+  deadStatus: number | null
+  deadText: string
   size: string
 }
 
@@ -807,6 +811,8 @@ const parseTermSession = (raw: unknown): TermSession | null => {
     activityAt: wsNum(r.activityAt) ?? 0,
     clients: wsNum(r.clients) ?? 0,
     dead: r.dead === true,
+    deadStatus: wsNum(r.deadStatus) ?? null,
+    deadText: wsStr(r.deadText) ?? '',
     size: wsStr(r.size) ?? '',
   }
 }

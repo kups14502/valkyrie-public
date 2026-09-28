@@ -898,6 +898,23 @@ export default function TerminalPage() {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
+  // Open the same thing again in place of a dead pane. The dead one is killed
+  // FIRST: closeSession would clear `active` after the new one had taken it. A
+  // new session whose conversation reached the board resumes that conversation;
+  // one that died before Claude ever ran (a refused login) just opens again.
+  const reopenSession = async (s: TermSession) => {
+    const label = termLabel(s, titles)
+    const known = s.sessionId && boardRows.some((r) => r.sessionId === s.sessionId)
+    const body: TermOpen | null = s.mode === 'resume'
+      ? (s.target ? { mode: 'resume', sessionId: s.target, label } : null)
+      : s.mode === 'new' && known
+        ? { mode: 'resume', sessionId: s.sessionId, label }
+        : s.target ? { mode: s.mode, target: s.target, label } : null
+    if (!body) return
+    await killTermSession(s.name).catch(() => {})
+    await openSession(body)
+  }
+
   // Which session the phone's one-line switcher is naming, and where it sits in
   // the list it is counting against. Both come off `ordered`, so the position
   // is the one the sheet shows, and a session killed from another device simply
@@ -1098,6 +1115,50 @@ export default function TerminalPage() {
             {!sessions.isLoading && (
               <div className="text-[10px] text-[var(--color-text-faint)]">tap the session bar above, or pick one on the board</div>
             )}
+          </div>
+        )}
+
+        {/* A dead pane, said in words. All tmux leaves on screen is one raw
+            "Pane is dead (status 255, <date>)" line, cut off at a phone's
+            width in the middle of an empty terminal, which reads as a broken
+            page rather than as a session that ended. Absolute, like everything
+            else in the stage, so it costs no refit. */}
+        {activeSession?.dead && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 p-3">
+            <div className="panel w-full max-w-md space-y-2 p-3">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-danger)]">
+                &gt; session ended
+              </div>
+              <div className="text-[12px] text-[var(--color-text)]">
+                {activeSession.deadStatus === 255
+                  ? 'The SSH connection to thor failed, so this session is not running.'
+                  : activeSession.deadStatus !== null
+                    ? `The session on thor exited with status ${activeSession.deadStatus}.`
+                    : 'The session on thor exited.'}
+              </div>
+              {activeSession.deadText && (
+                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border border-[var(--color-border)] px-2 py-1.5 text-[11px] text-[var(--color-text-dim)]">
+                  {activeSession.deadText}
+                </pre>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void reopenSession(activeSession)}
+                  className={`${BTN} flex-1 disabled:opacity-40`}
+                >
+                  <RotateCw size={12} /> reopen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void closeSession(activeSession.name)}
+                  className={`${BTN} flex-1`}
+                >
+                  <X size={12} /> close
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

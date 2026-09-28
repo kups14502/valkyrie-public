@@ -161,6 +161,7 @@ const FORMAT = [
   '#{@vk_sid}',
   '#{pane_dead}',
   '#{window_width}x#{window_height}',
+  '#{pane_dead_status}',
 ].join(SEP)
 
 export type TermSession = {
@@ -182,7 +183,32 @@ export type TermSession = {
   // remain-on-exit kept the pane after its command failed: the last screen is
   // still there to read, and nothing is running behind it.
   dead: boolean
+  // The exit status of the pane's ssh, and the last lines it printed. The page
+  // shows these over a dead pane, because what tmux leaves there is one raw
+  // "Pane is dead (status 255, <date>)" line, cut off at a phone's width, in
+  // the middle of an empty screen. 255 is ssh's own failure: no connection, or
+  // a login thor refused. Anything else came from thor's side.
+  deadStatus: number | null
+  deadText: string
   size: string
+}
+
+// The pane's last few printed lines, minus tmux's own dead-pane line. Only ever
+// read for a dead pane, so the list poll pays for it only while one is on
+// screen. Bare name: capture-pane takes a target-PANE.
+async function deadText(name: string): Promise<string> {
+  try {
+    const out = await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-60'], 5_000)
+    return out
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l && !l.startsWith('Pane is dead'))
+      .slice(-6)
+      .join('\n')
+      .slice(-600)
+  } catch {
+    return ''
+  }
 }
 
 export async function listSessions(): Promise<TermSession[]> {
@@ -195,12 +221,14 @@ export async function listSessions(): Promise<TermSession[]> {
     // an error the page should show.
     return []
   }
-  return out
+  const rows: TermSession[] = out
     .split('\n')
     .map((l) => l.trimEnd())
     .filter(Boolean)
     .map((line) => {
       const f = line.split(SEP)
+      const dead = f[9] === '1'
+      const status = f[11] ? Number(f[11]) : NaN
       return {
         name: f[0] ?? '',
         label: f[4] || f[0] || '',
@@ -211,12 +239,15 @@ export async function listSessions(): Promise<TermSession[]> {
         createdAt: (Number(f[1]) || 0) * 1000,
         activityAt: (Number(f[2]) || 0) * 1000,
         clients: Number(f[3]) || 0,
-        dead: f[9] === '1',
+        dead,
+        deadStatus: dead && Number.isFinite(status) ? status : null,
+        deadText: '',
         size: f[10] || '',
       }
     })
     .filter((s) => SESSION_NAME_RE.test(s.name))
-    .sort((a, b) => b.activityAt - a.activityAt)
+  await Promise.all(rows.filter((s) => s.dead).map(async (s) => { s.deadText = await deadText(s.name) }))
+  return rows.sort((a, b) => b.activityAt - a.activityAt)
 }
 
 export async function hasSession(name: string): Promise<boolean> {
@@ -347,20 +378,28 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
 //
 // ConnectTimeout is the one that matters day to day: thor is a workstation and
 // it sleeps. Without it a connection that never opens sits in TCP SYN retries
-// for the kernel default (about two minutes), and BatchMode plus
-// LogLevel=ERROR mean the pane prints nothing at all while it waits, which on
+// for the kernel default (about two minutes), and ssh prints nothing at all
+// while it waits, which on
 // a phone is indistinguishable from Claude thinking. Ten seconds gets a
 // readable "Connection timed out" and a dead pane instead.
 //
 // The keepalives are the other half: a phone that vanishes detaches from tmux
 // and never touches this SSH connection, so an established connection only
 // ever dies when the tailnet does, and this is how sshd finds out.
+//
+// LogLevel is INFO, not ERROR. OpenSSH prints "Connection reset by" and
+// "Connection closed by" at INFO, so under ERROR a login thor refused left the
+// pane completely blank before it died (2026-09-28: sshd there could not build
+// a logon token, and the phone showed nothing but tmux's dead-pane line).
+// WarnWeakCrypto=no drops the post-quantum banner that INFO would otherwise
+// print on every connect, since thor's sshd offers no PQ key exchange.
 export function sshArgs(remote: string): string[] {
   return [
     SSH_BIN,
     '-t',
     '-o', 'BatchMode=yes',
-    '-o', 'LogLevel=ERROR',
+    '-o', 'LogLevel=INFO',
+    '-o', 'WarnWeakCrypto=no',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=10',
     '-o', 'ServerAliveInterval=30',
