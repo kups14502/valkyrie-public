@@ -24,6 +24,15 @@ export const fetchDailyStreak = async (today: string) =>
 export const logTrackerDay = async (tracker: TrackerName, target: string, taken: boolean, date: string, today: string) =>
   (await api.post<TrackerWindow>(`/${tracker}/log`, { target, taken, date, today })).data
 
+/** Every skipped day, oldest first. Only exercise has skips. */
+export type TrackerSkips = { skips: string[] }
+
+export const fetchTrackerSkips = async (tracker: TrackerName) =>
+  (await api.get<TrackerSkips>(`/${tracker}/skips`)).data
+
+export const skipTrackerDay = async (tracker: TrackerName, target: string, skipped: boolean) =>
+  (await api.post<TrackerSkips>(`/${tracker}/skip`, { target, skipped })).data
+
 /** Today's key in the device's own timezone, which is the day the log uses. */
 export const supplementDateKey = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

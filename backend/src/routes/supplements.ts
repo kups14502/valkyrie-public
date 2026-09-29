@@ -25,6 +25,10 @@ const db = openDb('supplements', `
     date TEXT PRIMARY KEY,
     takenAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS exercise_skips (
+    date TEXT PRIMARY KEY,
+    skippedAt TEXT NOT NULL
+  );
 `)
 
 // The first cut of this route kept a per-supplement stack and a dose log.
@@ -86,8 +90,11 @@ router.get('/daily/streak', (req, res) => {
   res.json({ today, streak: streakEndingAt(today, dailyDone) })
 })
 
-/** GET `${path}/day` and POST `${path}/log`, backed by `table`. */
-function tracker(path: string, table: string) {
+/**
+ * GET `${path}/day` and POST `${path}/log`, backed by `table`. With a
+ * `skipTable` it also takes GET `${path}/skips` and POST `${path}/skip`.
+ */
+function tracker(path: string, table: string, skipTable?: string) {
   const takenAtFor = (date: string) => takenAtIn(table, date)
 
   const entry = (date: string) => {
@@ -126,15 +133,42 @@ function tracker(path: string, table: string) {
     if (req.body?.taken !== false) {
       db.prepare(`INSERT INTO ${table} (date, takenAt) VALUES (?, ?) ON CONFLICT(date) DO NOTHING`)
         .run(target, new Date().toISOString())
+      // Done after all, so the day is no longer skipped.
+      if (skipTable) db.prepare(`DELETE FROM ${skipTable} WHERE date = ?`).run(target)
     } else {
       db.prepare(`DELETE FROM ${table} WHERE date = ?`).run(target)
     }
     res.json(view(dates.center, dates.today))
   })
+
+  if (!skipTable) return
+
+  // A skipped day is one the plan moves past: the client pushes the rest of the
+  // rotation back a day for each one. It is not done, so it breaks the streak,
+  // and skipping a day clears its tick. The client needs every skip since the
+  // rotation started to place a day, and there are few enough to send them all.
+  const skips = () => ({
+    skips: (db.prepare(`SELECT date FROM ${skipTable} ORDER BY date`).all() as { date: string }[]).map((r) => r.date),
+  })
+
+  router.get(`${path}/skips`, (_req, res) => res.json(skips()))
+
+  router.post(`${path}/skip`, (req, res) => {
+    const target = String(req.body?.target || '')
+    if (!DATE_RE.test(target)) return res.status(400).json({ error: 'target must be YYYY-MM-DD' })
+    if (req.body?.skipped !== false) {
+      db.prepare(`INSERT INTO ${skipTable} (date, skippedAt) VALUES (?, ?) ON CONFLICT(date) DO NOTHING`)
+        .run(target, new Date().toISOString())
+      db.prepare(`DELETE FROM ${table} WHERE date = ?`).run(target)
+    } else {
+      db.prepare(`DELETE FROM ${skipTable} WHERE date = ?`).run(target)
+    }
+    res.json(skips())
+  })
 }
 
 tracker('/supplements', 'supplement_days')
-tracker('/exercise', 'exercise_days')
+tracker('/exercise', 'exercise_days', 'exercise_skips')
 tracker('/sf', 'sf_days')
 
 export default router

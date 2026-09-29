@@ -1,11 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, SkipForward } from 'lucide-react'
 import { Card } from './Card'
 import { apiErrorText } from '../lib/api'
 import {
-  dateLabel, fetchDailyStreak, fetchTrackerWindow, logTrackerDay, parseDateKey, shiftDateKey, supplementDateKey,
-  type TrackerDayEntry, type TrackerName, type TrackerWindow,
+  dateLabel, fetchDailyStreak, fetchTrackerSkips, fetchTrackerWindow, logTrackerDay, parseDateKey, shiftDateKey,
+  skipTrackerDay, supplementDateKey, type TrackerDayEntry, type TrackerName, type TrackerSkips, type TrackerWindow,
 } from '../lib/supplementsApi'
 import type { PanelSize } from './HomePanels'
 
@@ -61,8 +61,11 @@ function Strip({ title, step, children }: { title: string; step: (days: number) 
   )
 }
 
+/** Two taps inside this window are a double tap. */
+const DOUBLE_TAP_MS = 250
+
 function CheckDay({
-  entry, today, center, size, detail, onToggle,
+  entry, today, center, size, detail, skipped = false, onToggle, onSkip,
 }: {
   entry: TrackerDayEntry
   today: string
@@ -70,18 +73,41 @@ function CheckDay({
   size: PanelSize
   /** A line under the date, e.g. the day's workout. */
   detail?: ReactNode
+  skipped?: boolean
   onToggle: () => void
+  /** Called on a double tap. Without it the box ticks on the first tap. */
+  onSkip?: () => void
 }) {
+  // A box that can be skipped holds each tap until the double-tap window
+  // closes, so a double tap never ticks the day on its way to skipping it.
+  // Counted by hand: a phone does not fire dblclick reliably.
+  const pendingTap = useRef<number | null>(null)
+  const onClick = () => {
+    if (!onSkip) return onToggle()
+    if (pendingTap.current != null) {
+      clearTimeout(pendingTap.current)
+      pendingTap.current = null
+      onSkip()
+      return
+    }
+    pendingTap.current = window.setTimeout(() => {
+      pendingTap.current = null
+      onToggle()
+    }, DOUBLE_TAP_MS)
+  }
+
   const isCenter = entry.date === center
   const taken = entry.taken
-  const color = taken ? 'var(--color-success)' : isCenter ? 'var(--color-accent)' : 'var(--color-border)'
+  const mark = taken ? 'var(--color-success)' : skipped ? 'var(--color-warning)' : undefined
+  const color = mark ?? (isCenter ? 'var(--color-accent)' : 'var(--color-border)')
   return (
     <button
       type="button"
-      onClick={onToggle}
+      onClick={onClick}
       aria-pressed={taken}
-      aria-label={`${dateLabel(entry.date, today)}: ${taken ? 'done' : 'not done'}`}
-      className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 border px-1 ${size === 'pad' ? 'py-5' : 'py-4'}`}
+      aria-label={`${dateLabel(entry.date, today)}: ${taken ? 'done' : skipped ? 'skipped' : 'not done'}`}
+      // touch-manipulation stops the phone zooming on the double tap.
+      className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 border px-1 ${size === 'pad' ? 'py-5' : 'py-4'}${onSkip ? ' touch-manipulation select-none' : ''}`}
       style={{
         borderColor: color,
         backgroundColor: taken ? 'color-mix(in srgb, var(--color-success) 8%, transparent)' : 'transparent',
@@ -98,13 +124,15 @@ function CheckDay({
       <span
         className={`flex items-center justify-center border ${size === 'pad' ? 'h-10 w-10' : 'h-8 w-8'}`}
         style={{
-          borderColor: taken ? 'var(--color-success)' : 'var(--color-border)',
-          color: taken ? 'var(--color-success)' : 'transparent',
+          borderColor: mark ?? 'var(--color-border)',
+          color: mark ?? 'transparent',
           boxShadow: taken ? '0 0 10px var(--color-success)' : undefined,
         }}
         aria-hidden
       >
-        <Check size={size === 'pad' ? 22 : 18} strokeWidth={3} />
+        {skipped && !taken
+          ? <SkipForward size={size === 'pad' ? 20 : 16} strokeWidth={2.5} />
+          : <Check size={size === 'pad' ? 22 : 18} strokeWidth={3} />}
       </span>
       <span className="h-3 truncate text-[9px] tabular-nums text-[var(--color-text-faint)]">
         {taken ? fmtTime(entry.takenAt) : ''}
@@ -115,7 +143,7 @@ function CheckDay({
 
 /** A one-checkbox-a-day row backed by the API. */
 function CheckStrip({
-  tracker, title, center, today, size, step, detail,
+  tracker, title, center, today, size, step, detail, skippable = false,
 }: {
   tracker: TrackerName
   title: string
@@ -123,12 +151,16 @@ function CheckStrip({
   today: string
   size: PanelSize
   step: (days: number) => void
-  detail?: (date: string, isCenter: boolean) => ReactNode
+  detail?: (date: string, isCenter: boolean, skips: readonly string[]) => ReactNode
+  /** A double tap skips a day. Only exercise has skips. */
+  skippable?: boolean
 }) {
   const qc = useQueryClient()
   const key = ['daily', tracker, center, today]
+  const skipsKey = ['daily', tracker, 'skips']
 
   const day = useQuery({ queryKey: key, queryFn: () => fetchTrackerWindow(tracker, center, today), ...LIVE })
+  const skips = useQuery({ queryKey: skipsKey, queryFn: () => fetchTrackerSkips(tracker), enabled: skippable, ...LIVE })
 
   const log = useMutation({
     mutationFn: ({ target, taken }: { target: string; taken: boolean }) =>
@@ -136,8 +168,9 @@ function CheckStrip({
     // Optimistic: the tap has to land instantly on the phone, where the round
     // trip is the slowest part of it.
     onMutate: async ({ target, taken }) => {
-      await qc.cancelQueries({ queryKey: key })
+      await Promise.all([qc.cancelQueries({ queryKey: key }), qc.cancelQueries({ queryKey: skipsKey })])
       const prev = qc.getQueryData<TrackerWindow>(key)
+      const prevSkips = qc.getQueryData<TrackerSkips>(skipsKey)
       if (prev) {
         const takenAt = taken ? new Date().toISOString() : null
         qc.setQueryData<TrackerWindow>(key, {
@@ -145,24 +178,65 @@ function CheckStrip({
           days: prev.days.map((d) => (d.date === target ? { ...d, taken, takenAt } : d)),
         })
       }
-      return { prev }
+      // Ticking a skipped day un-skips it, on the server too.
+      if (taken && prevSkips?.skips.includes(target)) {
+        qc.setQueryData<TrackerSkips>(skipsKey, { skips: prevSkips.skips.filter((s) => s !== target) })
+      }
+      return { prev, prevSkips }
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(key, ctx.prev) },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev)
+      if (ctx?.prevSkips) qc.setQueryData(skipsKey, ctx.prevSkips)
+    },
     // The server owns the streak, so ask it again once the tick has landed.
     onSuccess: (data) => {
       qc.setQueryData(key, data)
+      void qc.invalidateQueries({ queryKey: ['daily', 'streak'] })
+      if (skippable) void qc.invalidateQueries({ queryKey: skipsKey })
+    },
+  })
+
+  const skip = useMutation({
+    mutationFn: ({ target, skipped }: { target: string; skipped: boolean }) => skipTrackerDay(tracker, target, skipped),
+    onMutate: async ({ target, skipped }) => {
+      await Promise.all([qc.cancelQueries({ queryKey: key }), qc.cancelQueries({ queryKey: skipsKey })])
+      const prev = qc.getQueryData<TrackerWindow>(key)
+      const prevSkips = qc.getQueryData<TrackerSkips>(skipsKey)
+      if (prevSkips) {
+        const rest = prevSkips.skips.filter((s) => s !== target)
+        qc.setQueryData<TrackerSkips>(skipsKey, { skips: skipped ? [...rest, target].sort() : rest })
+      }
+      // Skipping a day clears its tick.
+      if (skipped && prev) {
+        qc.setQueryData<TrackerWindow>(key, {
+          ...prev,
+          days: prev.days.map((d) => (d.date === target ? { ...d, taken: false, takenAt: null } : d)),
+        })
+      }
+      return { prev, prevSkips }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev)
+      if (ctx?.prevSkips) qc.setQueryData(skipsKey, ctx.prevSkips)
+    },
+    // A cleared tick changes the window and the streak.
+    onSuccess: (data) => {
+      qc.setQueryData(skipsKey, data)
+      void qc.invalidateQueries({ queryKey: key })
       void qc.invalidateQueries({ queryKey: ['daily', 'streak'] })
     },
   })
 
   const d = day.data
+  const skipList = skips.data?.skips ?? []
+  const error = day.error ?? skips.error
 
   return (
     <Strip title={title} step={step}>
-      {day.isLoading && !d ? (
+      {(day.isLoading && !d) || skips.isLoading ? (
         <div className="flex flex-1 items-center justify-center py-4 text-sm text-[var(--color-text-dim)]">Loading…</div>
-      ) : day.error ? (
-        <div className="flex flex-1 items-center justify-center py-4 text-sm text-[var(--color-danger)]">{apiErrorText(day.error, `${title} log unavailable`)}</div>
+      ) : error ? (
+        <div className="flex flex-1 items-center justify-center py-4 text-sm text-[var(--color-danger)]">{apiErrorText(error, `${title} log unavailable`)}</div>
       ) : d ? (
         d.days.map((entry) => (
           <CheckDay
@@ -171,8 +245,10 @@ function CheckStrip({
             today={today}
             center={center}
             size={size}
-            detail={detail?.(entry.date, entry.date === center)}
+            detail={detail?.(entry.date, entry.date === center, skipList)}
+            skipped={skipList.includes(entry.date)}
             onToggle={() => log.mutate({ target: entry.date, taken: !entry.taken })}
+            onSkip={skippable ? () => skip.mutate({ target: entry.date, skipped: !skipList.includes(entry.date) }) : undefined}
           />
         ))
       ) : null}
@@ -180,21 +256,26 @@ function CheckStrip({
   )
 }
 
-// Exercise: a fixed five-day rotation counted from the day it started, so every
-// screen agrees on the day without a server.
+// Exercise: a fixed five-day rotation counted from the day it started. A
+// skipped day holds the rotation back, so the workout it missed moves to the
+// next day and everything after it slides one day later. The skips live on
+// the server, so every screen agrees on the day.
 const ROTATION = ['chest', 'back', 'shoulders', 'legs', 'rest'] as const
 const ROTATION_START = '2026-09-27' // chest, so 2026-09-28 is back
 
 /** The workout for a date key. Rounded because a DST day is 23 or 25 hours. */
-function workoutFor(key: string): (typeof ROTATION)[number] {
-  const days = Math.round((parseDateKey(key).getTime() - parseDateKey(ROTATION_START).getTime()) / 86_400_000)
+function workoutFor(key: string, skips: readonly string[]): (typeof ROTATION)[number] | 'skipped' {
+  if (skips.includes(key)) return 'skipped'
+  // Date keys sort as strings.
+  const held = skips.filter((s) => s >= ROTATION_START && s < key).length
+  const days = Math.round((parseDateKey(key).getTime() - parseDateKey(ROTATION_START).getTime()) / 86_400_000) - held
   return ROTATION[((days % ROTATION.length) + ROTATION.length) % ROTATION.length]
 }
 
 /** The workout name inside an exercise day box. A rest day is ticked like any other. */
-function workoutLabel(date: string, isCenter: boolean, size: PanelSize) {
-  const workout = workoutFor(date)
-  const rest = workout === 'rest'
+function workoutLabel(date: string, isCenter: boolean, size: PanelSize, skips: readonly string[]) {
+  const workout = workoutFor(date, skips)
+  const rest = workout === 'rest' || workout === 'skipped'
   return (
     <span
       // A phone box is about 70px inside, which "shoulders" at text-sm overruns.
@@ -259,7 +340,8 @@ export function DailyTrackerCard({ size = 'normal' }: { size?: PanelSize } = {})
             today={today}
             size={size}
             step={step}
-            detail={(date, isCenter) => workoutLabel(date, isCenter, size)}
+            skippable
+            detail={(date, isCenter, skips) => workoutLabel(date, isCenter, size, skips)}
           />
           <CheckStrip tracker="sf" title="SF" center={center} today={today} size={size} step={step} />
         </div>
