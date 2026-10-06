@@ -111,7 +111,7 @@ export function ProjectList() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-            [{total} projects · <span className={asking > 0 ? 'text-[var(--color-warning)]' : ''}>{asking} asking</span>]
+            [{total} project{total === 1 ? '' : 's'} · <span className={asking > 0 ? 'text-[var(--color-warning)]' : ''}>{asking} asking</span>]
           </div>
           <button
             type="button"

@@ -383,7 +383,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const split = term.embedded && term.selected !== null
 
   return (
-    <div className="space-y-4">
+    <div className={split ? 'space-y-4' : 'max-w-5xl space-y-4'}>
       <header className="space-y-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
           <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
@@ -463,7 +463,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
       </nav>
 
       <div className={split ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] lg:gap-6' : ''}>
-        <div className={split ? 'min-w-0' : 'min-w-0 max-w-4xl'}>
+        <div className="min-w-0">
           {active.id === 'sessions' && <SessionsTab {...tabProps} />}
           {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
           {custom?.kind === 'checklist' && <ChecklistTab key={custom.id} {...tabProps} tab={custom} />}
