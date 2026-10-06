@@ -397,8 +397,9 @@ export function ProjectPage({ projectId }: { projectId: string }) {
             {d.lastEvent && <> · changed {ago(d.lastEvent.at)} by {actorLabel(d.lastEvent.actor, titles)}</>}
           </span>
         </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <h1 className="min-w-0 flex-1 truncate text-lg font-semibold tracking-[0.04em] text-[var(--color-accent)]" title={p.name}>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {/* Its own line on a phone, where the button beside it cut the name to a word. */}
+          <h1 className="min-w-0 basis-full truncate text-lg font-semibold tracking-[0.04em] text-[var(--color-accent)] sm:basis-auto sm:flex-1" title={p.name}>
             {p.name}
           </h1>
           <button type="button" disabled={term.busy} onClick={primary.run} className={`${BTN_ACCENT} min-w-0 max-w-[16rem]`}>
@@ -439,7 +440,8 @@ export function ProjectPage({ projectId }: { projectId: string }) {
         )}
       </header>
 
-      <nav className="flex flex-wrap items-center gap-x-5 border-b border-[var(--color-border)]">
+      {/* One swipeable row on a phone (wrapped, it took three); wrapped on wider screens. */}
+      <nav className="flex items-center gap-x-5 overflow-x-auto border-b border-[var(--color-border)] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => (
           <button
             key={t.id}
