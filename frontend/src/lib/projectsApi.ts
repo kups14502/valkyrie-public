@@ -116,6 +116,8 @@ export const PROJ_KEYS = {
   events: (id: string) => ['proj', 'events', id] as const,
   file: (id: string, fileId: string) => ['proj', 'file', id, fileId] as const,
   automation: (id: string, key: string) => ['proj', 'automation', id, key] as const,
+  tree: (id: string, rel: string) => ['proj', 'tree', id, rel] as const,
+  fsFile: (id: string, rel: string) => ['proj', 'fsfile', id, rel] as const,
 }
 
 // The 409 a stale rev gets (a run started from an older brief, an edit saved
@@ -190,6 +192,20 @@ export const updateProjFile = async (id: string, fileId: string, patch: FilePatc
 
 export const unpinProjFile = async (id: string, fileId: string) =>
   (await api.delete<{ ok: true }>(`${p(id)}/files/${seg(fileId)}`)).data
+
+// The project folder on thor, through odin (backend routes/proj.ts, fs/*).
+// rel is relative to the folder, '/'-separated, '' for the folder itself.
+export type FsEntry = { name: string; dir: boolean; size: number; mtime: number }
+export type FsListing = { rel: string; root: string; entries: FsEntry[]; truncated: boolean }
+
+export const fetchProjTree = async (id: string, rel: string) =>
+  (await api.get<FsListing>(`${p(id)}/fs/tree`, { params: { rel } })).data
+
+export const fetchProjFsFile = async (id: string, rel: string) =>
+  (await api.get<Blob>(`${p(id)}/fs/file`, { params: { rel }, responseType: 'blob' })).data
+
+export const openProjFsFile = async (id: string, rel: string) =>
+  (await api.post<{ ok: true }>(`${p(id)}/fs/open`, { rel })).data
 
 export const fetchProjFileContent = async (id: string, fileId: string) =>
   (await api.get<FileContent>(`${p(id)}/files/${seg(fileId)}/content`)).data

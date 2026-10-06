@@ -8,14 +8,15 @@ import {
 } from '../../lib/api'
 import { relIso } from '../../lib/term'
 import {
-  PROJ_KEYS, actorLabel, fetchProjDoc, undoProjEvent,
+  PROJ_KEYS, actorLabel, fetchProjDoc, fetchProjTree, undoProjEvent,
   type ProjectDoc, type ProjectEvent, type ProjectTabProps,
 } from '../../lib/projectsApi'
 import { ActivityTab } from './ActivityTab'
 import { AddTabSheet } from './AddTabSheet'
 import { AutomationsTab } from './AutomationsTab'
 import { ChecklistTab } from './ChecklistTab'
-import { FilesTab } from './FilesTab'
+import { FileExplorer } from './FileExplorer'
+import { FileView } from './FileView'
 import { LinksTab } from './LinksTab'
 import { MarkdownTab } from './MarkdownTab'
 import { ProjectEditSheet } from './ProjectEditSheet'
@@ -278,6 +279,15 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const board = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
   const terms = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
   const term = useProjectTerm(projectId, doc.data?.project, paneRef)
+  // The folder's name for the viewer's breadcrumb: the explorer's own cache
+  // entry, so no extra request.
+  const folderName = useQuery({
+    queryKey: PROJ_KEYS.tree(projectId, ''),
+    queryFn: () => fetchProjTree(projectId, ''),
+    staleTime: 30_000,
+    refetchInterval: false,
+    retry: false,
+  }).data?.root
 
   const rows = board.data?.installed ? board.data.sessions : NO_ROWS
   const titles = useMemo(() => {
@@ -368,21 +378,36 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   ]
   const active = tabs.find((t) => t.id === params.get('tab')) ?? tabs[0]
   const custom = customTabs.find((t) => t.id === active.id) ?? null
-  // Picking a tab also closes a session shown in the middle column.
+  // Picking a tab also closes a session or a file shown in the middle column.
   const setTab = (id: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       if (id === tabs[0].id) next.delete('tab')
       else next.set('tab', id)
       next.delete('term')
+      next.delete('file')
       return next
     }, { replace: true })
   }
   const tabProps: ProjectTabProps = { projectId, doc: d, term }
 
-  // A session opened on a desktop takes the middle column; the tabs come back
-  // when it is closed or a tab is picked.
+  // A file from the folder, open like an editor tab. In the URL, so a reload
+  // or a link lands on it.
+  const fileParam = params.get('file')
+  const openFile = fileParam && fileParam.length <= 1024 ? fileParam : null
+  const setOpenFile = (rel: string | null) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (rel) { next.set('file', rel); next.delete('term') } else next.delete('file')
+      return next
+    }, { replace: true })
+  }
+  const pinnedFile = openFile ? d.files.find((f) => f.kind === 'path' && f.relPath === openFile) : undefined
+
+  // A session or a file opened on a desktop takes the middle column; the tabs
+  // come back when it is closed or a tab is picked. A session wins over a file.
   const showTerm = term.embedded && term.selected !== null
+  const showFile = term.embedded && !showTerm && openFile !== null
 
   return (
     <div className="mx-auto max-w-[1700px] space-y-4">
@@ -479,7 +504,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
-                className={`${TAB_CLS} ${!showTerm && active.id === t.id ? TAB_ON : TAB_OFF}`}
+                className={`${TAB_CLS} ${!showTerm && !showFile && active.id === t.id ? TAB_ON : TAB_OFF}`}
               >
                 <span className="inline-block max-w-[12rem] truncate align-bottom">{t.label}</span>
                 {t.count ? <span className="ml-1.5 text-[var(--color-text-faint)]">{t.count}</span> : null}
@@ -513,6 +538,18 @@ export function ProjectPage({ projectId }: { projectId: string }) {
                 back={back}
               />
             </section>
+          ) : showFile && openFile ? (
+            <section className="flex h-[calc(100dvh-15rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)]">
+              <FileView
+                key={openFile}
+                projectId={projectId}
+                rel={openFile}
+                rootName={folderName}
+                term={term}
+                pinned={pinnedFile}
+                onClose={() => setOpenFile(null)}
+              />
+            </section>
           ) : (
             <div className="min-w-0">
               {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
@@ -530,11 +567,29 @@ export function ProjectPage({ projectId }: { projectId: string }) {
           title="files"
           count={d.files.length}
           icon={<FileText size={14} />}
-          width="lg:w-80"
+          width="lg:w-80 xl:w-96"
         >
-          <FilesTab {...tabProps} compact />
+          <FileExplorer projectId={projectId} doc={d} term={term} openFile={openFile} onOpenFile={setOpenFile} />
         </SidePanel>
       </div>
+
+      {/* The phone has no middle column beside the files: a file opens over the page. */}
+      {!term.embedded && openFile && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-[var(--color-bg)]"
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          <FileView
+            key={openFile}
+            projectId={projectId}
+            rel={openFile}
+            rootName={folderName}
+            term={term}
+            pinned={pinnedFile}
+            onClose={() => setOpenFile(null)}
+          />
+        </div>
+      )}
 
       {editing && <ProjectEditSheet project={p} onClose={() => setEditing(false)} />}
       {addingTab && <AddTabSheet projectId={projectId} onClose={() => setAddingTab(false)} />}

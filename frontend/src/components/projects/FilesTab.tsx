@@ -39,7 +39,7 @@ const forTerminal = (relPath: string): string => (relPath.includes(' ') ? `"${re
 // useful thing the file allows: view, open, or copy the path.
 const ICON = 'inline-flex h-8 w-7 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-30'
 
-function CompactFileRow({ projectId, file, term, onView }: {
+export function CompactFileRow({ projectId, file, term, onView }: {
   projectId: string
   file: FileRef
   term: ProjectTerm
@@ -200,7 +200,7 @@ function FileRow({ projectId, file, term, onView }: {
   )
 }
 
-function FileViewer({ projectId, file, onClose }: { projectId: string; file: FileRef; onClose: () => void }) {
+export function FileViewer({ projectId, file, onClose }: { projectId: string; file: FileRef; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
   // A session can re-pin the same path at any time, so every open refetches.
   const q = useQuery({
@@ -259,7 +259,7 @@ const KIND_HINT: Record<FileKind, string> = {
   doc: 'Text kept here on odin, readable from the phone.',
 }
 
-function AddFileSheet({ projectId, allowSnapshots, onClose }: { projectId: string; allowSnapshots: boolean; onClose: () => void }) {
+export function AddFileSheet({ projectId, allowSnapshots, onClose }: { projectId: string; allowSnapshots: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const [kind, setKind] = useState<FileKind>('path')
   const [label, setLabel] = useState('')

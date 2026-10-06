@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from 'express'
+import { Readable } from 'node:stream'
+import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import {
   listProjects, getProject, getProjectDoc, createProject, updateProject, archiveProject,
   addTab, updateTab, moveTab, removeTab, tabItem,
@@ -342,6 +344,96 @@ router.delete('/proj/:id/files/:fileId', h((req, res) => {
 router.get('/proj/:id/files/:fileId/content', h((req, res) => {
   const p = visible(req)
   res.json(getFileContent(p.id, String(req.params.fileId)))
+}))
+
+// ------------------------------------------------------- folder files ---
+// The project folder itself, browsed and read through thor's project-files
+// service (C:\Thor\tools\session-board\project-files). odin passes the
+// project's folder KEY and a relative path; thor resolves and guards both.
+// Contents stream through and are never stored here, client areas included:
+// the page shows what is on thor's disk, the same as a session there reads it.
+
+const FILES_URL = process.env.PROJECT_FILES_URL || 'http://100.118.7.57:8767'
+const FILES_TOKEN = process.env.PROJECT_FILES_TOKEN || ''
+
+// Only these leave odin with their own type. Everything else is plain text or
+// a download, so a file in the folder can never run as a page on this origin.
+const SAFE_TYPES = /^(text\/plain|application\/pdf|image\/(png|jpeg|gif|webp|bmp))\b/
+
+async function thorFiles(pathAndQuery: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<globalThis.Response> {
+  if (!FILES_TOKEN) throw new ProjError(503, 'PROJECT_FILES_TOKEN is not set on the api host')
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), init.timeoutMs ?? 15_000)
+  try {
+    return await fetch(FILES_URL + pathAndQuery, {
+      ...init,
+      signal: ac.signal,
+      headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${FILES_TOKEN}` },
+    })
+  } catch (e) {
+    throw new ProjError(502, `thor's file service is not answering (${(e as Error).name === 'AbortError' ? 'timed out' : (e as Error).message})`)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function thorError(r: globalThis.Response): Promise<never> {
+  let msg = `thor answered ${r.status}`
+  try { msg = ((await r.json()) as { error?: string }).error || msg } catch { /* not json */ }
+  throw new ProjError(r.status >= 500 ? 502 : r.status, msg)
+}
+
+const relOf = (v: unknown): string => {
+  const s = typeof v === 'string' ? v : ''
+  if (s.length > 1024) throw new ProjError(400, 'path too long')
+  return s
+}
+
+router.get('/proj/:id/fs/tree', h(async (req, res) => {
+  const p = visible(req)
+  const q = new URLSearchParams({ target: p.targetKey, rel: relOf(req.query.rel) })
+  const r = await thorFiles(`/tree?${q}`)
+  if (!r.ok) await thorError(r)
+  res.set('Cache-Control', 'no-store').json(await r.json())
+}))
+
+router.get('/proj/:id/fs/file', h(async (req, res) => {
+  const p = visible(req)
+  const q = new URLSearchParams({ target: p.targetKey, rel: relOf(req.query.rel) })
+  const range = typeof req.headers.range === 'string' ? { Range: req.headers.range } : undefined
+  const r = await thorFiles(`/file?${q}`, { headers: range })
+  if (!r.ok && r.status !== 206) await thorError(r)
+  const type = r.headers.get('content-type') || 'application/octet-stream'
+  const safe = SAFE_TYPES.test(type)
+  res.status(r.status)
+  res.set({
+    'Content-Type': safe ? type : 'application/octet-stream',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",
+    'Cache-Control': 'private, no-store',
+    'Accept-Ranges': 'bytes',
+  })
+  if (!safe) res.set('Content-Disposition', 'attachment')
+  for (const name of ['content-length', 'content-range', 'last-modified']) {
+    const v = r.headers.get(name)
+    if (v) res.set(name, v)
+  }
+  if (!r.body) return res.end()
+  const body = Readable.fromWeb(r.body as unknown as WebReadableStream)
+  res.on('close', () => body.destroy())
+  body.on('error', () => res.destroy())
+  body.pipe(res)
+}))
+
+router.post('/proj/:id/fs/open', h(async (req, res) => {
+  const p = visible(req)
+  const r = await thorFiles('/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: p.targetKey, rel: relOf(bodyOf(req).rel) }),
+  })
+  if (!r.ok) await thorError(r)
+  res.json({ ok: true })
 }))
 
 // ---------------------------------------------------------- automations ---
