@@ -33,9 +33,12 @@ const WEEK_MS = 7 * 86_400_000
 const NO_ROWS: WorkSession[] = []
 const NO_TERMS: TermSession[] = []
 
-const TAB_CLS = 'shrink-0 whitespace-nowrap border px-4 py-2.5 text-xs uppercase tracking-[0.14em] transition-colors'
-const TAB_ON = 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.12)] text-[var(--color-accent)]'
-const TAB_OFF = 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40'
+// Underlined text, not boxes: a row of bordered buttons read as a toolbar and
+// pushed the content halfway down a desktop screen (2026-10-06).
+const TAB_CLS = '-mb-px shrink-0 whitespace-nowrap border-b-2 py-2.5 text-[11px] uppercase tracking-[0.14em] transition-colors sm:py-2'
+const TAB_ON = 'border-[var(--color-accent)] text-[var(--color-accent)]'
+const TAB_OFF = 'border-transparent text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+const ICON_BTN = 'inline-flex h-9 w-9 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-40 sm:h-8 sm:w-8'
 const LOADING = (
   <div className="py-16 text-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">&gt; loading<span className="cursor-blink">_</span></div>
 )
@@ -261,6 +264,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const paneRef = useRef<HTMLElement | null>(null)
   const [editing, setEditing] = useState(false)
   const [addingTab, setAddingTab] = useState(false)
+  const [summaryOpen, setSummaryOpen] = useState(false)
 
   const doc = useQuery({
     queryKey: PROJ_KEYS.doc(projectId),
@@ -358,7 +362,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
     { id: 'sessions', label: 'sessions', count: liveCount },
     ...customTabs.map((t) => ({ id: t.id, label: t.title })),
     { id: 'files', label: 'files', count: d.files.length },
-    { id: 'automations', label: 'automations', count: d.automations.length },
+    { id: 'automations', label: 'agents', count: d.automations.length },
     { id: 'reminders', label: 'reminders', count: pending },
     { id: 'activity', label: 'activity' },
   ]
@@ -374,85 +378,92 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   }
   const tabProps: ProjectTabProps = { projectId, doc: d, term }
 
+  // The pane takes half the page only while a session is open in it. Empty, it
+  // was a screen-tall box saying "open a session".
+  const split = term.embedded && term.selected !== null
+
   return (
-    <div className={term.embedded ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-6' : ''}>
-      <div className="min-w-0 space-y-6">
-        <div className="space-y-3">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">
-              <Link to="/projects" className="transition hover:text-[var(--color-accent)]">// project</Link>
-              {' · '}[{p.area}]
-              {p.exposure === 'tailnet' && ' · [tailnet only]'}
-              {p.status !== 'active' && ` · [${p.status}]`}
-            </div>
-            <h1 className="mt-1 break-words text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
-              {p.name}<span className="cursor-blink">_</span>
-            </h1>
-          </div>
-          {p.nextAction && (
-            <div className="break-words text-sm text-[var(--color-text)]">
-              <span className="text-[var(--color-text-faint)]">next: </span>{p.nextAction}
-            </div>
-          )}
-          {p.summary && <p className="line-clamp-2 text-xs text-[var(--color-text-dim)]">{p.summary}</p>}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-              [{liveCount} live · <span className={askingRows.length > 0 ? 'text-[var(--color-warning)]' : ''}>{askingRows.length} asking</span>]
-            </span>
-            {d.lastEvent && (
-              <span className="text-[11px] text-[var(--color-text-faint)]">
-                changed {ago(d.lastEvent.at)} by {actorLabel(d.lastEvent.actor, titles)}
-              </span>
-            )}
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <button type="button" disabled={term.busy} onClick={primary.run} className={`${BTN_ACCENT} min-w-0 max-w-full`}>
-              <PrimaryIcon size={13} className="shrink-0" />
-              <span className="min-w-0 truncate">{term.busy ? 'opening' : primary.label}</span>
-            </button>
-            <button type="button" onClick={() => setEditing(true)} className={BTN_GHOST}>
-              <Pencil size={12} /> edit
-            </button>
-            {primary.kind !== 'new' && (
-              <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_GHOST} title="Start a new session in this project">
-                <Plus size={12} /> new
-              </button>
-            )}
-          </div>
-          {term.error && (
-            <div className="flex items-start gap-2 border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
-              <span className="min-w-0 flex-1 break-words">{term.error}</span>
-              <button type="button" onClick={term.dismissError} aria-label="Dismiss" className="-m-1 shrink-0 p-1 hover:text-[var(--color-text)]">
-                <X size={12} />
-              </button>
-            </div>
-          )}
+    <div className="space-y-4">
+      <header className="space-y-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
+          <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
+          <span>/</span>
+          <span>{p.area}</span>
+          {p.exposure === 'tailnet' && <span>· tailnet only</span>}
+          {p.status !== 'active' && <span className="text-[var(--color-warning)]">· {p.status}</span>}
+          <span className="ml-auto normal-case tracking-normal">
+            {liveCount} live
+            {askingRows.length > 0 && <span className="text-[var(--color-warning)]"> · {askingRows.length} asking</span>}
+            {d.lastEvent && <> · changed {ago(d.lastEvent.at)} by {actorLabel(d.lastEvent.actor, titles)}</>}
+          </span>
         </div>
-
-        <div>
-          <div className="mb-4 flex gap-2 overflow-x-auto">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`${TAB_CLS} ${active.id === t.id ? TAB_ON : TAB_OFF}`}
-              >
-                <span className="inline-block max-w-[14rem] truncate align-bottom">{t.label}</span>
-                {t.count !== undefined && <span className="ml-2 text-[9px] text-[var(--color-text-faint)]">[{t.count}]</span>}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setAddingTab(true)}
-              aria-label="Add a tab"
-              title="Add a notes, checklist or links tab"
-              className={`${TAB_CLS} ${TAB_OFF} px-3`}
-            >
-              <Plus size={13} />
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="min-w-0 flex-1 truncate text-lg font-semibold tracking-[0.04em] text-[var(--color-accent)]" title={p.name}>
+            {p.name}
+          </h1>
+          <button type="button" disabled={term.busy} onClick={primary.run} className={`${BTN_ACCENT} min-w-0 max-w-[16rem]`}>
+            <PrimaryIcon size={12} className="shrink-0" />
+            <span className="min-w-0 truncate">{term.busy ? 'opening' : primary.label}</span>
+          </button>
+          {primary.kind !== 'new' && (
+            <button type="button" disabled={term.busy} onClick={() => void term.start()} className={ICON_BTN} title="New session in this project" aria-label="New session">
+              <Plus size={15} />
+            </button>
+          )}
+          <button type="button" onClick={() => setEditing(true)} className={ICON_BTN} title="Edit the project" aria-label="Edit the project">
+            <Pencil size={13} />
+          </button>
+        </div>
+        {p.nextAction && (
+          <div className="break-words text-[13px] text-[var(--color-text)]">
+            <span className="mr-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">next</span>{p.nextAction}
+          </div>
+        )}
+        {p.summary && (
+          <button
+            type="button"
+            onClick={() => setSummaryOpen((v) => !v)}
+            title={summaryOpen ? 'Show less' : 'Show the whole summary'}
+            className={`block w-full text-left text-xs leading-relaxed text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] ${summaryOpen ? '' : 'line-clamp-1'}`}
+          >
+            {p.summary}
+          </button>
+        )}
+        {term.error && (
+          <div className="flex items-start gap-2 border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
+            <span className="min-w-0 flex-1 break-words">{term.error}</span>
+            <button type="button" onClick={term.dismissError} aria-label="Dismiss" className="-m-1 shrink-0 p-1 hover:text-[var(--color-text)]">
+              <X size={12} />
             </button>
           </div>
+        )}
+      </header>
 
+      <nav className="flex flex-wrap items-center gap-x-5 border-b border-[var(--color-border)]">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`${TAB_CLS} ${active.id === t.id ? TAB_ON : TAB_OFF}`}
+          >
+            <span className="inline-block max-w-[12rem] truncate align-bottom">{t.label}</span>
+            {t.count ? <span className="ml-1.5 text-[var(--color-text-faint)]">{t.count}</span> : null}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setAddingTab(true)}
+          aria-label="Add a tab"
+          title="Add a notes, checklist or links tab"
+          className={`${TAB_CLS} ${TAB_OFF}`}
+        >
+          <Plus size={12} />
+        </button>
+      </nav>
+
+      <div className={split ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] lg:gap-6' : ''}>
+        <div className={split ? 'min-w-0' : 'min-w-0 max-w-4xl'}>
           {active.id === 'sessions' && <SessionsTab {...tabProps} />}
           {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
           {custom?.kind === 'checklist' && <ChecklistTab key={custom.id} {...tabProps} tab={custom} />}
@@ -462,14 +473,12 @@ export function ProjectPage({ projectId }: { projectId: string }) {
           {active.id === 'reminders' && <RemindersTab {...tabProps} />}
           {active.id === 'activity' && <ActivityTab {...tabProps} />}
         </div>
-      </div>
 
-      {term.embedded && (
-        <aside
-          ref={paneRef}
-          className="flex h-[calc(100dvh-8rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)] lg:sticky lg:top-0"
-        >
-          {term.selected ? (
+        {split && term.selected && (
+          <aside
+            ref={paneRef}
+            className="mt-4 flex h-[calc(100dvh-14rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)] lg:sticky lg:top-0 lg:mt-0"
+          >
             <SelectedTerm
               key={term.selected}
               name={term.selected}
@@ -481,17 +490,9 @@ export function ProjectPage({ projectId }: { projectId: string }) {
               doc={d}
               back={back}
             />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-              <SquareTerminal size={22} className="text-[var(--color-text-faint)]" />
-              <div className="text-[11px] text-[var(--color-text-faint)]">Open a session from the list, or start one here.</div>
-              <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_ACCENT}>
-                <Plus size={13} /> {term.busy ? 'opening' : 'new session'}
-              </button>
-            </div>
-          )}
-        </aside>
-      )}
+          </aside>
+        )}
+      </div>
 
       {editing && <ProjectEditSheet project={p} onClose={() => setEditing(false)} />}
       {addingTab && <AddTabSheet projectId={projectId} onClose={() => setAddingTab(false)} />}

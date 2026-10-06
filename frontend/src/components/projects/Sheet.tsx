@@ -4,8 +4,8 @@ import { X } from 'lucide-react'
 // The class strings every project sheet and tab shares, copied from the pages
 // they have to sit next to (Meals, Calendar, Sessions) so the workspace reads as
 // the same app rather than a new one.
-export const BTN_ACCENT = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--color-accent)] bg-[rgba(var(--color-accent-rgb),0.10)] px-4 text-xs uppercase tracking-[0.16em] text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.18)] disabled:opacity-40'
-export const BTN_GHOST = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--color-border)] px-3 text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] disabled:opacity-40'
+export const BTN_ACCENT = 'inline-flex min-h-9 items-center justify-center gap-1.5 border border-[var(--color-accent)] bg-[rgba(var(--color-accent-rgb),0.10)] px-3 text-[11px] uppercase tracking-[0.14em] sm:min-h-8 text-[var(--color-accent)] transition hover:bg-[rgba(var(--color-accent-rgb),0.18)] disabled:opacity-40'
+export const BTN_GHOST = 'inline-flex min-h-9 items-center justify-center gap-1.5 border border-[var(--color-border)] px-2.5 text-[10px] uppercase tracking-[0.14em] sm:min-h-8 text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] disabled:opacity-40'
 export const BTN_TEXT = 'inline-flex min-h-9 items-center gap-1.5 px-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-40'
 // text-base below sm: iOS zooms the page into any focused field under 16px.
 export const FIELD = 'w-full min-w-0 border border-[var(--color-border)] bg-transparent px-2.5 py-2 text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] sm:text-sm'

@@ -37,31 +37,30 @@ const rank = (p: Counted) => (p.asking > 0 ? 2 : p.live > 0 ? 1 : 0)
 const byUrgency = (a: Counted, b: Counted) =>
   rank(b) - rank(a) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
 
-function ProjectCard({ p, onOpen }: { p: Counted; onOpen: () => void }) {
+// One line per project: name, what is next, and whether anyone is in it. A box
+// per project spent most of the screen on borders.
+function ProjectRow({ p, onOpen }: { p: Counted; onOpen: () => void }) {
   const line = p.nextAction || p.summary
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="block w-full min-w-0 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-3 text-left transition hover:border-[var(--color-border-strong)]"
+      className="flex w-full min-w-0 flex-wrap items-baseline gap-x-4 gap-y-0.5 py-2.5 text-left transition hover:bg-[rgba(var(--color-accent-rgb),0.04)] sm:flex-nowrap"
     >
-      <div className="flex min-w-0 items-baseline gap-2">
-        <span className="min-w-0 truncate text-sm text-[var(--color-text)]">{p.name}</span>
-        {p.status !== 'active' && (
-          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">[{p.status}]</span>
-        )}
-      </div>
-      {line && <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-dim)]">{line}</div>}
-      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
-        <span>
-          {p.live} live · <span className={p.asking > 0 ? 'text-[var(--color-warning)]' : ''}>{p.asking} asking</span>
-        </span>
+      <span className="min-w-0 shrink-0 truncate text-sm text-[var(--color-text)] sm:w-64">
+        {p.name}
+        {p.status !== 'active' && <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{p.status}</span>}
+      </span>
+      <span className="order-3 min-w-0 basis-full truncate text-xs text-[var(--color-text-dim)] sm:order-none sm:basis-auto sm:flex-1">{line}</span>
+      <span className="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-[var(--color-text-faint)]">
+        {p.asking > 0 && <span className="text-[var(--color-warning)]">{p.asking} asking</span>}
+        {p.live > 0 && <span className="text-[var(--color-accent)]">{p.live} live</span>}
         {p.nextReminderAt && (
-          <span className="inline-flex items-center gap-1 normal-case tracking-normal">
+          <span className="inline-flex items-center gap-1">
             <Bell size={10} /> {untilIso(p.nextReminderAt)}
           </span>
         )}
-      </div>
+      </span>
     </button>
   )
 }
@@ -102,7 +101,7 @@ export function ProjectList() {
   }, [list.data, board.data, areas])
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-5xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// claude desk</div>
@@ -149,13 +148,13 @@ export function ProjectList() {
         <div className="space-y-6">
           {sections.map((g) => (
             <section key={g.area}>
-              <div className="mb-2 flex items-baseline gap-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
+              <div className="mb-1 flex items-baseline gap-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
                 {g.area}
                 <span className="text-[var(--color-border-strong)]">{g.rows.length}</span>
               </div>
-              <div className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+              <div className="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]">
                 {g.rows.map((p) => (
-                  <ProjectCard key={p.id} p={p} onOpen={() => navigate(`/projects/${p.id}`)} />
+                  <ProjectRow key={p.id} p={p} onOpen={() => navigate(`/projects/${p.id}`)} />
                 ))}
               </div>
             </section>

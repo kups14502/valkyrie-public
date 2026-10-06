@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2, Plus } from 'lucide-react'
+import { Link2 } from 'lucide-react'
 import { apiErrorText, fetchSessionList } from '../../lib/api'
 import { PROJ_KEYS, unlinkProjSession, type ProjectTabProps } from '../../lib/projectsApi'
 import { SessionBoard } from '../SessionBoard'
 import { AddSessionSheet } from './AddSessionSheet'
-import { BTN_ACCENT, BTN_GHOST } from './Sheet'
+import { BTN_TEXT } from './Sheet'
 
 export function SessionsTab({ projectId, doc, term }: ProjectTabProps) {
   const qc = useQueryClient()
@@ -34,15 +34,6 @@ export function SessionsTab({ projectId, doc, term }: ProjectTabProps) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_ACCENT}>
-          <Plus size={13} /> {term.busy ? 'opening' : 'new session'}
-        </button>
-        <button type="button" onClick={() => setAdding(true)} className={BTN_GHOST}>
-          <Link2 size={12} /> add existing
-        </button>
-      </div>
-
       {error && <div className="text-xs text-[var(--color-danger)]">{error}</div>}
 
       <SessionBoard scope={{ projectId, sessionIds, onUnlink: unlink }} onOpenTerminal={term.open} />
@@ -52,6 +43,10 @@ export function SessionsTab({ projectId, doc, term }: ProjectTabProps) {
           {notes.map((n) => <div key={n.id} className="break-words">{n.text}</div>)}
         </div>
       )}
+
+      <button type="button" onClick={() => setAdding(true)} className={BTN_TEXT}>
+        <Link2 size={11} /> link an existing session
+      </button>
 
       {adding && <AddSessionSheet projectId={projectId} doc={doc} onClose={() => setAdding(false)} />}
     </div>
