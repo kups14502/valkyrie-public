@@ -8,5 +8,10 @@ import { ProjectPage } from '../components/projects/ProjectPage'
 // and drop the terminal.
 export default function Projects() {
   const { projectId } = useParams()
-  return projectId ? <ProjectPage key={projectId} projectId={projectId} /> : <ProjectList />
+  // vk-proj: see index.css, it lets the text sizes on buttons apply here.
+  return (
+    <div className="vk-proj">
+      {projectId ? <ProjectPage key={projectId} projectId={projectId} /> : <ProjectList />}
+    </div>
+  )
 }

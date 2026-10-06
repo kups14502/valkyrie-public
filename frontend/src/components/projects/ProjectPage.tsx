@@ -424,7 +424,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
             type="button"
             onClick={() => setSummaryOpen((v) => !v)}
             title={summaryOpen ? 'Show less' : 'Show the whole summary'}
-            className={`block w-full text-left text-xs leading-relaxed text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] ${summaryOpen ? '' : 'line-clamp-1'}`}
+            className={`w-full text-left text-xs leading-relaxed text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] ${summaryOpen ? '' : 'line-clamp-1'}`}
           >
             {p.summary}
           </button>

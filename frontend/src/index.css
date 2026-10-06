@@ -87,6 +87,17 @@ button, input, select, textarea {
   font: inherit;
 }
 
+/* The rule above is unlayered, and unlayered CSS beats every Tailwind utility
+   (they sit in @layer utilities), so a text-[11px] on a button never applied:
+   buttons took their parent's size. Inside the Projects pages the utilities
+   win again; revert-layer falls back to Tailwind's own `font: inherit` where a
+   button sets no size. Scoped so the other pages keep the look they have. */
+.vk-proj :is(button, input, select, textarea) {
+  font-size: revert-layer;
+  line-height: revert-layer;
+  font-weight: revert-layer;
+}
+
 html {
   /* The shell (App.tsx) is a full-height flex column and <main> is the scroll
      container, so the root must never scroll — otherwise it shows a permanent,
