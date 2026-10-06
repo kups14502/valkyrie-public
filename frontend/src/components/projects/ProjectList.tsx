@@ -51,7 +51,7 @@ function ProjectRow({ p, onOpen }: { p: Counted; onOpen: () => void }) {
         {p.name}
         {p.status !== 'active' && <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{p.status}</span>}
       </span>
-      <span className="order-3 min-w-0 basis-full truncate text-xs text-[var(--color-text-dim)] sm:order-none sm:basis-auto sm:flex-1">{line}</span>
+      <span className="order-3 line-clamp-2 min-w-0 basis-full text-xs text-[var(--color-text-dim)] sm:order-none sm:basis-auto sm:flex-1">{line}</span>
       <span className="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-[var(--color-text-faint)]">
         {p.asking > 0 && <span className="text-[var(--color-warning)]">{p.asking} asking</span>}
         {p.live > 0 && <span className="text-[var(--color-accent)]">{p.live} live</span>}
@@ -101,7 +101,7 @@ export function ProjectList() {
   }, [list.data, board.data, areas])
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// claude desk</div>

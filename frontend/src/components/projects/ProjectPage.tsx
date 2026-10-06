@@ -383,7 +383,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const split = term.embedded && term.selected !== null
 
   return (
-    <div className={split ? 'space-y-4' : 'max-w-5xl space-y-4'}>
+    <div className={split ? 'space-y-4' : 'mx-auto max-w-6xl space-y-4'}>
       <header className="space-y-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
           <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
