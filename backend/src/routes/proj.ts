@@ -13,6 +13,7 @@ import {
   type Project, type ProjectPatch, type SaveAutomationInput, type TabItemOp, type TabPatch,
 } from '../lib/projectTypes.js'
 import { AREAS } from '../lib/projectAreas.js'
+import { takeDeskBrief } from '../lib/projectDesk.js'
 import { viaCloudflare } from '../middleware/auth.js'
 
 // The Projects page REST. Thin on purpose: the store (lib/projectsStore.ts)
@@ -379,6 +380,14 @@ router.get('/proj/:id/runs/:runId/brief', h((req, res) => {
   const runId = String(req.params.runId)
   if (!UUID_RE.test(runId)) throw new ProjError(404, 'no such run')
   res.json(takeRunBrief(p.id, runId))
+}))
+
+// A new-project session's brief (lib/projectDesk.ts). Same reply shape as a
+// run brief, so Remote-Session.ps1 reads both with one function.
+router.get('/proj-desk/briefs/:runId', h((req, res) => {
+  const runId = String(req.params.runId)
+  if (!UUID_RE.test(runId)) throw new ProjError(404, 'no such brief')
+  res.json(takeDeskBrief(runId))
 }))
 
 // ------------------------------------------------------------- sessions ---

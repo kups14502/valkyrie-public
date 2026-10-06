@@ -5,6 +5,7 @@ import { Bell, Plus } from 'lucide-react'
 import { apiErrorText, fetchSessionList, type WorkSession } from '../../lib/api'
 import { BASE_AREAS, PROJ_KEYS, fetchProjList, projAreasQuery, type ProjectSummary } from '../../lib/projectsApi'
 import { NewProjectSheet } from './NewProjectSheet'
+import { NewProjectAiSheet } from './NewProjectAiSheet'
 import { BTN_ACCENT, BTN_GHOST } from './Sheet'
 
 const untilIso = (iso: string): string => {
@@ -68,6 +69,7 @@ function ProjectCard({ p, onOpen }: { p: Counted; onOpen: () => void }) {
 export function ProjectList() {
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
+  const [manual, setManual] = useState(false)
   // The way back from an archive: the list leaves archived projects out, and
   // an archived page is otherwise reachable only by typing its URL.
   const [showArchived, setShowArchived] = useState(false)
@@ -161,7 +163,8 @@ export function ProjectList() {
         </div>
       )}
 
-      {creating && <NewProjectSheet onClose={() => setCreating(false)} />}
+      {creating && <NewProjectAiSheet onClose={() => setCreating(false)} onManual={() => { setCreating(false); setManual(true) }} />}
+      {manual && <NewProjectSheet onClose={() => setManual(false)} />}
     </div>
   )
 }

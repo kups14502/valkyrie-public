@@ -377,6 +377,22 @@ router.get('/session-hosts', async (_req, res) => {
   res.json({ hosts })
 })
 
+// The keys thor will launch a session in, for a session creating a project:
+// a project on a key thor does not have could never start a session. null
+// when thor cannot say, so a sleeping thor does not block the create.
+export async function launchTargetKeys(host = 'thor'): Promise<string[] | null> {
+  const launcher = LAUNCHERS[host]
+  if (!launcher?.token) return null
+  try {
+    const r = await callHostLauncher(launcher, '/launch-targets', { method: 'GET' }, 10_000)
+    const targets = (r.body as { targets?: unknown } | null)?.targets
+    if (r.status !== 200 || !Array.isArray(targets)) return null
+    return targets.map((t) => String((t as { key?: unknown })?.key ?? '')).filter(Boolean)
+  } catch {
+    return null
+  }
+}
+
 router.get('/hosts/:host/launch-targets', async (req, res) => {
   const name = String(req.params.host ?? '')
   const launcher = LAUNCHERS[name]

@@ -758,8 +758,12 @@ export function updateProject(id: string, patch: ProjectPatch, ctx: Ctx): Projec
     if (pt.area !== undefined) {
       next.area = areaOf(pt.area)
       // A project moved into a client area must not keep the looser
-      // exposure it was created with. Explicit values below still win.
-      if (next.area !== before.area) Object.assign(next, areaDefaults(next.area))
+      // exposure it was created with. Explicit values below still win. A
+      // session only ever tightens: moving a client project out of its area
+      // keeps it hidden until Brendon loosens it on the page.
+      if (next.area !== before.area && (ctx.actor === 'ui' || isClientArea(next.area))) {
+        Object.assign(next, areaDefaults(next.area))
+      }
     }
     if (pt.targetKey !== undefined) next.targetKey = keyOf('targetKey', pt.targetKey)
     if (pt.exposure !== undefined) {
@@ -770,10 +774,11 @@ export function updateProject(id: string, patch: ProjectPatch, ctx: Ctx): Projec
     if (pt.allowSnapshots !== undefined) next.allowSnapshots = flag('allowSnapshots', pt.allowSnapshots)
     const changed = (Object.keys(next) as (keyof ProjectRow)[]).filter((k) => next[k] !== before[k])
     if (!changed.length) return { result: undefined, event: null }
-    // The MCP tools never offer these, and a hook has no business with them
-    // either: they decide where sessions run and who can see the project.
-    if (ctx.actor !== 'ui' && changed.some((k) => SETTINGS.has(k))) {
-      throw new ProjError(403, 'only the project page can change the area, folder, exposure or session settings')
+    // Sessions set up projects, so they may pick the area and folder. Who can
+    // see the project and whether sessions may edit it stay with the page:
+    // those are the brakes on sessions themselves.
+    if (ctx.actor !== 'ui' && (pt.exposure !== undefined || pt.sessionEdits !== undefined || pt.allowSnapshots !== undefined)) {
+      throw new ProjError(403, 'only the project page can change exposure, file contents or session edits')
     }
     next.metaRev = before.metaRev + 1
     q.projectSave.run(next)

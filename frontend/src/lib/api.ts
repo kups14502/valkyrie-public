@@ -798,7 +798,7 @@ export type TermStatus = {
 // automationRev is the rev of the brief the run sheet showed; the backend
 // answers 409 "changed since" when the stored brief is newer.
 export type TermOpen =
-  | { mode: 'new' | 'shell'; target?: string; project?: string; automation?: string; automationRev?: number; label?: string; cols?: number; rows?: number }
+  | { mode: 'new' | 'shell'; target?: string; project?: string; automation?: string; automationRev?: number; desk?: boolean; prompt?: string; label?: string; cols?: number; rows?: number }
   | { mode: 'resume'; sessionId: string; project?: string; label?: string; cols?: number; rows?: number }
 
 // conversationId is the id minted for a new session, and runId the automation
@@ -865,7 +865,7 @@ export const killTermSession = async (name: string) =>
 
 // The only place the terminal page's back buttons may lead besides the board.
 // ?back= is a URL anyone can hand the phone, so it is a project path or nothing.
-export const PROJECT_BACK_RE = /^\/projects\/[a-z0-9][a-z0-9-]{0,31}$/
+export const PROJECT_BACK_RE = /^\/projects(\/[a-z0-9][a-z0-9-]{0,31})?$/
 
 // Where the in-page terminal lives, optionally landing on one session.
 export const termPath = (name?: string | null, back?: string | null): string => {

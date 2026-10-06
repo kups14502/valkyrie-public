@@ -342,6 +342,9 @@ export type CreateOpts = {
   // in remoteCommand before they reach the ssh line.
   projectId?: string
   runId?: string
+  // A session started from the Projects list to set up a new project. It gets
+  // the unbound MCP endpoint instead of a project's, and its brief by -Run.
+  desk?: boolean
 }
 
 async function setOpt(name: string, option: string, value: string): Promise<void> {
@@ -354,6 +357,13 @@ async function setOpt(name: string, option: string, value: string): Promise<void
   }
 }
 
+// A desk session creates its project after it started, so the pane learns its
+// project then. Same option createSession sets for a project launch.
+export async function tagProject(name: string, projectId: string): Promise<void> {
+  if (!SESSION_NAME_RE.test(name) || !TARGET_RE.test(projectId)) return
+  await setOpt(name, '@vk_project', projectId)
+}
+
 // The command sshd runs on thor. The whole string is one PowerShell command
 // line (PowerShell is thor's sshd default shell), and every variable part of
 // it has already been matched against a regex that admits only [a-z0-9-] or a
@@ -363,7 +373,7 @@ async function setOpt(name: string, option: string, value: string): Promise<void
 // the same string, byte for byte, that thor has always been sent. A thor
 // script that predates -Project would fail parameter binding on it, which is
 // why thor is updated first.
-export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId'>): string {
+export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk'>): string {
   const parts = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', REMOTE_SCRIPT, '-Mode', o.mode]
   if (o.mode === 'resume') {
     if (!o.resumeId || !UUID_RE.test(o.resumeId)) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
@@ -385,9 +395,15 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
     }
     parts.push('-Project', o.projectId)
   }
+  if (o.desk) {
+    if (o.projectId || o.mode !== 'new' || !(o.newId && UUID_RE.test(o.newId))) {
+      throw Object.assign(new Error('a desk session is a new session with a minted id and no project'), { status: 400 })
+    }
+    parts.push('-Desk')
+  }
   if (o.runId) {
-    if (!o.projectId || o.mode !== 'new' || !UUID_RE.test(o.runId)) {
-      throw Object.assign(new Error('a run needs a project, mode new and a run id'), { status: 400 })
+    if (!(o.projectId || o.desk) || o.mode !== 'new' || !UUID_RE.test(o.runId)) {
+      throw Object.assign(new Error('a run needs a project or the desk, mode new and a run id'), { status: 400 })
     }
     parts.push('-Run', o.runId)
   }

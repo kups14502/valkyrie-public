@@ -15,6 +15,7 @@ import {
 } from '../terminal/tmux.js'
 import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
+import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
@@ -93,6 +94,10 @@ router.get('/terminal/sessions', async (req, res) => {
   }
 })
 
+// Where a new-project session starts, before it knows its project's folder.
+// It can read any folder from there; the project's own sessions run in its folder.
+const DESK_TARGET = process.env.PROJECT_DESK_TARGET || 'personal'
+
 router.post('/terminal/sessions', async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>
   const mode = String(body.mode ?? 'new') as TermMode
@@ -113,6 +118,13 @@ router.post('/terminal/sessions', async (req, res) => {
   if (automation !== undefined && (typeof automationRev !== 'number' || !Number.isInteger(automationRev) || automationRev < 0)) {
     return res.status(400).json({ error: 'an agent or workflow run needs the rev that was shown' })
   }
+  // A desk session sets up a project that does not exist yet (lib/projectDesk.ts).
+  const desk = body.desk === true
+  const prompt = typeof body.prompt === 'string' ? body.prompt : ''
+  if (desk && (mode !== 'new' || projectKey !== undefined || automation !== undefined)) {
+    return res.status(400).json({ error: 'a new-project session is mode new, with no project or agent' })
+  }
+  if (prompt.length > DESK_PROMPT_MAX) return res.status(400).json({ error: `the description is longer than ${DESK_PROMPT_MAX} characters` })
   const hidden = hiddenFrom(req)
   let project: Project | null = null
   if (projectKey !== undefined) {
@@ -142,7 +154,7 @@ router.post('/terminal/sessions', async (req, res) => {
   } else {
     // A project session always runs in the project's own folder, whatever the
     // client sent: the pinned relPaths and the session's work are relative to it.
-    target = project ? project.targetKey : String(body.target ?? '')
+    target = project ? project.targetKey : desk ? DESK_TARGET : String(body.target ?? '')
     if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
     fallback = target
     // The conversation id is minted HERE and handed to claude, rather than read
@@ -157,13 +169,14 @@ router.post('/terminal/sessions', async (req, res) => {
   const ctx: Ctx = { actor: 'ui', via: 'terminal' }
   try {
     const run: Run | null = project && automation ? createRun(project.id, automation, automationRev as number, ctx) : null
-    const label = cleanLabel(body.label, run && project ? `${project.name}: ${run.name}` : project ? project.name : fallback)
+    const deskRun = desk ? createDeskBrief(prompt) : null
+    const label = cleanLabel(body.label, run && project ? `${project.name}: ${run.name}` : project ? project.name : desk ? 'new project' : fallback)
     let name: string
     try {
       name = await createSession({
         mode, target, resumeId, newId, label,
         cols: Number(body.cols), rows: Number(body.rows),
-        projectId: project?.id, runId: run?.id,
+        projectId: project?.id, runId: run?.id ?? deskRun ?? undefined, desk,
       })
     } catch (err) {
       if (run) failRun(run.id, 'could not start: ' + (err as Error).message)
@@ -185,6 +198,7 @@ router.post('/terminal/sessions', async (req, res) => {
         console.error('[terminal] project link failed', (err as Error).message)
       }
     }
+    if (desk && newId) noteDeskPane(newId, name)
     const row = (await listSessions()).find((s) => s.name === name)
     const session = row ? maskRow(hidden)(row) : null
     res.status(201).json({ name, session, conversationId: newId ?? resumeId ?? null, runId: run?.id ?? null })

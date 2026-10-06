@@ -72,7 +72,7 @@ const ACTOR = `session:${SID}`
 const PID = 'vk-smoke'
 const WORK = 'vk-smoke-work'
 const TOOLS = [
-  'project_get', 'project_update', 'tab_get', 'tab_add', 'tab_update', 'tab_append', 'tab_move', 'tab_remove', 'tab_item',
+  'projects_list', 'project_create', 'project_get', 'project_update', 'tab_get', 'tab_add', 'tab_update', 'tab_append', 'tab_move', 'tab_remove', 'tab_item',
   'file_pin', 'file_unpin', 'reminder_add', 'reminder_list', 'reminder_cancel', 'automation_save', 'automation_get',
   'automation_remove', 'run_report', 'session_status', 'notify', 'history', 'undo',
 ]
@@ -407,6 +407,42 @@ assert.equal(onPage?.updatedBy, ACTOR)
 assert.equal(doc.project.nextAction, 'verify relink')
 assert.equal(doc.lastEvent?.actor, ACTOR)
 ok(`the REST doc shows the session's tab, createdBy ${ACTOR}`)
+
+// ---------------------------------------------------------- the desk ----
+// A new-project session: nothing bound, it creates the project and then works
+// on it by projectId. thor's launcher is not configured here, so the folder
+// check is skipped the way it is when thor is asleep.
+
+const DESK_SID = '33333333-2222-3333-4444-555555555555'
+const desk = new Client({ name: 'vk-smoke', version: '0.0.0' })
+await desk.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp-desk`), { requestInit: { headers: { 'X-Valkyrie-Session': DESK_SID } } }))
+assert.match(desk.getInstructions() ?? '', /runs Brendon's Valkyrie projects/)
+assert.match(desk.getInstructions() ?? '', /client2/)
+assert.deepEqual((await desk.listTools()).tools.map((t) => t.name).sort(), [...TOOLS].sort())
+await toolFails(desk, 'tab_add', { kind: 'markdown', title: 'x' }, /pass projectId/)
+await toolFails(desk, 'project_create', { name: 'vk desk', area: 'nope', folder: 'personal' }, /area|Invalid/)
+const made = await tool<{ project: { id: string; area: string; exposure: string }; page: string }>(desk, 'project_create', {
+  name: 'vk desk made', area: 'client2', folder: 'personal', summary: 'made by a desk session', nextAction: 'check it',
+})
+assert.equal(made.project.area, 'client2')
+assert.equal(made.project.exposure, 'tailnet')
+assert.equal(made.page, `/projects/${made.project.id}`)
+const listed = await tool<{ id: string }[]>(desk, 'projects_list', {})
+assert.ok(listed.some((p) => p.id === made.project.id))
+await tool(desk, 'tab_add', { projectId: made.project.id, kind: 'checklist', title: 'open', items: ['one'] })
+await tool(desk, 'project_update', { projectId: made.project.id, folder: 'work' })
+const madeDoc = await docOf(made.project.id)
+assert.equal(madeDoc.project.nextAction, 'check it')
+assert.equal(madeDoc.project.targetKey, 'work')
+assert.ok(madeDoc.sessions.some((l) => l.sessionId === DESK_SID && l.linkedVia === 'link'))
+assert.ok(madeDoc.tabs.some((t) => t.title === 'open' && t.createdBy === `session:${DESK_SID}`))
+await toolFails(desk, 'tab_get', { projectId: 'vk-nope', tabId: 'x' }, /no such project/)
+// A bound session reaches another project by naming it.
+await tool(mcp, 'tab_add', { projectId: made.project.id, kind: 'markdown', title: 'from vk smoke' })
+assert.ok((await docOf(made.project.id)).tabs.some((t) => t.title === 'from vk smoke'))
+assert.equal((await rest('POST', '/mcp-desk', INIT, { Accept: 'application/json, text/event-stream', Origin: 'http://example.com' })).status, 403)
+await desk.close()
+ok('the desk creates a project, links itself, fills it by projectId; a bound session can name another project')
 
 await mcp.close()
 server.closeAllConnections()
