@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquare, Pencil, Play, Plus, SquareTerminal, X } from 'lucide-react'
+import { FileText, MessageSquare, Pencil, Play, Plus, SquareTerminal, X } from 'lucide-react'
 import {
   apiErrorText, fetchSessionList, fetchTermSessions, killTermSession, termLabel, termPath,
   type TermSession, type WorkSession,
@@ -20,7 +20,8 @@ import { LinksTab } from './LinksTab'
 import { MarkdownTab } from './MarkdownTab'
 import { ProjectEditSheet } from './ProjectEditSheet'
 import { RemindersTab } from './RemindersTab'
-import { SessionsTab } from './SessionsTab'
+import { SessionsPanel } from './SessionsPanel'
+import { SidePanel } from './SidePanel'
 import { BTN_ACCENT, BTN_GHOST, BTN_TEXT } from './Sheet'
 import { useProjectLive } from './useProjectLive'
 import { useProjectTerm, type ProjectTermState } from './useProjectTerm'
@@ -358,32 +359,33 @@ export function ProjectPage({ projectId }: { projectId: string }) {
 
   const customTabs = [...d.tabs].sort((a, b) => a.sortOrder - b.sortOrder)
   const pending = d.reminders.filter((r) => r.state === 'pending').length
+  // Sessions and files are the side columns now, not tabs.
   const tabs: { id: string; label: string; count?: number }[] = [
-    { id: 'sessions', label: 'sessions', count: liveCount },
     ...customTabs.map((t) => ({ id: t.id, label: t.title })),
-    { id: 'files', label: 'files', count: d.files.length },
     { id: 'automations', label: 'agents', count: d.automations.length },
     { id: 'reminders', label: 'reminders', count: pending },
     { id: 'activity', label: 'activity' },
   ]
-  const active = tabs.find((t) => t.id === (params.get('tab') ?? 'sessions')) ?? tabs[0]
+  const active = tabs.find((t) => t.id === params.get('tab')) ?? tabs[0]
   const custom = customTabs.find((t) => t.id === active.id) ?? null
+  // Picking a tab also closes a session shown in the middle column.
   const setTab = (id: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      if (id === 'sessions') next.delete('tab')
+      if (id === tabs[0].id) next.delete('tab')
       else next.set('tab', id)
+      next.delete('term')
       return next
     }, { replace: true })
   }
   const tabProps: ProjectTabProps = { projectId, doc: d, term }
 
-  // The pane takes half the page only while a session is open in it. Empty, it
-  // was a screen-tall box saying "open a session".
-  const split = term.embedded && term.selected !== null
+  // A session opened on a desktop takes the middle column; the tabs come back
+  // when it is closed or a tab is picked.
+  const showTerm = term.embedded && term.selected !== null
 
   return (
-    <div className={split ? 'space-y-4' : 'mx-auto max-w-6xl space-y-4'}>
+    <div className="mx-auto max-w-[1700px] space-y-4">
       <header className="space-y-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
           <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
@@ -440,60 +442,98 @@ export function ProjectPage({ projectId }: { projectId: string }) {
         )}
       </header>
 
-      {/* One swipeable row on a phone (wrapped, it took three); wrapped on wider screens. */}
-      <nav className="flex items-center gap-x-5 overflow-x-auto border-b border-[var(--color-border)] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`${TAB_CLS} ${active.id === t.id ? TAB_ON : TAB_OFF}`}
-          >
-            <span className="inline-block max-w-[12rem] truncate align-bottom">{t.label}</span>
-            {t.count ? <span className="ml-1.5 text-[var(--color-text-faint)]">{t.count}</span> : null}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setAddingTab(true)}
-          aria-label="Add a tab"
-          title="Add a notes, checklist or links tab"
-          className={`${TAB_CLS} ${TAB_OFF}`}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+        <SidePanel
+          id="sessions"
+          title="sessions"
+          count={liveCount}
+          icon={<SquareTerminal size={14} />}
+          width="lg:w-72"
+          actions={(
+            <button
+              type="button"
+              disabled={term.busy}
+              onClick={() => void term.start()}
+              title="New session in this project"
+              aria-label="New session"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-40"
+            >
+              <Plus size={14} />
+            </button>
+          )}
         >
-          <Plus size={12} />
-        </button>
-      </nav>
+          <SessionsPanel
+            projectId={projectId}
+            doc={d}
+            term={term}
+            rows={rows}
+            terms={terms.data ?? NO_TERMS}
+            titles={titles}
+          />
+        </SidePanel>
 
-      <div className={split ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] lg:gap-6' : ''}>
-        <div className="min-w-0">
-          {active.id === 'sessions' && <SessionsTab {...tabProps} />}
-          {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
-          {custom?.kind === 'checklist' && <ChecklistTab key={custom.id} {...tabProps} tab={custom} />}
-          {custom?.kind === 'links' && <LinksTab key={custom.id} {...tabProps} tab={custom} />}
-          {active.id === 'files' && <FilesTab {...tabProps} />}
-          {active.id === 'automations' && <AutomationsTab {...tabProps} />}
-          {active.id === 'reminders' && <RemindersTab {...tabProps} />}
-          {active.id === 'activity' && <ActivityTab {...tabProps} />}
-        </div>
+        <main className="min-w-0 flex-1 space-y-4">
+          <nav className="flex items-center gap-x-5 overflow-x-auto border-b border-[var(--color-border)] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`${TAB_CLS} ${!showTerm && active.id === t.id ? TAB_ON : TAB_OFF}`}
+              >
+                <span className="inline-block max-w-[12rem] truncate align-bottom">{t.label}</span>
+                {t.count ? <span className="ml-1.5 text-[var(--color-text-faint)]">{t.count}</span> : null}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setAddingTab(true)}
+              aria-label="Add a tab"
+              title="Add a notes, checklist or links tab"
+              className={`${TAB_CLS} ${TAB_OFF}`}
+            >
+              <Plus size={12} />
+            </button>
+          </nav>
 
-        {split && term.selected && (
-          <aside
-            ref={paneRef}
-            className="mt-4 flex h-[calc(100dvh-14rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)] lg:sticky lg:top-0 lg:mt-0"
-          >
-            <SelectedTerm
-              key={term.selected}
-              name={term.selected}
-              term={term}
-              terms={terms.data ?? NO_TERMS}
-              settled={terms.isFetched && !terms.isFetching}
-              titles={titles}
-              boardIds={boardIds}
-              doc={d}
-              back={back}
-            />
-          </aside>
-        )}
+          {showTerm && term.selected ? (
+            <section
+              ref={paneRef}
+              className="flex h-[calc(100dvh-15rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)]"
+            >
+              <SelectedTerm
+                key={term.selected}
+                name={term.selected}
+                term={term}
+                terms={terms.data ?? NO_TERMS}
+                settled={terms.isFetched && !terms.isFetching}
+                titles={titles}
+                boardIds={boardIds}
+                doc={d}
+                back={back}
+              />
+            </section>
+          ) : (
+            <div className="min-w-0">
+              {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
+              {custom?.kind === 'checklist' && <ChecklistTab key={custom.id} {...tabProps} tab={custom} />}
+              {custom?.kind === 'links' && <LinksTab key={custom.id} {...tabProps} tab={custom} />}
+              {active.id === 'automations' && <AutomationsTab {...tabProps} />}
+              {active.id === 'reminders' && <RemindersTab {...tabProps} />}
+              {active.id === 'activity' && <ActivityTab {...tabProps} />}
+            </div>
+          )}
+        </main>
+
+        <SidePanel
+          id="files"
+          title="files"
+          count={d.files.length}
+          icon={<FileText size={14} />}
+          width="lg:w-80"
+        >
+          <FilesTab {...tabProps} compact />
+        </SidePanel>
       </div>
 
       {editing && <ProjectEditSheet project={p} onClose={() => setEditing(false)} />}

@@ -76,8 +76,8 @@ export function useProjectTerm(
       rows = Math.floor(box.clientHeight / (13 * CELL_H))
     } else if (embedded) {
       // The pane mounts only once a session is open in it: guess its box from
-      // the split it is about to take (a bit over half the page).
-      cols = Math.floor((window.innerWidth * 0.52) / (13 * CELL_W))
+      // the middle column it is about to take, between the two side columns.
+      cols = Math.floor(Math.max(480, window.innerWidth - 720) / (13 * CELL_W))
       rows = Math.floor((window.innerHeight - 260) / (13 * CELL_H))
     } else {
       // The pinned phone terminal loses about 120px to its header and key bar.

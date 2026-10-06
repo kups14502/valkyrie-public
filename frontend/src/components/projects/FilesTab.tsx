@@ -34,6 +34,84 @@ const whereTo = (href: string): string => {
 // argument. The trailing space lets the next word be typed straight after it.
 const forTerminal = (relPath: string): string => (relPath.includes(' ') ? `"${relPath}" ` : `${relPath} `)
 
+// The narrow form for the files column beside the tabs: label and path on two
+// lines, actions as icons that show on hover. The label itself does the most
+// useful thing the file allows: view, open, or copy the path.
+const ICON = 'inline-flex h-8 w-7 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-30'
+
+function CompactFileRow({ projectId, file, term, onView }: {
+  projectId: string
+  file: FileRef
+  term: ProjectTerm
+  onView: (f: FileRef) => void
+}) {
+  const qc = useQueryClient()
+  const [copied, setCopied] = useState(false)
+  const [armed, setArmed] = useState(false)
+  const unpin = useMutation({
+    mutationFn: () => unpinProjFile(projectId, file.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROJ_KEYS.doc(projectId) })
+      void qc.invalidateQueries({ queryKey: PROJ_KEYS.events(projectId) })
+    },
+  })
+  const href = file.kind === 'url' && file.url ? safeHref(file.url) : null
+  const Icon = file.kind === 'doc' ? FileText : file.kind === 'url' ? LinkIcon : File
+  const sub = file.kind === 'path' ? file.relPath ?? '' : file.kind === 'url' ? (href ? whereTo(href) : '[blocked link]') : 'doc'
+  const viewable = (file.kind === 'doc' || file.kind === 'path') && file.hasContent
+
+  const copy = async () => {
+    if (!file.relPath) return
+    if (await copyText(file.relPath)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+  const primary = () => {
+    if (viewable) onView(file)
+    else if (href && !href.startsWith('/')) window.open(href, '_blank', 'noopener,noreferrer')
+    else if (href) window.location.assign(href)
+    else void copy()
+  }
+
+  return (
+    <li className={`group flex items-start gap-2 py-1.5${unpin.isPending ? ' opacity-40' : ''}`}>
+      <Icon size={13} className="mt-0.5 shrink-0 text-[var(--color-text-faint)]" />
+      <button
+        type="button"
+        onClick={primary}
+        title={[file.note, viewable ? 'View it' : href ? 'Open it' : 'Copy the path'].filter(Boolean).join('\n')}
+        className="min-w-0 flex-1 text-left"
+      >
+        <span className="block truncate text-[13px] text-[var(--color-text)]">{copied ? 'path copied' : file.label}</span>
+        <span className="block truncate font-mono text-[10px] text-[var(--color-text-faint)]">{sub}</span>
+      </button>
+      <div className="flex shrink-0 items-center lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
+        {file.kind === 'path' && term.canSend && file.relPath && (
+          <button type="button" onClick={() => term.send(forTerminal(file.relPath ?? ''))} title="Type the path into the open session" aria-label="Send to the session" className={ICON}>
+            <Send size={12} />
+          </button>
+        )}
+        {file.kind === 'path' && (
+          <button type="button" onClick={() => void copy()} title="Copy the path" aria-label="Copy the path" className={ICON}>
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={unpin.isPending}
+          onClick={() => { if (armed) { setArmed(false); unpin.mutate() } else { setArmed(true); setTimeout(() => setArmed(false), 4000) } }}
+          title={armed ? 'Click again to unpin it' : 'Unpin it. The activity tab can undo it.'}
+          aria-label="Unpin"
+          className={`${ICON} ${armed ? 'text-[var(--color-danger)]' : 'hover:text-[var(--color-danger)]'}`}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </li>
+  )
+}
+
 function FileRow({ projectId, file, term, onView }: {
   projectId: string
   file: FileRef
@@ -318,10 +396,41 @@ function AddFileSheet({ projectId, allowSnapshots, onClose }: { projectId: strin
   )
 }
 
-export function FilesTab({ projectId, doc, term }: ProjectTabProps) {
+export function FilesTab({ projectId, doc, term, compact = false }: ProjectTabProps & { compact?: boolean }) {
   const [viewing, setViewing] = useState<FileRef | null>(null)
   const [adding, setAdding] = useState(false)
   const files = doc.files
+  const sheets = (
+    <>
+      {viewing && <FileViewer projectId={projectId} file={viewing} onClose={() => setViewing(null)} />}
+      {adding && (
+        <AddFileSheet projectId={projectId} allowSnapshots={doc.project.allowSnapshots} onClose={() => setAdding(false)} />
+      )}
+    </>
+  )
+
+  if (compact) {
+    return (
+      <div>
+        {files.length === 0 ? (
+          <div className="py-2 text-[11px] text-[var(--color-text-faint)]">Nothing pinned yet. Ask a session to pin the key files.</div>
+        ) : (
+          <ul>
+            {files.map((f) => <CompactFileRow key={f.id} projectId={projectId} file={f} term={term} onView={setViewing} />)}
+          </ul>
+        )}
+        <button
+          type="button"
+          disabled={files.length >= LIMITS.filesPerProject}
+          onClick={() => setAdding(true)}
+          className={`mt-1 ${BTN_TEXT}`}
+        >
+          <Plus size={11} /> pin a file
+        </button>
+        {sheets}
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -353,10 +462,7 @@ export function FilesTab({ projectId, doc, term }: ProjectTabProps) {
         Sessions pin files with the valkyrie tools; ask one to refresh the pinned files.
       </div>
 
-      {viewing && <FileViewer projectId={projectId} file={viewing} onClose={() => setViewing(null)} />}
-      {adding && (
-        <AddFileSheet projectId={projectId} allowSnapshots={doc.project.allowSnapshots} onClose={() => setAdding(false)} />
-      )}
+      {sheets}
     </div>
   )
 }
