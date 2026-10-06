@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import helmet from 'helmet'
 import { requireAuth } from './middleware/auth.js'
+import { hostGuard, isAllowedOrigin } from './middleware/origin.js'
 import authRoute from './routes/auth.js'
 import updatesRoute from './routes/updates.js'
 import systemRoute from './routes/system.js'
@@ -30,6 +31,8 @@ import calendarRoute from './routes/calendar.js'
 import mealsRoute from './routes/meals.js'
 import supplementsRoute from './routes/supplements.js'
 import pushRoute from './routes/push.js'
+import projRoute from './routes/proj.js'
+import mcpRoute from './routes/mcp.js'
 import { startAlerts } from './alerts.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -59,38 +62,14 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }))
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []
-// The dedicated Tauri apps run the web UI from a tauri:// (or tauri.localhost)
-// origin — allow those so their API calls aren't CORS-blocked.
-const TAURI_ORIGINS = new Set(['tauri://localhost', 'https://tauri.localhost', 'http://tauri.localhost'])
-// Origins that reach us over the tailnet (the app served from this box on the
-// tailscale interface, or via `tailscale serve` at *.ts.net). The socket-level
-// tailnet/loopback check in requireAuth is what actually authorizes them; this
-// only keeps the browser's CORS preflight from rejecting the origin header.
-const isTailnetOrigin = (origin: string) => {
-  try {
-    const host = new URL(origin).hostname
-    return host === 'odin' || host.endsWith('.ts.net')
-      || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)
-  } catch {
-    return false
-  }
-}
-const isAllowedOrigin = (origin: string) => {
-  if (allowedOrigins.includes(origin)) return true
-  if (TAURI_ORIGINS.has(origin)) return true
-  if (/^https:\/\/[a-z0-9-]+\.master-control-72u\.pages\.dev$/i.test(origin)) return true
-  if (isTailnetOrigin(origin)) return true
-  return false
-}
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, true)
-    if (allowedOrigins.length === 0 || isAllowedOrigin(origin)) return callback(null, true)
-    console.warn('[cors] blocked origin', { origin })
-    return callback(new Error(`Origin not allowed: ${origin}`))
-  },
-  credentials: true,
+// Ahead of everything under /api, preflights included. The lists and the
+// reasons are in middleware/origin.ts, shared with the terminal websocket.
+app.use('/api', hostGuard)
+app.use(cors((req, callback) => {
+  const origin = req.headers.origin
+  if (!origin || isAllowedOrigin(origin, req)) return callback(null, { origin: true, credentials: true })
+  console.warn('[cors] blocked origin', { origin })
+  return callback(new Error(`Origin not allowed: ${origin}`))
 }))
 // 1mb everywhere, except the endpoints that carry a photo: a meal snapshot is
 // a few megabytes of base64 and the global limit would 413 it before the route
@@ -144,6 +123,8 @@ app.use('/api', calendarRoute)
 app.use('/api', mealsRoute)
 app.use('/api', supplementsRoute)
 app.use('/api', pushRoute)
+app.use('/api', projRoute)
+app.use('/api', mcpRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit

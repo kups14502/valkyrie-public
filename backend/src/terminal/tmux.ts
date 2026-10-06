@@ -162,6 +162,9 @@ const FORMAT = [
   '#{pane_dead}',
   '#{window_width}x#{window_height}',
   '#{pane_dead_status}',
+  // Last on purpose: every index above keeps its meaning, and a session made
+  // before projects existed simply reads back an empty field here.
+  '#{@vk_project}',
 ].join(SEP)
 
 export type TermSession = {
@@ -191,6 +194,8 @@ export type TermSession = {
   deadStatus: number | null
   deadText: string
   size: string
+  // The Valkyrie project this pane was opened for, '' for none.
+  projectId: string
 }
 
 // The pane's last few printed lines, minus tmux's own dead-pane line. Only ever
@@ -243,6 +248,7 @@ export async function listSessions(): Promise<TermSession[]> {
         deadStatus: dead && Number.isFinite(status) ? status : null,
         deadText: '',
         size: f[10] || '',
+        projectId: f[12] || '',
       }
     })
     .filter((s) => SESSION_NAME_RE.test(s.name))
@@ -332,6 +338,10 @@ export type CreateOpts = {
   label: string
   cols?: number
   rows?: number
+  // A project key and a run id minted by the route, both regex-checked again
+  // in remoteCommand before they reach the ssh line.
+  projectId?: string
+  runId?: string
 }
 
 async function setOpt(name: string, option: string, value: string): Promise<void> {
@@ -348,7 +358,12 @@ async function setOpt(name: string, option: string, value: string): Promise<void
 // line (PowerShell is thor's sshd default shell), and every variable part of
 // it has already been matched against a regex that admits only [a-z0-9-] or a
 // uuid, so there is nothing here for a shell on either side to interpret.
-export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId'>): string {
+//
+// Project arguments go after everything else, so a launch without a project is
+// the same string, byte for byte, that thor has always been sent. A thor
+// script that predates -Project would fail parameter binding on it, which is
+// why thor is updated first.
+export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId'>): string {
   const parts = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', REMOTE_SCRIPT, '-Mode', o.mode]
   if (o.mode === 'resume') {
     if (!o.resumeId || !UUID_RE.test(o.resumeId)) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
@@ -360,6 +375,21 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
     // thor that still runs the older script ignores the argument rather than
     // failing: the parameter has always existed there for resume.
     if (o.mode === 'new' && o.newId && UUID_RE.test(o.newId)) parts.push('-SessionId', o.newId)
+  }
+  if (o.projectId) {
+    if (!TARGET_RE.test(o.projectId)) throw Object.assign(new Error('project must be a project id'), { status: 400 })
+    // Thor names the session's MCP config after the conversation id, and the
+    // project link is keyed on it, so a project session never starts without one.
+    if (o.mode === 'new' && !(o.newId && UUID_RE.test(o.newId))) {
+      throw Object.assign(new Error('a project session needs a minted id'), { status: 400 })
+    }
+    parts.push('-Project', o.projectId)
+  }
+  if (o.runId) {
+    if (!o.projectId || o.mode !== 'new' || !UUID_RE.test(o.runId)) {
+      throw Object.assign(new Error('a run needs a project, mode new and a run id'), { status: 400 })
+    }
+    parts.push('-Run', o.runId)
   }
   return parts.join(' ')
 }
@@ -453,6 +483,7 @@ export async function createSession(o: CreateOpts): Promise<string> {
     setOpt(name, '@vk_mode', o.mode),
     setOpt(name, '@vk_target', o.mode === 'resume' ? (o.resumeId ?? '') : (o.target ?? '')),
     setOpt(name, '@vk_sid', o.mode === 'resume' ? (o.resumeId ?? '') : (o.mode === 'new' ? (o.newId ?? '') : '')),
+    setOpt(name, '@vk_project', o.projectId ?? ''),
   ])
 
   return name

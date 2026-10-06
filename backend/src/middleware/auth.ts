@@ -43,15 +43,21 @@ const getKey = (header: jwt.JwtHeader): Promise<string> =>
     })
   })
 
+// Cloudflare always sets these and a client cannot remove them, so their
+// absence means the request came over the tailnet or loopback. A client CAN
+// add them, which only ever costs it the socket-address trust below.
+export function viaCloudflare(req: Pick<IncomingMessage, 'headers'>): boolean {
+  return Boolean(req.headers['cf-ray'] || req.headers['cf-connecting-ip'])
+}
+
 // A request that originated on this host (dev, or a local reverse proxy like
 // `tailscale serve`), not one Cloudflare forwarded. Decided on the actual
 // socket peer address only: X-Forwarded-For and req.ip are client-controlled
 // under `trust proxy` and must never grant access.
 export function isLoopbackReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
   const socketIP = req.socket.remoteAddress || ''
-  const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
   const loopbacks = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
-  return loopbacks.includes(socketIP) && !fromCloudflare
+  return loopbacks.includes(socketIP) && !viaCloudflare(req)
 }
 
 // A request from a Tailscale peer: the socket peer address is in the tailnet
@@ -63,8 +69,7 @@ const TAILNET_V4 = /^(?:::ffff:)?100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./
 const TAILNET_V6 = /^fd7a:115c:a1e0:/i
 export function isTailnetReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
   const socketIP = req.socket.remoteAddress || ''
-  const fromCloudflare = req.headers['cf-ray'] || req.headers['cf-connecting-ip']
-  return !fromCloudflare && (TAILNET_V4.test(socketIP) || TAILNET_V6.test(socketIP))
+  return !viaCloudflare(req) && (TAILNET_V4.test(socketIP) || TAILNET_V6.test(socketIP))
 }
 
 // Verify a Cloudflare Access JWT (RS256, JWKS-backed). Returns payload or null.

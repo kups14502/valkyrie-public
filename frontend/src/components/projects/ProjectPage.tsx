@@ -1,0 +1,501 @@
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { MessageSquare, Pencil, Play, Plus, SquareTerminal, X } from 'lucide-react'
+import {
+  apiErrorText, fetchSessionList, fetchTermSessions, killTermSession, termLabel, termPath,
+  type TermSession, type WorkSession,
+} from '../../lib/api'
+import { relIso } from '../../lib/term'
+import {
+  PROJ_KEYS, actorLabel, fetchProjDoc, undoProjEvent,
+  type ProjectDoc, type ProjectEvent, type ProjectTabProps,
+} from '../../lib/projectsApi'
+import { ActivityTab } from './ActivityTab'
+import { AddTabSheet } from './AddTabSheet'
+import { AutomationsTab } from './AutomationsTab'
+import { ChecklistTab } from './ChecklistTab'
+import { FilesTab } from './FilesTab'
+import { LinksTab } from './LinksTab'
+import { MarkdownTab } from './MarkdownTab'
+import { ProjectEditSheet } from './ProjectEditSheet'
+import { RemindersTab } from './RemindersTab'
+import { SessionsTab } from './SessionsTab'
+import { BTN_ACCENT, BTN_GHOST, BTN_TEXT } from './Sheet'
+import { useProjectLive } from './useProjectLive'
+import { useProjectTerm, type ProjectTermState } from './useProjectTerm'
+
+// The xterm chunk is the heaviest thing on the page and the phone never shows
+// a pane here, so it loads only when the desktop column first needs it.
+const TermPane = lazy(() => import('../TermPane'))
+
+const WEEK_MS = 7 * 86_400_000
+const NO_ROWS: WorkSession[] = []
+const NO_TERMS: TermSession[] = []
+
+const TAB_CLS = 'shrink-0 whitespace-nowrap border px-4 py-2.5 text-xs uppercase tracking-[0.14em] transition-colors'
+const TAB_ON = 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.12)] text-[var(--color-accent)]'
+const TAB_OFF = 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/40'
+const LOADING = (
+  <div className="py-16 text-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">&gt; loading<span className="cursor-blink">_</span></div>
+)
+
+const httpStatus = (e: unknown): number | null =>
+  (e as { response?: { status?: number } } | null)?.response?.status ?? null
+
+const ago = (iso: string | null) => {
+  const r = relIso(iso)
+  return r === 'now' ? 'just now' : r ? `${r} ago` : ''
+}
+
+const activeWithin = (iso: string | null, ms: number) => {
+  const t = iso ? Date.parse(iso) : NaN
+  return Number.isFinite(t) && Date.now() - t < ms
+}
+
+// The conversation a pane is running: a new pane is handed its id up front, a
+// resume has always kept it in target.
+const paneConversation = (t: TermSession) => t.sessionId || (t.mode === 'resume' ? t.target : '')
+
+type Primary = { kind: 'answer' | 'continue' | 'resume' | 'new'; label: string; run: () => void }
+
+function Toast({ projectId, event, titles, onClose }: {
+  projectId: string
+  event: ProjectEvent
+  titles: Map<string, string>
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [force, setForce] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  // Restarted by every answer, so a 409 that asks for "undo anyway" does not
+  // vanish before it can be pressed.
+  useEffect(() => {
+    if (busy) return
+    const t = setTimeout(onClose, 8000)
+    return () => clearTimeout(t)
+  }, [onClose, busy, force, error])
+
+  const undo = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await undoProjEvent(projectId, event.id, force || undefined)
+      void qc.invalidateQueries({ queryKey: PROJ_KEYS.doc(projectId) })
+      void qc.invalidateQueries({ queryKey: PROJ_KEYS.events(projectId) })
+      void qc.invalidateQueries({ queryKey: PROJ_KEYS.list })
+      onClose()
+    } catch (e) {
+      if (httpStatus(e) === 409 && !force) setForce(true)
+      setError(apiErrorText(e, 'could not undo that'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-x-3 z-50 sm:left-auto sm:right-4 sm:w-96"
+      // fixed is measured from the viewport, not from body's safe-area padding,
+      // so a plain bottom-3 sits under the home indicator in the iPhone PWA.
+      style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+    >
+      {/* .panel is unlayered CSS with position: relative, which beats Tailwind's
+          layered `fixed` on the same element, hence the wrapper. */}
+      <div role="status" className="panel p-3 text-xs">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1 break-words text-[var(--color-text)]">
+            <span className="text-[var(--color-accent)]">{actorLabel(event.actor, titles)}</span> {event.summary}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Dismiss"
+            className="-m-1.5 shrink-0 p-1.5 text-[var(--color-text-faint)] transition hover:text-[var(--color-text)]"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        {(event.undoable || error) && (
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            {event.undoable && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void undo()}
+                className="-mx-2 inline-flex min-h-9 items-center px-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] transition hover:text-[var(--color-text)] disabled:opacity-40"
+              >
+                {busy ? 'undoing' : force ? 'undo anyway' : 'undo'}
+              </button>
+            )}
+            {error && <span className="min-w-0 text-[11px] text-[var(--color-danger)]">{error}</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SelectedTerm({ name, term, terms, settled, titles, boardIds, doc, back }: {
+  name: string
+  term: ProjectTermState
+  terms: TermSession[]
+  settled: boolean
+  titles: Map<string, string>
+  boardIds: Set<string>
+  doc: ProjectDoc
+  back: string
+}) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [stopArmed, setStopArmed] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [stopErr, setStopErr] = useState('')
+
+  useEffect(() => {
+    if (!stopArmed) return
+    const t = setTimeout(() => setStopArmed(false), 4000)
+    return () => clearTimeout(t)
+  }, [stopArmed])
+
+  const session = terms.find((t) => t.name === name) ?? null
+  // Only once the list has settled: while a refetch is in flight, a pane that
+  // is missing from the cached list may simply be newer than it.
+  const gone = !session && settled
+  // A pane that has left the list no longer says what it was running; the
+  // project's own link row for that tmux name still does.
+  const link = doc.sessions.find((l) => l.tmuxName === name)
+  const convo = (session ? paneConversation(session) : '') || link?.sessionId || ''
+  // The link is written when the pane opens, before Claude runs, so a launch
+  // that died early leaves an id no transcript has. Terminal.tsx's reopen asks
+  // the same question: did the board ever see it, or was it a resume.
+  const resumable = !!convo && (boardIds.has(convo) || session?.mode === 'resume' || link?.mode === 'resume')
+  const label = session ? termLabel(session, titles) : (convo && titles.get(convo)) || name
+  const dot = term.conn === 'live'
+    ? 'var(--color-accent)'
+    : term.conn === 'connecting' ? 'var(--color-accent-2)' : 'var(--color-text-faint)'
+
+  const stop = async () => {
+    if (!stopArmed) { setStopArmed(true); return }
+    setStopArmed(false)
+    setStopping(true)
+    setStopErr('')
+    try {
+      await killTermSession(name)
+    } catch (e) {
+      // 404: it ended on its own between the last poll and the click.
+      if (httpStatus(e) !== 404) setStopErr(apiErrorText(e, 'could not stop it'))
+    }
+    setStopping(false)
+    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
+  }
+
+  return (
+    <>
+      <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 py-1">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: dot, boxShadow: `0 0 6px ${dot}` }} />
+        <span className="min-w-0 flex-1 truncate text-[11px] uppercase tracking-[0.12em] text-[var(--color-accent)]" title={label}>
+          {label}
+        </span>
+        {session?.dead && (
+          <span className="shrink-0 text-[9px] uppercase tracking-[0.14em] text-[var(--color-danger)]">ended</span>
+        )}
+        <div className="flex shrink-0 items-center">
+          {!gone && (
+            <button type="button" onClick={() => navigate(termPath(name, back))} className={BTN_TEXT} title="Open it in the full-screen terminal">
+              full screen
+            </button>
+          )}
+          {!gone && (
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={() => void stop()}
+              title={stopArmed ? 'Click again to stop it' : 'Close this terminal. A Claude session ends on thor; the conversation stays resumable.'}
+              className={`${BTN_TEXT} ${stopArmed ? 'text-[var(--color-danger)]' : 'hover:text-[var(--color-danger)]'}`}
+            >
+              {stopping ? 'stopping' : stopArmed ? 'stop?' : 'stop'}
+            </button>
+          )}
+          <button type="button" onClick={term.deselect} className={BTN_TEXT} title="Close the pane. The session keeps running.">
+            close
+          </button>
+        </div>
+      </div>
+      {stopErr && <div className="shrink-0 px-3 py-1.5 text-[11px] text-[var(--color-danger)]">{stopErr}</div>}
+      {gone ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-faint)]">this session ended</div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {resumable ? (
+              <button
+                type="button"
+                disabled={term.busy}
+                onClick={() => void term.resume(convo, titles.get(convo))}
+                className={BTN_ACCENT}
+              >
+                <Play size={12} /> {term.busy ? 'opening' : 'resume'}
+              </button>
+            ) : (
+              <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_ACCENT}>
+                <Plus size={12} /> {term.busy ? 'opening' : 'new session'}
+              </button>
+            )}
+            <button type="button" onClick={term.deselect} className={BTN_GHOST}>close</button>
+          </div>
+        </div>
+      ) : (
+        <Suspense fallback={LOADING}>
+          <TermPane key={name} name={name} focused onConn={term.setConn} register={term.setApi} className="min-h-0 flex-1" />
+        </Suspense>
+      )}
+    </>
+  )
+}
+
+export function ProjectPage({ projectId }: { projectId: string }) {
+  const [params, setParams] = useSearchParams()
+  const paneRef = useRef<HTMLElement | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [addingTab, setAddingTab] = useState(false)
+
+  const doc = useQuery({
+    queryKey: PROJ_KEYS.doc(projectId),
+    queryFn: () => fetchProjDoc(projectId),
+    staleTime: 5_000,
+    refetchInterval: 60_000,
+  })
+  useProjectLive(projectId, doc.data?.project.rev)
+  // Both are the board's own cache entries, shared with SessionBoard below.
+  const board = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
+  const terms = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
+  const term = useProjectTerm(projectId, doc.data?.project, paneRef)
+
+  const rows = board.data?.installed ? board.data.sessions : NO_ROWS
+  const titles = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of rows) if (s.title) m.set(s.sessionId, s.title)
+    return m
+  }, [rows])
+  // Every conversation the board knows, titled or not: proof one ever ran.
+  const boardIds = useMemo(() => new Set(rows.map((r) => r.sessionId)), [rows])
+
+  // The toast is for changes a session made while the page was open, so the
+  // event the page loaded with only sets the baseline.
+  const [seenEvent, setSeenEvent] = useState<number | null>(null)
+  const [toast, setToast] = useState<ProjectEvent | null>(null)
+  const hideToast = useCallback(() => setToast(null), [])
+  const lastEvent = doc.data?.lastEvent ?? null
+  if (doc.data && seenEvent === null) {
+    setSeenEvent(lastEvent?.id ?? 0)
+  } else if (lastEvent && seenEvent !== null && lastEvent.id > seenEvent) {
+    setSeenEvent(lastEvent.id)
+    if (lastEvent.actor.startsWith('session:')) setToast(lastEvent)
+  }
+
+  const d = doc.data
+  if (!d) {
+    if (!doc.isError) return LOADING
+    return (
+      <div className="panel mx-auto max-w-md p-6 text-center">
+        <div className="text-sm text-[var(--color-danger)]">
+          {httpStatus(doc.error) === 404 ? 'no such project' : apiErrorText(doc.error, 'project unavailable')}
+        </div>
+        <Link to="/projects" className="mt-3 inline-block text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]">
+          &lt; all projects
+        </Link>
+      </div>
+    )
+  }
+
+  const back = `/projects/${projectId}`
+  const p = d.project
+  const linkedIds = new Set(d.sessions.map((s) => s.sessionId))
+  const linked = rows.filter((s) => linkedIds.has(s.sessionId))
+  const liveCount = linked.filter((s) => s.live).length
+  const askingRows = linked.filter((s) => s.activity === 'asking')
+  const panes = (terms.data ?? NO_TERMS).filter((t) => !t.dead)
+  const paneFor = new Map<string, string>()
+  for (const t of panes) {
+    const c = paneConversation(t)
+    if (c) paneFor.set(c, t.name)
+  }
+
+  // Exactly one primary: the most useful next step, in order of how much it
+  // costs Brendon to be without it.
+  let primary: Primary
+  const answering = askingRows.find((s) => paneFor.has(s.sessionId))
+  // Opened for this project, or running one of its conversations: a session
+  // resumed from the plain board and linked afterwards has no project on its
+  // tmux session, and it is still the one Brendon is continuing.
+  const own = panes
+    .filter((t) => (t.projectId !== '' && t.projectId === projectId) || linkedIds.has(paneConversation(t)))
+    .sort((a, b) => (b.activityAt || b.createdAt) - (a.activityAt || a.createdAt))[0]
+  // Not a live one and not one in a pane: that is running in a window on thor
+  // or in tmux (the board marks a pane live only once Claude registers), and
+  // resuming it here would put a second Claude on the same transcript.
+  const resumable = linked
+    .filter((s) => !s.done && !s.live && !paneFor.has(s.sessionId) && activeWithin(s.lastActivityUtc, WEEK_MS))
+    .sort((a, b) => (b.lastActivityUtc ?? '').localeCompare(a.lastActivityUtc ?? ''))[0]
+  if (answering) {
+    const pane = paneFor.get(answering.sessionId) ?? ''
+    primary = { kind: 'answer', label: 'answer', run: () => term.open(pane) }
+  } else if (own) {
+    primary = { kind: 'continue', label: 'continue', run: () => term.open(own.name) }
+  } else if (resumable) {
+    primary = { kind: 'resume', label: `resume ${resumable.title}`, run: () => void term.resume(resumable.sessionId, resumable.title) }
+  } else {
+    primary = { kind: 'new', label: 'new session', run: () => void term.start() }
+  }
+  const PrimaryIcon = primary.kind === 'answer' ? MessageSquare : primary.kind === 'new' ? Plus : primary.kind === 'resume' ? Play : SquareTerminal
+
+  const customTabs = [...d.tabs].sort((a, b) => a.sortOrder - b.sortOrder)
+  const pending = d.reminders.filter((r) => r.state === 'pending').length
+  const tabs: { id: string; label: string; count?: number }[] = [
+    { id: 'sessions', label: 'sessions', count: liveCount },
+    ...customTabs.map((t) => ({ id: t.id, label: t.title })),
+    { id: 'files', label: 'files', count: d.files.length },
+    { id: 'automations', label: 'automations', count: d.automations.length },
+    { id: 'reminders', label: 'reminders', count: pending },
+    { id: 'activity', label: 'activity' },
+  ]
+  const active = tabs.find((t) => t.id === (params.get('tab') ?? 'sessions')) ?? tabs[0]
+  const custom = customTabs.find((t) => t.id === active.id) ?? null
+  const setTab = (id: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (id === 'sessions') next.delete('tab')
+      else next.set('tab', id)
+      return next
+    }, { replace: true })
+  }
+  const tabProps: ProjectTabProps = { projectId, doc: d, term }
+
+  return (
+    <div className={term.embedded ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-6' : ''}>
+      <div className="min-w-0 space-y-6">
+        <div className="space-y-3">
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">
+              <Link to="/projects" className="transition hover:text-[var(--color-accent)]">// project</Link>
+              {' · '}[{p.area}]
+              {p.exposure === 'tailnet' && ' · [tailnet only]'}
+              {p.status !== 'active' && ` · [${p.status}]`}
+            </div>
+            <h1 className="mt-1 break-words text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>
+              {p.name}<span className="cursor-blink">_</span>
+            </h1>
+          </div>
+          {p.nextAction && (
+            <div className="break-words text-sm text-[var(--color-text)]">
+              <span className="text-[var(--color-text-faint)]">next: </span>{p.nextAction}
+            </div>
+          )}
+          {p.summary && <p className="line-clamp-2 text-xs text-[var(--color-text-dim)]">{p.summary}</p>}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+              [{liveCount} live · <span className={askingRows.length > 0 ? 'text-[var(--color-warning)]' : ''}>{askingRows.length} asking</span>]
+            </span>
+            {d.lastEvent && (
+              <span className="text-[11px] text-[var(--color-text-faint)]">
+                changed {ago(d.lastEvent.at)} by {actorLabel(d.lastEvent.actor, titles)}
+              </span>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <button type="button" disabled={term.busy} onClick={primary.run} className={`${BTN_ACCENT} min-w-0 max-w-full`}>
+              <PrimaryIcon size={13} className="shrink-0" />
+              <span className="min-w-0 truncate">{term.busy ? 'opening' : primary.label}</span>
+            </button>
+            <button type="button" onClick={() => setEditing(true)} className={BTN_GHOST}>
+              <Pencil size={12} /> edit
+            </button>
+            {primary.kind !== 'new' && (
+              <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_GHOST} title="Start a new session in this project">
+                <Plus size={12} /> new
+              </button>
+            )}
+          </div>
+          {term.error && (
+            <div className="flex items-start gap-2 border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
+              <span className="min-w-0 flex-1 break-words">{term.error}</span>
+              <button type="button" onClick={term.dismissError} aria-label="Dismiss" className="-m-1 shrink-0 p-1 hover:text-[var(--color-text)]">
+                <X size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="mb-4 flex gap-2 overflow-x-auto">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`${TAB_CLS} ${active.id === t.id ? TAB_ON : TAB_OFF}`}
+              >
+                <span className="inline-block max-w-[14rem] truncate align-bottom">{t.label}</span>
+                {t.count !== undefined && <span className="ml-2 text-[9px] text-[var(--color-text-faint)]">[{t.count}]</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setAddingTab(true)}
+              aria-label="Add a tab"
+              title="Add a notes, checklist or links tab"
+              className={`${TAB_CLS} ${TAB_OFF} px-3`}
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+
+          {active.id === 'sessions' && <SessionsTab {...tabProps} />}
+          {custom?.kind === 'markdown' && <MarkdownTab key={custom.id} {...tabProps} tab={custom} />}
+          {custom?.kind === 'checklist' && <ChecklistTab key={custom.id} {...tabProps} tab={custom} />}
+          {custom?.kind === 'links' && <LinksTab key={custom.id} {...tabProps} tab={custom} />}
+          {active.id === 'files' && <FilesTab {...tabProps} />}
+          {active.id === 'automations' && <AutomationsTab {...tabProps} />}
+          {active.id === 'reminders' && <RemindersTab {...tabProps} />}
+          {active.id === 'activity' && <ActivityTab {...tabProps} />}
+        </div>
+      </div>
+
+      {term.embedded && (
+        <aside
+          ref={paneRef}
+          className="flex h-[calc(100dvh-8rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)] lg:sticky lg:top-0"
+        >
+          {term.selected ? (
+            <SelectedTerm
+              key={term.selected}
+              name={term.selected}
+              term={term}
+              terms={terms.data ?? NO_TERMS}
+              settled={terms.isFetched && !terms.isFetching}
+              titles={titles}
+              boardIds={boardIds}
+              doc={d}
+              back={back}
+            />
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+              <SquareTerminal size={22} className="text-[var(--color-text-faint)]" />
+              <div className="text-[11px] text-[var(--color-text-faint)]">Open a session from the list, or start one here.</div>
+              <button type="button" disabled={term.busy} onClick={() => void term.start()} className={BTN_ACCENT}>
+                <Plus size={13} /> {term.busy ? 'opening' : 'new session'}
+              </button>
+            </div>
+          )}
+        </aside>
+      )}
+
+      {editing && <ProjectEditSheet project={p} onClose={() => setEditing(false)} />}
+      {addingTab && <AddTabSheet projectId={projectId} onClose={() => setAddingTab(false)} />}
+      {toast && <Toast key={toast.id} projectId={projectId} event={toast} titles={titles} onClose={hideToast} />}
+    </div>
+  )
+}

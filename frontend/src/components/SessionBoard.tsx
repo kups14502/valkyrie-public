@@ -100,7 +100,7 @@ const httpStatus = (e: unknown): number | null =>
 const fmtSize = (b: number): string =>
   b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
 
-function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onStop, onDone, onReattach, opening, stopping, busy }: {
+function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onStop, onDone, onReattach, onUnlink, opening, stopping, busy }: {
   s: WorkSession
   remote: boolean
   here: string | null
@@ -113,6 +113,9 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
   onStop: (s: WorkSession) => void
   onDone: (s: WorkSession) => void
   onReattach: (terminal: string) => void
+  // Only on a project's board: takes the conversation off the project and
+  // leaves the session itself alone.
+  onUnlink?: (s: WorkSession) => void
   opening: boolean
   stopping: boolean
   busy: boolean
@@ -242,6 +245,17 @@ function Row({ s, remote, here, inPage, attachedTo, picked, onPick, onOpen, onSt
         >
           {s.done ? <><Undo2 size={12} /> undo</> : <><Check size={12} /> done</>}
         </button>
+        {onUnlink && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onUnlink(s)}
+            title="Take this session off the project. The session and its transcript are untouched."
+            className="inline-flex min-h-9 items-center border border-transparent px-2 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-faint)] transition hover:text-[var(--color-danger)] disabled:opacity-30"
+          >
+            unlink
+          </button>
+        )}
       </div>
     </div>
   )
@@ -402,7 +416,10 @@ function NewSession({ onStarted, inPage, remote }: { onStarted: () => void; inPa
 // while the one just launched sits unselected. POST /terminal/sessions already
 // returns the row, so seeding is exact; if it somehow came back without one,
 // invalidating makes the page refetch and its own guard covers the gap.
-function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession | null }): void {
+// Exported because the project page opens panes outside this board and has the
+// same handoff race.
+// eslint-disable-next-line react-refresh/only-export-components
+export function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession | null }): void {
   if (!r.session) {
     void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
     return
@@ -422,15 +439,18 @@ function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession |
 // personal target read "personal" for its whole life, and only closing and
 // reopening it (as a resume, which passes the row's title) ever picked the real
 // one up.
-function OpenTerminals({ titles }: { titles: Map<string, string> }) {
+function OpenTerminals({ titles, filter, onOpen }: {
+  titles: Map<string, string>
+  filter?: (t: TermSession) => boolean
+  onOpen: (name: string) => void
+}) {
   const qc = useQueryClient()
-  const navigate = useNavigate()
   const [killing, setKilling] = useState<string | null>(null)
   const [all, setAll] = useState(false)
   const q = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
   // Oldest first, not the server's last-activity order: a terminal that printed
   // a line should not jump to the front of a list Brendon is about to tap.
-  const list = [...(q.data ?? [])].sort((a, b) => a.createdAt - b.createdAt)
+  const list = (filter ? (q.data ?? []).filter(filter) : [...(q.data ?? [])]).sort((a, b) => a.createdAt - b.createdAt)
   if (list.length === 0) return null
 
   // A chip is a whole phone width once it carries a real title (measured: 281px
@@ -461,7 +481,7 @@ function OpenTerminals({ titles }: { titles: Map<string, string> }) {
           >
             <button
               type="button"
-              onClick={() => navigate(termPath(s.name))}
+              onClick={() => onOpen(s.name)}
               title={`Reattach to ${label} on ${s.host}`}
               className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[11px] text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
             >
@@ -575,9 +595,27 @@ function AreaHeader({ area, count }: { area: string; count: number }) {
   )
 }
 
-export function SessionBoard() {
+// A project's slice of the board. The project page owns the list of linked
+// conversations; the board only narrows to it, so every action below (resume,
+// stop, done, stop all) is the same code the Sessions tab runs.
+export type SessionScope = {
+  projectId: string
+  sessionIds: ReadonlySet<string>
+  onUnlink?: (sessionId: string) => void
+  emptyText?: string
+}
+
+export function SessionBoard({ scope, onOpenTerminal }: { scope?: SessionScope; onOpenTerminal?: (name: string) => void } = {}) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const scopeProject = scope?.projectId ?? null
+  const scopeIds = scope?.sessionIds ?? null
+  // The desktop project page shows a pane beside the board, so there "open"
+  // selects it instead of leaving for the full-screen terminal.
+  const openTerm = (name: string) => {
+    if (onOpenTerminal) onOpenTerminal(name)
+    else navigate(termPath(name))
+  }
   const [here, setHere] = useState<string | null>(null)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
@@ -626,8 +664,11 @@ export function SessionBoard() {
   // A browser (the phone, above all) cannot open a local terminal and has no
   // use for a tab on thor's screen, so there "open" means the in-page terminal:
   // Claude resumes on thor over SSH and the phone is its screen. The desktop
-  // app can do both, and the choice is the toggle in the header below.
-  const inPage = openMode === 'page'
+  // app can do both, and the choice is the toggle in the header below. A
+  // project's board always opens in the page: only that path hands the session
+  // the project's MCP server, and a tab on thor's screen would leave it unable
+  // to change the page it was opened from.
+  const inPage = scope !== undefined || openMode === 'page'
   const chooseMode = (mode: OpenMode) => {
     setOpenMode(mode)
     try { localStorage.setItem(OPEN_MODE_KEY, mode) } catch { /* private window */ }
@@ -640,9 +681,14 @@ export function SessionBoard() {
       // into thor and nowhere else, which is why it is thor-only here.
       if (s.host !== HOST) return void (await launchSessionOnHost(s.sessionId, '', s.host))
       if (inPage) {
-        const r = await openTermSession({ mode: 'resume', sessionId: s.sessionId, label: s.title })
+        // project rides along so the resumed session gets the project's MCP
+        // server; without it the conversation reopens with no way to edit the page.
+        const r = await openTermSession({
+          mode: 'resume', sessionId: s.sessionId, label: s.title,
+          ...(scopeProject !== null ? { project: scopeProject } : {}),
+        })
         seedTerminal(qc, r)
-        navigate(termPath(r.name))
+        openTerm(r.name)
         return
       }
       if (remote) return openSessionHere(s.sessionId, HOST_IP, s.launchGroup)
@@ -675,9 +721,21 @@ export function SessionBoard() {
   // exact match rather than a guess about folders. Same query key as
   // OpenTerminals, so it is one fetch shared through the cache.
   const terms = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchInterval: 15_000 })
+  // A project's panes are the ones opened for it, plus any pane already
+  // running one of its conversations: a session resumed from the plain board
+  // and linked afterwards carries no project on its tmux session.
+  const termFilter = useMemo(() => {
+    if (scopeProject === null || scopeIds === null) return undefined
+    return (t: TermSession) => (t.projectId !== '' && t.projectId === scopeProject)
+      || scopeIds.has(t.sessionId || (t.mode === 'resume' ? t.target : ''))
+  }, [scopeProject, scopeIds])
+  const scopedTerms = useMemo(
+    () => (termFilter ? (terms.data ?? []).filter(termFilter) : terms.data),
+    [terms.data, termFilter],
+  )
   const attachedTerminals = useMemo(() => {
     const m = new Map<string, string>()
-    for (const t of terms.data ?? []) {
+    for (const t of scopedTerms ?? []) {
       // sessionId covers a terminal opened on a target, which knows its
       // conversation id from the moment it is created; target is where a
       // resume has always kept it.
@@ -685,7 +743,7 @@ export function SessionBoard() {
       if (id && !t.dead) m.set(id, t.name)
     }
     return m
-  }, [terms.data])
+  }, [scopedTerms])
 
   // What the board calls each conversation, for the chips above to borrow.
   const titleById = useMemo(() => {
@@ -697,11 +755,15 @@ export function SessionBoard() {
   // What "stop all" closes besides the session rows. A dead one is a pane tmux
   // is holding open so its last screen can be read, so there is nothing left in
   // it to stop.
-  const liveTerminals = useMemo(() => (terms.data ?? []).filter((t) => !t.dead), [terms.data])
+  const liveTerminals = useMemo(() => (scopedTerms ?? []).filter((t) => !t.dead), [scopedTerms])
 
-  const { live, rest, doneList, desk } = useMemo(() => {
-    const all = q.data?.installed ? q.data.sessions : []
+  const { live, rest, doneList, desk, rowCount } = useMemo(() => {
+    const fetched = q.data?.installed ? q.data.sessions : []
+    // thor only: a project launches there, and the in-page terminal reaches
+    // no other host.
+    const all = scopeIds === null ? fetched : fetched.filter((s) => s.host === HOST && scopeIds.has(s.sessionId))
     return {
+      rowCount: all.length,
       live: all.filter((s) => s.live),
       // "recent" means recent AND still open. Done rows arrive in the payload
       // (undo needs them) but live in their own collapsed section: after the
@@ -720,7 +782,7 @@ export function SessionBoard() {
       // the age window that once hid 11 sessions from the board itself.
       desk: all.filter((s) => !s.live && !s.done && s.host === HOST),
     }
-  }, [q.data])
+  }, [q.data, scopeIds])
 
   if (q.isLoading) return <div className="py-2 text-[11px] text-[var(--color-text-faint)]">reading sessions…</div>
   if (q.data && !q.data.installed) {
@@ -834,10 +896,15 @@ export function SessionBoard() {
   const pickedOpen = pickedRows.filter((s) => !s.done)
   const pickedDone = pickedRows.filter((s) => s.done)
   const allPicked = onScreen.length > 0 && pickedRows.length === onScreen.length
+  // A project whose only session is a pane that has not reached the board yet
+  // (Claude registers a few seconds after start) is not empty: the chip shows it.
+  const termCount = scopedTerms?.length ?? 0
+  const unlink = scope?.onUnlink
   const rowProps = {
     remote, here, inPage, busy,
     onPick: (s: WorkSession, next: boolean) => setPicked((prev) => ({ ...prev, [s.sessionId]: next })),
-    onReattach: (terminal: string) => navigate(termPath(terminal)),
+    onReattach: openTerm,
+    onUnlink: unlink ? (s: WorkSession) => unlink(s.sessionId) : undefined,
     onOpen: (s: WorkSession) => { setOpeningId(s.sessionId); open.mutate(s) },
     onStop: (s: WorkSession) => { setStoppingId(s.sessionId); stop.mutate(s) },
     onDone: (s: WorkSession) => done.mutate(s),
@@ -845,15 +912,16 @@ export function SessionBoard() {
 
   return (
     <div>
-      <OpenTerminals titles={titleById} />
+      <OpenTerminals titles={titleById} filter={termFilter} onOpen={openTerm} />
       <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="text-[11px] text-[var(--color-text-faint)]">
           {live.length > 0 ? `${live.length} running · ` : ''}{rest.length} recent
           {inPage ? ' · opens in the page' : remote && here ? ` · opening on ${here}` : ''}
         </div>
         <div className="flex items-center gap-2">
-        {isTauri() && !isTauriMobile() && (
-          // Desktop only. A browser or the Android app has no second option to offer.
+        {isTauri() && !isTauriMobile() && !scope && (
+          // Desktop only. A browser or the Android app has no second option to
+          // offer, and a project's board has only the one (inPage above).
           <div className="flex items-center border border-[var(--color-border)] text-[10px] uppercase tracking-[0.12em]">
             {(['page', 'screen'] as const).map((mode) => (
               <button
@@ -892,8 +960,8 @@ export function SessionBoard() {
               : stopAllArmed ? `stop all ${stopAllCount}?` : `stop all ${stopAllCount}`}
           </button>
         )}
-        <NewSession onStarted={refresh} inPage={inPage} remote={remote} />
-        {desk.length > 0 && (
+        {!scope && <NewSession onStarted={refresh} inPage={inPage} remote={remote} />}
+        {!scope && desk.length > 0 && (
           <RecoverDesk
             desk={desk}
             disabled={recovering || openingId !== null}
@@ -977,7 +1045,11 @@ export function SessionBoard() {
         </div>
       ))}
 
-      {live.length === 0 && rest.length === 0 && (
+      {scope && rowCount === 0 && termCount === 0 ? (
+        <div className="py-3 text-[11px] text-[var(--color-text-faint)]">
+          {scope.emptyText ?? 'no sessions in this project yet'}
+        </div>
+      ) : live.length === 0 && rest.length === 0 && !(scope && termCount > 0) && (
         <div className="py-3 text-[11px] text-[var(--color-text-faint)]">
           Nothing open. Finished sessions are under done, and a new one appears here the moment you start it.
         </div>

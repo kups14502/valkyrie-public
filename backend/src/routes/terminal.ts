@@ -1,17 +1,20 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import type { IncomingMessage, Server as HttpServer } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
 import ptyModule from 'node-pty'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { requireStrongAuth, authorizeStrongUpgrade } from '../middleware/auth.js'
+import { requireStrongAuth, authorizeStrongUpgrade, viaCloudflare } from '../middleware/auth.js'
+import { isAllowedHost, isAllowedOrigin } from '../middleware/origin.js'
 import {
   MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
   attachArgs, createSession, endScroll, ensureServer, hasSession, killSession, listSessions,
   remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion,
-  type TermMode,
+  type TermMode, type TermSession,
 } from '../terminal/tmux.js'
+import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
+import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
@@ -54,9 +57,36 @@ router.get('/terminal/status', async (_req, res) => {
   })
 })
 
-router.get('/terminal/sessions', async (_req, res) => {
+// A tailnet-only project answers a Cloudflare request as if it did not exist,
+// and a pane opened for one carries the project's name as its label. Through
+// Cloudflare that pane keeps its row, since it is still a terminal Brendon can
+// attach to, but loses the name and the project id.
+const hiddenFrom = (req: Request) => {
+  const cf = viaCloudflare(req)
+  const seen = new Map<string, boolean>()
+  return (projectId: string): boolean => {
+    if (!cf || !projectId) return false
+    if (!seen.has(projectId)) {
+      const p = getProject(projectId)
+      seen.set(projectId, !p || p.exposure === 'tailnet')
+    }
+    return seen.get(projectId) as boolean
+  }
+}
+
+const maskRow = (hidden: (projectId: string) => boolean) => (s: TermSession): TermSession =>
+  (hidden(s.projectId) ? { ...s, projectId: '', label: s.target || s.name } : s)
+
+router.get('/terminal/sessions', async (req, res) => {
+  const project = req.query.project
+  if (project !== undefined && (typeof project !== 'string' || !TARGET_RE.test(project))) {
+    return res.status(400).json({ error: 'project must be a project id' })
+  }
+  const hidden = hiddenFrom(req)
+  if (project !== undefined && hidden(project)) return res.json([])
   try {
-    res.json(await listSessions())
+    const rows = (await listSessions()).map(maskRow(hidden))
+    res.json(project === undefined ? rows : rows.filter((s) => s.projectId === project))
   } catch (err) {
     console.error('[terminal] list failed', err)
     res.status(500).json({ error: 'could not list sessions' })
@@ -68,19 +98,53 @@ router.post('/terminal/sessions', async (req, res) => {
   const mode = String(body.mode ?? 'new') as TermMode
   if (!MODES.includes(mode)) return res.status(400).json({ error: `mode must be one of ${MODES.join(', ')}` })
 
+  // Both are keys, never paths. The project id rides the ssh line to thor; the
+  // agent key does not, only the run id minted from it.
+  const projectKey = body.project == null ? undefined : String(body.project)
+  if (projectKey !== undefined && !TARGET_RE.test(projectKey)) return res.status(400).json({ error: 'project must be a project id' })
+  const automation = body.automation == null ? undefined : String(body.automation)
+  if (automation !== undefined && (!KEY_RE.test(automation) || !projectKey || mode !== 'new')) {
+    return res.status(400).json({ error: 'an agent or workflow run needs a project and mode new' })
+  }
+  // The rev of the brief the run sheet showed. The run starts from that
+  // version or not at all: a session can rewrite the body between Brendon's
+  // read and this request, and the run is elevated with no prompts.
+  const automationRev = body.automationRev
+  if (automation !== undefined && (typeof automationRev !== 'number' || !Number.isInteger(automationRev) || automationRev < 0)) {
+    return res.status(400).json({ error: 'an agent or workflow run needs the rev that was shown' })
+  }
+  const hidden = hiddenFrom(req)
+  let project: Project | null = null
+  if (projectKey !== undefined) {
+    project = getProject(projectKey)
+    if (!project || project.status === 'archived' || hidden(project.id)) return res.status(404).json({ error: 'no such project' })
+  }
+
   let target: string | undefined
   let resumeId: string | undefined
   let newId: string | undefined
-  let label: string
+  let fallback: string
 
   if (mode === 'resume') {
     resumeId = String(body.sessionId ?? '')
     if (!UUID_RE.test(resumeId)) return res.status(400).json({ error: 'sessionId must be a uuid' })
-    label = cleanLabel(body.label, resumeId.slice(0, 8))
+    fallback = resumeId.slice(0, 8)
+    // A project conversation reopened from anywhere but its project page (the
+    // Sessions page, the phone's dead-pane reopen, a resume picker, an older
+    // app) would otherwise come back with no MCP channel and nothing on screen
+    // to say so. Only an unambiguous link counts: a conversation linked to two
+    // projects is left alone.
+    if (!project) {
+      const ids = projectsForSession(resumeId)
+      const p = ids.length === 1 ? getProject(ids[0]) : null
+      if (p && p.status !== 'archived' && !hidden(p.id)) project = p
+    }
   } else {
-    target = String(body.target ?? '')
+    // A project session always runs in the project's own folder, whatever the
+    // client sent: the pinned relPaths and the session's work are relative to it.
+    target = project ? project.targetKey : String(body.target ?? '')
     if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
-    label = cleanLabel(body.label, target)
+    fallback = target
     // The conversation id is minted HERE and handed to claude, rather than read
     // back afterwards. A chip opened on a target could otherwise never name the
     // conversation running in it: the label froze at 'personal' for the life of
@@ -90,17 +154,46 @@ router.post('/terminal/sessions', async (req, res) => {
     if (mode === 'new') newId = randomUUID()
   }
 
+  const ctx: Ctx = { actor: 'ui', via: 'terminal' }
   try {
-    const name = await createSession({
-      mode, target, resumeId, newId, label,
-      cols: Number(body.cols), rows: Number(body.rows),
-    })
-    const session = (await listSessions()).find((s) => s.name === name) ?? null
-    res.status(201).json({ name, session })
+    const run: Run | null = project && automation ? createRun(project.id, automation, automationRev as number, ctx) : null
+    const label = cleanLabel(body.label, run && project ? `${project.name}: ${run.name}` : project ? project.name : fallback)
+    let name: string
+    try {
+      name = await createSession({
+        mode, target, resumeId, newId, label,
+        cols: Number(body.cols), rows: Number(body.rows),
+        projectId: project?.id, runId: run?.id,
+      })
+    } catch (err) {
+      if (run) failRun(run.id, 'could not start: ' + (err as Error).message)
+      throw err
+    }
+    if (project && mode !== 'shell') {
+      // Linked here, at creation, rather than left to thor's SessionStart hook:
+      // the page shows the session the moment it opens, and a hook that never
+      // fires (an old thor, a launch that dies early) cannot orphan it. The
+      // pane is already running, so a failure here is logged, not returned.
+      const sid = (newId ?? resumeId) as string
+      try {
+        linkSession(project.id, {
+          sessionId: sid, launchSessionId: sid, tmuxName: name, mode,
+          runId: run?.id ?? null, via: mode === 'resume' ? 'resume' : 'launch',
+        }, ctx)
+        if (run) attachRun(run.id, sid, name)
+      } catch (err) {
+        console.error('[terminal] project link failed', (err as Error).message)
+      }
+    }
+    const row = (await listSessions()).find((s) => s.name === name)
+    const session = row ? maskRow(hidden)(row) : null
+    res.status(201).json({ name, session, conversationId: newId ?? resumeId ?? null, runId: run?.id ?? null })
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500
     if (status >= 500) console.error('[terminal] create failed', err)
-    res.status(status).json({ error: (err as Error).message })
+    // A run whose brief changed since the sheet opened answers 409 with the
+    // current rev, which the sheet uses to show the new text.
+    res.status(status).json({ error: (err as Error).message, ...(err instanceof ProjError ? err.body : undefined) })
   }
 })
 
@@ -108,6 +201,15 @@ router.post('/terminal/sessions/:name/kill', async (req, res) => {
   const name = String(req.params.name)
   if (!SESSION_NAME_RE.test(name)) return res.status(400).json({ error: 'not a session name' })
   const killed = await killSession(name)
+  // A run stopped from here never gets to call run_report, and would sit at
+  // 'running' on the page forever.
+  if (killed) {
+    try {
+      failRunsForTmux(name, 'stopped before it reported')
+    } catch (err) {
+      console.error('[terminal] could not close runs for', name, (err as Error).message)
+    }
+  }
   res.status(killed ? 200 : 404).json({ killed })
 })
 
@@ -147,6 +249,11 @@ async function onUpgrade(wss: WebSocketServer, req: IncomingMessage, socket: Dup
   // mistake worth answering rather than a socket left hanging for a handler
   // that does not exist.
   if (url.pathname !== WS_PATH) return refuse(socket, 404, 'Not Found')
+
+  // The CORS layer never sees an upgrade, and a browser lets any page open a
+  // websocket to any host. Native clients send no Origin and are unaffected.
+  const origin = req.headers.origin
+  if (!isAllowedHost(req) || (origin && !isAllowedOrigin(origin, req))) return refuse(socket, 403, 'Forbidden')
 
   if (!(await authorizeStrongUpgrade(req))) return refuse(socket, 401, 'Unauthorized')
 

@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useSearch
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
   Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
-  CalendarDays, UtensilsCrossed, Glasses,
+  CalendarDays, UtensilsCrossed, Glasses, FolderKanban,
 } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
@@ -108,6 +108,7 @@ const Pad = lazyRoute('pad', () => import('./pages/Pad'))
 const Settings = lazyRoute('settings', () => import('./pages/Settings'))
 const Phone = lazyRoute('phone', () => import('./pages/Phone'))
 const Sessions = lazyRoute('sessions', () => import('./pages/Sessions'))
+const Projects = lazyRoute('projects', () => import('./pages/Projects'))
 const Terminal = lazyRoute('terminal', () => import('./pages/Terminal'))
 const Vr = lazyRoute('vr', () => import('./pages/Vr'))
 const Calendar = lazyRoute('calendar', () => import('./pages/Calendar'))
@@ -138,6 +139,7 @@ function PageFallback() {
 const navItems = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
+  { to: '/projects', label: 'projects', icon: FolderKanban },
   { to: '/lights', label: 'lights', icon: Lightbulb },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
@@ -427,6 +429,8 @@ function Shell() {
             <Route path="/calendar" element={<PageContainer><Calendar /></PageContainer>} />
             <Route path="/meals" element={<PageContainer><Meals /></PageContainer>} />
             <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
+            <Route path="/projects" element={<PageContainer><Projects /></PageContainer>} />
+            <Route path="/projects/:projectId" element={<PageContainer><Projects /></PageContainer>} />
             {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
                 exists for prose line length, and a non-positioned wrapper between
                 main and an absolute inset-0 page root is dead weight. */}

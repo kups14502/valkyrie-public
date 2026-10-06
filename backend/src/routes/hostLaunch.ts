@@ -1,5 +1,6 @@
 import express, { Router } from 'express'
 import { Agent, fetch as undiciFetch } from 'undici'
+import { sessionArea } from '../lib/projectAreas.js'
 
 // Proxy to thor's session launcher agent.
 //
@@ -290,7 +291,8 @@ router.get('/session-board', async (_req, res) => {
         return { host: name, ok: false, status: r.status, rows: [] as BoardRow[], detail: 'no session list' }
       }
       const rows = (body.sessions as BoardRow[])
-        .map((row) => ({ ...row, host: name }))
+        // odin's area table can split one host area into two (lib/projectAreas.ts).
+        .map((row) => ({ ...row, host: name, area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null) }))
         // thor is the desk: everything open stays. Elsewhere, recent or running.
         .filter((row) => {
           if (name === 'thor') return true

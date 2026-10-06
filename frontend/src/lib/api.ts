@@ -630,7 +630,8 @@ export type WorkSession = {
   titleFromClaude: boolean
   project: string
   // work, server, personal or a host-defined area, routed from the cwd by the host out of
-  // the same table the Obsidian capture uses, so the two never disagree.
+  // the same table the Obsidian capture uses, so the two never disagree. odin's
+  // private area table can split one of them further (backend lib/projectAreas.ts).
   area: string
   // Which Windows Terminal window this session reopens into, resolved on its
   // host from launch-groups.json. NOT the area: two areas can share one
@@ -778,6 +779,9 @@ export type TermSession = {
   deadStatus: number | null
   deadText: string
   size: string
+  // The project the pane was opened for, from tmux's @vk_project option. Empty
+  // for a pane opened outside a project, and for any API older than projects.
+  projectId: string
 }
 
 export type TermStatus = {
@@ -789,9 +793,17 @@ export type TermStatus = {
   maxSessions: number
 }
 
+// target is optional because a project brings its own: the backend resolves a
+// new or shell session opened with `project` to that project's launch target.
+// automationRev is the rev of the brief the run sheet showed; the backend
+// answers 409 "changed since" when the stored brief is newer.
 export type TermOpen =
-  | { mode: 'new' | 'shell'; target: string; label?: string; cols?: number; rows?: number }
-  | { mode: 'resume'; sessionId: string; label?: string; cols?: number; rows?: number }
+  | { mode: 'new' | 'shell'; target?: string; project?: string; automation?: string; automationRev?: number; label?: string; cols?: number; rows?: number }
+  | { mode: 'resume'; sessionId: string; project?: string; label?: string; cols?: number; rows?: number }
+
+// conversationId is the id minted for a new session, and runId the automation
+// run it carries. Both are null on an older API and wherever they do not apply.
+export type TermOpenResult = { name: string; session: TermSession | null; conversationId: string | null; runId: string | null }
 
 const TERM_MODES: TermMode[] = ['new', 'resume', 'shell']
 
@@ -815,6 +827,7 @@ const parseTermSession = (raw: unknown): TermSession | null => {
     deadStatus: wsNum(r.deadStatus) ?? null,
     deadText: wsStr(r.deadText) ?? '',
     size: wsStr(r.size) ?? '',
+    projectId: wsStr(r.projectId) ?? '',
   }
 }
 
@@ -837,15 +850,29 @@ export const termLabel = (s: TermSession, titles: Map<string, string>): string =
 
 export const fetchTermStatus = async () => (await api.get<TermStatus>('/terminal/status')).data
 
-export const openTermSession = async (body: TermOpen) =>
-  (await api.post<{ name: string; session: TermSession | null }>('/terminal/sessions', body)).data
+export const openTermSession = async (body: TermOpen): Promise<TermOpenResult> => {
+  const d = (await api.post<Record<string, unknown> | null>('/terminal/sessions', body)).data ?? {}
+  return {
+    name: wsStr(d.name) ?? '',
+    session: parseTermSession(d.session),
+    conversationId: wsStr(d.conversationId),
+    runId: wsStr(d.runId),
+  }
+}
 
 export const killTermSession = async (name: string) =>
   (await api.post<{ killed: boolean }>(`/terminal/sessions/${encodeURIComponent(name)}/kill`)).data
 
+// The only place the terminal page's back buttons may lead besides the board.
+// ?back= is a URL anyone can hand the phone, so it is a project path or nothing.
+export const PROJECT_BACK_RE = /^\/projects\/[a-z0-9][a-z0-9-]{0,31}$/
+
 // Where the in-page terminal lives, optionally landing on one session.
-export const termPath = (name?: string | null): string =>
-  name ? `/sessions/terminal?s=${encodeURIComponent(name)}` : '/sessions/terminal'
+export const termPath = (name?: string | null, back?: string | null): string => {
+  if (!name) return '/sessions/terminal'
+  const s = `/sessions/terminal?s=${encodeURIComponent(name)}`
+  return back && PROJECT_BACK_RE.test(back) ? `${s}&back=${encodeURIComponent(back)}` : s
+}
 
 // ---------------------------------------------------------------- desk RGB ----
 // thor's desk lighting, the two actions its desktop buttons already have.

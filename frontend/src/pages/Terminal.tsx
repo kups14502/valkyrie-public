@@ -9,8 +9,8 @@ import {
   CornerDownLeft, ImageUp, Keyboard, MoreHorizontal, Plus, RotateCw, Terminal as TerminalIcon, X,
 } from 'lucide-react'
 import {
-  fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus, killTermSession,
-  openTermSession, termLabel, type TermOpen, type TermSession,
+  PROJECT_BACK_RE, fetchLaunchTargets, fetchSessionList, fetchTermSessions, fetchTermStatus,
+  killTermSession, openTermSession, termLabel, type TermOpen, type TermOpenResult, type TermSession,
 } from '../lib/api'
 import {
   TERM_FONT_FAMILY, errText, readTermTheme as readTheme, readUiZoom, relIso, relative, setTermZoom,
@@ -135,6 +135,13 @@ export default function TerminalPage() {
     const s = params.get('s')
     return s && /^vk-[0-9a-f]{10}$/.test(s) ? s : null
   })
+  // Where the back buttons lead. A project hands the phone over with ?back= so
+  // its sessions return to it; read once, because effect G rewrites the query.
+  const [back] = useState(() => {
+    const b = params.get('back')
+    return b && PROJECT_BACK_RE.test(b) ? b : '/sessions'
+  })
+  const backLabel = back === '/sessions' ? 'Back to the session board' : 'Back to the project'
   const [gen, setGen] = useState(0)
   const [conn, setConn] = useState<'idle' | 'connecting' | 'live' | 'closed'>('idle')
   const [ctrlArmed, setCtrlArmed] = useState(false)
@@ -846,11 +853,13 @@ export default function TerminalPage() {
   }, [list, active, sessions.isFetching])
 
   // G. Keep ?s= in step with the selection. Replace, never push, so the back
-  //    gesture leaves the terminal instead of stepping through sessions.
+  //    gesture leaves the terminal instead of stepping through sessions. ?back=
+  //    rides along, or the first switch would strip it and a reload would
+  //    return to the board instead of the project.
   useEffect(() => {
     if ((params.get('s') ?? '') === (active ?? '')) return
-    setParams(active ? { s: active } : {}, { replace: true })
-  }, [active, params, setParams])
+    setParams({ ...(active ? { s: active } : {}), ...(back !== '/sessions' ? { back } : {}) }, { replace: true })
+  }, [active, back, params, setParams])
 
   const guessGrid = () => {
     const host = hostRef.current
@@ -862,17 +871,22 @@ export default function TerminalPage() {
     }
   }
 
-  const openSession = async (body: TermOpen) => {
+  // fallback is tried once on a 404, the answer for a project archived since
+  // its pane opened, so a reopen does not end with no pane at all.
+  const openSession = async (body: TermOpen, fallback?: TermOpen) => {
     setBusy(true)
     setError(null)
     try {
       const term = termRef.current
       const grid = guessGrid()
-      const data = await openTermSession({
-        ...body,
-        cols: term?.cols ?? grid.cols,
-        rows: term?.rows ?? grid.rows,
-      })
+      const size = { cols: term?.cols ?? grid.cols, rows: term?.rows ?? grid.rows }
+      let data: TermOpenResult
+      try {
+        data = await openTermSession({ ...body, ...size })
+      } catch (e) {
+        if (!fallback || (e as { response?: { status?: number } } | null)?.response?.status !== 404) throw e
+        data = await openTermSession({ ...fallback, ...size })
+      }
       await qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
       setPicker(false)
       setActive(data.name)
@@ -902,6 +916,8 @@ export default function TerminalPage() {
   // FIRST: closeSession would clear `active` after the new one had taken it. A
   // new session whose conversation reached the board resumes that conversation;
   // one that died before Claude ever ran (a refused login) just opens again.
+  // A project pane reopens for its project: without it the new pane has no
+  // MCP server, and a new one is never linked to the project page.
   const reopenSession = async (s: TermSession) => {
     const label = termLabel(s, titles)
     const known = s.sessionId && boardRows.some((r) => r.sessionId === s.sessionId)
@@ -912,7 +928,8 @@ export default function TerminalPage() {
         : s.target ? { mode: s.mode, target: s.target, label } : null
     if (!body) return
     await killTermSession(s.name).catch(() => {})
-    await openSession(body)
+    if (s.projectId) await openSession({ ...body, project: s.projectId }, body)
+    else await openSession(body)
   }
 
   // Which session the phone's one-line switcher is naming, and where it sits in
@@ -951,9 +968,9 @@ export default function TerminalPage() {
       <div className="flex h-9 shrink-0 items-stretch gap-2 sm:hidden">
         <button
           type="button"
-          onClick={() => navigate('/sessions')}
-          aria-label="Back to the session board"
-          title="Back to the session board"
+          onClick={() => navigate(back)}
+          aria-label={backLabel}
+          title={backLabel}
           className={`${BTN} shrink-0 px-2`}
         >
           <ChevronLeft size={13} />
@@ -1015,9 +1032,9 @@ export default function TerminalPage() {
       <div data-term-scroll className="hidden shrink-0 items-center gap-2 overflow-x-auto pb-0.5 sm:flex">
         <button
           type="button"
-          onClick={() => navigate('/sessions')}
-          aria-label="Back to the session board"
-          title="Back to the session board"
+          onClick={() => navigate(back)}
+          aria-label={backLabel}
+          title={backLabel}
           className={`${BTN} shrink-0 px-2`}
         >
           <ChevronLeft size={13} />

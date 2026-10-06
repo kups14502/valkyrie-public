@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Cast, Clapperboard, Film, Music, Server, SquareTerminal, TrendingUp } from 'lucide-react'
+import { Cast, Clapperboard, Film, FolderKanban, Music, Server, SquareTerminal, TrendingUp } from 'lucide-react'
 import {
   openInApp, plexAppHomeLink, plexWebHomeLink, shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
@@ -16,6 +16,7 @@ import { ThorUploadPanel } from '../components/ThorUpload'
 
 const TILES = [
   { to: '/sessions', label: 'claude', icon: SquareTerminal },
+  { to: '/projects', label: 'projects', icon: FolderKanban },
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },

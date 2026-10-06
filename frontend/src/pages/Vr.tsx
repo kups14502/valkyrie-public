@@ -74,6 +74,7 @@ type PaneApi = {
 // workspace itself are left out: one is a pane already, the other would nest.
 const PAGES: { path: string; label: string }[] = [
   { path: '/sessions', label: 'session board' },
+  { path: '/projects', label: 'projects' },
   { path: '/dashboard', label: 'dashboard' },
   { path: '/calendar', label: 'calendar' },
   { path: '/meals', label: 'meals' },
