@@ -36,6 +36,9 @@ export default function Phone() {
         <SystemChips />
       </div>
 
+      {/* First under the clock: supplements are ticked off from here every day. */}
+      <DailyTrackerCard size="normal" />
+
       <section className="grid grid-cols-2 gap-2.5">
         <a
           href={plexWebHomeLink()}
@@ -78,9 +81,6 @@ export default function Phone() {
       <ThorUploadPanel />
       <DownloadsPanel />
       <RecentStrip width="w-24" />
-      {/* Last on the phone: it is a once-a-day tap, not something to scroll
-          past every time the screen is opened. */}
-      <DailyTrackerCard size="normal" />
     </div>
   )
 }
