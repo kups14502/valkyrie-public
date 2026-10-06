@@ -43,11 +43,10 @@ const fmtTime = (iso: string | null) =>
 
 const STEP_BUTTON = 'flex w-8 shrink-0 items-center justify-center border border-[var(--color-border)] text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]'
 
-/** One row of the tracker: its label and the day strip. A compact strip keeps
- *  its own height instead of stretching to the tallest strip beside it. */
-function Strip({ title, step, compact = false, children }: { title: string; step: (days: number) => void; compact?: boolean; children: ReactNode }) {
+/** One row of the tracker: its label and the day strip. */
+function Strip({ title, step, children }: { title: string; step: (days: number) => void; children: ReactNode }) {
   return (
-    <div className={`flex min-w-0 flex-col gap-1.5${compact ? ' self-start' : ''}`}>
+    <div className="flex min-w-0 flex-col gap-1">
       <h3 className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-text-dim)]">{title}</h3>
       <div className="flex flex-1 items-stretch gap-1.5">
         <button type="button" onClick={() => step(-1)} aria-label="earlier days" className={STEP_BUTTON}>
@@ -66,7 +65,7 @@ function Strip({ title, step, compact = false, children }: { title: string; step
 const DOUBLE_TAP_MS = 250
 
 function CheckDay({
-  entry, today, center, size, detail, skipped = false, compact = false, onToggle, onSkip,
+  entry, today, center, size, detail, skipped = false, onToggle, onSkip,
 }: {
   entry: TrackerDayEntry
   today: string
@@ -75,8 +74,6 @@ function CheckDay({
   /** A line under the date, e.g. the day's workout. */
   detail?: ReactNode
   skipped?: boolean
-  /** Date and a small box only; the tick time moves to the tooltip. */
-  compact?: boolean
   onToggle: () => void
   /** Called on a double tap. Without it the box ticks on the first tap. */
   onSkip?: () => void
@@ -103,18 +100,17 @@ function CheckDay({
   const taken = entry.taken
   const mark = taken ? 'var(--color-success)' : skipped ? 'var(--color-warning)' : undefined
   const color = mark ?? (isCenter ? 'var(--color-accent)' : 'var(--color-border)')
-  const pad = compact ? (size === 'pad' ? 'gap-1 py-2' : 'gap-1 py-1.5') : size === 'pad' ? 'gap-1.5 py-5' : 'gap-1.5 py-4'
-  const box = compact ? (size === 'pad' ? 'h-7 w-7' : 'h-6 w-6') : size === 'pad' ? 'h-10 w-10' : 'h-8 w-8'
-  const icon = compact ? (size === 'pad' ? 16 : 14) : size === 'pad' ? 22 : 18
+  const icon = size === 'pad' ? 16 : 14
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={taken}
       aria-label={`${dateLabel(entry.date, today)}: ${taken ? 'done' : skipped ? 'skipped' : 'not done'}`}
-      title={compact && taken ? fmtTime(entry.takenAt) : undefined}
+      // The tick time lives in the tooltip, not a line of its own, to keep the box short.
+      title={taken ? fmtTime(entry.takenAt) : undefined}
       // touch-manipulation stops the phone zooming on the double tap.
-      className={`flex min-w-0 flex-1 flex-col items-center justify-center border px-1 ${pad}${onSkip ? ' touch-manipulation select-none' : ''}`}
+      className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border px-1 ${size === 'pad' ? 'py-2' : 'py-1.5'}${onSkip ? ' touch-manipulation select-none' : ''}`}
       style={{
         borderColor: color,
         backgroundColor: taken ? 'color-mix(in srgb, var(--color-success) 8%, transparent)' : 'transparent',
@@ -129,7 +125,7 @@ function CheckDay({
       </span>
       {detail}
       <span
-        className={`flex items-center justify-center border ${box}`}
+        className={`flex items-center justify-center border ${size === 'pad' ? 'h-7 w-7' : 'h-6 w-6'}`}
         style={{
           borderColor: mark ?? 'var(--color-border)',
           color: mark ?? 'transparent',
@@ -141,18 +137,13 @@ function CheckDay({
           ? <SkipForward size={icon - 2} strokeWidth={2.5} />
           : <Check size={icon} strokeWidth={3} />}
       </span>
-      {!compact && (
-        <span className="h-3 truncate text-[9px] tabular-nums text-[var(--color-text-faint)]">
-          {taken ? fmtTime(entry.takenAt) : ''}
-        </span>
-      )}
     </button>
   )
 }
 
 /** A one-checkbox-a-day row backed by the API. */
 function CheckStrip({
-  tracker, title, center, today, size, step, detail, skippable = false, compact = false,
+  tracker, title, center, today, size, step, detail, skippable = false,
 }: {
   tracker: TrackerName
   title: string
@@ -163,7 +154,6 @@ function CheckStrip({
   detail?: (date: string, isCenter: boolean, skips: readonly string[]) => ReactNode
   /** A double tap skips a day. Only exercise has skips. */
   skippable?: boolean
-  compact?: boolean
 }) {
   const qc = useQueryClient()
   const key = ['daily', tracker, center, today]
@@ -242,11 +232,11 @@ function CheckStrip({
   const error = day.error ?? skips.error
 
   return (
-    <Strip title={title} step={step} compact={compact}>
+    <Strip title={title} step={step}>
       {(day.isLoading && !d) || skips.isLoading ? (
-        <div className={`flex flex-1 items-center justify-center ${compact ? 'py-2' : 'py-4'} text-sm text-[var(--color-text-dim)]`}>Loading…</div>
+        <div className="flex flex-1 items-center justify-center py-2 text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : error ? (
-        <div className={`flex flex-1 items-center justify-center ${compact ? 'py-2' : 'py-4'} text-sm text-[var(--color-danger)]`}>{apiErrorText(error, `${title} log unavailable`)}</div>
+        <div className="flex flex-1 items-center justify-center py-2 text-sm text-[var(--color-danger)]">{apiErrorText(error, `${title} log unavailable`)}</div>
       ) : d ? (
         d.days.map((entry) => (
           <CheckDay
@@ -257,7 +247,6 @@ function CheckStrip({
             size={size}
             detail={detail?.(entry.date, entry.date === center, skipList)}
             skipped={skipList.includes(entry.date)}
-            compact={compact}
             onToggle={() => log.mutate({ target: entry.date, taken: !entry.taken })}
             onSkip={skippable ? () => skip.mutate({ target: entry.date, skipped: !skipList.includes(entry.date) }) : undefined}
           />
@@ -342,8 +331,8 @@ export function DailyTrackerCard({ size = 'normal' }: { size?: PanelSize } = {})
       <div className="space-y-2">
         {/* Three across when there is room, stacked on the phone. Capped so an
             ultrawide does not stretch each strip into a billboard. */}
-        <div className="grid max-w-7xl gap-x-5 gap-y-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
-          <CheckStrip tracker="supplements" title="Supplements" center={center} today={today} size={size} step={step} compact />
+        <div className="grid max-w-7xl gap-x-5 gap-y-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
+          <CheckStrip tracker="supplements" title="Supplements" center={center} today={today} size={size} step={step} />
           <CheckStrip
             tracker="exercise"
             title="Exercise"
