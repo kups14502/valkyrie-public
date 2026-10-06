@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, Link2, Square, Undo2, Unlink } from 'lucide-react'
+import { ArrowDownToLine, Check, Link2, Play, Square, SquareTerminal, Undo2, Unlink } from 'lucide-react'
 import {
   apiErrorText, killTermSession, setSessionDone, stopSessionOnHost, termLabel,
   type SessionActivity, type TermSession, type WorkSession,
@@ -55,28 +55,37 @@ type Item = {
 
 const ICON = 'inline-flex h-8 w-7 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition disabled:opacity-30'
 
-function SessionItem({ item, selected, term, onStop, onDone, onUnlink }: {
+function SessionItem({ item, selected, term, onStop, onDone, onUnlink, onMove }: {
   item: Item
   selected: boolean
   term: ProjectTerm
   onStop: (i: Item) => Promise<void>
   onDone: (i: Item) => Promise<void>
   onUnlink: (i: Item) => Promise<void>
+  onMove: (i: Item) => Promise<void>
 }) {
   const [armed, setArmed] = useState<'stop' | 'unlink' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [confirmMove, setConfirmMove] = useState(false)
   useEffect(() => {
     if (!armed) return
     const t = setTimeout(() => setArmed(null), 4000)
     return () => clearTimeout(t)
   }, [armed])
 
-  // Running in a window on thor, not in a pane here: resuming it would put a
-  // second Claude on the same transcript, so the row only says where it is.
+  // Running in a window on thor, not in a pane here. Opening it here as well
+  // would put a second Claude on the same transcript, so it MOVES: stopped in
+  // its window, then resumed in the page, after one confirm.
   const runningElsewhere = item.live && !item.pane
   const open = () => {
     if (item.pane) term.open(item.pane)
-    else if (item.sessionId && !item.live) void term.resume(item.sessionId, item.title)
+    else if (runningElsewhere) setConfirmMove((v) => !v)
+    else if (item.sessionId) void term.resume(item.sessionId, item.title)
+  }
+  const move = async () => {
+    setConfirmMove(false)
+    setBusy(true)
+    try { await onMove(item) } finally { setBusy(false) }
   }
   const act = async (which: 'stop' | 'unlink' | 'done') => {
     if (which !== 'done' && armed !== which) { setArmed(which); return }
@@ -92,7 +101,7 @@ function SessionItem({ item, selected, term, onStop, onDone, onUnlink }: {
     .filter(Boolean).join(' · ')
 
   return (
-    <li className={`group flex items-start gap-2 border-l-2 py-1.5 pl-2 ${selected ? 'border-[var(--color-accent)] bg-[rgba(var(--color-accent-rgb),0.06)]' : 'border-transparent'}${busy ? ' opacity-50' : ''}`}>
+    <li className={`group flex flex-wrap items-start gap-x-2 border-l-2 py-1.5 pl-2 ${selected ? 'border-[var(--color-accent)] bg-[rgba(var(--color-accent-rgb),0.06)]' : 'border-transparent'}${busy ? ' opacity-50' : ''}`}>
       <span
         aria-hidden
         className={`mt-1.5 h-2 w-2 shrink-0 rounded-full${item.activity === 'working' ? ' animate-pulse' : ''}`}
@@ -101,8 +110,8 @@ function SessionItem({ item, selected, term, onStop, onDone, onUnlink }: {
       <button
         type="button"
         onClick={open}
-        disabled={runningElsewhere || term.busy}
-        title={runningElsewhere ? 'Running in a window on thor. Stop it there, or here, to reopen it in the page.' : item.pane ? 'Show it' : 'Reopen it here'}
+        disabled={term.busy || busy}
+        title={runningElsewhere ? 'Running in a window on thor. Click to move it into the page.' : item.pane ? 'Show it' : 'Open it here'}
         className="min-w-0 flex-1 text-left disabled:cursor-default"
       >
         <span className={`block truncate text-[13px] ${item.done ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text)]'}`}>{item.title}</span>
@@ -110,6 +119,16 @@ function SessionItem({ item, selected, term, onStop, onDone, onUnlink }: {
         {item.note && <span className="block truncate text-[10px] text-[var(--color-text-dim)]" title={item.note}>{item.note}</span>}
       </button>
       <div className="flex shrink-0 items-center lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
+        <button
+          type="button"
+          disabled={busy || term.busy}
+          onClick={open}
+          title={runningElsewhere ? 'Move it into the page' : item.pane ? 'Show it' : 'Open it here'}
+          aria-label={runningElsewhere ? 'Move into the page' : 'Open'}
+          className={`${ICON} hover:text-[var(--color-accent)]`}
+        >
+          {runningElsewhere ? <ArrowDownToLine size={12} /> : item.pane ? <SquareTerminal size={12} /> : <Play size={12} />}
+        </button>
         {(item.pane || item.live) && (
           <button
             type="button"
@@ -147,6 +166,28 @@ function SessionItem({ item, selected, term, onStop, onDone, onUnlink }: {
           </button>
         )}
       </div>
+      {confirmMove && (
+        <div className="basis-full space-y-1.5 pb-1 pl-4 pt-1">
+          <div className="text-[11px] leading-snug text-[var(--color-text-dim)]">
+            {item.activity === 'working'
+              ? 'It is working right now. Moving stops it in its window on thor and picks the conversation up here.'
+              : 'Moving stops it in its window on thor and picks the conversation up here.'}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={busy || term.busy}
+              onClick={() => void move()}
+              className="inline-flex h-8 items-center gap-1 border border-[var(--color-accent)] bg-[rgba(var(--color-accent-rgb),0.10)] px-2.5 text-[10px] uppercase tracking-[0.12em] text-[var(--color-accent)] disabled:opacity-40"
+            >
+              <ArrowDownToLine size={11} /> move here
+            </button>
+            <button type="button" onClick={() => setConfirmMove(false)} className="inline-flex h-8 items-center px-2 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] hover:text-[var(--color-text)]">
+              cancel
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   )
 }
@@ -218,13 +259,28 @@ export function SessionsPanel({ projectId, doc, term, rows, terms, titles }: {
     else if (i.sessionId) await stopSessionOnHost(i.sessionId)
   }, 'could not stop it')
   const onDone = (i: Item) => run(() => setSessionDone(i.sessionId as string, !i.done), 'could not mark it')
+  // Stop it in its window on thor, then resume the same conversation here. The
+  // stop returns once thor has killed the process; the short wait lets the
+  // window's Claude finish writing the transcript before it is picked up.
+  const onMove = async (i: Item) => {
+    if (!i.sessionId) return
+    setError('')
+    try {
+      await stopSessionOnHost(i.sessionId)
+    } catch (e) {
+      if (httpStatus(e) !== 404) { setError(apiErrorText(e, 'could not stop it in its window')); return }
+    }
+    await new Promise((r) => setTimeout(r, 1500))
+    await term.resume(i.sessionId, i.title)
+    refresh()
+  }
   const onUnlink = (i: Item) => run(async () => {
     await unlinkProjSession(projectId, i.sessionId as string)
     void qc.invalidateQueries({ queryKey: PROJ_KEYS.doc(projectId) })
     void qc.invalidateQueries({ queryKey: PROJ_KEYS.list })
   }, 'could not unlink it')
 
-  const itemProps = { term, onStop, onDone, onUnlink }
+  const itemProps = { term, onStop, onDone, onUnlink, onMove }
 
   return (
     <div>
