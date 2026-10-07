@@ -1,15 +1,15 @@
 {
-  "version": "0.3.126",
-  "notes": "Calendar grid: event text starts at the top of its block; one-letter weekdays on a phone week",
-  "pub_date": "2026-10-07T18:15:01Z",
+  "version": "0.3.127",
+  "notes": "Dashboard and phone home: a today card from the calendar",
+  "pub_date": "2026-10-07T21:06:48Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWF3VkQzUXFiR0dRT0RQR2dPV0lRMnZnQ1RPckFzRDZYZnZWaTNuVG5EWnB4cGVzRW5jVThIaytuT1dSMlVNMG93TmlKUHhJdXVjUUNicEcvRThrUGdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMzk2ODE5CWZpbGU6VmFsa3lyaWVfMC4zLjEyNl94NjQtc2V0dXAuZXhlClRSUDFUc3JqNzdPT25VVm1PRThLTVRJQUN1Z2hRZUc2NW00d0RUWHd0OG5GYVN4ZXVYWkx4U1ZQank5MWlEOTJncU1BRzJLNnRjdEUyZ3ZvTjh1RkJ3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.126/Valkyrie_0.3.126_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWNpV00wRmZvaGl2eGRoeGEraThtWjR1ekdnUzJyOEROemxPaURJSUtCc3dvY0kvMCtWUjRqMnFQdkFRTlpHR3MvL3RTNjNzSm11enJxMU9ZMXRtdWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDA3MTAyCWZpbGU6VmFsa3lyaWVfMC4zLjEyN194NjQtc2V0dXAuZXhlCjZDaG1QRVNKOG1WV2oxQlRQN3ZlSkxKWTZYZ0MvdGZqalVkQmRVUEV2a0hxeXJrTHNEbStGOC9aNDQ2THNYZkFyWDZwNEVJZU9icFE4Q3hyb0owUkJ3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.127/Valkyrie_0.3.127_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVo5QW95SlBUbUJGTXRxcHcrWVFPYkpKUC9ndmVXTEl2SWhPVGc5TWxDTjU2THZ0NFRBd1M0N3RHV2pzUGNid05jSE5NTG1PM2MzR0o3ZVpsOGJ4YkF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMzk2NzczCWZpbGU6VmFsa3lyaWVfMC4zLjEyNl9hbWQ2NC5BcHBJbWFnZQplNFJRQWdUdUdVYldEdXdKdVRLK0x5UEZYS1kyV1FjNHVsdGJoWEFobGN6eG1zMzd4RzQ5RjZRN0VQU0dYY3BZZ1lpSks0OTQyOUMzN1ZxNmtuU0VEdz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.126/Valkyrie_0.3.126_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZjY2pkdldhN2F1L1I0VHdJMFk0YVhXek95eFRibDFuZ0NIRTZvYjVidEI0cjNIckJzVC9qNG5YTUI2TmZvSVIyVkRoUmdsLzAzRjFHRjBIdUsxcWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDA3MDU2CWZpbGU6VmFsa3lyaWVfMC4zLjEyN19hbWQ2NC5BcHBJbWFnZQpIS2FoZXNhUmV0OE5oWnVtcmF3TFNqYXhwOERaSU5qcXBhWDg1TjhXMjJCRnlyTzAvVHU4NUpOMmNNZ3pSc1ZMWExtU0RidUl2NWV0ZFVqUzJUc0FCUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.127/Valkyrie_0.3.127_amd64.AppImage"
     }
   }
 }
