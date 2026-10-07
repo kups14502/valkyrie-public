@@ -140,7 +140,9 @@ export function TimeGrid({ days, events, onOpen, onCreate, onDay }: {
                   {d.getDate()}
                 </span>
                 <span className="truncate text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-faint)] sm:text-[10px]">
-                  {d.toLocaleDateString([], { weekday })}
+                  {/* A phone week column is ~45px: one letter fits, "WED" does not. */}
+                  <span className={days.length > 1 ? 'sm:hidden' : 'hidden'}>{d.toLocaleDateString([], { weekday: 'narrow' })}</span>
+                  <span className={days.length > 1 ? 'hidden sm:inline' : ''}>{d.toLocaleDateString([], { weekday })}</span>
                 </span>
               </button>
             )
@@ -257,7 +259,7 @@ export function TimeGrid({ days, events, onOpen, onCreate, onDay }: {
                   type="button"
                   onClick={() => onOpen(p.ev)}
                   title={`${p.ev.summary}\n${timeLabel(p.ev.start)} – ${timeLabel(p.ev.end)}`}
-                  className="absolute z-[5] overflow-hidden border-l-2 px-1 py-0.5 text-left leading-tight transition-[filter] hover:brightness-150 sm:px-1.5"
+                  className="absolute z-[5] flex flex-col justify-start overflow-hidden border-l-2 px-1 py-0.5 text-left leading-tight transition-[filter] hover:brightness-150 sm:px-1.5"
                   style={{
                     top: p.top + 1,
                     height: Math.max(16, p.height - 2),
