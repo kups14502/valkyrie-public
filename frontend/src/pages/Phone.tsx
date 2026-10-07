@@ -7,6 +7,7 @@ import { DownloadsPanel, LightsPanel, RecentStrip, SystemChips } from '../compon
 import { PhoneClock } from '../components/HomePanels'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { DailyTrackerCard } from '../components/DailyTrackerCard'
+import { TodayCard } from '../components/TodayCard'
 import { ThorUploadPanel } from '../components/ThorUpload'
 
 // iPhone home screen. Same panels as the iPad's (components/HomePanels.tsx) but
@@ -38,6 +39,8 @@ export default function Phone() {
 
       {/* First under the clock: supplements are ticked off from here every day. */}
       <DailyTrackerCard size="normal" />
+
+      <TodayCard />
 
       <section className="grid grid-cols-2 gap-2.5">
         <a

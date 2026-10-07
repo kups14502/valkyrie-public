@@ -4,6 +4,7 @@ import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { LightsPanel } from '../components/HomePanels'
 import { DailyTrackerCard } from '../components/DailyTrackerCard'
+import { TodayCard } from '../components/TodayCard'
 import { useProfile } from '../lib/deviceMode'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
@@ -496,6 +497,8 @@ export default function Dashboard() {
       {/* Above the fold on purpose: a daily habit check is worthless if you
           have to scroll past the fleet to find it. */}
       <DailyTrackerCard size={profile.size} />
+
+      <TodayCard />
 
       {/* AI usage is the headline: full width, first thing under the banner. */}
       <AIUsageHero />

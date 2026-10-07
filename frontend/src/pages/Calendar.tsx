@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, MapPin, Plus, RefreshCw, Repeat, Settings2, Trash2 } from 'lucide-react'
 import { apiErrorText } from '../lib/api'
 import { BTN_ACCENT, BTN_GHOST, BTN_TEXT, FIELD, LABEL, Sheet } from '../components/projects/Sheet'
@@ -596,16 +597,22 @@ function DayList({ days, onOpen }: { days: [string, CalendarEvent[]][]; onOpen: 
 const HIDDEN_KEY = 'valkyrie-cal-hidden'
 
 export default function Calendar() {
+  // ?view=day&date=2026-10-07 opens a given day (the dashboard's today card
+  // links here); without them the page opens where it was left.
+  const [params] = useSearchParams()
+  const linkedDate = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') ?? '') ? params.get('date')! : null
   const [view, setView] = useState<View>(() => {
+    const linked = params.get('view')
+    if (VIEWS.some((v) => v.id === linked)) return linked as View
     const saved = localStorage.getItem('valkyrie-cal-view')
     if (VIEWS.some((v) => v.id === saved)) return saved as View
     return window.matchMedia('(min-width: 640px)').matches ? 'week' : 'day'
   })
-  const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
+  const [anchor, setAnchor] = useState(() => startOfDay(linkedDate ? keyDate(linkedDate) : new Date()))
   const [open, setOpen] = useState<CalendarEvent | null>(null)
   const [editing, setEditing] = useState<EditSeed | null>(null)
   const [managing, setManaging] = useState(false)
-  const [selected, setSelected] = useState<string | null>(() => dateKey(new Date()))
+  const [selected, setSelected] = useState<string | null>(() => linkedDate ?? dateKey(new Date()))
   const [hidden, setHidden] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]') as string[]) } catch { return new Set() }
   })
