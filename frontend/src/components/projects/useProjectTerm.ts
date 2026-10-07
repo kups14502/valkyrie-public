@@ -5,7 +5,7 @@ import { apiErrorText, openTermSession, termPath, type TermSession } from '../..
 import { useProfile } from '../../lib/deviceMode'
 import { TERM_NAME_RE } from '../../lib/term'
 import { PROJ_KEYS, isChangedSince, type Project, type ProjectTerm } from '../../lib/projectsApi'
-import { seedTerminal } from '../SessionBoard'
+import { seedTerminal } from '../../lib/sessionLaunch'
 import type { TermConn, TermPaneApi } from '../TermPane'
 
 // Tailwind's lg. The column layout and this flag must flip at the same width,

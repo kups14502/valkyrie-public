@@ -688,7 +688,8 @@ const parseSession = (raw: unknown): WorkSession | null => {
 // `group` is the Windows Terminal window a session started in this target
 // joins. It matters off thor: the desktop app opens that window on ITS OWN
 // screen, so the grouping rule has to travel with the target.
-export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean; group: string | null }
+// `project` marks a target Add-LaunchTarget made for one Valkyrie project.
+export type LaunchTarget = { key: string; label: string; exists: boolean; phone: boolean; project: boolean; group: string | null }
 
 export const fetchLaunchTargets = async (host = 'thor'): Promise<LaunchTarget[]> => {
   try {
@@ -699,7 +700,7 @@ export const fetchLaunchTargets = async (host = 'thor'): Promise<LaunchTarget[]>
         const r = (raw ?? {}) as Record<string, unknown>
         const key = wsStr(r.key)
         return key
-          ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false, phone: r.phone === true, group: wsStr(r.group) }
+          ? { key, label: wsStr(r.label) ?? key, exists: r.exists !== false, phone: r.phone === true, project: r.project === true, group: wsStr(r.group) }
           : null
       })
       .filter((x): x is LaunchTarget => x !== null)

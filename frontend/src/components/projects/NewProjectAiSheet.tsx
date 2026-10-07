@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from 'lucide-react'
 import { apiErrorText, openTermSession, termPath } from '../../lib/api'
-import { seedTerminal } from '../SessionBoard'
+import { seedTerminal } from '../../lib/sessionLaunch'
 import { BTN_ACCENT, BTN_TEXT, FIELD, LABEL, Sheet } from './Sheet'
 
 // Brendon does not set projects up: a Claude session on thor does. This starts

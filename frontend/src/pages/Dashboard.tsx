@@ -5,6 +5,7 @@ import { ThorRgbControl } from '../components/ThorRgbControl'
 import { LightsPanel } from '../components/HomePanels'
 import { DailyTrackerCard } from '../components/DailyTrackerCard'
 import { TodayCard } from '../components/TodayCard'
+import { QuickSessions } from '../components/QuickSessions'
 import { useProfile } from '../lib/deviceMode'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
@@ -492,6 +493,7 @@ export default function Dashboard() {
         </div>
 
         <NowBanner />
+        <QuickSessions />
       </div>
 
       {/* Above the fold on purpose: a daily habit check is worthless if you

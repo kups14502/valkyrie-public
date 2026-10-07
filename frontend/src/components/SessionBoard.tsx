@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, Copy, Play, Plus, RotateCcw, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import {
   fetchLaunchTargets, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession,
@@ -9,6 +9,7 @@ import {
   type SessionActivity, type SessionHost, type TermSession, type WorkSession,
 } from '../lib/api'
 import { isTauri, isTauriMobile } from '../lib/auth'
+import { OPEN_MODE_KEY, readOpenMode, seedTerminal, type OpenMode } from '../lib/sessionLaunch'
 
 // I open sessions on thor and recover them from anywhere. That is the whole
 // feature, so this is one row per session and one button to get back into it.
@@ -24,23 +25,6 @@ import { isTauri, isTauriMobile } from '../lib/auth'
 const HOST = 'thor'
 const HOST_IP = '100.118.7.57'
 const SHOWN_BY_DEFAULT = 20
-
-// Where "open" puts a session. In a browser there is only one answer: the page.
-// The desktop app can do either, and until now it could ONLY open a window on
-// the local screen, so an in-page terminal was reachable from the desktop app
-// only when one already existed and could be clicked in the "in page" row.
-type OpenMode = 'page' | 'screen'
-const OPEN_MODE_KEY = 'valkyrie-session-open-mode'
-
-const readOpenMode = (): OpenMode => {
-  // The Android app has no local terminal to open either.
-  if (!isTauri() || isTauriMobile()) return 'page'
-  try {
-    return localStorage.getItem(OPEN_MODE_KEY) === 'page' ? 'page' : 'screen'
-  } catch {
-    return 'screen'
-  }
-}
 
 // Work and personal do not belong in one interleaved list. thor routes every
 // session to an area out of the same table the Obsidian capture uses, so this
@@ -405,28 +389,6 @@ function NewSession({ onStarted, inPage, remote }: { onStarted: () => void; inPa
   )
 }
 
-// Put the session we just created into the terminal page's cache BEFORE
-// navigating to it.
-//
-// Without this the handoff picks the wrong session. OpenTerminals below keeps
-// ['term','sessions'] warm, so the terminal page mounts, renders that cached
-// list synchronously (and, inside the 10s global staleTime, may not refetch at
-// all), fails to find the brand-new name from ?s= in it, and falls back to the
-// old list's first row: the phone ends up attached to the previous session
-// while the one just launched sits unselected. POST /terminal/sessions already
-// returns the row, so seeding is exact; if it somehow came back without one,
-// invalidating makes the page refetch and its own guard covers the gap.
-// Exported because the project page opens panes outside this board and has the
-// same handoff race.
-// eslint-disable-next-line react-refresh/only-export-components
-export function seedTerminal(qc: QueryClient, r: { name: string; session: TermSession | null }): void {
-  if (!r.session) {
-    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
-    return
-  }
-  const fresh = r.session
-  qc.setQueryData<TermSession[]>(['term', 'sessions'], (old) => [fresh, ...(old ?? []).filter((s) => s.name !== fresh.name)])
-}
 
 // Terminals already open in the page: tmux sessions on odin, each an SSH client
 // running Claude (or a shell) on thor. A tap reattaches; the X closes it, which
