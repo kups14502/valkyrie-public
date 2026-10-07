@@ -1,12 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Plus, RefreshCw, Repeat, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Plus, RefreshCw, Repeat, Settings2, Trash2 } from 'lucide-react'
 import { apiErrorText } from '../lib/api'
-import { Card } from '../components/Card'
+import { BTN_ACCENT, BTN_GHOST, BTN_TEXT, FIELD, LABEL, Sheet } from '../components/projects/Sheet'
 import {
-  addCalendarSource, deleteCalendarSource, fetchCalendarEvents, refreshCalendars, updateCalendarSource,
-  type CalendarEvent, type CalendarSource,
+  addCalendarSource, createLocalEvent, deleteCalendarSource, deleteLocalEvent, fetchCalendarEvents,
+  refreshCalendars, rruleText, updateCalendarSource, updateLocalEvent,
+  type CalendarEvent, type CalendarSource, type LocalEvent, type LocalEventInput,
 } from '../lib/calendarApi'
+
+// The calendar is Valkyrie's own: it renders with nothing connected, events
+// can be added here, and connected feeds (the work calendar) fill it in.
 
 type View = 'agenda' | 'month'
 
@@ -18,6 +22,7 @@ const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), 
 const addMonths = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth() + n, 1)
 const dateKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const keyDate = (key: string) => new Date(`${key}T12:00:00`)
 
 const timeLabel = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(' ', '')
@@ -52,6 +57,33 @@ function windowFor(view: View, anchor: Date): { from: number; to: number } {
   return { from: addDays(first, -7).getTime(), to: addMonths(first, 1).getTime() + 7 * DAY_MS }
 }
 
+/** Every day key an event covers, so a multi-day event shows on each. */
+function eventDays(ev: CalendarEvent): string[] {
+  const start = startOfDay(new Date(ev.start))
+  const endMs = Date.parse(ev.end)
+  const out = [dateKey(start)]
+  for (let d = addDays(start, 1); d.getTime() < endMs && out.length < 62; d = addDays(d, 1)) out.push(dateKey(d))
+  return out
+}
+
+function useWide() {
+  const query = '(min-width: 640px)'
+  const [wide, setWide] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setWide(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return wide
+}
+
+const TAB_CLS = '-mb-px shrink-0 whitespace-nowrap border-b-2 py-2.5 text-[11px] uppercase tracking-[0.14em] transition-colors sm:py-2'
+const TAB_ON = 'border-[var(--color-accent)] text-[var(--color-accent)]'
+const TAB_OFF = 'border-transparent text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+const ICON_BTN = 'inline-flex h-9 w-9 shrink-0 items-center justify-center text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:opacity-40 sm:h-8 sm:w-8'
+const DATE_FIELD = `${FIELD} [color-scheme:dark]`
+
 function EventRow({ event, onOpen }: { event: CalendarEvent; onOpen: (e: CalendarEvent) => void }) {
   return (
     <button
@@ -60,14 +92,19 @@ function EventRow({ event, onOpen }: { event: CalendarEvent; onOpen: (e: Calenda
       className="flex w-full items-start gap-3 border-l-2 py-1.5 pl-3 pr-2 text-left transition-colors hover:bg-[rgba(255,255,255,0.04)]"
       style={{ borderLeftColor: event.color }}
     >
-      <span className="w-20 shrink-0 pt-0.5 font-mono text-[11px] text-[var(--color-text-faint)]">
+      <span className="w-16 shrink-0 pt-0.5 font-mono text-[11px] text-[var(--color-text-faint)]">
         {event.allDay ? 'all day' : timeLabel(event.start)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm text-[var(--color-text)]">{event.summary}</span>
         {(event.location || event.recurring) && (
           <span className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-dim)]">
-            {event.recurring && <Repeat size={10} className="shrink-0" />}
+            {event.recurring && (
+              <span className="flex shrink-0 items-center gap-1">
+                <Repeat size={10} />
+                {event.local?.rrule ? rruleText(event.local.rrule) : ''}
+              </span>
+            )}
             {event.location && (
               <span className="flex min-w-0 items-center gap-1">
                 <MapPin size={10} className="shrink-0" />
@@ -81,266 +118,476 @@ function EventRow({ event, onOpen }: { event: CalendarEvent; onOpen: (e: Calenda
   )
 }
 
-function EventDetail({ event, onClose }: { event: CalendarEvent; onClose: () => void }) {
-  const start = new Date(event.start)
-  const end = new Date(event.end)
-  const span = event.allDay
-    ? start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-    : `${start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}, ${timeLabel(event.start)} – ${timeLabel(event.end)}`
-  const minutes = Math.round((end.getTime() - start.getTime()) / 60_000)
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6" onClick={onClose}>
-      <div
-        className="panel max-h-[80vh] w-full max-w-xl overflow-y-auto p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-3">
-          <span className="mt-1.5 h-3 w-3 shrink-0" style={{ backgroundColor: event.color }} />
-          <div className="min-w-0 flex-1">
-            <h3 className="text-base font-semibold text-[var(--color-text)]">{event.summary}</h3>
-            <div className="mt-1 text-xs text-[var(--color-text-dim)]">{span}</div>
-            {!event.allDay && (
-              <div className="text-[11px] text-[var(--color-text-faint)]">
-                {minutes >= 60 ? `${Math.round((minutes / 60) * 10) / 10}h` : `${minutes}m`}
-              </div>
-            )}
-          </div>
-          <button type="button" onClick={onClose} className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-dim)] hover:text-[var(--color-accent)]">
-            close
-          </button>
-        </div>
-        <dl className="mt-4 space-y-2 border-t border-[var(--color-border)] pt-3 text-xs">
-          <div className="flex gap-3">
-            <dt className="w-20 shrink-0 uppercase tracking-[0.2em] text-[var(--color-text-faint)]">cal</dt>
-            <dd className="text-[var(--color-text-dim)]">{event.sourceLabel}</dd>
-          </div>
-          {event.location && (
-            <div className="flex gap-3">
-              <dt className="w-20 shrink-0 uppercase tracking-[0.2em] text-[var(--color-text-faint)]">where</dt>
-              <dd className="min-w-0 break-words text-[var(--color-text-dim)]">{event.location}</dd>
-            </div>
-          )}
-          {event.organizer && (
-            <div className="flex gap-3">
-              <dt className="w-20 shrink-0 uppercase tracking-[0.2em] text-[var(--color-text-faint)]">host</dt>
-              <dd className="text-[var(--color-text-dim)]">{event.organizer}</dd>
-            </div>
-          )}
-          {event.description && (
-            <div className="flex gap-3">
-              <dt className="w-20 shrink-0 uppercase tracking-[0.2em] text-[var(--color-text-faint)]">notes</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words text-[var(--color-text-dim)]">
-                {event.description.slice(0, 4000)}
-              </dd>
-            </div>
-          )}
-        </dl>
-      </div>
+    <div className="flex gap-3">
+      <dt className="w-16 shrink-0 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">{label}</dt>
+      <dd className="min-w-0 whitespace-pre-wrap break-words text-xs text-[var(--color-text-dim)]">{children}</dd>
     </div>
   )
 }
 
-function MonthGrid({ anchor, events, onOpen }: { anchor: Date; events: CalendarEvent[]; onOpen: (e: CalendarEvent) => void }) {
-  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
-  const gridStart = addDays(first, -first.getDay())
-  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i))
-  const byDay = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>()
-    for (const ev of events) {
-      // A multi-day event belongs on every day it covers.
-      const start = startOfDay(new Date(ev.start))
-      const endMs = Date.parse(ev.end)
-      for (let d = start; d.getTime() < endMs || dateKey(d) === dateKey(start); d = addDays(d, 1)) {
-        const key = dateKey(d)
-        const list = map.get(key) ?? []
-        list.push(ev)
-        map.set(key, list)
-        if (d.getTime() > endMs) break
-      }
-    }
-    return map
-  }, [events])
-  const todayKey = dateKey(new Date())
+function EventDetail({ event, onClose, onEdit }: { event: CalendarEvent; onClose: () => void; onEdit: (e: LocalEvent) => void }) {
+  const qc = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => deleteLocalEvent(event.local!.id),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['calendar'] }); onClose() },
+  })
+  const start = new Date(event.start)
+  const end = new Date(event.end)
+  const day = (d: Date) => d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  const lastDay = new Date(end.getTime() - 1)
+  const when = event.allDay
+    ? (dateKey(lastDay) === dateKey(start) ? day(start) : `${day(start)} – ${day(lastDay)}`)
+    : `${day(start)}, ${timeLabel(event.start)} – ${timeLabel(event.end)}`
+  const repeat = event.local?.rrule ? rruleText(event.local.rrule) : event.recurring ? 'repeats' : ''
+  const local = event.local
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[640px]">
-        <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
-          {DAY_NAMES.map((d) => (
-            <div key={d} className="px-2 py-1.5 text-[9px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">{d}</div>
-          ))}
+    <Sheet
+      title={event.summary}
+      onClose={onClose}
+      footer={local && (
+        <>
+          <button type="button" onClick={() => onEdit(local)} className={BTN_ACCENT}>edit</button>
+          <button
+            type="button"
+            onClick={() => (confirming ? remove.mutate() : setConfirming(true))}
+            disabled={remove.isPending}
+            className={`${BTN_TEXT} ${confirming ? 'text-[var(--color-danger)]' : ''}`}
+          >
+            <Trash2 size={12} /> {confirming ? (local.rrule ? 'delete every repeat' : 'confirm delete') : 'delete'}
+          </button>
+          {remove.isError && <span className="text-xs text-[var(--color-danger)]">{apiErrorText(remove.error, 'delete failed')}</span>}
+        </>
+      )}
+    >
+      <dl className="space-y-2">
+        <DetailRow label="when">{when}</DetailRow>
+        {repeat && <DetailRow label="repeat">{repeat}</DetailRow>}
+        <DetailRow label="cal">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5" style={{ backgroundColor: event.color }} />
+            {event.sourceLabel}
+          </span>
+        </DetailRow>
+        {event.location && <DetailRow label="where">{event.location}</DetailRow>}
+        {event.organizer && <DetailRow label="host">{event.organizer}</DetailRow>}
+        {event.description && <DetailRow label="notes">{event.description.slice(0, 4000)}</DetailRow>}
+      </dl>
+    </Sheet>
+  )
+}
+
+type Freq = '' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
+
+type Draft = {
+  sourceId: string
+  title: string
+  notes: string
+  location: string
+  allDay: boolean
+  date: string
+  endDate: string
+  startTime: string
+  endTime: string
+  freq: Freq
+  interval: number
+}
+
+function draftFrom(seed: EditSeed, fallbackSource: string): Draft {
+  const ev = seed.event
+  if (ev) {
+    return {
+      sourceId: ev.sourceId,
+      title: ev.title,
+      notes: ev.notes,
+      location: ev.location,
+      allDay: ev.allDay,
+      date: ev.start.slice(0, 10),
+      endDate: ev.end.slice(0, 10),
+      startTime: ev.allDay ? '09:00' : ev.start.slice(11, 16),
+      endTime: ev.allDay ? '10:00' : ev.end.slice(11, 16),
+      freq: (/FREQ=(\w+)/.exec(ev.rrule)?.[1] ?? '') as Freq,
+      interval: Number(/INTERVAL=(\d+)/.exec(ev.rrule)?.[1] ?? 1),
+    }
+  }
+  const date = seed.date ?? dateKey(new Date())
+  return {
+    sourceId: fallbackSource, title: '', notes: '', location: '', allDay: false,
+    date, endDate: date, startTime: '09:00', endTime: '10:00', freq: '', interval: 1,
+  }
+}
+
+function inputFrom(d: Draft): LocalEventInput {
+  const rrule = d.freq ? (d.interval > 1 ? `FREQ=${d.freq};INTERVAL=${d.interval}` : `FREQ=${d.freq}`) : ''
+  if (d.allDay) {
+    return {
+      sourceId: d.sourceId, title: d.title.trim(), notes: d.notes, location: d.location.trim(),
+      allDay: true, start: d.date, end: d.endDate >= d.date ? d.endDate : d.date, rrule,
+    }
+  }
+  // An end time at or before the start means the event runs past midnight.
+  const endDay = d.endTime > d.startTime ? d.date : dateKey(addDays(keyDate(d.date), 1))
+  return {
+    sourceId: d.sourceId, title: d.title.trim(), notes: d.notes, location: d.location.trim(),
+    allDay: false, start: `${d.date}T${d.startTime}`, end: `${endDay}T${d.endTime}`, rrule,
+  }
+}
+
+type EditSeed = { event?: LocalEvent; date?: string }
+
+function EventEditor({ seed, calendars, onClose }: { seed: EditSeed; calendars: CalendarSource[]; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(seed, calendars[0]?.id ?? ''))
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }))
+  const save = useMutation({
+    mutationFn: () => (seed.event ? updateLocalEvent(seed.event.id, inputFrom(draft)) : createLocalEvent(inputFrom(draft))),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['calendar'] }); onClose() },
+  })
+  const canSave = draft.title.trim() && draft.date && !save.isPending
+
+  return (
+    <Sheet
+      title={seed.event ? 'edit event' : 'new event'}
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" onClick={() => save.mutate()} disabled={!canSave} className={BTN_ACCENT}>
+            {save.isPending ? 'saving' : 'save'}
+          </button>
+          <button type="button" onClick={onClose} className={BTN_GHOST}>cancel</button>
+          {save.isError && <span className="text-xs text-[var(--color-danger)]">{apiErrorText(save.error, 'save failed')}</span>}
+        </>
+      )}
+    >
+      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate() }}>
+        <input
+          autoFocus
+          value={draft.title}
+          onChange={(e) => set('title', e.target.value)}
+          placeholder="title"
+          className={FIELD}
+        />
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="min-w-[9.5rem] flex-1">
+            <span className={LABEL}>{draft.allDay ? 'from' : 'date'}</span>
+            <input
+              type="date"
+              value={draft.date}
+              onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value, endDate: d.endDate < e.target.value ? e.target.value : d.endDate }))}
+              className={DATE_FIELD}
+            />
+          </label>
+          {draft.allDay ? (
+            <label className="min-w-[9.5rem] flex-1">
+              <span className={LABEL}>through</span>
+              <input type="date" value={draft.endDate} min={draft.date} onChange={(e) => set('endDate', e.target.value)} className={DATE_FIELD} />
+            </label>
+          ) : (
+            <>
+              <label className="w-[7.5rem]">
+                <span className={LABEL}>start</span>
+                <input type="time" value={draft.startTime} onChange={(e) => set('startTime', e.target.value)} className={DATE_FIELD} />
+              </label>
+              <label className="w-[7.5rem]">
+                <span className={LABEL}>end</span>
+                <input type="time" value={draft.endTime} onChange={(e) => set('endTime', e.target.value)} className={DATE_FIELD} />
+              </label>
+            </>
+          )}
         </div>
-        <div className="grid grid-cols-7">
-          {cells.map((day) => {
-            const key = dateKey(day)
-            const dayEvents = byDay.get(key) ?? []
-            const otherMonth = day.getMonth() !== anchor.getMonth()
-            return (
-              <div
-                key={key}
-                className={`min-h-[92px] border-b border-r border-[var(--color-border)] p-1.5 ${otherMonth ? 'opacity-40' : ''}`}
-              >
-                <div
-                  className={`mb-1 inline-flex h-5 min-w-5 items-center justify-center px-1 font-mono text-[11px] ${
-                    key === todayKey
-                      ? 'bg-[var(--color-accent)] font-bold text-black'
-                      : 'text-[var(--color-text-dim)]'
-                  }`}
-                >
-                  {day.getDate()}
-                </div>
-                <div className="space-y-0.5">
-                  {dayEvents.slice(0, 3).map((ev, i) => (
-                    <button
-                      key={`${ev.uid}-${ev.start}-${i}`}
-                      type="button"
-                      onClick={() => onOpen(ev)}
-                      title={ev.summary}
-                      className="block w-full truncate border-l-2 pl-1 text-left text-[10px] text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-                      style={{ borderLeftColor: ev.color }}
-                    >
-                      {!ev.allDay && <span className="text-[var(--color-text-faint)]">{timeLabel(ev.start)} </span>}
-                      {ev.summary}
-                    </button>
-                  ))}
-                  {dayEvents.length > 3 && (
-                    <div className="pl-1 text-[10px] text-[var(--color-text-faint)]">+{dayEvents.length - 3} more</div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+        <label className="flex items-center gap-2 text-xs text-[var(--color-text-dim)]">
+          <input type="checkbox" checked={draft.allDay} onChange={(e) => set('allDay', e.target.checked)} className="accent-[var(--color-accent)]" />
+          all day
+        </label>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="min-w-[9.5rem] flex-1">
+            <span className={LABEL}>repeat</span>
+            <select value={draft.freq} onChange={(e) => set('freq', e.target.value as Freq)} className={`${FIELD} [color-scheme:dark]`}>
+              <option value="">does not repeat</option>
+              <option value="DAILY">daily</option>
+              <option value="WEEKLY">weekly</option>
+              <option value="MONTHLY">monthly</option>
+              <option value="YEARLY">yearly</option>
+            </select>
+          </label>
+          {draft.freq && (
+            <label className="w-[7.5rem]">
+              <span className={LABEL}>every</span>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={draft.interval}
+                onChange={(e) => set('interval', Math.min(99, Math.max(1, Number(e.target.value) || 1)))}
+                className={FIELD}
+              />
+            </label>
+          )}
+          {draft.freq && (
+            <span className="pb-2.5 text-[11px] text-[var(--color-text-faint)]">
+              {rruleText(draft.interval > 1 ? `FREQ=${draft.freq};INTERVAL=${draft.interval}` : `FREQ=${draft.freq}`)}
+            </span>
+          )}
         </div>
-      </div>
-    </div>
+        {calendars.length > 1 && (
+          <label className="block">
+            <span className={LABEL}>calendar</span>
+            <select value={draft.sourceId} onChange={(e) => set('sourceId', e.target.value)} className={`${FIELD} [color-scheme:dark]`}>
+              {calendars.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </label>
+        )}
+        <input value={draft.location} onChange={(e) => set('location', e.target.value)} placeholder="location" className={FIELD} />
+        <textarea value={draft.notes} onChange={(e) => set('notes', e.target.value)} placeholder="notes" rows={3} className={FIELD} />
+        <button type="submit" hidden />
+      </form>
+    </Sheet>
   )
 }
 
 const COLORS = ['#00ff41', '#00b4ff', '#ff9f1c', '#ff4d6d', '#b388ff', '#ffe066']
 
-function SourcesCard({ sources }: { sources: CalendarSource[] }) {
+function ManageSheet({ sources, onClose }: { sources: CalendarSource[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const [label, setLabel] = useState('Work')
+  const [label, setLabel] = useState('')
   const [url, setUrl] = useState('')
-  const [color, setColor] = useState(COLORS[0])
+  const [color, setColor] = useState(COLORS[1])
   const [error, setError] = useState('')
 
   const invalidate = () => { void qc.invalidateQueries({ queryKey: ['calendar'] }) }
   const add = useMutation({
-    mutationFn: () => addCalendarSource({ label, url, color }),
-    onSuccess: () => { setUrl(''); setError(''); invalidate() },
+    mutationFn: () => addCalendarSource({ label: label.trim() || 'Feed', url, color }),
+    onSuccess: () => { setUrl(''); setLabel(''); setError(''); invalidate() },
     onError: (e: unknown) => setError(apiErrorText(e, 'could not add that feed')),
   })
   const toggle = useMutation({
     mutationFn: (s: CalendarSource) => updateCalendarSource(s.id, { enabled: !s.enabled }),
     onSuccess: invalidate,
   })
-  const remove = useMutation({ mutationFn: (id: string) => deleteCalendarSource(id), onSuccess: invalidate })
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteCalendarSource(id),
+    onSuccess: invalidate,
+    onError: (e: unknown) => setError(apiErrorText(e, 'could not remove that calendar')),
+  })
 
   return (
-    <Card title="calendars" collapsible defaultCollapsed={sources.length > 0} storageKey="calendar-sources">
-      <div className="space-y-4">
-        {sources.length > 0 && (
-          <ul className="space-y-2">
-            {sources.map((s) => (
-              <li key={s.id} className="flex items-center gap-3 border border-[var(--color-border)] px-3 py-2">
-                <span className="h-3 w-3 shrink-0" style={{ backgroundColor: s.color }} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-[var(--color-text)]">{s.label}</span>
-                  <span className="block truncate text-[11px] text-[var(--color-text-faint)]">{s.urlHint}</span>
-                </span>
-                <span className="shrink-0 text-right text-[11px]">
-                  {s.error
+    <Sheet title="calendars" onClose={onClose}>
+      <ul className="divide-y divide-[var(--color-border)]">
+        {sources.map((s) => (
+          <li key={s.id} className="flex items-center gap-3 py-2">
+            <span className="h-3 w-3 shrink-0" style={{ backgroundColor: s.color }} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-[var(--color-text)]">{s.label}</span>
+              <span className="block truncate text-[11px] text-[var(--color-text-faint)]">
+                {s.kind === 'local'
+                  ? 'lives in valkyrie'
+                  : s.error
                     ? <span className="text-[var(--color-danger)]">{s.error}</span>
-                    : <span className="text-[var(--color-text-faint)]">synced {relative(s.fetchedAt)}</span>}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => toggle.mutate(s)}
-                  className={`shrink-0 border px-2 py-1 text-[10px] uppercase tracking-[0.18em] ${
-                    s.enabled
-                      ? 'border-[var(--color-accent)]/60 text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-faint)]'
-                  }`}
-                >
-                  {s.enabled ? 'on' : 'off'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => remove.mutate(s.id)}
-                  title="Remove this feed"
-                  className="shrink-0 text-[var(--color-text-faint)] hover:text-[var(--color-danger)]"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <form
-          className="space-y-2"
-          onSubmit={(e) => { e.preventDefault(); if (url.trim()) add.mutate() }}
-        >
-          <div className="flex flex-wrap gap-2">
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="name"
-              className="w-28 border border-[var(--color-border)] bg-transparent px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-            />
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="ICS link (webcal:// or https://…)"
-              className="min-w-0 flex-1 border border-[var(--color-border)] bg-transparent px-2 py-1.5 font-mono text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-            />
-            <div className="flex items-center gap-1">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  aria-label={`color ${c}`}
-                  className={`h-5 w-5 border ${color === c ? 'border-[var(--color-text)]' : 'border-transparent'}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
+                    : `${s.urlHint} · synced ${relative(s.fetchedAt)}`}
+              </span>
+            </span>
             <button
-              type="submit"
-              disabled={add.isPending || !url.trim()}
-              className="inline-flex items-center gap-2 border border-[var(--color-accent)]/60 px-3 py-1.5 text-xs uppercase tracking-[0.18em] text-[var(--color-accent)] disabled:opacity-40"
+              type="button"
+              onClick={() => toggle.mutate(s)}
+              className={`${BTN_TEXT} ${s.enabled ? 'text-[var(--color-accent)]' : ''}`}
             >
-              <Plus size={12} /> {add.isPending ? 'adding' : 'add'}
+              {s.enabled ? 'shown' : 'off'}
             </button>
-          </div>
-          {error && <div className="text-xs text-[var(--color-danger)]">{error}</div>}
-          <p className="text-[11px] leading-relaxed text-[var(--color-text-dim)]">
-            Outlook Web → Calendar → Share → your calendar → Publish a calendar → permission
-            "Can view all details" → copy the <span className="font-mono">.ics</span> link. Read-only:
-            events are shown here, edits still happen in Outlook.
-          </p>
-        </form>
-      </div>
-    </Card>
+            {s.kind === 'ics' && (
+              <button
+                type="button"
+                onClick={() => remove.mutate(s.id)}
+                aria-label={`Remove ${s.label}`}
+                className={ICON_BTN}
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      <form
+        className="mt-5 space-y-2 border-t border-[var(--color-border)] pt-4"
+        onSubmit={(e) => { e.preventDefault(); if (url.trim()) add.mutate() }}
+      >
+        <div className={LABEL}>connect a feed</div>
+        <div className="flex flex-wrap gap-2">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name" className={`${FIELD} sm:w-32 sm:flex-none`} />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="ICS link (webcal:// or https://…)"
+            className={`${FIELD} flex-1 font-mono`}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(c)}
+              aria-label={`color ${c}`}
+              className={`h-5 w-5 border ${color === c ? 'border-[var(--color-text)]' : 'border-transparent'}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <button type="submit" disabled={add.isPending || !url.trim()} className={`${BTN_GHOST} ml-auto`}>
+            <Plus size={12} /> {add.isPending ? 'adding' : 'connect'}
+          </button>
+        </div>
+        {error && <div className="text-xs text-[var(--color-danger)]">{error}</div>}
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-faint)]">
+          Read-only: a feed's events show here and are edited where they came from.
+        </p>
+      </form>
+    </Sheet>
   )
 }
 
+function MonthGrid({ anchor, events, selected, onDay, onOpen }: {
+  anchor: Date
+  events: CalendarEvent[]
+  selected: string | null
+  onDay: (key: string) => void
+  onOpen: (e: CalendarEvent) => void
+}) {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+  const gridStart = addDays(first, -first.getDay())
+  // Only as many rows as the month needs, so a short month does not waste one.
+  const daysInMonth = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate()
+  const rows = Math.ceil((first.getDay() + daysInMonth) / 7)
+  const cells = Array.from({ length: rows * 7 }, (_, i) => addDays(gridStart, i))
+  const byDay = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>()
+    for (const ev of events) {
+      for (const key of eventDays(ev)) {
+        const list = map.get(key) ?? []
+        list.push(ev)
+        map.set(key, list)
+      }
+    }
+    for (const list of map.values()) list.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start))
+    return map
+  }, [events])
+  const todayKey = dateKey(new Date())
+
+  return (
+    <div className="border-l border-t border-[var(--color-border)]">
+      <div className="grid grid-cols-7">
+        {DAY_NAMES.map((d) => (
+          <div key={d} className="border-b border-r border-[var(--color-border)] px-1.5 py-1 text-[9px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {cells.map((day) => {
+          const key = dateKey(day)
+          const dayEvents = byDay.get(key) ?? []
+          const otherMonth = day.getMonth() !== anchor.getMonth()
+          return (
+            <div
+              key={key}
+              role="button"
+              tabIndex={-1}
+              onClick={() => onDay(key)}
+              className={`group min-h-[52px] cursor-pointer border-b border-r border-[var(--color-border)] p-1 transition-colors hover:bg-[rgba(255,255,255,0.03)] sm:min-h-[96px] sm:p-1.5 ${
+                otherMonth ? 'opacity-40' : ''
+              } ${selected === key ? 'bg-[rgba(var(--color-accent-rgb),0.08)]' : ''}`}
+            >
+              <div className="flex items-center justify-between">
+                <span
+                  className={`inline-flex h-5 min-w-5 items-center justify-center px-1 font-mono text-[11px] ${
+                    key === todayKey ? 'bg-[var(--color-accent)] font-bold text-black' : 'text-[var(--color-text-dim)]'
+                  }`}
+                >
+                  {day.getDate()}
+                </span>
+                <Plus size={11} className="hidden text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 sm:block" />
+              </div>
+              {/* Phone: a dot per event; the selected day lists them below the grid. */}
+              <div className="mt-1 flex flex-wrap gap-0.5 sm:hidden">
+                {dayEvents.slice(0, 4).map((ev, i) => (
+                  <span key={`${ev.uid}-${ev.start}-${i}`} className="h-1.5 w-1.5" style={{ backgroundColor: ev.color }} />
+                ))}
+              </div>
+              <div className="mt-0.5 hidden space-y-0.5 sm:block">
+                {dayEvents.slice(0, 3).map((ev, i) => (
+                  <button
+                    key={`${ev.uid}-${ev.start}-${i}`}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onOpen(ev) }}
+                    title={ev.summary}
+                    className="block w-full truncate border-l-2 pl-1 text-left text-[11px] leading-snug text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+                    style={{ borderLeftColor: ev.color }}
+                  >
+                    {!ev.allDay && <span className="text-[var(--color-text-faint)]">{timeLabel(ev.start)} </span>}
+                    {ev.summary}
+                  </button>
+                ))}
+                {dayEvents.length > 3 && (
+                  <div className="pl-1 text-[10px] text-[var(--color-text-faint)]">+{dayEvents.length - 3} more</div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DayList({ days, onOpen }: { days: [string, CalendarEvent[]][]; onOpen: (e: CalendarEvent) => void }) {
+  return (
+    <div className="space-y-5">
+      {days.map(([key, dayEvents]) => (
+        <div key={key}>
+          <div className="mb-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">
+            {dayHeading(keyDate(key))}
+          </div>
+          <div className="space-y-0.5">
+            {dayEvents.map((ev, i) => (
+              <EventRow key={`${ev.uid}-${ev.start}-${i}`} event={ev} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const HIDDEN_KEY = 'valkyrie-cal-hidden'
+
 export default function Calendar() {
-  const [view, setView] = useState<View>(() => (localStorage.getItem('valkyrie-cal-view') as View) || 'agenda')
+  const [view, setView] = useState<View>(() => (localStorage.getItem('valkyrie-cal-view') as View) || 'month')
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
   const [open, setOpen] = useState<CalendarEvent | null>(null)
-  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const [editing, setEditing] = useState<EditSeed | null>(null)
+  const [managing, setManaging] = useState(false)
+  const [selected, setSelected] = useState<string | null>(() => dateKey(new Date()))
+  const [hidden, setHidden] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]') as string[]) } catch { return new Set() }
+  })
+  const wide = useWide()
   const qc = useQueryClient()
 
   const setViewPersisted = (v: View) => { setView(v); localStorage.setItem('valkyrie-cal-view', v) }
+  const toggleHidden = (id: string) => setHidden((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next]))
+    return next
+  })
 
   const { from, to } = windowFor(view, anchor)
   const query = useQuery({
     queryKey: ['calendar', 'events', view, from, to],
     queryFn: () => fetchCalendarEvents(from, to),
     refetchInterval: 5 * 60_000,
+    placeholderData: (prev) => prev,
   })
 
   const refresh = useMutation({
@@ -349,6 +596,9 @@ export default function Calendar() {
   })
 
   const sources = query.data?.sources ?? []
+  const shown = sources.filter((s) => s.enabled)
+  const localCalendars = sources.filter((s) => s.kind === 'local')
+  const failing = shown.filter((s) => s.error)
   const events = useMemo(
     () => (query.data?.events ?? []).filter((e) => !hidden.has(e.sourceId)),
     [query.data, hidden],
@@ -356,24 +606,38 @@ export default function Calendar() {
 
   const agendaDays = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>()
+    const firstKey = dateKey(anchor)
     for (const ev of events) {
-      const key = dateKey(new Date(ev.start))
+      // A multi-day event that began before the window still belongs on its
+      // first visible day.
+      const key = eventDays(ev).find((k) => k >= firstKey)
+      if (!key) continue
       const list = map.get(key) ?? []
       list.push(ev)
       map.set(key, list)
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [events])
+  }, [events, anchor])
+
+  const selectedEvents = useMemo(
+    () => (selected ? events.filter((ev) => eventDays(ev).includes(selected)) : []),
+    [events, selected],
+  )
 
   const title = view === 'month'
     ? anchor.toLocaleDateString([], { month: 'long', year: 'numeric' })
-    : `${startOfDay(anchor).toLocaleDateString([], { month: 'short', day: 'numeric' })} onward`
+    : `${anchor.toLocaleDateString([], { month: 'short', day: 'numeric' })} onward`
 
   const step = (dir: -1 | 1) =>
     setAnchor((a) => (view === 'month' ? addMonths(a, dir) : addDays(a, dir * 7)))
 
+  const onDay = (key: string) => {
+    if (wide) setEditing({ date: key })
+    else setSelected(key)
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="vk-compact mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// time</div>
@@ -381,122 +645,119 @@ export default function Calendar() {
             calendar<span className="cursor-blink">_</span>
           </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {(['agenda', 'month'] as View[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setViewPersisted(v)}
-              className={`border px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] ${
-                view === v
-                  ? 'border-[var(--color-accent)]/70 bg-[rgba(0,255,65,0.12)] text-[var(--color-accent)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
-              }`}
-            >
-              {v}
-            </button>
-          ))}
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => refresh.mutate()}
             disabled={refresh.isPending}
-            title="Re-fetch every feed now"
-            className="inline-flex items-center gap-2 border border-[var(--color-border)] px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)] disabled:opacity-40"
+            title="Re-fetch every connected feed"
+            aria-label="Sync feeds"
+            className={ICON_BTN}
           >
-            <RefreshCw size={12} className={refresh.isPending ? 'animate-spin' : ''} /> sync
+            <RefreshCw size={14} className={refresh.isPending ? 'animate-spin' : ''} />
+          </button>
+          <button type="button" onClick={() => setManaging(true)} title="Calendars and feeds" aria-label="Calendars" className={ICON_BTN}>
+            <Settings2 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing({ date: view === 'month' && selected ? selected : dateKey(new Date()) })}
+            className={`${BTN_ACCENT} ml-2`}
+          >
+            <Plus size={12} /> event
           </button>
         </div>
       </div>
 
-      <SourcesCard sources={sources} />
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-b border-[var(--color-border)]">
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => step(-1)} className={ICON_BTN} aria-label="Back">
+            <ChevronLeft size={15} />
+          </button>
+          <button type="button" onClick={() => step(1)} className={ICON_BTN} aria-label="Forward">
+            <ChevronRight size={15} />
+          </button>
+          <span className="min-w-0 text-sm text-[var(--color-text)]">{title}</span>
+          <button
+            type="button"
+            onClick={() => { setAnchor(startOfDay(new Date())); setSelected(dateKey(new Date())) }}
+            className={BTN_TEXT}
+          >
+            today
+          </button>
+        </div>
+        <div className="flex items-center gap-4">
+          {(['month', 'agenda'] as View[]).map((v) => (
+            <button key={v} type="button" onClick={() => setViewPersisted(v)} className={`${TAB_CLS} ${view === v ? TAB_ON : TAB_OFF}`}>
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {sources.length === 0 ? (
-        <Card>
-          <div className="flex items-start gap-3 text-sm">
-            <CalendarDays size={16} className="mt-0.5 shrink-0 text-[var(--color-accent)]" />
-            <div className="space-y-1">
-              <div className="text-[var(--color-text)]">No calendar connected yet.</div>
-              <div className="text-[var(--color-text-dim)]">
-                Open the calendars card above and paste the published ICS link for your calendar.
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <Card
-          title={title}
-          action={(
-            <div className="flex items-center gap-1">
-              <button type="button" onClick={() => step(-1)} className="p-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Back">
-                <ChevronLeft size={14} />
-              </button>
+      {(shown.length > 1 || failing.length > 0) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+          {shown.length > 1 && shown.map((s) => {
+            const off = hidden.has(s.id)
+            return (
               <button
+                key={s.id}
                 type="button"
-                onClick={() => setAnchor(startOfDay(new Date()))}
-                className="border border-[var(--color-border)] px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] hover:border-[var(--color-accent)]/60 hover:text-[var(--color-accent)]"
+                onClick={() => toggleHidden(s.id)}
+                aria-pressed={!off}
+                className={`inline-flex items-center gap-1.5 ${off ? 'text-[var(--color-text-faint)] line-through' : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'}`}
               >
-                today
+                <span className="h-2.5 w-2.5" style={{ backgroundColor: off ? 'transparent' : s.color, border: `1px solid ${s.color}` }} />
+                {s.label}
               </button>
-              <button type="button" onClick={() => step(1)} className="p-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]" aria-label="Forward">
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
-        >
-          {sources.length > 1 && (
-            <div className="mb-4 flex flex-wrap gap-2 border-b border-[var(--color-border)] pb-3">
-              {sources.map((s) => {
-                const off = hidden.has(s.id)
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setHidden((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(s.id)) next.delete(s.id)
-                      else next.add(s.id)
-                      return next
-                    })}
-                    className={`inline-flex items-center gap-2 border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${
-                      off ? 'border-[var(--color-border)] text-[var(--color-text-faint)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
-                    }`}
-                  >
-                    <span className="h-2.5 w-2.5" style={{ backgroundColor: off ? 'transparent' : s.color, border: `1px solid ${s.color}` }} />
-                    {s.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {query.isLoading && !query.data ? (
-            <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
-          ) : query.error ? (
-            <div className="text-sm text-[var(--color-danger)]">Calendar API unreachable</div>
-          ) : view === 'month' ? (
-            <MonthGrid anchor={anchor} events={events} onOpen={setOpen} />
-          ) : agendaDays.length === 0 ? (
-            <div className="text-sm text-[var(--color-text-dim)]">Nothing scheduled in the next six weeks.</div>
-          ) : (
-            <div className="space-y-5">
-              {agendaDays.map(([key, dayEvents]) => (
-                <div key={key}>
-                  <div className="mb-1.5 text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">
-                    {dayHeading(new Date(`${key}T12:00:00`))}
-                  </div>
-                  <div className="space-y-0.5">
-                    {dayEvents.map((ev, i) => (
-                      <EventRow key={`${ev.uid}-${ev.start}-${i}`} event={ev} onOpen={setOpen} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+            )
+          })}
+          {failing.map((s) => (
+            <span key={s.id} className="text-[var(--color-danger)]">{s.label}: {s.error}</span>
+          ))}
+        </div>
       )}
 
-      {open && <EventDetail event={open} onClose={() => setOpen(null)} />}
+      {query.isLoading && !query.data ? (
+        <div className="py-16 text-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">&gt; loading<span className="cursor-blink">_</span></div>
+      ) : query.isError ? (
+        <div className="text-sm text-[var(--color-danger)]">{apiErrorText(query.error, 'calendar API unreachable')}</div>
+      ) : view === 'month' ? (
+        <>
+          <MonthGrid anchor={anchor} events={events} selected={wide ? null : selected} onDay={onDay} onOpen={setOpen} />
+          {!wide && selected && (
+            <div className="pt-1">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-faint)]">{dayHeading(keyDate(selected))}</span>
+                <button type="button" onClick={() => setEditing({ date: selected })} className={BTN_TEXT}>
+                  <Plus size={11} /> add
+                </button>
+              </div>
+              {selectedEvents.length === 0 ? (
+                <div className="py-2 text-xs text-[var(--color-text-faint)]">Nothing this day.</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {selectedEvents.map((ev, i) => <EventRow key={`${ev.uid}-${ev.start}-${i}`} event={ev} onOpen={setOpen} />)}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : agendaDays.length === 0 ? (
+        <div className="py-6 text-sm text-[var(--color-text-dim)]">Nothing in the next six weeks.</div>
+      ) : (
+        <DayList days={agendaDays} onOpen={setOpen} />
+      )}
+
+      {open && (
+        <EventDetail
+          event={open}
+          onClose={() => setOpen(null)}
+          onEdit={(ev) => { setOpen(null); setEditing({ event: ev }) }}
+        />
+      )}
+      {editing && <EventEditor seed={editing} calendars={localCalendars} onClose={() => setEditing(null)} />}
+      {managing && <ManageSheet sources={sources} onClose={() => setManaging(false)} />}
     </div>
   )
 }

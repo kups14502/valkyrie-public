@@ -91,8 +91,9 @@ button, input, select, textarea {
    (they sit in @layer utilities), so a text-[11px] on a button never applied:
    buttons took their parent's size. Inside the Projects pages the utilities
    win again; revert-layer falls back to Tailwind's own `font: inherit` where a
-   button sets no size. Scoped so the other pages keep the look they have. */
-.vk-proj :is(button, input, select, textarea) {
+   button sets no size. Scoped so the other pages keep the look they have;
+   .vk-compact opts another page in (the calendar). */
+:is(.vk-proj, .vk-compact) :is(button, input, select, textarea) {
   font-size: revert-layer;
   line-height: revert-layer;
   font-weight: revert-layer;
