@@ -8,24 +8,25 @@ import {
   refreshCalendars, rruleText, updateCalendarSource, updateLocalEvent,
   type CalendarEvent, type CalendarSource, type LocalEvent, type LocalEventInput,
 } from '../lib/calendarApi'
+import { DAY_MS, addDays, addMonths, dateKey, keyDate, startOfDay, startOfWeek, timeLabel } from '../lib/calendarDates'
+import { TimeGrid, type SlotSeed } from '../components/calendar/TimeGrid'
 
 // The calendar is Valkyrie's own: it renders with nothing connected, events
 // can be added here, and connected feeds (the work calendar) fill it in.
 
-type View = 'agenda' | 'month'
+type View = 'day' | 'workweek' | 'week' | 'month' | 'agenda'
 
-const DAY_MS = 86_400_000
+// Outlook's set, plus the agenda list the phone reads best.
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'day', label: 'day' },
+  { id: 'workweek', label: 'work week' },
+  { id: 'week', label: 'week' },
+  { id: 'month', label: 'month' },
+  { id: 'agenda', label: 'agenda' },
+]
+const isGrid = (v: View) => v === 'day' || v === 'workweek' || v === 'week'
+
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-
-const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
-const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
-const addMonths = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth() + n, 1)
-const dateKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-const keyDate = (key: string) => new Date(`${key}T12:00:00`)
-
-const timeLabel = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(' ', '')
 
 const dayHeading = (d: Date) => {
   const today = dateKey(new Date())
@@ -49,12 +50,41 @@ const relative = (iso: string | null) => {
 /** The window the API is asked for, wide enough that the visible range and a
  *  bit of scroll either side come from one fetch. */
 function windowFor(view: View, anchor: Date): { from: number; to: number } {
+  if (isGrid(view)) {
+    const days = gridDays(view, anchor)
+    return { from: addDays(days[0], -1).getTime(), to: addDays(days[days.length - 1], 2).getTime() }
+  }
   if (view === 'agenda') {
     const from = startOfDay(anchor).getTime()
     return { from, to: from + 45 * DAY_MS }
   }
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
   return { from: addDays(first, -7).getTime(), to: addMonths(first, 1).getTime() + 7 * DAY_MS }
+}
+
+/** The columns of a time-grid view: one day, Monday to Friday, or Sunday to Saturday. */
+function gridDays(view: View, anchor: Date): Date[] {
+  if (view === 'day') return [startOfDay(anchor)]
+  const sunday = startOfWeek(anchor)
+  return view === 'workweek'
+    ? Array.from({ length: 5 }, (_, i) => addDays(sunday, i + 1))
+    : Array.from({ length: 7 }, (_, i) => addDays(sunday, i))
+}
+
+/** `October 5–9, 2026`, `Sep 27 – Oct 3, 2026`, or `Dec 28, 2026 – Jan 3, 2027`. */
+function rangeTitle(first: Date, last: Date): string {
+  if (first.getTime() === last.getTime()) {
+    return first.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  }
+  if (first.getFullYear() !== last.getFullYear()) {
+    const f = { month: 'short', day: 'numeric', year: 'numeric' } as const
+    return `${first.toLocaleDateString([], f)} – ${last.toLocaleDateString([], f)}`
+  }
+  if (first.getMonth() !== last.getMonth()) {
+    const f = { month: 'short', day: 'numeric' } as const
+    return `${first.toLocaleDateString([], f)} – ${last.toLocaleDateString([], f)}, ${last.getFullYear()}`
+  }
+  return `${first.toLocaleDateString([], { month: 'long' })} ${first.getDate()}–${last.getDate()}, ${last.getFullYear()}`
 }
 
 /** Every day key an event covers, so a multi-day event shows on each. */
@@ -215,8 +245,8 @@ function draftFrom(seed: EditSeed, fallbackSource: string): Draft {
   }
   const date = seed.date ?? dateKey(new Date())
   return {
-    sourceId: fallbackSource, title: '', notes: '', location: '', allDay: false,
-    date, endDate: date, startTime: '09:00', endTime: '10:00', freq: '', interval: 1,
+    sourceId: fallbackSource, title: '', notes: '', location: '', allDay: Boolean(seed.allDay),
+    date, endDate: date, startTime: seed.startTime ?? '09:00', endTime: seed.endTime ?? '10:00', freq: '', interval: 1,
   }
 }
 
@@ -236,7 +266,7 @@ function inputFrom(d: Draft): LocalEventInput {
   }
 }
 
-type EditSeed = { event?: LocalEvent; date?: string }
+type EditSeed = { event?: LocalEvent } & Partial<SlotSeed>
 
 function EventEditor({ seed, calendars, onClose }: { seed: EditSeed; calendars: CalendarSource[]; onClose: () => void }) {
   const qc = useQueryClient()
@@ -448,11 +478,13 @@ function ManageSheet({ sources, onClose }: { sources: CalendarSource[]; onClose:
   )
 }
 
-function MonthGrid({ anchor, events, selected, onDay, onOpen }: {
+function MonthGrid({ anchor, events, selected, onDay, onDayView, onOpen }: {
   anchor: Date
   events: CalendarEvent[]
   selected: string | null
   onDay: (key: string) => void
+  /** The date number was clicked: open the day view. */
+  onDayView: (key: string) => void
   onOpen: (e: CalendarEvent) => void
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
@@ -498,13 +530,16 @@ function MonthGrid({ anchor, events, selected, onDay, onOpen }: {
               } ${selected === key ? 'bg-[rgba(var(--color-accent-rgb),0.08)]' : ''}`}
             >
               <div className="flex items-center justify-between">
-                <span
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onDayView(key) }}
+                  title="Show this day"
                   className={`inline-flex h-5 min-w-5 items-center justify-center px-1 font-mono text-[11px] ${
-                    key === todayKey ? 'bg-[var(--color-accent)] font-bold text-black' : 'text-[var(--color-text-dim)]'
+                    key === todayKey ? 'bg-[var(--color-accent)] font-bold text-black' : 'text-[var(--color-text-dim)] hover:text-[var(--color-accent)]'
                   }`}
                 >
                   {day.getDate()}
-                </span>
+                </button>
                 <Plus size={11} className="hidden text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 sm:block" />
               </div>
               {/* Phone: a dot per event; the selected day lists them below the grid. */}
@@ -561,7 +596,11 @@ function DayList({ days, onOpen }: { days: [string, CalendarEvent[]][]; onOpen: 
 const HIDDEN_KEY = 'valkyrie-cal-hidden'
 
 export default function Calendar() {
-  const [view, setView] = useState<View>(() => (localStorage.getItem('valkyrie-cal-view') as View) || 'month')
+  const [view, setView] = useState<View>(() => {
+    const saved = localStorage.getItem('valkyrie-cal-view')
+    if (VIEWS.some((v) => v.id === saved)) return saved as View
+    return window.matchMedia('(min-width: 640px)').matches ? 'week' : 'day'
+  })
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
   const [open, setOpen] = useState<CalendarEvent | null>(null)
   const [editing, setEditing] = useState<EditSeed | null>(null)
@@ -582,6 +621,7 @@ export default function Calendar() {
     return next
   })
 
+  const days = useMemo(() => (isGrid(view) ? gridDays(view, anchor) : []), [view, anchor])
   const { from, to } = windowFor(view, anchor)
   const query = useQuery({
     queryKey: ['calendar', 'events', view, from, to],
@@ -624,12 +664,15 @@ export default function Calendar() {
     [events, selected],
   )
 
-  const title = view === 'month'
-    ? anchor.toLocaleDateString([], { month: 'long', year: 'numeric' })
-    : `${anchor.toLocaleDateString([], { month: 'short', day: 'numeric' })} onward`
+  const title = isGrid(view)
+    ? rangeTitle(days[0], days[days.length - 1])
+    : view === 'month'
+      ? anchor.toLocaleDateString([], { month: 'long', year: 'numeric' })
+      : `${anchor.toLocaleDateString([], { month: 'short', day: 'numeric' })} onward`
 
   const step = (dir: -1 | 1) => {
-    if (view === 'agenda') return setAnchor((a) => addDays(a, dir * 7))
+    if (view === 'day') return setAnchor((a) => addDays(a, dir))
+    if (view !== 'month') return setAnchor((a) => addDays(a, dir * 7))
     // The phone's day list follows the month: today in this month, else the 1st.
     const next = addMonths(anchor, dir)
     const today = new Date()
@@ -642,8 +685,22 @@ export default function Calendar() {
     else setSelected(key)
   }
 
+  const showDay = (key: string) => {
+    setAnchor(startOfDay(keyDate(key)))
+    setSelected(key)
+    setViewPersisted('day')
+  }
+
+  // "+ event" lands on the day being looked at: today when it is on screen.
+  const newEventDate = () => {
+    const today = dateKey(new Date())
+    if (isGrid(view)) return days.some((d) => dateKey(d) === today) ? today : dateKey(days[0])
+    if (view === 'month' && selected) return selected
+    return today
+  }
+
   return (
-    <div className="vk-compact mx-auto max-w-6xl space-y-4">
+    <div className="vk-compact mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// time</div>
@@ -667,7 +724,7 @@ export default function Calendar() {
           </button>
           <button
             type="button"
-            onClick={() => setEditing({ date: view === 'month' && selected ? selected : dateKey(new Date()) })}
+            onClick={() => setEditing({ date: newEventDate() })}
             className={`${BTN_ACCENT} ml-2`}
           >
             <Plus size={12} /> event
@@ -692,10 +749,10 @@ export default function Calendar() {
             today
           </button>
         </div>
-        <div className="flex items-center gap-4">
-          {(['month', 'agenda'] as View[]).map((v) => (
-            <button key={v} type="button" onClick={() => setViewPersisted(v)} className={`${TAB_CLS} ${view === v ? TAB_ON : TAB_OFF}`}>
-              {v}
+        <div className="flex items-center gap-3 sm:gap-4">
+          {VIEWS.map((v) => (
+            <button key={v.id} type="button" onClick={() => setViewPersisted(v.id)} className={`${TAB_CLS} ${view === v.id ? TAB_ON : TAB_OFF}`}>
+              {v.label}
             </button>
           ))}
         </div>
@@ -728,9 +785,11 @@ export default function Calendar() {
         <div className="py-16 text-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">&gt; loading<span className="cursor-blink">_</span></div>
       ) : query.isError ? (
         <div className="text-sm text-[var(--color-danger)]">{apiErrorText(query.error, 'calendar API unreachable')}</div>
+      ) : isGrid(view) ? (
+        <TimeGrid days={days} events={events} onOpen={setOpen} onCreate={setEditing} onDay={showDay} />
       ) : view === 'month' ? (
         <>
-          <MonthGrid anchor={anchor} events={events} selected={wide ? null : selected} onDay={onDay} onOpen={setOpen} />
+          <MonthGrid anchor={anchor} events={events} selected={wide ? null : selected} onDay={onDay} onDayView={showDay} onOpen={setOpen} />
           {!wide && selected && (
             <div className="pt-1">
               <div className="mb-1.5 flex items-center justify-between">
