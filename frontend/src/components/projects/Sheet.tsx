@@ -35,35 +35,40 @@ export function Sheet({ title, onClose, children, footer }: {
       onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose() }}
     >
+      {/* The scroller is an inner box: .panel's corner brackets sit 1px outside
+          it, and on the panel itself they made it scroll 1px both ways, which
+          showed two scrollbars on every sheet. */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="panel max-h-[85dvh] w-full max-w-xl overflow-y-auto p-5"
+        className="panel flex max-h-[85dvh] w-full max-w-xl flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
-          <h2
-            className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[0.22em]"
-            style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
-          >
-            &gt; {title}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="-m-2 shrink-0 p-2 text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
-          >
-            <X size={15} />
-          </button>
-        </div>
-        {children}
-        {footer && (
-          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
-            {footer}
+        <div className="min-h-0 overflow-y-auto p-5">
+          <div className="mb-4 flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2">
+            <h2
+              className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[0.22em]"
+              style={{ color: 'var(--color-accent)', textShadow: '0 0 8px var(--color-accent)' }}
+            >
+              &gt; {title}
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="-m-2 shrink-0 p-2 text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+            >
+              <X size={15} />
+            </button>
           </div>
-        )}
+          {children}
+          {footer && (
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
+              {footer}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

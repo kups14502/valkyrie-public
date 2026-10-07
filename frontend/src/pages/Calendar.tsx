@@ -628,8 +628,14 @@ export default function Calendar() {
     ? anchor.toLocaleDateString([], { month: 'long', year: 'numeric' })
     : `${anchor.toLocaleDateString([], { month: 'short', day: 'numeric' })} onward`
 
-  const step = (dir: -1 | 1) =>
-    setAnchor((a) => (view === 'month' ? addMonths(a, dir) : addDays(a, dir * 7)))
+  const step = (dir: -1 | 1) => {
+    if (view === 'agenda') return setAnchor((a) => addDays(a, dir * 7))
+    // The phone's day list follows the month: today in this month, else the 1st.
+    const next = addMonths(anchor, dir)
+    const today = new Date()
+    setAnchor(next)
+    setSelected(next.getFullYear() === today.getFullYear() && next.getMonth() === today.getMonth() ? dateKey(today) : dateKey(next))
+  }
 
   const onDay = (key: string) => {
     if (wide) setEditing({ date: key })
