@@ -6,14 +6,16 @@ import {
   rgbToHex, useSliderSync, type LightPatch,
 } from '../lib/lights'
 
-// One light UI for both the Lights page and the iPad pad screen, in two sizes.
+// One light UI for the Lights page, the iPad pad screen and the desktop
+// dashboard, in three sizes. Dense is the dashboard's: a flat row with a thin
+// divider instead of a card, so a tile holds the whole room.
 //
 // The old layout repeated eight labelled preset buttons per bulb, so five lights
 // meant forty word-buttons competing with the controls that actually matter.
 // Colors are swatches now (the color IS the label), brightness leads, and a bulb
 // that's off collapses to a single row.
 
-type Size = 'normal' | 'pad'
+type Size = 'normal' | 'pad' | 'dense'
 
 const SZ = {
   normal: {
@@ -34,7 +36,23 @@ const SZ = {
     swatchIcon: 16,
     dot: 'h-9 w-9',
   },
+  dense: {
+    card: 'border-b border-[var(--color-border)]/50 py-2 first:pt-0 last:border-b-0',
+    name: 'text-sm',
+    pct: 'text-sm',
+    toggle: 'min-h-7 px-2.5 text-[10px]',
+    swatch: 'min-h-6',
+    swatchIcon: 12,
+    dot: 'h-3 w-3',
+  },
 } as const
+
+// A card on the Lights page and the pad, a flat row on the dashboard.
+const shell = (size: Size) => (size === 'dense' ? SZ.dense.card : `panel ${SZ[size].card}`)
+const body = (size: Size) => (size === 'dense' ? 'mt-2 space-y-2' : 'mt-4 space-y-4')
+// Dense puts the state beside the name, so each row is one line.
+const nameBlock = (size: Size) => (size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0')
+const stateLine = (size: Size) => (size === 'dense' ? 'shrink-0' : 'mt-0.5')
 
 // Eight presets plus a custom picker. A responsive grid rather than fixed
 // widths, so the swatches stay tappable at 390px and never wrap raggedly.
@@ -46,7 +64,7 @@ function Swatches({ size, customHex, onPick, onCustom }: {
 }) {
   const s = SZ[size]
   return (
-    <div className="grid grid-cols-5 gap-2 sm:grid-cols-9">
+    <div className={size === 'dense' ? 'grid grid-cols-9 gap-1.5' : 'grid grid-cols-5 gap-2 sm:grid-cols-9'}>
       {PRESETS.map((p) => (
         <button
           key={p.label}
@@ -141,7 +159,7 @@ function Brightness({ size, pct, onCommit }: {
 
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between">
+      <div className={`${size === 'dense' ? 'mb-1' : 'mb-2'} flex items-baseline justify-between`}>
         <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">brightness</span>
         <span className={`${s.pct} font-semibold tabular-nums leading-none text-[var(--color-text)]`}>
           {shown != null ? `${shown}%` : '—'}
@@ -204,8 +222,8 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
   const off = !light.on || light.unavailable
   return (
     <div
-      className={`panel ${s.card} transition ${light.on ? 'border-[var(--color-border-strong)]' : ''} ${light.unavailable ? 'opacity-45' : ''}`}
-      style={light.on ? { boxShadow: `0 0 24px -8px ${color}` } : undefined}
+      className={`${shell(size)} transition ${light.on && size !== 'dense' ? 'border-[var(--color-border-strong)]' : ''} ${light.unavailable ? 'opacity-45' : ''}`}
+      style={light.on && size !== 'dense' ? { boxShadow: `0 0 24px -8px ${color}` } : undefined}
     >
       <div className="flex items-center justify-between gap-3">
         {/* When compact, the whole name block is the expand target — a much
@@ -226,9 +244,9 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
             }}
             aria-hidden
           />
-          <div className="min-w-0">
-            <div className={`${s.name} truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+          <div className={nameBlock(size)}>
+            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
+            <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {light.unavailable ? 'unavailable' : light.on ? `on${pct != null ? ` · ${pct}%` : ''}` : 'off'}
             </div>
           </div>
@@ -257,7 +275,7 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
       </div>
 
       {!off && open && (
-        <div className="mt-4 space-y-4">
+        <div className={body(size)}>
           <Brightness
             size={size}
             pct={pct}
@@ -293,17 +311,17 @@ export function AllLightsControl({
   const [hex, setHex] = useState('#ffb87a')
 
   return (
-    <div className={`panel ${s.card}`} style={{ boxShadow: anyOn ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}>
+    <div className={shell(size)} style={{ boxShadow: anyOn && size !== 'dense' ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <Lightbulb
-            size={size === 'pad' ? 26 : 22}
+            size={size === 'pad' ? 26 : size === 'dense' ? 16 : 22}
             className={`shrink-0 ${anyOn ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}
             style={anyOn ? { filter: 'drop-shadow(0 0 6px var(--color-accent))' } : undefined}
           />
-          <div className="min-w-0">
-            <div className={`${s.name} truncate leading-tight text-[var(--color-text)]`}>every light</div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+          <div className={nameBlock(size)}>
+            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)]`}>every light</div>
+            <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {count} bulb{count === 1 ? '' : 's'}{anyOn && pct != null ? ` · ${pct}%` : ''}
             </div>
           </div>
@@ -326,7 +344,7 @@ export function AllLightsControl({
           dark there is nothing here to drive. Showing the controls anyway made
           a preset tap turn the whole room back on. */}
       {litCount > 0 ? (
-        <div className="mt-4 space-y-4">
+        <div className={body(size)}>
           <Brightness size={size} pct={pct} onCommit={onBrightness} />
           <Swatches
             size={size}
@@ -336,7 +354,7 @@ export function AllLightsControl({
           />
         </div>
       ) : (
-        <div className="mt-4 text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+        <div className={`${size === 'dense' ? 'mt-1' : 'mt-4'} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
           all off · turn a light on to set brightness or color
         </div>
       )}

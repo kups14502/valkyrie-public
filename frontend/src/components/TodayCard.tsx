@@ -34,7 +34,7 @@ function useNow(): number {
   return now
 }
 
-export function TodayCard() {
+export function TodayCard({ dense = false }: { dense?: boolean } = {}) {
   const navigate = useNavigate()
   const now = useNow()
   const today = startOfDay(new Date(now))
@@ -82,7 +82,7 @@ export function TodayCard() {
         <button
           type="button"
           onClick={() => open()}
-          className={`flex w-full min-w-0 items-baseline gap-3 border-l-2 py-1.5 pl-3 pr-1 text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] ${past ? 'opacity-45' : ''}`}
+          className={`flex w-full min-w-0 items-baseline gap-3 border-l-2 ${dense ? 'py-1' : 'py-1.5'} pl-3 pr-1 text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] ${past ? 'opacity-45' : ''}`}
           style={{ borderLeftColor: ev.color }}
         >
           <span className="w-16 shrink-0 font-mono text-[11px] text-[var(--color-text-faint)]">
@@ -99,7 +99,7 @@ export function TodayCard() {
   // vk-compact: lets the small text sizes on this card's buttons apply (index.css).
   return (
     <div className="vk-compact">
-      <Card title={title} action={action}>
+      <Card title={title} action={action} dense={dense}>
         {query.isLoading && !query.data ? (
           <div className="text-xs text-[var(--color-text-faint)]">loading…</div>
         ) : query.isError ? (

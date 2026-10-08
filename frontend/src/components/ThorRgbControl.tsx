@@ -12,11 +12,13 @@ import { fetchThorRgb, setThorRgb, type ThorRgbMode } from '../lib/api'
 // and takes about 45 seconds, so the button fires the task and the panel polls
 // until thor agrees.
 
-type Size = 'normal' | 'pad'
+type Size = 'normal' | 'pad' | 'dense'
 
+// Dense is the dashboard's lights tile: a flat row under the bulbs, no card.
 const SZ = {
-  normal: { card: 'p-4', name: 'text-base', button: 'min-h-11 px-5 text-xs', icon: 14 },
-  pad: { card: 'p-5', name: 'text-lg', button: 'min-h-14 px-6 text-sm', icon: 16 },
+  normal: { card: 'panel p-4', name: 'text-base', button: 'min-h-11 px-5 text-xs', icon: 14 },
+  pad: { card: 'panel p-5', name: 'text-lg', button: 'min-h-14 px-6 text-sm', icon: 16 },
+  dense: { card: 'border-t border-[var(--color-border)]/50 pt-2', name: 'text-sm', button: 'min-h-7 px-2.5 text-[10px]', icon: 12 },
 } as const
 
 // Worst case for a relight, after which the panel stops claiming to be busy
@@ -107,19 +109,20 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
 
   return (
     <div
-      className={`panel ${s.card}`}
-      style={{ boxShadow: lit ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}
+      className={s.card}
+      style={{ boxShadow: lit && size !== 'dense' ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <Zap
-            size={size === 'pad' ? 26 : 22}
+            size={size === 'pad' ? 26 : size === 'dense' ? 16 : 22}
             className={`shrink-0 ${lit ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}
             style={lit ? { filter: 'drop-shadow(0 0 6px var(--color-accent))' } : undefined}
           />
-          <div className="min-w-0">
-            <div className={`${s.name} truncate leading-tight text-[var(--color-text)]`}>thor desk rgb</div>
-            <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+          {/* Dense puts the status beside the name, so the row is one line. */}
+          <div className={size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0'}>
+            <div className={`${s.name} truncate leading-tight text-[var(--color-text)] ${size === 'dense' ? 'shrink-0' : ''}`}>thor desk rgb</div>
+            <div className={`${size === 'dense' ? 'min-w-0' : 'mt-0.5'} truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {status}
             </div>
           </div>
@@ -158,7 +161,7 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
       </div>
 
       {err && (
-        <div className="mt-3 border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">
+        <div className={`${size === 'dense' ? 'mt-2' : 'mt-3'} border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]`}>
           {err}
         </div>
       )}

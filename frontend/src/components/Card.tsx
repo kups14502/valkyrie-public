@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 export function Card({
-  title, children, action, collapsible, defaultCollapsed, storageKey,
+  title, children, action, collapsible, defaultCollapsed, storageKey, dense,
 }: {
   title?: string
   children: ReactNode
@@ -11,6 +11,8 @@ export function Card({
   defaultCollapsed?: boolean
   // Persist the collapsed state across sessions when set.
   storageKey?: string
+  // A dashboard tile: tighter padding and a shorter header, so several fit on one screen.
+  dense?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(() => {
     if (storageKey) {
@@ -37,9 +39,9 @@ export function Card({
   )
 
   return (
-    <section className="panel max-w-full overflow-visible p-4 sm:p-5">
+    <section className={`panel max-w-full overflow-visible ${dense ? 'p-3' : 'p-4 sm:p-5'}`}>
       {(title || action) && (
-        <div className={`flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] pb-2 ${collapsed ? '' : 'mb-4'}`}>
+        <div className={`flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] ${dense ? 'pb-1.5' : 'pb-2'} ${collapsed ? '' : dense ? 'mb-2.5' : 'mb-4'}`}>
           {collapsible ? (
             <button
               type="button"

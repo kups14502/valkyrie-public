@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
-import { LightsPanel } from '../components/HomePanels'
+import { AllLightsControl, LightControl } from '../components/LightControl'
 import { DailyTrackerCard } from '../components/DailyTrackerCard'
 import { TodayCard } from '../components/TodayCard'
 import { QuickSessions } from '../components/QuickSessions'
 import { useProfile } from '../lib/deviceMode'
+import { useLightsControl } from '../lib/lights'
 import { copyText } from '../lib/clipboard'
 import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
 
@@ -126,7 +127,7 @@ function NowBanner() {
   const alertSegments = segments.filter((s) => s.tone === 'alert' || s.tone === 'watch')
 
   return (
-    <section className="border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
+    <section className="flex h-full flex-col justify-center border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
       {/* mobile: compact single line */}
       <div className="flex items-center justify-between gap-3 sm:hidden">
         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
@@ -212,23 +213,22 @@ function AccountEmail({ email }: { email: string }) {
 const claudeBarColor = (p: number) => (clampPct(p) >= 85 ? 'var(--color-danger)' : '#D97757')
 const claudePctText = (p: number) => (clampPct(p) >= 85 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]')
 
-// One account per row: name, sign-in address, plan, and a bar for each limit,
+// One account per row: name, sign-in address, and a bar for each limit,
 // 5-hour above weekly. Each bar carries its own reset countdown, and the email
-// copies on click, so nothing needed for signing in hides behind a hover.
+// copies on click, so nothing needed for signing in hides behind a hover. The
+// plan is on the name's hover: it never changes, and its column cost every bar
+// a quarter of its length once the tile became one column of three.
 function AIClientRow({ client }: { client: AIClientUsage }) {
   const q = client.quota
   const plan = client.subscription.replace(/ plan$/i, '')
   return (
     <div
       title={q ? undefined : client.authError || undefined}
-      className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-3 text-sm last:border-b-0 sm:gap-4"
+      className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-1.5 text-sm last:border-b-0"
     >
-      <div className="w-32 shrink-0 sm:w-60">
-        <div className="truncate font-semibold text-[var(--color-text)] sm:text-base">{client.label}</div>
+      <div className="w-36 shrink-0 @lg:w-44" title={plan}>
+        <div className="truncate font-semibold leading-tight text-[var(--color-text)]">{client.label}</div>
         {client.email && <AccountEmail email={client.email} />}
-      </div>
-      <div className="hidden w-28 shrink-0 truncate text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] sm:block">
-        {plan}
       </div>
       {q ? (
         // Both limits get a bar. Only the weekly one was drawn, so the 5-hour
@@ -241,19 +241,19 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
           ] as const).map((row) => (
             // Each bar carries its own reset countdown: one shared tooltip for
             // two bars left you guessing which window it described.
-            <div key={row.label} className="flex items-center gap-3">
-              <div className="h-2.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+            <div key={row.label} className="flex items-center gap-2">
+              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${clampPct(row.pct)}%`, backgroundColor: claudeBarColor(row.pct) }}
                 />
               </div>
-              <div className={`w-16 shrink-0 text-right font-semibold tabular-nums sm:w-20 sm:text-base ${claudePctText(row.pct)}`}>
-                {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)] sm:text-[11px]">{row.label}</span>
+              <div className={`w-14 shrink-0 text-right text-[13px] font-semibold leading-none tabular-nums ${claudePctText(row.pct)}`}>
+                {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">{row.label}</span>
               </div>
               <div
                 title={fmtResetExact(row.resets)}
-                className="w-[92px] shrink-0 truncate text-right text-[10px] tabular-nums text-[var(--color-text-faint)] sm:w-[124px] sm:text-[11px]"
+                className="w-[104px] shrink-0 truncate text-right text-[10px] leading-none tabular-nums text-[var(--color-text-faint)]"
               >
                 {fmtResetAt(row.resets) ?? 'reset unknown'}
               </div>
@@ -276,9 +276,9 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
   )
 }
 
-// The primary thing on the dashboard: every AI account's quota at a glance,
-// full width, sorted hottest-first so the account closest to a limit leads.
-function AIUsageHero() {
+// Every AI account's quota at a glance, sorted hottest-first so the account
+// closest to a limit leads.
+function AIUsageTile() {
   const aiUsage = useQuery({ queryKey: ['ai-usage'], queryFn: fetchAIUsage, refetchInterval: 60_000 })
   const clients: AIClientUsage[] = aiUsage.data?.aiClients ?? (aiUsage.data
     ? [{ id: 'claude-default', kind: 'claude' as const, label: 'Claude', subscription: 'Claude', ...aiUsage.data.claude }]
@@ -286,13 +286,13 @@ function AIUsageHero() {
   const hottest = (c: AIClientUsage) => Math.max(c.quota?.sessionPct ?? -1, c.quota?.weeklyPct ?? -1)
   const sorted = [...clients].sort((a, b) => hottest(b) - hottest(a))
   return (
-    <Card title="AI Usage">
+    <Card title="AI Usage" dense>
       {aiUsage.isLoading && !aiUsage.data ? (
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : aiUsage.error ? (
         <div className="text-sm text-[var(--color-danger)]">Usage data unavailable</div>
       ) : (
-        <div className="flex flex-col">
+        <div className="@container flex flex-col">
           {sorted.map((client) => <AIClientRow key={client.id} client={client} />)}
         </div>
       )}
@@ -305,7 +305,7 @@ function AIUsageHero() {
 // /api/tradebot/status. The old v1 "Trading" card that sat under this one was
 // removed 2026-08-04: it read the dead /api/trading route (last written
 // 2026-07-31) and contradicted this card's broker truth with stale figures.
-function TradeBotCard() {
+function TradeBotTile() {
   const status = useQuery({ queryKey: ['tradebot-status'], queryFn: fetchTradeBotStatus, refetchInterval: 60_000 })
   const s = status.data
   const fmtUSD = (n: number | null | undefined) =>
@@ -329,6 +329,7 @@ function TradeBotCard() {
   return (
     <Card
       title="Trade Bot v2"
+      dense
       action={pill && (
         <span
           className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
@@ -347,40 +348,38 @@ function TradeBotCard() {
           {(err?.detail || err?.message) && <div className="text-xs text-[var(--color-text-dim)]">{err.detail || err.message}</div>}
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="text-sm text-[var(--color-text-dim)]">&gt; {s.up_detail}</div>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="@container space-y-2.5">
+          <div className="truncate text-sm text-[var(--color-text-dim)]" title={s.up_detail}>&gt; {s.up_detail}</div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 @md:grid-cols-4">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Live Equity</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.live_equity)}</div>
+              <div className="truncate text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">Live Equity</div>
+              <div className="mt-0.5 text-sm font-semibold tabular-nums text-[var(--color-text)]">{fmtUSD(s.portfolio.live_equity)}</div>
             </div>
             {/* Took the slot the retired paper arm used to occupy. Cash against
                 equity says whether the bot is deployed or sitting flat. */}
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Live Cash</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.portfolio.live_cash)}</div>
+              <div className="truncate text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">Live Cash</div>
+              <div className="mt-0.5 text-sm font-semibold tabular-nums text-[var(--color-text)]">{fmtUSD(s.portfolio.live_cash)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Spend Total</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.spend.total_usd)}</div>
+              <div className="truncate text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">Spend Total</div>
+              <div className="mt-0.5 text-sm font-semibold tabular-nums text-[var(--color-text)]">{fmtUSD(s.spend.total_usd)}</div>
               <div className="text-[11px] text-[var(--color-text-faint)]">{s.spend.calls_total} call{s.spend.calls_total === 1 ? '' : 's'}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Spend Today</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]">{fmtUSD(s.spend.today_usd)}</div>
+              <div className="truncate text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">Spend Today</div>
+              <div className="mt-0.5 text-sm font-semibold tabular-nums text-[var(--color-text)]">{fmtUSD(s.spend.today_usd)}</div>
               <div className="text-[11px] text-[var(--color-text-faint)]">{s.spend.calls_today} call{s.spend.calls_today === 1 ? '' : 's'}</div>
             </div>
           </div>
-          <div>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-faint)]">Experiment</span>
-              <span className="font-mono text-[10px] text-[var(--color-text-faint)]">{trips ?? '—'}/{target} live trips</span>
-            </div>
-            <div className="mt-1.5 h-1 w-full bg-[var(--color-surface-2)]">
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">Experiment</span>
+            <div className="h-1 min-w-0 flex-1 bg-[var(--color-surface-2)]">
               <div className="h-full transition-all duration-300" style={{ width: `${tripPct}%`, backgroundColor: 'var(--color-accent)', boxShadow: '0 0 6px var(--color-accent)' }} />
             </div>
+            <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-faint)]">{trips ?? '—'}/{target} live trips</span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-text-dim)]">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-2 text-[11px] text-[var(--color-text-dim)]">
             <span className="uppercase tracking-[0.12em]">[market {s.market.is_open ? 'open' : 'closed'}]</span>
             {s.experiment.rules_ok === false && <span className="font-semibold uppercase tracking-[0.12em] text-[var(--color-danger)]">rules drift</span>}
             {generatedAgo && <span className="text-[var(--color-text-faint)]">{generatedAgo}</span>}
@@ -395,25 +394,26 @@ function TradeBotCard() {
 const usageColor = (p: number) =>
   clampPct(p) >= 90 ? 'var(--color-danger)' : clampPct(p) >= 80 ? 'var(--color-warning)' : 'var(--color-accent)'
 
-function HostBar({ label, pct, sub }: { label: string; pct: number | null; sub?: string }) {
+// One usage meter in a host row. The used / total figure is on the hover.
+function HostMeter({ pct, sub }: { pct: number | null; sub?: string }) {
   const c = pct == null ? null : clampPct(pct)
   return (
-    <div className="flex items-center gap-2.5" title={sub}>
-      <span className="w-9 shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{label}</span>
-      <div className="h-2.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+    <div className="flex min-w-0 items-center gap-2" title={sub}>
+      <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
         {c != null && (
           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
         )}
       </div>
-      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
+      <span className="w-9 shrink-0 text-right text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
     </div>
   )
 }
 
-// One machine: name + a status dot, three usage bars, one footer line. odin,
-// thor, and mimir all render identically, so the fleet reads as one list rather
-// than one rich card and two afterthoughts.
-function HostCard({ h }: { h: HostStat }) {
+const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-3'
+
+// One machine per row: name and status, then cpu, mem and disk side by side.
+// odin, thor and mimir share the columns, so the fleet reads as one table.
+function HostRow({ h }: { h: HostStat }) {
   const status = !h.online
     ? { label: 'offline', color: 'var(--color-danger)' }
     : h.stale
@@ -422,56 +422,174 @@ function HostCard({ h }: { h: HostStat }) {
   const load = h.cpu?.loadAvg ? `load ${h.cpu.loadAvg[0].toFixed(2)}` : null
   const cores = h.cpu?.cores ? `${h.cpu.cores} cores` : null
   const up = h.uptime != null ? `up ${fmtUptime(h.uptime)}` : null
-  const footer = [cores, load, up].filter(Boolean).join(' · ')
   const memSub = h.memory ? `${fmtBytes(h.memory.used)} / ${fmtBytes(h.memory.total)}` : undefined
   const diskSub = h.disk ? `${fmtBytes(h.disk.used)} / ${fmtBytes(h.disk.total)}` : undefined
+  // Online and fresh is the normal case, so the second line spends its room on
+  // uptime; anything else says what is wrong in the status color.
+  const second = status.label === 'online' ? up ?? h.os : status.label
   return (
-    <div className="space-y-3 border border-[var(--color-border)] bg-[color:rgba(255,255,255,0.02)] p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-base font-semibold text-[var(--color-text)]">{h.label}</span>
-          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{h.os}</span>
-        </span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: status.color }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
-          {status.label}
-        </span>
+    <div className={`${HOST_GRID} border-b border-[var(--color-border)]/50 py-1.5 last:border-b-0`}>
+      <div className="min-w-0" title={[h.os, cores, load, up].filter(Boolean).join(' · ')}>
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
+          <span className="truncate text-sm font-semibold leading-tight text-[var(--color-text)]">{h.label}</span>
+        </div>
+        <div
+          className="truncate pl-3 text-[10px] uppercase tracking-[0.12em]"
+          style={{ color: status.label === 'online' ? 'var(--color-text-faint)' : status.color }}
+        >
+          {second}
+        </div>
       </div>
       {h.online ? (
         <>
-          <HostBar label="cpu" pct={h.cpu?.usage ?? null} sub={cores ?? undefined} />
-          <HostBar label="mem" pct={h.memory?.percent ?? null} sub={memSub} />
-          <HostBar label="disk" pct={h.disk?.percent ?? null} sub={diskSub} />
-          {footer && <div className="pt-0.5 text-[10px] text-[var(--color-text-faint)]">{footer}</div>}
+          <HostMeter pct={h.cpu?.usage ?? null} sub={[cores, load].filter(Boolean).join(' · ') || undefined} />
+          <HostMeter pct={h.memory?.percent ?? null} sub={memSub} />
+          <HostMeter pct={h.disk?.percent ?? null} sub={diskSub} />
         </>
       ) : (
-        <div className="text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
+        <div className="col-span-3 truncate text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
       )}
     </div>
   )
 }
 
-function HostsCard() {
+function HostsTile() {
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts, refetchInterval: 30_000 })
   return (
-    <Card title="Hosts">
+    <Card title="Hosts" dense>
       {hosts.isLoading && !hosts.data ? (
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : hosts.error ? (
         <div className="text-sm text-[var(--color-danger)]">Host telemetry unavailable</div>
       ) : (
-        // Side by side now that this card owns the wide column: three machines
-        // stacked in a 360px rail wasted most of the row.
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-          {(hosts.data ?? []).map((h) => <HostCard key={h.host} h={h} />)}
+        <div>
+          <div className={`${HOST_GRID} pb-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]`}>
+            <span />
+            <span>cpu</span>
+            <span>mem</span>
+            <span>disk</span>
+          </div>
+          {(hosts.data ?? []).map((h) => <HostRow key={h.host} h={h} />)}
         </div>
       )}
     </Card>
   )
 }
 
+// Same key as the phone and pad lights panel, so the bulbs stay unrolled or
+// rolled up the way they were left on this device.
+const LIGHTS_BULBS_KEY = 'valkyrie-lights-bulbs-open'
+
+// The room's bulbs and the desk relight in one tile: every light on top, the
+// bulbs under it on request, the desk RGB last. Flat rows, no card per bulb.
+function LightsTile() {
+  const { lights, all, anyOn, availableTargets, litTargets, roomPct, updateOne, bulk, bulkBrightness, bulkPreset } = useLightsControl()
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(LIGHTS_BULBS_KEY) === '1' } catch { return false }
+  })
+  const toggle = () => setOpen((v) => {
+    const next = !v
+    try { localStorage.setItem(LIGHTS_BULBS_KEY, next ? '1' : '0') } catch { /* ignore */ }
+    return next
+  })
+  const ordered = useMemo(
+    () => [...all].sort((a, b) => Number(a.unavailable) - Number(b.unavailable)),
+    [all],
+  )
+  const onCount = all.filter((l) => l.on).length
+  // With one bulb there is no every-light row to fold into, so it always shows.
+  const foldable = availableTargets.length > 1
+
+  return (
+    <Card
+      title="Lights"
+      dense
+      action={all.length > 0 && (
+        <button
+          type="button"
+          onClick={foldable ? toggle : undefined}
+          disabled={!foldable}
+          aria-expanded={foldable ? open : undefined}
+          className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)] disabled:hover:text-[var(--color-text-faint)]"
+        >
+          {onCount} of {all.length} on{foldable ? (open ? ' · hide bulbs' : ' · show bulbs') : ''}
+        </button>
+      )}
+    >
+      {lights.isLoading && !lights.data ? (
+        <div className="pb-2 text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : lights.error ? (
+        <div className="pb-2 text-sm text-[var(--color-danger)]">Home Assistant unreachable</div>
+      ) : all.length > 0 && availableTargets.length === 0 ? (
+        <div className="pb-2 text-sm text-[var(--color-warning)]">All lights unavailable. Home Assistant can't reach any bulb.</div>
+      ) : all.length > 0 ? (
+        <div>
+          {foldable && (
+            <AllLightsControl
+              size="dense"
+              count={availableTargets.length}
+              litCount={litTargets.length}
+              anyOn={anyOn}
+              pct={roomPct}
+              onToggleAll={bulk}
+              onBrightness={bulkBrightness}
+              onPreset={bulkPreset}
+            />
+          )}
+          {(open || !foldable) && ordered.map((l) => (
+            <LightControl key={l.entity_id} light={l} onUpdate={updateOne} size="dense" compact />
+          ))}
+        </div>
+      ) : null}
+      <ThorRgbControl size="dense" />
+    </Card>
+  )
+}
+
+const WIDE_2 = '(min-width: 1024px)'
+const WIDE_3 = '(min-width: 1536px)'
+
+// How many columns the window has room for. The tiles are dealt into columns
+// rather than laid on grid rows, so a tall tile never leaves a hole beside a
+// short one, and opening the bulbs grows one column instead of the whole row.
+function useColumnCount(): 1 | 2 | 3 {
+  const read = () => (window.matchMedia(WIDE_3).matches ? 3 : window.matchMedia(WIDE_2).matches ? 2 : 1)
+  const [n, setN] = useState<1 | 2 | 3>(read)
+  useEffect(() => {
+    const queries = [WIDE_2, WIDE_3].map((q) => window.matchMedia(q))
+    const on = () => setN(read())
+    queries.forEach((q) => q.addEventListener('change', on))
+    return () => queries.forEach((q) => q.removeEventListener('change', on))
+  }, [])
+  return n
+}
+
 export default function Dashboard() {
   const profile = useProfile()
+  const columns = useColumnCount()
+
+  const tiles: Record<string, ReactNode> = {
+    tracker: <DailyTrackerCard size={profile.size} dense />,
+    today: <TodayCard dense />,
+    ai: <AIUsageTile />,
+    hosts: <HostsTile />,
+    lights: <LightsTile />,
+    trade: <TradeBotTile />,
+  }
+  // The daily tracker and AI usage lead their columns: a habit check is
+  // worthless below the fold, and AI usage is the number checked most.
+  const layout: string[][] = columns === 3
+    ? [['tracker', 'today'], ['ai', 'hosts'], ['lights', 'trade']]
+    : columns === 2
+    ? [['tracker', 'today', 'lights'], ['ai', 'hosts', 'trade']]
+    : [['tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
+  const grid = columns === 3
+    ? 'grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]'
+    : columns === 2
+    ? 'grid-cols-2'
+    : 'grid-cols-1'
+
   return (
     // overflow-x-clip rather than overflow-hidden. `hidden` makes this element a
     // scroll container in BOTH axes; `clip` clips the horizontal axis without
@@ -480,53 +598,25 @@ export default function Dashboard() {
     // every viewport tested) and was NOT the scroll bug - that was the shell
     // being taller than the window under CSS zoom, fixed in index.css. This is a
     // correctness tidy-up, not the fix.
-    <div className="min-w-0 space-y-8 overflow-x-clip">
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.35em] text-[var(--color-text-faint)]">// overview</div>
-            <h1 className="mt-1 text-2xl font-bold tracking-[0.12em]" style={{ color: 'var(--color-accent)', textShadow: '0 0 16px var(--color-accent)' }}>dashboard<span className="cursor-blink">_</span></h1>
-          </div>
-          <div className="text-xs uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-            [live telemetry]
-          </div>
+    // vk-compact: lets the small text sizes on the tiles' buttons apply (index.css).
+    // A dashboard, not a page of stacked cards: everything fits one screen at
+    // 1920x1080, so there is no page title and every tile is dense.
+    <div className="vk-compact min-w-0 space-y-3 overflow-x-clip">
+      <div className="flex flex-col gap-3 xl:flex-row">
+        <div className="min-w-0 xl:flex-1">
+          <NowBanner />
         </div>
-
-        <NowBanner />
-        <QuickSessions />
+        <div className="xl:shrink-0 [&>section]:h-full">
+          <QuickSessions />
+        </div>
       </div>
 
-      {/* Above the fold on purpose: a daily habit check is worthless if you
-          have to scroll past the fleet to find it. */}
-      <DailyTrackerCard size={profile.size} />
-
-      <TodayCard />
-
-      {/* AI usage is the headline: full width, first thing under the banner. */}
-      <AIUsageHero />
-
-      {/* The room's bulbs and the desk relight, the same controls the Lights
-          page carries, in their compact form. On every profile now, desktop
-          included: the dashboard is the screen that is already open, and hopping
-          to Lights for one button was the whole friction. LightsPanel renders
-          each bulb as a single row until tapped, so the whole room fits here
-          without turning the dashboard into the Lights page. */}
-      <div className="space-y-5">
-        <LightsPanel size={profile.size} />
-        <ThorRgbControl size={profile.size} />
-      </div>
-
-      {/* Two columns now that the sessions card is gone: hosts take the wide
-          side (the Sessions page owns session state, and this card duplicated
-          it), the trade bot keeps the narrow one. */}
-      <div className="grid max-w-full min-w-0 gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(300px,400px)] xl:items-start">
-        <div className="order-1 min-w-0">
-          <HostsCard />
-        </div>
-
-        <div className="order-2 min-w-0 space-y-6 xl:sticky xl:top-24">
-          <TradeBotCard />
-        </div>
+      <div className={`grid items-start gap-3 ${grid}`}>
+        {layout.map((col, i) => (
+          <div key={i} className="min-w-0 space-y-3">
+            {col.map((key) => <div key={key}>{tiles[key]}</div>)}
+          </div>
+        ))}
       </div>
     </div>
   )
