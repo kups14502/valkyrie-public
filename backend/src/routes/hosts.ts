@@ -46,6 +46,7 @@ const REMOTE_HOSTS: { host: string; label: string; os: 'windows' | 'linux' }[] =
 ]
 
 type HostMetric = { percent: number; used: number; total: number }
+type HistoryPoint = { t: number; cpu: number | null; mem: number | null; disk: number | null }
 type HostStat = {
   host: string
   label: string
@@ -58,6 +59,7 @@ type HostStat = {
   memory: HostMetric | null
   disk: HostMetric | null
   error?: string
+  history?: HistoryPoint[]
 }
 
 // odin's CPU usage across two samples of os.cpus(). Kept as module state so the
@@ -184,12 +186,37 @@ async function readRemote(spec: { host: string; label: string; os: 'windows' | '
   }
 }
 
+// The last hour of every host, a point a minute, for the dashboard's graphs.
+// In memory only: a restart starts the graphs over, which is fine for a glance
+// at the last hour and keeps this route free of any file it would have to own.
+const HISTORY_SIZE = 60
+const HISTORY_MS = 60_000
+const history = new Map<string, HistoryPoint[]>()
+
+const record = (s: HostStat) => {
+  if (!s.online || s.ts == null) return
+  const points = history.get(s.host) ?? []
+  // thor and mimir publish once a minute on their own clocks, so a read can
+  // land twice on the same file. Their ts is the sample's identity.
+  if (points.length > 0 && points[points.length - 1].t === s.ts) return
+  points.push({ t: s.ts, cpu: s.cpu?.usage ?? null, mem: s.memory?.percent ?? null, disk: s.disk?.percent ?? null })
+  while (points.length > HISTORY_SIZE) points.shift()
+  history.set(s.host, points)
+}
+
+const sampleAll = async () => {
+  const all = await Promise.all([measureOdin(), ...REMOTE_HOSTS.map(readRemote)])
+  for (const s of all) record(s)
+}
+void sampleAll()
+setInterval(() => void sampleAll(), HISTORY_MS).unref()
+
 router.get('/hosts', async (_req, res) => {
   const [odin, ...remotes] = await Promise.all([
     measureOdin(),
     ...REMOTE_HOSTS.map(readRemote),
   ])
-  res.json({ hosts: [odin, ...remotes] })
+  res.json({ hosts: [odin, ...remotes].map((h) => ({ ...h, history: history.get(h.host) ?? [] })) })
 })
 
 export default router
