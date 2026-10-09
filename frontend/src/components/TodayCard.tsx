@@ -85,11 +85,16 @@ export function TodayCard({ dense = false }: { dense?: boolean } = {}) {
           className={`flex w-full min-w-0 items-baseline gap-3 border-l-2 ${dense ? 'py-1' : 'py-1.5'} pl-3 pr-1 text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] ${past ? 'opacity-45' : ''}`}
           style={{ borderLeftColor: ev.color }}
         >
-          <span className="w-16 shrink-0 font-mono text-[11px] text-[var(--color-text-faint)]">
+          <span className={`${dense ? 'w-14' : 'w-16'} shrink-0 font-mono text-[11px] text-[var(--color-text-faint)]`}>
             {ev.allDay ? 'all day' : timeLabel(ev.start)}
           </span>
           <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">{ev.summary}</span>
-          {live && <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">now · until {timeLabel(ev.end)}</span>}
+          {/* Dense sits in a narrow column, so the end time moves to the hover. */}
+          {live && (
+            <span title={dense ? `until ${timeLabel(ev.end)}` : undefined} className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">
+              {dense ? 'now' : `now · until ${timeLabel(ev.end)}`}
+            </span>
+          )}
           {isNext && <span className="shrink-0 text-[11px] text-[var(--color-warning)]">{until(start - now)}</span>}
         </button>
       </li>

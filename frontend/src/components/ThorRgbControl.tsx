@@ -121,8 +121,8 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
           />
           {/* Dense puts the status beside the name, so the row is one line. */}
           <div className={size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0'}>
-            <div className={`${s.name} truncate leading-tight text-[var(--color-text)] ${size === 'dense' ? 'shrink-0' : ''}`}>thor desk rgb</div>
-            <div className={`${size === 'dense' ? 'min-w-0' : 'mt-0.5'} truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
+            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)] ${size === 'dense' ? 'shrink-[0.1]' : ''}`}>thor desk rgb</div>
+            <div title={size === 'dense' ? status : undefined} className={`${size === 'dense' ? 'min-w-0' : 'mt-0.5'} truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {status}
             </div>
           </div>

@@ -50,9 +50,11 @@ const SZ = {
 // A card on the Lights page and the pad, a flat row on the dashboard.
 const shell = (size: Size) => (size === 'dense' ? SZ.dense.card : `panel ${SZ[size].card}`)
 const body = (size: Size) => (size === 'dense' ? 'mt-2 space-y-2' : 'mt-4 space-y-4')
-// Dense puts the state beside the name, so each row is one line.
+// Dense puts the state beside the name, so each row is one line. In a narrow
+// column the state truncates first: the name shrinks ten times slower.
 const nameBlock = (size: Size) => (size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0')
-const stateLine = (size: Size) => (size === 'dense' ? 'shrink-0' : 'mt-0.5')
+const nameShrink = (size: Size) => (size === 'dense' ? 'shrink-[0.1]' : '')
+const stateLine = (size: Size) => (size === 'dense' ? 'min-w-0 truncate' : 'mt-0.5')
 
 // Eight presets plus a custom picker. A responsive grid rather than fixed
 // widths, so the swatches stay tappable at 390px and never wrap raggedly.
@@ -245,7 +247,7 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
             aria-hidden
           />
           <div className={nameBlock(size)}>
-            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
+            <div className={`${s.name} ${nameShrink(size)} min-w-0 truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
             <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {light.unavailable ? 'unavailable' : light.on ? `on${pct != null ? ` · ${pct}%` : ''}` : 'off'}
             </div>
@@ -320,7 +322,7 @@ export function AllLightsControl({
             style={anyOn ? { filter: 'drop-shadow(0 0 6px var(--color-accent))' } : undefined}
           />
           <div className={nameBlock(size)}>
-            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)]`}>every light</div>
+            <div className={`${s.name} ${nameShrink(size)} min-w-0 truncate leading-tight text-[var(--color-text)]`}>every light</div>
             <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
               {count} bulb{count === 1 ? '' : 's'}{anyOn && pct != null ? ` · ${pct}%` : ''}
             </div>

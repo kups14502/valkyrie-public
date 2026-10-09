@@ -53,10 +53,7 @@ const toneText: Record<Tone, string> = {
   dim: 'text-[var(--color-text-dim)]',
 }
 
-// What needs a look right now, and one tap to a new Claude session. A tile at
-// the head of the first column: as a full-width bar above the columns it cost
-// every column a row.
-function NowTile() {
+function NowBanner() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
@@ -127,32 +124,51 @@ function NowTile() {
 
   const loading = sys.isLoading && sessions.isLoading && aiUsage.isLoading && vault.isLoading
 
+  const alertSegments = segments.filter((s) => s.tone === 'alert' || s.tone === 'watch')
+
   return (
-    <Card
-      title="Now"
-      dense
-      action={!loading && (
-        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${toneText[verdictTone]}`}>
-          {verdict}
-        </span>
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {loading ? (
-          <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
-        ) : segments.length === 0 ? (
-          <span className="text-xs text-[var(--color-text-dim)]">no signal yet</span>
-        ) : (
-          segments.map((s) => (
-            <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
+    <section className="flex h-full flex-col justify-center border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
+      {/* mobile: compact single line */}
+      <div className="flex items-center justify-between gap-3 sm:hidden">
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          {alertSegments.map((s) => (
+            <span key={s.label} className={`inline-flex items-center gap-1 text-[10px] ${toneText[s.tone]}`}>
               <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
-              {s.label}
+              [{s.label}]
             </span>
-          ))
+          ))}
+        </div>
+        {!loading && (
+          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${toneText[verdictTone]}`}>
+            &gt; {verdict}
+          </span>
         )}
       </div>
-      <QuickSessions bare className="mt-2.5 border-t border-[var(--color-border)]/50 pt-2.5" />
-    </Card>
+      {/* desktop: full segments */}
+      <div className="hidden sm:flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+          {loading ? (
+            <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
+          ) : segments.length === 0 ? (
+            <span className="text-xs text-[var(--color-text-dim)]">no signal yet</span>
+          ) : (
+            segments.map((s) => (
+              <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
+                <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
+                [{s.label}]
+              </span>
+            ))
+          )}
+        </div>
+        {!loading && (
+          <span className={`text-[11px] font-bold uppercase tracking-[0.18em] ${toneText[verdictTone]}`}>
+            &gt; {verdict}
+          </span>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -210,7 +226,7 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
       title={q ? undefined : client.authError || undefined}
       className="flex items-center gap-3 border-b border-[var(--color-border)]/50 py-1.5 text-sm last:border-b-0"
     >
-      <div className="w-36 shrink-0 @lg:w-44" title={plan}>
+      <div className="w-28 shrink-0 @md:w-36 @lg:w-44" title={plan}>
         <div className="truncate font-semibold leading-tight text-[var(--color-text)]">{client.label}</div>
         {client.email && <AccountEmail email={client.email} />}
       </div>
@@ -232,12 +248,12 @@ function AIClientRow({ client }: { client: AIClientUsage }) {
                   style={{ width: `${clampPct(row.pct)}%`, backgroundColor: claudeBarColor(row.pct) }}
                 />
               </div>
-              <div className={`w-14 shrink-0 text-right text-[13px] font-semibold leading-none tabular-nums ${claudePctText(row.pct)}`}>
+              <div title={fmtResetExact(row.resets)} className={`w-14 shrink-0 text-right text-[13px] font-semibold leading-none tabular-nums ${claudePctText(row.pct)}`}>
                 {clampPct(row.pct)}% <span className="text-[10px] font-normal text-[var(--color-text-faint)]">{row.label}</span>
               </div>
               <div
                 title={fmtResetExact(row.resets)}
-                className="w-[104px] shrink-0 truncate text-right text-[10px] leading-none tabular-nums text-[var(--color-text-faint)]"
+                className="hidden w-[104px] shrink-0 truncate text-right text-[10px] leading-none tabular-nums text-[var(--color-text-faint)] @md:block"
               >
                 {fmtResetAt(row.resets) ?? 'reset unknown'}
               </div>
@@ -534,9 +550,9 @@ function LightsTile() {
 type Columns = 1 | 2 | 3
 
 // Measured on the page, not the window: the UI zoom (Ctrl +/-) scales the
-// page, and a media query never sees it, so a zoomed-in window would still get
-// three columns too narrow to read.
-const columnsFor = (width: number): Columns => (width >= 1400 ? 3 : width >= 900 ? 2 : 1)
+// page, and a media query never sees it, so a zoomed-in window would get a
+// layout for a page wider than the one on screen.
+const columnsFor = (width: number): Columns => (width >= 1400 ? 3 : width >= 700 ? 2 : 1)
 
 // How many columns the page has room for. The tiles are dealt into columns
 // rather than laid on grid rows, so a tall tile never leaves a hole beside a
@@ -562,7 +578,6 @@ export default function Dashboard() {
   const columns = useColumnCount(root)
 
   const tiles: Record<string, ReactNode> = {
-    now: <NowTile />,
     tracker: <DailyTrackerCard size={profile.size} dense />,
     today: <TodayCard dense />,
     ai: <AIUsageTile />,
@@ -570,19 +585,20 @@ export default function Dashboard() {
     lights: <LightsTile />,
     trade: <TradeBotTile />,
   }
-  // Split so the columns end level with the bulbs rolled up: status, new
-  // session and the habit check on the left, the machines in the middle, the
-  // day and the house on the right. The daily tracker stays near the top in
-  // every layout: a habit check is worthless below the fold.
+  // The daily tracker has its own narrow column on the left, with the day under
+  // it, so it never takes a full-width row. The rest share what is left: two
+  // columns on a wide page, one beside the rail on a narrower one, where the
+  // trade bot joins the rail (its figures stack two by two) and the lights keep
+  // the width their swatches need.
   const layout: string[][] = columns === 3
-    ? [['now', 'tracker'], ['ai', 'hosts'], ['today', 'lights', 'trade']]
+    ? [['tracker', 'today'], ['ai', 'hosts'], ['lights', 'trade']]
     : columns === 2
-    ? [['now', 'tracker', 'today', 'lights'], ['ai', 'hosts', 'trade']]
-    : [['now', 'tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
+    ? [['tracker', 'today', 'trade'], ['ai', 'hosts', 'lights']]
+    : [['tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
   const grid = columns === 3
-    ? 'grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]'
+    ? 'grid-cols-[20rem_minmax(0,1fr)_minmax(0,1fr)]'
     : columns === 2
-    ? 'grid-cols-2'
+    ? 'grid-cols-[20rem_minmax(0,1fr)]'
     : 'grid-cols-1'
 
   return (
@@ -596,12 +612,24 @@ export default function Dashboard() {
     // vk-compact: lets the small text sizes on the tiles' buttons apply (index.css).
     // A dashboard, not a page of stacked cards: everything fits one screen at
     // 1920x1080, so there is no page title and every tile is dense.
-    <div ref={root} className={`vk-compact grid min-w-0 items-start gap-3 overflow-x-clip ${grid}`}>
-      {layout.map((col, i) => (
-        <div key={i} className="min-w-0 space-y-3">
-          {col.map((key) => <div key={key}>{tiles[key]}</div>)}
+    <div ref={root} className="vk-compact @container min-w-0 space-y-3 overflow-x-clip">
+      {/* Side by side only when the status line keeps to one row beside the buttons. */}
+      <div className="flex flex-col gap-3 @5xl:flex-row">
+        <div className="min-w-0 @5xl:flex-1">
+          <NowBanner />
         </div>
-      ))}
+        <div className="@5xl:shrink-0 [&>section]:h-full">
+          <QuickSessions />
+        </div>
+      </div>
+
+      <div className={`grid items-start gap-3 ${grid}`}>
+        {layout.map((col, i) => (
+          <div key={i} className="min-w-0 space-y-3">
+            {col.map((key) => <div key={key}>{tiles[key]}</div>)}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
