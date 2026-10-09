@@ -717,7 +717,7 @@ function ProjectsTile() {
               type="button"
               onClick={() => navigate(`/projects/${p.id}`)}
               title={p.summary || undefined}
-              className="flex w-full min-w-0 items-baseline gap-3 border-b border-[var(--color-border)]/50 py-1.5 text-left transition last:border-b-0 hover:bg-[rgba(var(--color-accent-rgb),0.04)]"
+              className="flex w-full min-w-0 items-baseline gap-3 border-b border-[var(--color-border)]/50 py-1 text-left transition last:border-b-0 hover:bg-[rgba(var(--color-accent-rgb),0.04)]"
             >
               <span className="w-36 shrink-0 truncate text-sm text-[var(--color-text)] @lg:w-48">
                 {p.name}
@@ -786,12 +786,12 @@ export default function Dashboard() {
   // full-width row. The rest share what is left: two columns on a wide page,
   // one beside the rail on a narrower one. The columns stretch to the bottom of
   // the window and the LAST tile in each takes the spare height, so each column
-  // ends on something that uses it: the day's list, the host charts, the
-  // project list.
+  // ends on something that can use it: the day's list, the host charts, the
+  // service dots. Not the projects: stretched, it was a short list in a tall box.
   const layout: string[][] = columns === 3
-    ? [['tracker', 'trade', 'today'], ['ai', 'services', 'hosts'], ['lights', 'projects']]
+    ? [['tracker', 'trade', 'today'], ['ai', 'hosts'], ['lights', 'projects', 'services']]
     : columns === 2
-    ? [['tracker', 'trade', 'services', 'today'], ['ai', 'hosts', 'lights', 'projects']]
+    ? [['tracker', 'trade', 'services', 'today'], ['ai', 'lights', 'projects', 'hosts']]
     : [['tracker', 'today', 'ai', 'hosts', 'lights', 'projects', 'services', 'trade']]
   const grid = columns === 3
     ? 'grid-cols-[20rem_minmax(0,1fr)_minmax(0,1fr)]'
