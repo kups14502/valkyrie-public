@@ -20,7 +20,8 @@ const HOST = 'thor'
 // A label can carry a note in brackets, which suits a menu; a button needs the kind.
 const shortName = (t: LaunchTarget) => t.label.replace(/\s*\(.*\)\s*$/, '') || t.key
 
-export function QuickSessions() {
+// bare: no box of its own, for sitting inside a dashboard tile.
+export function QuickSessions({ bare = false, className = '' }: { bare?: boolean; className?: string } = {}) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
@@ -72,7 +73,7 @@ export function QuickSessions() {
 
   // vk-compact: lets the small text sizes on these buttons apply (index.css).
   return (
-    <section className="vk-compact border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
+    <section className={`vk-compact ${bare ? '' : 'border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5'} ${className}`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="w-full text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)] sm:w-auto">// new claude</span>
         <div className="grid flex-1 grid-cols-3 gap-2 sm:flex sm:flex-none sm:flex-wrap">

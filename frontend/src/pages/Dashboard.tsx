@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
@@ -53,7 +53,10 @@ const toneText: Record<Tone, string> = {
   dim: 'text-[var(--color-text-dim)]',
 }
 
-function NowBanner() {
+// What needs a look right now, and one tap to a new Claude session. A tile at
+// the head of the first column: as a full-width bar above the columns it cost
+// every column a row.
+function NowTile() {
   const sys = useQuery({ queryKey: ['system'], queryFn: fetchSystem })
   const sessions = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
   const projects = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, refetchInterval: 30_000 })
@@ -124,51 +127,32 @@ function NowBanner() {
 
   const loading = sys.isLoading && sessions.isLoading && aiUsage.isLoading && vault.isLoading
 
-  const alertSegments = segments.filter((s) => s.tone === 'alert' || s.tone === 'watch')
-
   return (
-    <section className="flex h-full flex-col justify-center border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
-      {/* mobile: compact single line */}
-      <div className="flex items-center justify-between gap-3 sm:hidden">
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
-        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          {alertSegments.map((s) => (
-            <span key={s.label} className={`inline-flex items-center gap-1 text-[10px] ${toneText[s.tone]}`}>
+    <Card
+      title="Now"
+      dense
+      action={!loading && (
+        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${toneText[verdictTone]}`}>
+          {verdict}
+        </span>
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {loading ? (
+          <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
+        ) : segments.length === 0 ? (
+          <span className="text-xs text-[var(--color-text-dim)]">no signal yet</span>
+        ) : (
+          segments.map((s) => (
+            <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
               <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
-              [{s.label}]
+              {s.label}
             </span>
-          ))}
-        </div>
-        {!loading && (
-          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] ${toneText[verdictTone]}`}>
-            &gt; {verdict}
-          </span>
+          ))
         )}
       </div>
-      {/* desktop: full segments */}
-      <div className="hidden sm:flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">// now</span>
-        <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-          {loading ? (
-            <span className="text-xs text-[var(--color-text-dim)]">syncing…</span>
-          ) : segments.length === 0 ? (
-            <span className="text-xs text-[var(--color-text-dim)]">no signal yet</span>
-          ) : (
-            segments.map((s) => (
-              <span key={s.label} className={`inline-flex items-center gap-1.5 text-xs ${toneText[s.tone]}`}>
-                <span className={`h-1.5 w-1.5 ${toneDot[s.tone]}`} aria-hidden />
-                [{s.label}]
-              </span>
-            ))
-          )}
-        </div>
-        {!loading && (
-          <span className={`text-[11px] font-bold uppercase tracking-[0.18em] ${toneText[verdictTone]}`}>
-            &gt; {verdict}
-          </span>
-        )}
-      </div>
-    </section>
+      <QuickSessions bare className="mt-2.5 border-t border-[var(--color-border)]/50 pt-2.5" />
+    </Card>
   )
 }
 
@@ -547,29 +531,38 @@ function LightsTile() {
   )
 }
 
-const WIDE_2 = '(min-width: 1024px)'
-const WIDE_3 = '(min-width: 1536px)'
+type Columns = 1 | 2 | 3
 
-// How many columns the window has room for. The tiles are dealt into columns
+// Measured on the page, not the window: the UI zoom (Ctrl +/-) scales the
+// page, and a media query never sees it, so a zoomed-in window would still get
+// three columns too narrow to read.
+const columnsFor = (width: number): Columns => (width >= 1400 ? 3 : width >= 900 ? 2 : 1)
+
+// How many columns the page has room for. The tiles are dealt into columns
 // rather than laid on grid rows, so a tall tile never leaves a hole beside a
 // short one, and opening the bulbs grows one column instead of the whole row.
-function useColumnCount(): 1 | 2 | 3 {
-  const read = () => (window.matchMedia(WIDE_3).matches ? 3 : window.matchMedia(WIDE_2).matches ? 2 : 1)
-  const [n, setN] = useState<1 | 2 | 3>(read)
+function useColumnCount(ref: RefObject<HTMLDivElement | null>): Columns {
+  const [n, setN] = useState<Columns>(() => {
+    const zoom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1
+    return columnsFor(Math.min(1800, window.innerWidth / zoom - 48))
+  })
   useEffect(() => {
-    const queries = [WIDE_2, WIDE_3].map((q) => window.matchMedia(q))
-    const on = () => setN(read())
-    queries.forEach((q) => q.addEventListener('change', on))
-    return () => queries.forEach((q) => q.removeEventListener('change', on))
-  }, [])
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => setN(columnsFor(entry.contentRect.width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
   return n
 }
 
 export default function Dashboard() {
   const profile = useProfile()
-  const columns = useColumnCount()
+  const root = useRef<HTMLDivElement>(null)
+  const columns = useColumnCount(root)
 
   const tiles: Record<string, ReactNode> = {
+    now: <NowTile />,
     tracker: <DailyTrackerCard size={profile.size} dense />,
     today: <TodayCard dense />,
     ai: <AIUsageTile />,
@@ -577,13 +570,15 @@ export default function Dashboard() {
     lights: <LightsTile />,
     trade: <TradeBotTile />,
   }
-  // The daily tracker and AI usage lead their columns: a habit check is
-  // worthless below the fold, and AI usage is the number checked most.
+  // Split so the columns end level with the bulbs rolled up: status, new
+  // session and the habit check on the left, the machines in the middle, the
+  // day and the house on the right. The daily tracker stays near the top in
+  // every layout: a habit check is worthless below the fold.
   const layout: string[][] = columns === 3
-    ? [['tracker', 'today'], ['ai', 'hosts'], ['lights', 'trade']]
+    ? [['now', 'tracker'], ['ai', 'hosts'], ['today', 'lights', 'trade']]
     : columns === 2
-    ? [['tracker', 'today', 'lights'], ['ai', 'hosts', 'trade']]
-    : [['tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
+    ? [['now', 'tracker', 'today', 'lights'], ['ai', 'hosts', 'trade']]
+    : [['now', 'tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
   const grid = columns === 3
     ? 'grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]'
     : columns === 2
@@ -601,23 +596,12 @@ export default function Dashboard() {
     // vk-compact: lets the small text sizes on the tiles' buttons apply (index.css).
     // A dashboard, not a page of stacked cards: everything fits one screen at
     // 1920x1080, so there is no page title and every tile is dense.
-    <div className="vk-compact min-w-0 space-y-3 overflow-x-clip">
-      <div className="flex flex-col gap-3 xl:flex-row">
-        <div className="min-w-0 xl:flex-1">
-          <NowBanner />
+    <div ref={root} className={`vk-compact grid min-w-0 items-start gap-3 overflow-x-clip ${grid}`}>
+      {layout.map((col, i) => (
+        <div key={i} className="min-w-0 space-y-3">
+          {col.map((key) => <div key={key}>{tiles[key]}</div>)}
         </div>
-        <div className="xl:shrink-0 [&>section]:h-full">
-          <QuickSessions />
-        </div>
-      </div>
-
-      <div className={`grid items-start gap-3 ${grid}`}>
-        {layout.map((col, i) => (
-          <div key={i} className="min-w-0 space-y-3">
-            {col.map((key) => <div key={key}>{tiles[key]}</div>)}
-          </div>
-        ))}
-      </div>
+      ))}
     </div>
   )
 }
