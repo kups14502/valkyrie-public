@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
@@ -9,7 +10,11 @@ import { QuickSessions } from '../components/QuickSessions'
 import { useProfile } from '../lib/deviceMode'
 import { useLightsControl } from '../lib/lights'
 import { copyText } from '../lib/clipboard'
-import { fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, type AIClientUsage, type HostStat } from '../lib/api'
+import {
+  fetchSystem, fetchSessionList, fetchProjects, fetchAIUsage, fetchVault, fetchTradeBotStatus, fetchHosts, fetchServices,
+  type AIClientUsage, type HostStat, type ServiceContainer, type ServiceUnit, type WorkSession,
+} from '../lib/api'
+import { PROJ_KEYS, fetchProjList, type ProjectSummary } from '../lib/projectsApi'
 
 const fmtBytes = (b: number) => {
   if (b > 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -395,25 +400,65 @@ const usageColor = (p: number) =>
   clampPct(p) >= 90 ? 'var(--color-danger)' : clampPct(p) >= 80 ? 'var(--color-warning)' : 'var(--color-accent)'
 
 // One usage meter in a host row. The used / total figure is on the hover.
-function HostMeter({ pct, sub }: { pct: number | null; sub?: string }) {
+const HOUR_MS = 3_600_000
+
+type SparkPoint = { t: number; v: number }
+
+// The last hour under a meter. x is the clock, not the sample index, so a
+// backend that restarted ten minutes ago draws ten minutes at the right edge
+// instead of stretching them across the hour. y is a fixed 0-100: an
+// autoscaled line turns a steady 1% into a mountain range.
+function HostSpark({ points, color, now }: { points: SparkPoint[]; color: string; now: number }) {
+  const w = 100
+  const h = 12
+  const xy = points
+    .filter((p) => now - p.t <= HOUR_MS)
+    .map((p) => `${(((p.t - (now - HOUR_MS)) / HOUR_MS) * w).toFixed(1)},${(h - (clampPct(p.v) / 100) * h).toFixed(1)}`)
+  if (xy.length < 2) return <div className="h-3" />
+  const first = xy[0].split(',')[0]
+  const last = xy[xy.length - 1].split(',')[0]
+  return (
+    <svg className="block h-3 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
+      <polygon points={`${first},${h} ${xy.join(' ')} ${last},${h}`} fill={color} fillOpacity={0.14} />
+      <polyline points={xy.join(' ')} fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+// One usage meter in a host row: the bar and figure now, the last hour under
+// the bar. The used / total figure is on the hover.
+function HostMeter({ pct, sub, points, now }: { pct: number | null; sub?: string; points: SparkPoint[]; now: number }) {
   const c = pct == null ? null : clampPct(pct)
   return (
-    <div className="flex min-w-0 items-center gap-2" title={sub}>
-      <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
-        {c != null && (
-          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
-        )}
+    <div className="min-w-0" title={sub ? `${sub} · last hour below` : 'last hour below'}>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
+          {c != null && (
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
+          )}
+        </div>
+        <span className="w-9 shrink-0 text-right text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
       </div>
-      <span className="w-9 shrink-0 text-right text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
+      {/* mr-11 keeps the graph under the bar, clear of the figure. */}
+      <div className="mr-11 mt-0.5">
+        <HostSpark points={points} now={now} color={c == null ? 'var(--color-text-faint)' : usageColor(c)} />
+      </div>
     </div>
   )
 }
 
 const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-3'
 
+const series = (h: HostStat, key: 'cpu' | 'mem' | 'disk'): SparkPoint[] =>
+  (h.history ?? []).flatMap((p) => {
+    const v = p[key]
+    return v == null ? [] : [{ t: p.t, v }]
+  })
+
 // One machine per row: name and status, then cpu, mem and disk side by side.
 // odin, thor and mimir share the columns, so the fleet reads as one table.
-function HostRow({ h }: { h: HostStat }) {
+// now: when the hosts answered, the right edge of every graph.
+function HostRow({ h, now }: { h: HostStat; now: number }) {
   const status = !h.online
     ? { label: 'offline', color: 'var(--color-danger)' }
     : h.stale
@@ -443,9 +488,9 @@ function HostRow({ h }: { h: HostStat }) {
       </div>
       {h.online ? (
         <>
-          <HostMeter pct={h.cpu?.usage ?? null} sub={[cores, load].filter(Boolean).join(' · ') || undefined} />
-          <HostMeter pct={h.memory?.percent ?? null} sub={memSub} />
-          <HostMeter pct={h.disk?.percent ?? null} sub={diskSub} />
+          <HostMeter pct={h.cpu?.usage ?? null} sub={[cores, load].filter(Boolean).join(' · ') || undefined} points={series(h, 'cpu')} now={now} />
+          <HostMeter pct={h.memory?.percent ?? null} sub={memSub} points={series(h, 'mem')} now={now} />
+          <HostMeter pct={h.disk?.percent ?? null} sub={diskSub} points={series(h, 'disk')} now={now} />
         </>
       ) : (
         <div className="col-span-3 truncate text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
@@ -470,7 +515,7 @@ function HostsTile() {
             <span>mem</span>
             <span>disk</span>
           </div>
-          {(hosts.data ?? []).map((h) => <HostRow key={h.host} h={h} />)}
+          {(hosts.data ?? []).map((h) => <HostRow key={h.host} h={h} now={hosts.dataUpdatedAt} />)}
         </div>
       )}
     </Card>
@@ -547,6 +592,163 @@ function LightsTile() {
   )
 }
 
+// Desktop plumbing that systemd lists among odin's user services (Plasma,
+// PipeWire, D-Bus, the portals). Real, but never what "is something down"
+// means here, so the tile leaves them to the Services page.
+const DESKTOP_UNIT = /^(app-|at-spi|dbus|dconf|obex|pipewire|plasma-|wireplumber|xdg-)/
+
+type Health = 'ok' | 'watch' | 'alert'
+type Chip = { name: string; health: Health; title: string }
+
+const containerHealth = (c: ServiceContainer): Health =>
+  c.state !== 'running' ? 'alert' : /unhealthy|restarting/i.test(c.status) ? 'watch' : 'ok'
+const unitHealth = (u: ServiceUnit): Health =>
+  u.active === 'failed' ? 'alert' : u.active === 'active' ? 'ok' : 'watch'
+const HEALTH_ORDER: Record<Health, number> = { alert: 0, watch: 1, ok: 2 }
+// Anything wrong sorts to the top, so it is the first thing read.
+const byHealth = (a: Chip, b: Chip) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] || a.name.localeCompare(b.name)
+
+function ChipGroup({ label, chips }: { label: string; chips: Chip[] }) {
+  if (chips.length === 0) return null
+  return (
+    <div>
+      <div className="mb-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">{label}</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 @md:grid-cols-3 @2xl:grid-cols-4">
+        {chips.map((c) => (
+          <span key={c.name} title={c.title} className="flex min-w-0 items-center gap-1.5 text-xs">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${toneDot[c.health]}`} aria-hidden />
+            <span className={`truncate ${c.health === 'ok' ? 'text-[var(--color-text-dim)]' : toneText[c.health]}`}>{c.name}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// odin's containers and the services that matter, one dot each. The Services
+// page owns restarts, logs and ports; this answers "is anything down".
+function ServicesTile() {
+  const navigate = useNavigate()
+  // Same key as the Services page, so the two share one cache entry.
+  const q = useQuery({ queryKey: ['services'], queryFn: fetchServices, refetchInterval: 30_000 })
+  const containers: Chip[] = (q.data?.containers ?? [])
+    .map((c) => ({ name: c.name, health: containerHealth(c), title: `${c.image} · ${c.status}` }))
+    .sort(byHealth)
+  const units: Chip[] = [...(q.data?.services ?? []), ...(q.data?.systemServices ?? [])]
+    // A one-shot that ran and exited is done, not up: it would only pad the list.
+    .filter((u) => !DESKTOP_UNIT.test(u.name) && u.sub !== 'exited')
+    .map((u) => ({ name: u.name.replace(/\.service$/, ''), health: unitHealth(u), title: `${u.description} · ${u.active} (${u.sub})` }))
+    .sort(byHealth)
+  const total = containers.length + units.length
+  const wrong = [...containers, ...units].filter((c) => c.health !== 'ok').length
+  return (
+    <Card
+      title="Services"
+      dense
+      action={(
+        <button
+          type="button"
+          onClick={() => navigate('/services')}
+          className={`shrink-0 text-[10px] uppercase tracking-[0.18em] transition hover:text-[var(--color-accent)] ${wrong > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}
+        >
+          {q.data ? (wrong > 0 ? `${wrong} need a look` : `${total} up`) : ''} →
+        </button>
+      )}
+    >
+      {q.isLoading && !q.data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : q.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Service status unavailable</div>
+      ) : (
+        <div className="@container space-y-1.5">
+          <ChipGroup label="containers" chips={containers} />
+          <ChipGroup label="services" chips={units} />
+        </div>
+      )}
+    </Card>
+  )
+}
+
+type CountedProject = ProjectSummary & { live: number; asking: number }
+
+// A session waiting on Brendon outranks one that is merely running, and both
+// outrank a project nobody is in. The same order as the Projects page.
+const projectRank = (p: CountedProject) => (p.asking > 0 ? 2 : p.live > 0 ? 1 : 0)
+const MAX_PROJECTS = 8
+
+// One line per project: name, what is next, who is in it, when it last moved.
+// A click opens the project.
+function ProjectsTile() {
+  const navigate = useNavigate()
+  // The Projects page's own key and query, so they share a cache entry.
+  const list = useQuery({ queryKey: PROJ_KEYS.list, queryFn: () => fetchProjList(false), refetchInterval: 30_000 })
+  const board = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList })
+
+  const rows = useMemo(() => {
+    const byId = new Map<string, WorkSession>()
+    for (const s of (board.data?.installed ? board.data.sessions : [])) byId.set(s.sessionId, s)
+    return (list.data ?? [])
+      .map((p): CountedProject => {
+        const sessions = p.sessionIds.map((id) => byId.get(id)).filter((x): x is WorkSession => !!x)
+        return { ...p, live: sessions.filter((x) => x.live).length, asking: sessions.filter((x) => x.activity === 'asking').length }
+      })
+      .sort((a, b) => projectRank(b) - projectRank(a) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+  }, [list.data, board.data])
+  const asking = rows.reduce((n, p) => n + p.asking, 0)
+
+  return (
+    <Card
+      title="Projects"
+      dense
+      action={(
+        <button
+          type="button"
+          onClick={() => navigate('/projects')}
+          className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)] transition hover:text-[var(--color-accent)]"
+        >
+          {asking > 0 && <span className="text-[var(--color-warning)]">{asking} asking · </span>}
+          all →
+        </button>
+      )}
+    >
+      {list.isLoading && !list.data ? (
+        <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
+      ) : list.error ? (
+        <div className="text-sm text-[var(--color-danger)]">Projects unavailable</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-[var(--color-text-dim)]">No projects yet.</div>
+      ) : (
+        <div className="@container">
+          {rows.slice(0, MAX_PROJECTS).map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => navigate(`/projects/${p.id}`)}
+              title={p.summary || undefined}
+              className="flex w-full min-w-0 items-baseline gap-3 border-b border-[var(--color-border)]/50 py-1.5 text-left transition last:border-b-0 hover:bg-[rgba(var(--color-accent-rgb),0.04)]"
+            >
+              <span className="w-36 shrink-0 truncate text-sm text-[var(--color-text)] @lg:w-48">
+                {p.name}
+                {p.status !== 'active' && <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{p.status}</span>}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-dim)]">{p.nextAction || p.summary}</span>
+              {p.asking > 0 && <span className="shrink-0 text-[11px] text-[var(--color-warning)]">{p.asking} asking</span>}
+              {p.live > 0 && <span className="shrink-0 text-[11px] text-[var(--color-accent)]">{p.live} live</span>}
+              <span className="hidden w-20 shrink-0 truncate text-right text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)] @md:block">{p.area}</span>
+              <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-[var(--color-text-faint)]">{fmtAgo(Date.parse(p.updatedAt))}</span>
+            </button>
+          ))}
+          {rows.length > MAX_PROJECTS && (
+            <button type="button" onClick={() => navigate('/projects')} className="mt-1 text-[11px] text-[var(--color-text-faint)] hover:text-[var(--color-accent)]">
+              +{rows.length - MAX_PROJECTS} more
+            </button>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 type Columns = 1 | 2 | 3
 
 // Measured on the page, not the window: the UI zoom (Ctrl +/-) scales the
@@ -584,17 +786,18 @@ export default function Dashboard() {
     hosts: <HostsTile />,
     lights: <LightsTile />,
     trade: <TradeBotTile />,
+    projects: <ProjectsTile />,
+    services: <ServicesTile />,
   }
-  // The daily tracker has its own narrow column on the left, with the day under
-  // it, so it never takes a full-width row. The rest share what is left: two
-  // columns on a wide page, one beside the rail on a narrower one, where the
-  // trade bot joins the rail (its figures stack two by two) and the lights keep
-  // the width their swatches need.
+  // The daily tracker has its own narrow column on the left, with the day and
+  // the trade bot (its figures stack two by two) under it, so it never takes a
+  // full-width row. The rest share what is left: two columns on a wide page,
+  // one beside the rail on a narrower one. Split so the columns end level.
   const layout: string[][] = columns === 3
-    ? [['tracker', 'today'], ['ai', 'hosts'], ['lights', 'trade']]
+    ? [['tracker', 'today', 'trade'], ['ai', 'hosts', 'services'], ['lights', 'projects']]
     : columns === 2
-    ? [['tracker', 'today', 'trade'], ['ai', 'hosts', 'lights']]
-    : [['tracker', 'today', 'ai', 'lights', 'hosts', 'trade']]
+    ? [['tracker', 'today', 'trade', 'services'], ['ai', 'hosts', 'lights', 'projects']]
+    : [['tracker', 'today', 'ai', 'hosts', 'lights', 'projects', 'services', 'trade']]
   const grid = columns === 3
     ? 'grid-cols-[20rem_minmax(0,1fr)_minmax(0,1fr)]'
     : columns === 2

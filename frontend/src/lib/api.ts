@@ -477,6 +477,9 @@ export type HostStat = {
   memory: HostMetric | null
   disk: HostMetric | null
   error?: string
+  // The last hour, a point a minute, oldest first. odin keeps it in memory, so
+  // it starts over when the backend restarts.
+  history?: { t: number; cpu: number | null; mem: number | null; disk: number | null }[]
 }
 export const fetchHosts = async () => {
   const r = await api.get<{ hosts: HostStat[] } | { error?: string; detail?: string }>('/hosts')
