@@ -1,15 +1,15 @@
 {
-  "version": "0.3.134",
-  "notes": "Dashboard: projects keeps its own height, services takes the spare",
-  "pub_date": "2026-10-09T20:55:51Z",
+  "version": "0.3.135",
+  "notes": "Dashboard: every tile keeps its own height again",
+  "pub_date": "2026-10-09T21:04:23Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMvWEZpOXhSMkl5cmdxQytydUhlOU9Zc2JGVmNCT2ZHLzd0QnI0NFdqNlBjdGdjSDVHL1Vhb24wV0VQTXFyQjkxYjZCdGg0RE9CeWtEK25xQVo3V2dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5MjY5CWZpbGU6VmFsa3lyaWVfMC4zLjEzNF94NjQtc2V0dXAuZXhlCnlxbG02a3MxNW1IclJzeTIxVjdMMGNEdHp6bUpERW1aVzVtSXVLa1lRZmdBV3BxQSt1VzFWYy9EZ2hiOEJlR09LeVFqRmcxZXVsbDVjR3RBWlJhckR3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.134/Valkyrie_0.3.134_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJZZTg1Ym5WajdOdHRyVWJPYVR2RVJZYTgyRXJwSHk1RUZKUnJoVm45R1F3cFFBanMvR3dKNjNWR0FzN0w4U2d2TWJBN0F3Uk0zcEI3RDdibDdTeXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5Nzc2CWZpbGU6VmFsa3lyaWVfMC4zLjEzNV94NjQtc2V0dXAuZXhlCmVQeURZZVZtQXVydWZ0eTdBaGc0VUg3SFhTSW1wc0xQSit0aU94TnNjbTA5bmlkK2wxV0ZlVldyNG5wZThROUQxbnFxYjFmTmxJenpQWXZRRFh2ZEN3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.135/Valkyrie_0.3.135_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNzWU9taDN5aE5qcVdNV0VTWFRPTnlZN0gxdWZOcVYzQ0ErNE5oL04yaitmSHljR0FiYlNOc2ZkaFBvU2tEWXd3dUpwYlNaQ1NpdGFJaUUzTnJ5cEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5MjIxCWZpbGU6VmFsa3lyaWVfMC4zLjEzNF9hbWQ2NC5BcHBJbWFnZQo1NzlNb0p1cUJXME15YzV5VXk4OW4wbWdSREFPWmkvdzdWSVJLYTJuNzhXQWZyS0hrbVBKRzNWRjJ0R1dFL3V6UTlUL0VXSUVOaW1sNitDZG55OUxDQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.134/Valkyrie_0.3.134_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMySmlLcmpjVTFHalg5MFNGUFVBbFZQU1IvclZ2cENOYkpER1NuN0FmTFJtdUoxMXlkTDVveUtvSklRQzFIL094d2YzSnR1bGhrc3dldFlYSEJuSndvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5NzMwCWZpbGU6VmFsa3lyaWVfMC4zLjEzNV9hbWQ2NC5BcHBJbWFnZQphUzV1MmNnUzVNTFdxbnFzamNxZTc0bUN2ellCQUZ2dTNmWVFORTJkZXlQNDdJYUlFeGIvTlFVVVFnQ3pzUUhGTnFUbDl3bTJVNjlpamlmdkd1SE5Cdz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.135/Valkyrie_0.3.135_amd64.AppImage"
     }
   }
 }
