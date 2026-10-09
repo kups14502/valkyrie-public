@@ -285,10 +285,8 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
 // tabbed route uses this, so nothing is full-bleed while its neighbor sits in a
 // narrow column any more. The device home screens (pad/phone) keep their own
 // full-screen layouts.
-// fill: at least as tall as main's visible area, for a page that lays itself
-// out to the window (the dashboard's columns stretch to the bottom edge).
-function PageContainer({ children, fill = false }: { children: ReactNode; fill?: boolean }) {
-  return <div className={`mx-auto w-full max-w-[1800px] ${fill ? 'flex min-h-full flex-col' : ''}`}>{children}</div>
+function PageContainer({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-[1800px]">{children}</div>
 }
 
 function Shell() {
@@ -426,7 +424,7 @@ function Shell() {
           <ErrorBoundary compact key={location.pathname}>
           <Routes>
             <Route path="/" element={<RootRedirect />} />
-            <Route path="/dashboard" element={<PageContainer fill><Dashboard /></PageContainer>} />
+            <Route path="/dashboard" element={<PageContainer><Dashboard /></PageContainer>} />
             <Route path="/lights" element={<PageContainer><Lights /></PageContainer>} />
             <Route path="/calendar" element={<PageContainer><Calendar /></PageContainer>} />
             <Route path="/meals" element={<PageContainer><Meals /></PageContainer>} />

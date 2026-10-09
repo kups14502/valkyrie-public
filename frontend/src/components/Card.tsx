@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 export function Card({
-  title, children, action, collapsible, defaultCollapsed, storageKey, dense, grow,
+  title, children, action, collapsible, defaultCollapsed, storageKey, dense,
 }: {
   title?: string
   children: ReactNode
@@ -13,8 +13,6 @@ export function Card({
   storageKey?: string
   // A dashboard tile: tighter padding and a shorter header, so several fit on one screen.
   dense?: boolean
-  // The body takes whatever height the panel is stretched to (a chart that grows).
-  grow?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(() => {
     if (storageKey) {
@@ -41,7 +39,7 @@ export function Card({
   )
 
   return (
-    <section className={`panel max-w-full overflow-visible ${dense ? 'p-3' : 'p-4 sm:p-5'} ${grow ? 'flex flex-col' : ''}`}>
+    <section className={`panel max-w-full overflow-visible ${dense ? 'p-3' : 'p-4 sm:p-5'}`}>
       {(title || action) && (
         <div className={`flex min-w-0 items-center justify-between gap-3 border-b border-[var(--color-border)] ${dense ? 'pb-1.5' : 'pb-2'} ${collapsed ? '' : dense ? 'mb-2.5' : 'mb-4'}`}>
           {collapsible ? (
@@ -62,7 +60,7 @@ export function Card({
           {action}
         </div>
       )}
-      {!collapsed && (grow ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children)}
+      {!collapsed && children}
     </section>
   )
 }

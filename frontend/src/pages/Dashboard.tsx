@@ -408,8 +408,8 @@ type SparkPoint = { t: number; v: number }
 // edge, with the figure beside it. x is the clock, so a backend that restarted
 // ten minutes ago fills the last sixth and leaves the rest of the track empty
 // rather than stretching ten minutes across the hour. y is a fixed 0-100: an
-// autoscaled line turns a steady 1% into a mountain range. The chart takes the
-// row's height, which grows when the Hosts tile has room.
+// autoscaled line turns a steady 1% into a mountain range. A fixed 32px: grown
+// to fill the tile, the charts looked like skyscrapers.
 function HostChart({ pct, sub, points, now }: { pct: number | null; sub?: string; points: SparkPoint[]; now: number }) {
   const c = pct == null ? null : clampPct(pct)
   const color = c == null ? 'var(--color-text-faint)' : usageColor(c)
@@ -418,8 +418,8 @@ function HostChart({ pct, sub, points, now }: { pct: number | null; sub?: string
     .map((p) => [((p.t - (now - HOUR_MS)) / HOUR_MS) * 100, 100 - clampPct(p.v)] as const)
   const line = xy.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
   return (
-    <div className="flex h-full min-w-0 items-center gap-2" title={sub ? `${sub} · last hour` : 'last hour'}>
-      <div className="relative h-full min-h-7 min-w-0 flex-1 overflow-hidden rounded-sm bg-[var(--color-surface-2)]">
+    <div className="flex min-w-0 items-center gap-2" title={sub ? `${sub} · last hour` : 'last hour'}>
+      <div className="relative h-8 min-w-0 flex-1 overflow-hidden rounded-sm bg-[var(--color-surface-2)]">
         {xy.length >= 2 && (
           <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
             <polygon points={`${xy[0][0].toFixed(2)},100 ${line} ${xy[xy.length - 1][0].toFixed(2)},100`} fill={color} fillOpacity={0.22} />
@@ -432,7 +432,7 @@ function HostChart({ pct, sub, points, now }: { pct: number | null; sub?: string
   )
 }
 
-const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] gap-x-3'
+const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-3'
 
 const series = (h: HostStat, key: 'cpu' | 'mem' | 'disk'): SparkPoint[] =>
   (h.history ?? []).flatMap((p) => {
@@ -458,9 +458,8 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
   // uptime; anything else says what is wrong in the status color.
   const second = status.label === 'online' ? up ?? h.os : status.label
   return (
-    // An online row grows with the tile, so its charts do; an offline one stays a line.
-    <div className={`${HOST_GRID} border-b border-[var(--color-border)]/50 py-1.5 last:border-b-0 ${h.online ? 'min-h-10 flex-1 items-stretch' : 'items-center'}`}>
-      <div className="flex min-w-0 flex-col justify-center" title={[h.os, cores, load, up].filter(Boolean).join(' · ')}>
+    <div className={`${HOST_GRID} border-b border-[var(--color-border)]/50 py-1.5 last:border-b-0`}>
+      <div className="min-w-0" title={[h.os, cores, load, up].filter(Boolean).join(' · ')}>
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
           <span className="truncate text-sm font-semibold leading-tight text-[var(--color-text)]">{h.label}</span>
@@ -491,7 +490,6 @@ function HostsTile() {
     <Card
       title="Hosts"
       dense
-      grow
       action={<span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">last hour</span>}
     >
       {hosts.isLoading && !hosts.data ? (
@@ -499,7 +497,7 @@ function HostsTile() {
       ) : hosts.error ? (
         <div className="text-sm text-[var(--color-danger)]">Host telemetry unavailable</div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div>
           <div className={`${HOST_GRID} pb-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]`}>
             <span />
             <span>cpu</span>
@@ -784,14 +782,13 @@ export default function Dashboard() {
   // The daily tracker has its own narrow column on the left, with the trade bot
   // (its figures stack two by two) and the day under it, so it never takes a
   // full-width row. The rest share what is left: two columns on a wide page,
-  // one beside the rail on a narrower one. The columns stretch to the bottom of
-  // the window and the LAST tile in each takes the spare height, so each column
-  // ends on something that can use it: the day's list, the host charts, the
-  // service dots. Not the projects: stretched, it was a short list in a tall box.
+  // one beside the rail on a narrower one. Every tile keeps its own height:
+  // stretched to the bottom of the window, the calendar, services and host
+  // charts were tall boxes around a few lines. Split so the columns end close.
   const layout: string[][] = columns === 3
-    ? [['tracker', 'trade', 'today'], ['ai', 'hosts'], ['lights', 'projects', 'services']]
+    ? [['tracker', 'trade', 'today'], ['ai', 'hosts', 'services'], ['lights', 'projects']]
     : columns === 2
-    ? [['tracker', 'trade', 'services', 'today'], ['ai', 'lights', 'projects', 'hosts']]
+    ? [['tracker', 'trade', 'services', 'today'], ['ai', 'hosts', 'lights', 'projects']]
     : [['tracker', 'today', 'ai', 'hosts', 'lights', 'projects', 'services', 'trade']]
   const grid = columns === 3
     ? 'grid-cols-[20rem_minmax(0,1fr)_minmax(0,1fr)]'
@@ -810,7 +807,7 @@ export default function Dashboard() {
     // vk-compact: lets the small text sizes on the tiles' buttons apply (index.css).
     // A dashboard, not a page of stacked cards: everything fits one screen at
     // 1920x1080, so there is no page title and every tile is dense.
-    <div ref={root} className="vk-compact @container flex min-w-0 flex-1 flex-col gap-3 overflow-x-clip">
+    <div ref={root} className="vk-compact @container min-w-0 space-y-3 overflow-x-clip">
       {/* Side by side only when the status line keeps to one row beside the buttons. */}
       <div className="flex flex-col gap-3 @5xl:flex-row">
         <div className="min-w-0 @5xl:flex-1">
@@ -821,20 +818,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* The grid fills the rest of the window; each column is a flex column whose
-          last tile stretches, through whatever wrapper the tile renders, down to
-          its panel. */}
-      <div className={`grid flex-1 gap-3 ${grid}`}>
+      <div className={`grid items-start gap-3 ${grid}`}>
         {layout.map((col, i) => (
-          <div key={i} className="flex min-w-0 flex-col gap-3">
-            {col.map((key, j) => (
-              <div
-                key={key}
-                className={j === col.length - 1 ? 'flex flex-1 flex-col [&>*]:flex-1 [&>div]:flex [&>div]:flex-col [&>*>section]:flex-1' : ''}
-              >
-                {tiles[key]}
-              </div>
-            ))}
+          <div key={i} className="min-w-0 space-y-3">
+            {col.map((key) => <div key={key}>{tiles[key]}</div>)}
           </div>
         ))}
       </div>
