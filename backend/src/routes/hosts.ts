@@ -208,7 +208,8 @@ const sampleAll = async () => {
   const all = await Promise.all([measureOdin(), ...REMOTE_HOSTS.map(readRemote)])
   for (const s of all) record(s)
 }
-void sampleAll()
+// No sample at startup: odin's CPU figure is a delta since the last reading,
+// and the first one after a restart spans only the busy boot, so it read 90%.
 setInterval(() => void sampleAll(), HISTORY_MS).unref()
 
 router.get('/hosts', async (_req, res) => {
