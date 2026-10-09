@@ -404,50 +404,35 @@ const HOUR_MS = 3_600_000
 
 type SparkPoint = { t: number; v: number }
 
-// The last hour under a meter. x is the clock, not the sample index, so a
-// backend that restarted ten minutes ago draws ten minutes at the right edge
-// instead of stretching them across the hour. y is a fixed 0-100: an
-// autoscaled line turns a steady 1% into a mountain range.
-function HostSpark({ points, color, now }: { points: SparkPoint[]; color: string; now: number }) {
-  const w = 100
-  const h = 12
+// One usage figure as a chart: the last hour as a filled line, now at the right
+// edge, with the figure beside it. x is the clock, so a backend that restarted
+// ten minutes ago fills the last sixth and leaves the rest of the track empty
+// rather than stretching ten minutes across the hour. y is a fixed 0-100: an
+// autoscaled line turns a steady 1% into a mountain range. The chart takes the
+// row's height, which grows when the Hosts tile has room.
+function HostChart({ pct, sub, points, now }: { pct: number | null; sub?: string; points: SparkPoint[]; now: number }) {
+  const c = pct == null ? null : clampPct(pct)
+  const color = c == null ? 'var(--color-text-faint)' : usageColor(c)
   const xy = points
     .filter((p) => now - p.t <= HOUR_MS)
-    .map((p) => `${(((p.t - (now - HOUR_MS)) / HOUR_MS) * w).toFixed(1)},${(h - (clampPct(p.v) / 100) * h).toFixed(1)}`)
-  if (xy.length < 2) return <div className="h-3" />
-  const first = xy[0].split(',')[0]
-  const last = xy[xy.length - 1].split(',')[0]
+    .map((p) => [((p.t - (now - HOUR_MS)) / HOUR_MS) * 100, 100 - clampPct(p.v)] as const)
+  const line = xy.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
   return (
-    <svg className="block h-3 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
-      <polygon points={`${first},${h} ${xy.join(' ')} ${last},${h}`} fill={color} fillOpacity={0.14} />
-      <polyline points={xy.join(' ')} fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
-
-// One usage meter in a host row: the bar and figure now, the last hour under
-// the bar. The used / total figure is on the hover.
-function HostMeter({ pct, sub, points, now }: { pct: number | null; sub?: string; points: SparkPoint[]; now: number }) {
-  const c = pct == null ? null : clampPct(pct)
-  return (
-    <div className="min-w-0" title={sub ? `${sub} · last hour below` : 'last hour below'}>
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[var(--color-surface-2)]">
-          {c != null && (
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c}%`, backgroundColor: usageColor(c) }} />
-          )}
-        </div>
-        <span className="w-9 shrink-0 text-right text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
+    <div className="flex h-full min-w-0 items-center gap-2" title={sub ? `${sub} · last hour` : 'last hour'}>
+      <div className="relative h-full min-h-7 min-w-0 flex-1 overflow-hidden rounded-sm bg-[var(--color-surface-2)]">
+        {xy.length >= 2 && (
+          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+            <polygon points={`${xy[0][0].toFixed(2)},100 ${line} ${xy[xy.length - 1][0].toFixed(2)},100`} fill={color} fillOpacity={0.22} />
+            <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          </svg>
+        )}
       </div>
-      {/* mr-11 keeps the graph under the bar, clear of the figure. */}
-      <div className="mr-11 mt-0.5">
-        <HostSpark points={points} now={now} color={c == null ? 'var(--color-text-faint)' : usageColor(c)} />
-      </div>
+      <span className="w-9 shrink-0 text-right text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{c == null ? '—' : `${c}%`}</span>
     </div>
   )
 }
 
-const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-3'
+const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] gap-x-3'
 
 const series = (h: HostStat, key: 'cpu' | 'mem' | 'disk'): SparkPoint[] =>
   (h.history ?? []).flatMap((p) => {
@@ -455,9 +440,9 @@ const series = (h: HostStat, key: 'cpu' | 'mem' | 'disk'): SparkPoint[] =>
     return v == null ? [] : [{ t: p.t, v }]
   })
 
-// One machine per row: name and status, then cpu, mem and disk side by side.
-// odin, thor and mimir share the columns, so the fleet reads as one table.
-// now: when the hosts answered, the right edge of every graph.
+// One machine per row: name and status, then cpu, mem and disk charts side by
+// side. odin, thor and mimir share the columns, so the fleet reads as one table.
+// now: when the hosts answered, the right edge of every chart.
 function HostRow({ h, now }: { h: HostStat; now: number }) {
   const status = !h.online
     ? { label: 'offline', color: 'var(--color-danger)' }
@@ -473,8 +458,9 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
   // uptime; anything else says what is wrong in the status color.
   const second = status.label === 'online' ? up ?? h.os : status.label
   return (
-    <div className={`${HOST_GRID} border-b border-[var(--color-border)]/50 py-1.5 last:border-b-0`}>
-      <div className="min-w-0" title={[h.os, cores, load, up].filter(Boolean).join(' · ')}>
+    // An online row grows with the tile, so its charts do; an offline one stays a line.
+    <div className={`${HOST_GRID} border-b border-[var(--color-border)]/50 py-1.5 last:border-b-0 ${h.online ? 'min-h-10 flex-1 items-stretch' : 'items-center'}`}>
+      <div className="flex min-w-0 flex-col justify-center" title={[h.os, cores, load, up].filter(Boolean).join(' · ')}>
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
           <span className="truncate text-sm font-semibold leading-tight text-[var(--color-text)]">{h.label}</span>
@@ -488,9 +474,9 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
       </div>
       {h.online ? (
         <>
-          <HostMeter pct={h.cpu?.usage ?? null} sub={[cores, load].filter(Boolean).join(' · ') || undefined} points={series(h, 'cpu')} now={now} />
-          <HostMeter pct={h.memory?.percent ?? null} sub={memSub} points={series(h, 'mem')} now={now} />
-          <HostMeter pct={h.disk?.percent ?? null} sub={diskSub} points={series(h, 'disk')} now={now} />
+          <HostChart pct={h.cpu?.usage ?? null} sub={[cores, load].filter(Boolean).join(' · ') || undefined} points={series(h, 'cpu')} now={now} />
+          <HostChart pct={h.memory?.percent ?? null} sub={memSub} points={series(h, 'mem')} now={now} />
+          <HostChart pct={h.disk?.percent ?? null} sub={diskSub} points={series(h, 'disk')} now={now} />
         </>
       ) : (
         <div className="col-span-3 truncate text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
@@ -502,13 +488,18 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
 function HostsTile() {
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts, refetchInterval: 30_000 })
   return (
-    <Card title="Hosts" dense>
+    <Card
+      title="Hosts"
+      dense
+      grow
+      action={<span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">last hour</span>}
+    >
       {hosts.isLoading && !hosts.data ? (
         <div className="text-sm text-[var(--color-text-dim)]">Loading…</div>
       ) : hosts.error ? (
         <div className="text-sm text-[var(--color-danger)]">Host telemetry unavailable</div>
       ) : (
-        <div>
+        <div className="flex min-h-0 flex-1 flex-col">
           <div className={`${HOST_GRID} pb-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]`}>
             <span />
             <span>cpu</span>
@@ -602,8 +593,7 @@ type Chip = { name: string; health: Health; title: string }
 
 const containerHealth = (c: ServiceContainer): Health =>
   c.state !== 'running' ? 'alert' : /unhealthy|restarting/i.test(c.status) ? 'watch' : 'ok'
-const unitHealth = (u: ServiceUnit): Health =>
-  u.active === 'failed' ? 'alert' : u.active === 'active' ? 'ok' : 'watch'
+const unitHealth = (u: ServiceUnit): Health => (u.active === 'failed' ? 'alert' : 'ok')
 const HEALTH_ORDER: Record<Health, number> = { alert: 0, watch: 1, ok: 2 }
 // Anything wrong sorts to the top, so it is the first thing read.
 const byHealth = (a: Chip, b: Chip) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] || a.name.localeCompare(b.name)
@@ -635,8 +625,10 @@ function ServicesTile() {
     .map((c) => ({ name: c.name, health: containerHealth(c), title: `${c.image} · ${c.status}` }))
     .sort(byHealth)
   const units: Chip[] = [...(q.data?.services ?? []), ...(q.data?.systemServices ?? [])]
-    // A one-shot that ran and exited is done, not up: it would only pad the list.
-    .filter((u) => !DESKTOP_UNIT.test(u.name) && u.sub !== 'exited')
+    // Long-running services, plus anything that failed. A one-shot is left out
+    // whatever its state: one that exited is done, and one a timer fires every
+    // minute (lilkups-reminders) was caught mid-run and flagged as down.
+    .filter((u) => !DESKTOP_UNIT.test(u.name) && (u.sub === 'running' || u.active === 'failed'))
     .map((u) => ({ name: u.name.replace(/\.service$/, ''), health: unitHealth(u), title: `${u.description} · ${u.active} (${u.sub})` }))
     .sort(byHealth)
   const total = containers.length + units.length
@@ -789,14 +781,17 @@ export default function Dashboard() {
     projects: <ProjectsTile />,
     services: <ServicesTile />,
   }
-  // The daily tracker has its own narrow column on the left, with the day and
-  // the trade bot (its figures stack two by two) under it, so it never takes a
+  // The daily tracker has its own narrow column on the left, with the trade bot
+  // (its figures stack two by two) and the day under it, so it never takes a
   // full-width row. The rest share what is left: two columns on a wide page,
-  // one beside the rail on a narrower one. Split so the columns end level.
+  // one beside the rail on a narrower one. The columns stretch to the bottom of
+  // the window and the LAST tile in each takes the spare height, so each column
+  // ends on something that uses it: the day's list, the host charts, the
+  // project list.
   const layout: string[][] = columns === 3
-    ? [['tracker', 'today', 'trade'], ['ai', 'hosts', 'services'], ['lights', 'projects']]
+    ? [['tracker', 'trade', 'today'], ['ai', 'services', 'hosts'], ['lights', 'projects']]
     : columns === 2
-    ? [['tracker', 'today', 'trade', 'services'], ['ai', 'hosts', 'lights', 'projects']]
+    ? [['tracker', 'trade', 'services', 'today'], ['ai', 'hosts', 'lights', 'projects']]
     : [['tracker', 'today', 'ai', 'hosts', 'lights', 'projects', 'services', 'trade']]
   const grid = columns === 3
     ? 'grid-cols-[20rem_minmax(0,1fr)_minmax(0,1fr)]'
@@ -815,7 +810,7 @@ export default function Dashboard() {
     // vk-compact: lets the small text sizes on the tiles' buttons apply (index.css).
     // A dashboard, not a page of stacked cards: everything fits one screen at
     // 1920x1080, so there is no page title and every tile is dense.
-    <div ref={root} className="vk-compact @container min-w-0 space-y-3 overflow-x-clip">
+    <div ref={root} className="vk-compact @container flex min-w-0 flex-1 flex-col gap-3 overflow-x-clip">
       {/* Side by side only when the status line keeps to one row beside the buttons. */}
       <div className="flex flex-col gap-3 @5xl:flex-row">
         <div className="min-w-0 @5xl:flex-1">
@@ -826,10 +821,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className={`grid items-start gap-3 ${grid}`}>
+      {/* The grid fills the rest of the window; each column is a flex column whose
+          last tile stretches, through whatever wrapper the tile renders, down to
+          its panel. */}
+      <div className={`grid flex-1 gap-3 ${grid}`}>
         {layout.map((col, i) => (
-          <div key={i} className="min-w-0 space-y-3">
-            {col.map((key) => <div key={key}>{tiles[key]}</div>)}
+          <div key={i} className="flex min-w-0 flex-col gap-3">
+            {col.map((key, j) => (
+              <div
+                key={key}
+                className={j === col.length - 1 ? 'flex flex-1 flex-col [&>*]:flex-1 [&>div]:flex [&>div]:flex-col [&>*>section]:flex-1' : ''}
+              >
+                {tiles[key]}
+              </div>
+            ))}
           </div>
         ))}
       </div>

@@ -239,14 +239,35 @@ async function readComposeFiles(): Promise<ComposeFile[]> {
   }
 }
 
+// A cold read takes about 3 s, most of it the compose-file find walking the
+// home folder, and the dashboard tile sat on "Loading…" for all of it. So an
+// expired read is still served while a fresh one runs behind it, up to
+// MAX_STALE_MS old, and the cache is filled at startup. A restart clears it, so
+// the read after a restart is always fresh.
+const MAX_STALE_MS = 5 * 60_000
+let refreshing: Promise<ServicesResponse> | null = null
+
+const refresh = (): Promise<ServicesResponse> => {
+  refreshing ??= (async () => {
+    const [containers, services, systemServices, timers, ports, composeFiles] = await Promise.all([
+      readContainers(), readUserServices(), readSystemServices(), readTimers(), readPorts(), readComposeFiles(),
+    ])
+    const data = { containers, services, systemServices, timers, ports, composeFiles }
+    cache = { at: Date.now(), data }
+    return data
+  })().finally(() => { refreshing = null })
+  return refreshing
+}
+void refresh().catch(() => { /* the first request will try again */ })
+
 router.get('/services', async (_req, res) => {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return res.json(cache.data)
-  const [containers, services, systemServices, timers, ports, composeFiles] = await Promise.all([
-    readContainers(), readUserServices(), readSystemServices(), readTimers(), readPorts(), readComposeFiles(),
-  ])
-  const data = { containers, services, systemServices, timers, ports, composeFiles }
-  cache = { at: Date.now(), data }
-  res.json(data)
+  const age = cache ? Date.now() - cache.at : Infinity
+  if (cache && age < CACHE_TTL_MS) return res.json(cache.data)
+  if (cache && age < MAX_STALE_MS) {
+    void refresh().catch((err) => console.error('[services] refresh failed:', err))
+    return res.json(cache.data)
+  }
+  res.json(await refresh())
 })
 
 const SAFE_NAME = /^[A-Za-z0-9_.@-]+$/
