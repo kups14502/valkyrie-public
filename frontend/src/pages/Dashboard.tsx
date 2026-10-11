@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { Zap } from 'lucide-react'
 import { Card } from '../components/Card'
 import { ThorRgbControl } from '../components/ThorRgbControl'
 import { AllLightsControl, LightControl } from '../components/LightControl'
@@ -432,6 +433,22 @@ function HostChart({ pct, sub, points, now }: { pct: number | null; sub?: string
   )
 }
 
+// A battery host's charge, in the name column where the others show uptime:
+// a short bar, amber at 30% and red at 15%, a bolt while it charges.
+function BatteryMeter({ b }: { b: NonNullable<HostStat['battery']> }) {
+  const p = clampPct(b.percent)
+  const color = p <= 15 ? 'var(--color-danger)' : p <= 30 ? 'var(--color-warning)' : 'var(--color-accent)'
+  return (
+    <div className="flex items-center gap-1.5 pl-3" title={`battery ${p}% · ${b.status}`}>
+      <div className="h-1.5 w-8 shrink-0 overflow-hidden rounded-sm bg-[var(--color-surface-2)]">
+        <div className="h-full" style={{ width: `${p}%`, backgroundColor: color, boxShadow: `0 0 4px ${color}` }} />
+      </div>
+      <span className="text-[10px] font-semibold tabular-nums text-[var(--color-text-dim)]">{p}%</span>
+      {b.status === 'charging' && <Zap className="h-2.5 w-2.5 shrink-0" style={{ color }} aria-label="charging" />}
+    </div>
+  )
+}
+
 const HOST_GRID = 'grid grid-cols-[6.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-3'
 
 const series = (h: HostStat, key: 'cpu' | 'mem' | 'disk'): SparkPoint[] =>
@@ -464,12 +481,16 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: status.color, boxShadow: `0 0 6px ${status.color}` }} aria-hidden />
           <span className="truncate text-sm font-semibold leading-tight text-[var(--color-text)]">{h.label}</span>
         </div>
-        <div
-          className="truncate pl-3 text-[10px] uppercase tracking-[0.12em]"
-          style={{ color: status.label === 'online' ? 'var(--color-text-faint)' : status.color }}
-        >
-          {second}
-        </div>
+        {status.label === 'online' && h.battery ? (
+          <BatteryMeter b={h.battery} />
+        ) : (
+          <div
+            className="truncate pl-3 text-[10px] uppercase tracking-[0.12em]"
+            style={{ color: status.label === 'online' ? 'var(--color-text-faint)' : status.color }}
+          >
+            {second}
+          </div>
+        )}
       </div>
       {h.online ? (
         <>
@@ -478,7 +499,9 @@ function HostRow({ h, now }: { h: HostStat; now: number }) {
           <HostChart pct={h.disk?.percent ?? null} sub={diskSub} points={series(h, 'disk')} now={now} />
         </>
       ) : (
-        <div className="col-span-3 truncate text-[11px] text-[var(--color-text-dim)]">{h.error || 'not reachable'}</div>
+        <div className="col-span-3 truncate text-[11px] text-[var(--color-text-dim)]">
+          {[h.error || 'not reachable', h.battery && `battery ${clampPct(h.battery.percent)}% ${fmtAgo(h.ts) ?? ''}`.trim()].filter(Boolean).join(' · ')}
+        </div>
       )}
     </div>
   )

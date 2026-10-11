@@ -14,6 +14,10 @@ import path from 'node:path'
 //     (/home/brendon/bifrost/...), so there is NO network listener, NO token on
 //     the wire, and nothing here ever executes anything a remote host sent.
 //
+//   * the Steam Frame sleeps, so it cannot publish on a timer. odin pulls it
+//     instead (pollFrame below), with a key the Frame accepts only as a forced
+//     command that prints key=value lines. odin parses numbers out of them.
+//
 // A remote host with no file, an unreadable file, or a file older than the
 // stale threshold comes back { online:false } (or stale:true) instead of taking
 // the route down. Every numeric field is re-validated because these files are
@@ -47,6 +51,9 @@ const REMOTE_HOSTS: { host: string; label: string; os: 'windows' | 'linux' }[] =
 
 type HostMetric = { percent: number; used: number; total: number }
 type HistoryPoint = { t: number; cpu: number | null; mem: number | null; disk: number | null }
+const BATTERY_STATUSES = ['charging', 'discharging', 'full', 'not charging', 'unknown'] as const
+type BatteryStatus = typeof BATTERY_STATUSES[number]
+type Battery = { percent: number; status: BatteryStatus }
 type HostStat = {
   host: string
   label: string
@@ -58,6 +65,9 @@ type HostStat = {
   cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
   memory: HostMetric | null
   disk: HostMetric | null
+  // Only hosts with a battery. While the host is offline this is the last
+  // reading, taken at ts.
+  battery?: Battery | null
   error?: string
   history?: HistoryPoint[]
 }
@@ -186,6 +196,93 @@ async function readRemote(spec: { host: string; label: string; os: 'windows' | '
   }
 }
 
+// The Steam Frame, pulled over the tailnet. `frame-stats` is an alias in odin's
+// ~/.ssh/config (host, user, key, 5s connect timeout), and the Frame runs
+// tools/host-stats/frame-host-stats.sh for that key whatever command is sent.
+// An ssh round trip is too slow for every request and a sleeping headset costs
+// the full timeout, so a timer polls it and the route serves the last result.
+const FRAME_SSH = process.env.FRAME_STATS_SSH || 'frame-stats'
+const FRAME_POLL_MS = 30_000
+const FRAME_BASE = { host: 'frame', label: 'frame', os: 'linux' as const }
+
+let frameStat: HostStat = {
+  ...FRAME_BASE, online: false, stale: false, ts: null, uptime: null,
+  cpu: null, memory: null, disk: null, battery: null, error: 'not polled yet',
+}
+// The previous /proc/stat totals, so the cpu figure is a real delta.
+let frameCpu: { idle: number; total: number } | null = null
+let framePolling = false
+
+const parseKv = (out: string): Map<string, string> => {
+  const kv = new Map<string, string>()
+  for (const line of out.split('\n')) {
+    const i = line.indexOf('=')
+    if (i > 0) kv.set(line.slice(0, i).trim(), line.slice(i + 1).trim())
+  }
+  return kv
+}
+
+const kvNum = (kv: Map<string, string>, key: string): number | null => {
+  const v = kv.get(key)
+  return v != null && /^\d+(\.\d+)?$/.test(v) ? num(Number(v)) : null
+}
+
+async function pollFrame() {
+  if (framePolling) return
+  framePolling = true
+  try {
+    const { stdout } = await exec('ssh', ['-T', FRAME_SSH], { timeout: 10_000, maxBuffer: 16 * 1024 })
+    const kv = parseKv(stdout)
+    const percent = pct(kvNum(kv, 'battery'))
+    const status = (kv.get('battery_status') ?? '').toLowerCase()
+    const battery: Battery | null = percent == null ? null : {
+      percent,
+      status: (BATTERY_STATUSES as readonly string[]).includes(status) ? status as BatteryStatus : 'unknown',
+    }
+    let cpu: HostStat['cpu'] = null
+    const ticks = (kv.get('cpu') ?? '').split(/\s+/).map(Number)
+    if (ticks.length >= 8 && ticks.every((n) => Number.isFinite(n) && n >= 0)) {
+      // user nice system idle iowait irq softirq steal. Guest time is already
+      // inside user, so these eight are the whole.
+      const total = ticks.slice(0, 8).reduce((a, b) => a + b, 0)
+      const idle = ticks[3] + ticks[4]
+      if (frameCpu && total > frameCpu.total) {
+        const usage = pct(100 - (100 * (idle - frameCpu.idle)) / (total - frameCpu.total))
+        if (usage != null) cpu = { usage, cores: kvNum(kv, 'cores') ?? 0 }
+      }
+      frameCpu = { idle, total }
+    }
+    const memTotal = kvNum(kv, 'mem_total_kb')
+    const memAvail = kvNum(kv, 'mem_avail_kb')
+    const diskTotal = kvNum(kv, 'disk_total')
+    const diskUsed = kvNum(kv, 'disk_used')
+    frameStat = {
+      ...FRAME_BASE, online: true, stale: false, ts: Date.now(),
+      uptime: kvNum(kv, 'uptime'),
+      cpu,
+      memory: memTotal != null && memAvail != null
+        ? metric({ total: memTotal * 1024, used: (memTotal - memAvail) * 1024, percent: ((memTotal - memAvail) / memTotal) * 100 })
+        : null,
+      disk: diskTotal != null && diskUsed != null
+        ? metric({ total: diskTotal, used: diskUsed, percent: (diskUsed / diskTotal) * 100 })
+        : null,
+      battery,
+    }
+  } catch {
+    // Asleep, off, or out of range. Keep the last battery reading and its ts so
+    // the panel can say where it was left. It may reboot before the next answer,
+    // which resets /proc/stat, so the cpu delta starts over.
+    frameCpu = null
+    frameStat = {
+      ...frameStat, online: false, uptime: null, cpu: null, memory: null, disk: null, error: 'asleep or off',
+    }
+  } finally {
+    framePolling = false
+  }
+}
+void pollFrame()
+setInterval(() => void pollFrame(), FRAME_POLL_MS).unref()
+
 // The last hour of every host, a point a minute, for the dashboard's graphs.
 // In memory only: a restart starts the graphs over, which is fine for a glance
 // at the last hour and keeps this route free of any file it would have to own.
@@ -206,7 +303,7 @@ const record = (s: HostStat) => {
 
 const sampleAll = async () => {
   const all = await Promise.all([measureOdin(), ...REMOTE_HOSTS.map(readRemote)])
-  for (const s of all) record(s)
+  for (const s of [...all, frameStat]) record(s)
 }
 // No sample at startup: odin's CPU figure is a delta since the last reading,
 // and the first one after a restart spans only the busy boot, so it read 90%.
@@ -217,7 +314,7 @@ router.get('/hosts', async (_req, res) => {
     measureOdin(),
     ...REMOTE_HOSTS.map(readRemote),
   ])
-  res.json({ hosts: [odin, ...remotes].map((h) => ({ ...h, history: history.get(h.host) ?? [] })) })
+  res.json({ hosts: [odin, ...remotes, frameStat].map((h) => ({ ...h, history: history.get(h.host) ?? [] })) })
 })
 
 export default router

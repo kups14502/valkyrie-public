@@ -476,6 +476,9 @@ export type HostStat = {
   cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
   memory: HostMetric | null
   disk: HostMetric | null
+  // Only hosts with a battery (the Frame). While the host is offline this is
+  // the last reading, taken at ts.
+  battery?: { percent: number; status: 'charging' | 'discharging' | 'full' | 'not charging' | 'unknown' } | null
   error?: string
   // The last hour, a point a minute, oldest first. odin keeps it in memory, so
   // it starts over when the backend restarts.
