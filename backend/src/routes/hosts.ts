@@ -203,7 +203,9 @@ async function readRemote(spec: { host: string; label: string; os: 'windows' | '
 // the full timeout, so a timer polls it and the route serves the last result.
 const FRAME_SSH = process.env.FRAME_STATS_SSH || 'frame-stats'
 const FRAME_POLL_MS = 30_000
-const FRAME_BASE = { host: 'frame', label: 'frame', os: 'linux' as const }
+// The label is the Frame's own hostname, lowercased like the rest of the fleet.
+// This one shows until its first answer after a restart.
+const FRAME_BASE = { host: 'frame', label: 'loki', os: 'linux' as const }
 
 let frameStat: HostStat = {
   ...FRAME_BASE, online: false, stale: false, ts: null, uptime: null,
@@ -256,8 +258,10 @@ async function pollFrame() {
     const memAvail = kvNum(kv, 'mem_avail_kb')
     const diskTotal = kvNum(kv, 'disk_total')
     const diskUsed = kvNum(kv, 'disk_used')
+    const name = (kv.get('hostname') ?? '').toLowerCase()
     frameStat = {
       ...FRAME_BASE, online: true, stale: false, ts: Date.now(),
+      label: /^[a-z0-9-]{1,32}$/.test(name) ? name : FRAME_BASE.label,
       uptime: kvNum(kv, 'uptime'),
       cpu,
       memory: memTotal != null && memAvail != null
