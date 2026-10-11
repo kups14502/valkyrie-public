@@ -1,15 +1,15 @@
 {
-  "version": "0.3.135",
-  "notes": "Dashboard: every tile keeps its own height again",
-  "pub_date": "2026-10-09T21:04:23Z",
+  "version": "0.3.136",
+  "notes": "Hosts: the Steam Frame joins the panel with a battery meter",
+  "pub_date": "2026-10-11T04:54:59Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJZZTg1Ym5WajdOdHRyVWJPYVR2RVJZYTgyRXJwSHk1RUZKUnJoVm45R1F3cFFBanMvR3dKNjNWR0FzN0w4U2d2TWJBN0F3Uk0zcEI3RDdibDdTeXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5Nzc2CWZpbGU6VmFsa3lyaWVfMC4zLjEzNV94NjQtc2V0dXAuZXhlCmVQeURZZVZtQXVydWZ0eTdBaGc0VUg3SFhTSW1wc0xQSit0aU94TnNjbTA5bmlkK2wxV0ZlVldyNG5wZThROUQxbnFxYjFmTmxJenpQWXZRRFh2ZEN3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.135/Valkyrie_0.3.135_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVdVV2pqOXp5LzFLTERtOWxtTGFGU3RNdjJoS1FpTUc0NENVQ0VISWlXZWRIc3hETWpreWFDS1ZtRGV3Z0d2N2RXWkJkTjk2YWdzVWFNSzEzd1RJQlFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjk0Mzg1CWZpbGU6VmFsa3lyaWVfMC4zLjEzNl94NjQtc2V0dXAuZXhlCkhlVjBWNWFxNXJXSGNRV21ielYva1hCZ3ZzckxNRm9PVG5NMkJFUit2L0k5bFN3TDJFbDQ0SURVTlpMNnQySUdBaDVBenl2V29TNGg4ZldsNExhN0N3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.136/Valkyrie_0.3.136_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMySmlLcmpjVTFHalg5MFNGUFVBbFZQU1IvclZ2cENOYkpER1NuN0FmTFJtdUoxMXlkTDVveUtvSklRQzFIL094d2YzSnR1bGhrc3dldFlYSEJuSndvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTc5NzMwCWZpbGU6VmFsa3lyaWVfMC4zLjEzNV9hbWQ2NC5BcHBJbWFnZQphUzV1MmNnUzVNTFdxbnFzamNxZTc0bUN2ellCQUZ2dTNmWVFORTJkZXlQNDdJYUlFeGIvTlFVVVFnQ3pzUUhGTnFUbDl3bTJVNjlpamlmdkd1SE5Cdz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.135/Valkyrie_0.3.135_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVhkaVlhZ0Q3cDVaNDMrWmt4R1IyTTB2K2lCS3hIS3VtK1ZnZVZnc0I1VmxWaUhFcVZPSmxnUHJ2WnRYaThHbnQrZWJXTkNCbGFadjcvRTBhS052MVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjk0MzQwCWZpbGU6VmFsa3lyaWVfMC4zLjEzNl9hbWQ2NC5BcHBJbWFnZQo3YWJHd0d4b203eFhzMkhDSFR5MkMzS3YxNzBTQmNqYnNiOVNwRXFJdE1yQlprcHYzWVVyZDhwbmZ3bmdNemlYVXhvY0tGWS9lVWpJdlVHbTNLQmRDQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.136/Valkyrie_0.3.136_amd64.AppImage"
     }
   }
 }
