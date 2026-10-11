@@ -26,6 +26,8 @@ const SZ = {
     swatch: 'min-h-11',
     swatchIcon: 14,
     dot: 'h-7 w-7',
+    meta: 'text-[10px] uppercase tracking-[0.2em]',
+    caps: 'font-semibold uppercase tracking-[0.16em]',
   },
   pad: {
     card: 'p-5',
@@ -35,15 +37,20 @@ const SZ = {
     swatch: 'min-h-14',
     swatchIcon: 16,
     dot: 'h-9 w-9',
+    meta: 'text-[10px] uppercase tracking-[0.2em]',
+    caps: 'font-semibold uppercase tracking-[0.16em]',
   },
   dense: {
     card: 'border-b border-[var(--color-border)]/50 py-2 first:pt-0 last:border-b-0',
-    name: 'text-sm',
+    name: 'text-[13px]',
     pct: 'text-sm',
-    toggle: 'min-h-7 px-2.5 text-[10px]',
-    swatch: 'min-h-6',
+    toggle: 'min-h-7 px-2.5 text-[11px]',
+    swatch: 'min-h-5',
     swatchIcon: 12,
     dot: 'h-3 w-3',
+    // The dashboard reads in plain lowercase; the cards keep the terminal caps.
+    meta: 'text-[11px]',
+    caps: '',
   },
 } as const
 
@@ -159,14 +166,22 @@ function Brightness({ size, pct, onCommit }: {
     commit()
   }
 
+  const readout = (
+    <span className={`${s.pct} font-semibold tabular-nums leading-none text-[var(--color-text)] ${size === 'dense' ? 'w-10 shrink-0 text-right' : ''}`}>
+      {shown != null ? `${shown}%` : '—'}
+    </span>
+  )
+
+  // Dense puts the figure at the end of the slider's own row, so the label row
+  // goes: the dashboard spends its height on content.
   return (
-    <div>
-      <div className={`${size === 'dense' ? 'mb-1' : 'mb-2'} flex items-baseline justify-between`}>
-        <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">brightness</span>
-        <span className={`${s.pct} font-semibold tabular-nums leading-none text-[var(--color-text)]`}>
-          {shown != null ? `${shown}%` : '—'}
-        </span>
-      </div>
+    <div className={size === 'dense' ? 'flex items-center gap-3' : undefined}>
+      {size !== 'dense' && (
+        <div className="mb-2 flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">brightness</span>
+          {readout}
+        </div>
+      )}
       <input
         ref={ref}
         type="range"
@@ -190,8 +205,10 @@ function Brightness({ size, pct, onCommit }: {
         // their own commit. Guarded on a real held value so a stray Tab keyup
         // cannot fire a write.
         onKeyUp={() => { if (!dragging.current && held !== null) commit() }}
+        aria-label="brightness"
         className="brightness-slider"
       />
+      {size === 'dense' && readout}
     </div>
   )
 }
@@ -248,7 +265,7 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
           />
           <div className={nameBlock(size)}>
             <div className={`${s.name} ${nameShrink(size)} min-w-0 truncate leading-tight text-[var(--color-text)]`}>{light.name}</div>
-            <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
+            <div className={`${stateLine(size)} ${s.meta} text-[var(--color-text-faint)]`}>
               {light.unavailable ? 'unavailable' : light.on ? `on${pct != null ? ` · ${pct}%` : ''}` : 'off'}
             </div>
           </div>
@@ -265,7 +282,7 @@ export function LightControl({ light, onUpdate, size = 'normal', compact = false
           disabled={light.unavailable}
           onClick={() => onUpdate(light.entity_id, { state: light.on ? 'off' : 'on' })}
           aria-label={light.on ? `Turn ${light.name} off` : `Turn ${light.name} on`}
-          className={`${s.toggle} flex shrink-0 items-center gap-2 border font-semibold uppercase tracking-[0.16em] transition active:border-[var(--color-accent)] disabled:opacity-40 ${
+          className={`${s.toggle} flex shrink-0 items-center gap-2 border ${s.caps} transition active:border-[var(--color-accent)] disabled:opacity-40 ${
             light.on
               ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.1)] text-[var(--color-accent)]'
               : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
@@ -323,7 +340,7 @@ export function AllLightsControl({
           />
           <div className={nameBlock(size)}>
             <div className={`${s.name} ${nameShrink(size)} min-w-0 truncate leading-tight text-[var(--color-text)]`}>every light</div>
-            <div className={`${stateLine(size)} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
+            <div className={`${stateLine(size)} ${s.meta} text-[var(--color-text-faint)]`}>
               {count} bulb{count === 1 ? '' : 's'}{anyOn && pct != null ? ` · ${pct}%` : ''}
             </div>
           </div>
@@ -331,7 +348,7 @@ export function AllLightsControl({
         <button
           type="button"
           onClick={() => onToggleAll(anyOn ? 'off' : 'on')}
-          className={`${s.toggle} flex shrink-0 items-center gap-2 border font-semibold uppercase tracking-[0.16em] transition active:border-[var(--color-accent)] ${
+          className={`${s.toggle} flex shrink-0 items-center gap-2 border ${s.caps} transition active:border-[var(--color-accent)] ${
             anyOn
               ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.1)] text-[var(--color-accent)]'
               : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
@@ -356,7 +373,7 @@ export function AllLightsControl({
           />
         </div>
       ) : (
-        <div className={`${size === 'dense' ? 'mt-1' : 'mt-4'} text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
+        <div className={`${size === 'dense' ? 'mt-1' : 'mt-4'} ${s.meta} text-[var(--color-text-faint)]`}>
           all off · turn a light on to set brightness or color
         </div>
       )}

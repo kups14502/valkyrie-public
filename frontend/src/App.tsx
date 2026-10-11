@@ -1,10 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Lightbulb, Menu, X, TrendingUp, Search,
-  Film, Clapperboard, Tablet, RefreshCw, Settings as SettingsIcon, Smartphone, Terminal as TerminalIcon,
-  CalendarDays, UtensilsCrossed, Glasses, FolderKanban,
-} from 'lucide-react'
+import { LayoutDashboard, Menu, X, Search, Tablet, RefreshCw, Smartphone, Glasses } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -16,6 +13,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
 import { useProfile } from './lib/deviceMode'
+import { navFor } from './lib/nav'
 import { isEmbedded } from './lib/embed'
 import PlayerBar from './components/PlayerBar'
 import Dashboard from './pages/Dashboard'
@@ -130,34 +128,6 @@ function PageFallback() {
       &gt; loading<span className="cursor-blink">_</span>
     </div>
   )
-}
-
-// Services, Vault, and Activity were pulled from the nav (unused day to day);
-// they stay routable and remain in the Ctrl+K palette. The menu grid is 8 wide
-// at lg, so the tail wraps onto a second row. Brendon's order: the five he
-// uses most first, settings always last.
-const navItems = [
-  { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
-  { to: '/sessions', label: 'sessions', icon: TerminalIcon },
-  { to: '/projects', label: 'projects', icon: FolderKanban },
-  { to: '/lights', label: 'lights', icon: Lightbulb },
-  { to: '/plex', label: 'plex', icon: Clapperboard },
-  { to: '/trade', label: 'trades', icon: TrendingUp },
-  { to: '/calendar', label: 'calendar', icon: CalendarDays },
-  { to: '/meals', label: 'meals', icon: UtensilsCrossed },
-  { to: '/vr', label: 'vr', icon: Glasses },
-  { to: '/slop', label: 'slop', icon: Film },
-]
-const settingsItem = { to: '/settings', label: 'settings', icon: SettingsIcon }
-
-// The home screens are per form factor, so only show the one that belongs to
-// this device: an iPad has no use for the phone dashboard, and a desktop has no
-// use for either. The VR workspace is in the menu for everyone (a desktop
-// browser is how it gets built and checked), so the vr profile adds nothing.
-function navFor(resolved: 'desktop' | 'iphone' | 'ipad' | 'vr') {
-  if (resolved === 'ipad') return [...navItems, { to: '/pad', label: 'ipad home', icon: Tablet }, settingsItem]
-  if (resolved === 'iphone') return [...navItems, { to: '/phone', label: 'phone home', icon: Smartphone }, settingsItem]
-  return [...navItems, settingsItem]
 }
 
 // "/" lands on the dashboard, unless a same-origin embedder asked for a page
@@ -301,13 +271,6 @@ function Shell() {
   const home = profile.home
   const atHome = location.pathname === home
   const onHomeScreen = home !== '/dashboard'
-
-  // The dashboard opens with the nav menu already down (as a launcher); it
-  // stays closeable, and closing it while on the dashboard sticks because this
-  // only fires when the route actually becomes /dashboard. Pad mode has its own
-  // big tiles, so it doesn't need the menu auto-opened.
-  const onDashboard = location.pathname === '/dashboard'
-  useEffect(() => { if (onDashboard) setMenuOpen(true) }, [onDashboard])
 
   // The in-page terminal (/sessions/terminal) is pinned: it owns its own
   // height, must not scroll, and must not carry main's padding. The page itself

@@ -30,7 +30,7 @@ const PAGES: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
 ]
 
-// Only this device's own home screen is offered (see navFor in App.tsx).
+// Only this device's own home screen is offered (see navFor in lib/nav.ts).
 const HOME_PAGES = {
   ipad: { to: '/pad', label: 'iPad home', icon: <Tablet size={15} /> },
   iphone: { to: '/phone', label: 'Phone home', icon: <Smartphone size={15} /> },

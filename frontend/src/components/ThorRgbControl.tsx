@@ -16,9 +16,10 @@ type Size = 'normal' | 'pad' | 'dense'
 
 // Dense is the dashboard's lights tile: a flat row under the bulbs, no card.
 const SZ = {
-  normal: { card: 'panel p-4', name: 'text-base', button: 'min-h-11 px-5 text-xs', icon: 14 },
-  pad: { card: 'panel p-5', name: 'text-lg', button: 'min-h-14 px-6 text-sm', icon: 16 },
-  dense: { card: 'border-t border-[var(--color-border)]/50 pt-2', name: 'text-sm', button: 'min-h-7 px-2.5 text-[10px]', icon: 12 },
+  normal: { card: 'panel p-4', name: 'text-base', button: 'min-h-11 px-5 text-xs', icon: 14, meta: 'text-[10px] uppercase tracking-[0.2em]', caps: 'font-semibold uppercase tracking-[0.16em]' },
+  pad: { card: 'panel p-5', name: 'text-lg', button: 'min-h-14 px-6 text-sm', icon: 16, meta: 'text-[10px] uppercase tracking-[0.2em]', caps: 'font-semibold uppercase tracking-[0.16em]' },
+  // The dashboard reads in plain lowercase; the cards keep the terminal caps.
+  dense: { card: 'border-t border-[var(--color-border)]/50 pt-2', name: 'text-[13px]', button: 'min-h-7 px-2.5 text-[11px]', icon: 12, meta: 'text-[11px]', caps: '' },
 } as const
 
 // Worst case for a relight, after which the panel stops claiming to be busy
@@ -121,8 +122,8 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
           />
           {/* Dense puts the status beside the name, so the row is one line. */}
           <div className={size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0'}>
-            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)] ${size === 'dense' ? 'shrink-[0.1]' : ''}`}>thor desk rgb</div>
-            <div title={size === 'dense' ? status : undefined} className={`${size === 'dense' ? 'min-w-0' : 'mt-0.5'} truncate text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)]`}>
+            <div className={`${s.name} min-w-0 truncate leading-tight text-[var(--color-text)] ${size === 'dense' ? 'shrink-0' : ''}`}>thor desk rgb</div>
+            <div title={size === 'dense' ? status : undefined} className={`${size === 'dense' ? 'min-w-0' : 'mt-0.5'} truncate ${s.meta} text-[var(--color-text-faint)]`}>
               {status}
             </div>
           </div>
@@ -134,7 +135,7 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
             disabled={disabled}
             onClick={() => fire('relight')}
             aria-label="Relight thor"
-            className={`${s.button} flex items-center gap-2 border font-semibold uppercase tracking-[0.16em] transition active:border-[var(--color-accent)] disabled:opacity-40 ${
+            className={`${s.button} flex items-center gap-2 border ${s.caps} transition active:border-[var(--color-accent)] disabled:opacity-40 ${
               lit
                 ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.1)] text-[var(--color-accent)]'
                 : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
@@ -148,7 +149,7 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
             disabled={disabled}
             onClick={() => fire('dark')}
             aria-label="Take thor dark"
-            className={`${s.button} flex items-center gap-2 border font-semibold uppercase tracking-[0.16em] transition active:border-[var(--color-accent)] disabled:opacity-40 ${
+            className={`${s.button} flex items-center gap-2 border ${s.caps} transition active:border-[var(--color-accent)] disabled:opacity-40 ${
               state === 'dark'
                 ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.1)] text-[var(--color-accent)]'
                 : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
