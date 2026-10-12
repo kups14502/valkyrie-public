@@ -1,5 +1,7 @@
+import type { Terminal as XTerm } from '@xterm/xterm'
 import { api } from './api'
 import { getToken } from './auth'
+import { copyText } from './clipboard'
 
 // What every screen onto a tmux session shares: the phone terminal
 // (pages/Terminal.tsx) and the VR workspace (pages/Vr.tsx) both attach to
@@ -117,3 +119,60 @@ export const errText = (e: unknown) =>
   (e as { response?: { data?: { error?: string } } })?.response?.data?.error
   || (e as Error)?.message
   || 'failed'
+
+// THE MOUSE BELONGS TO THE BROWSER, NOT TO TMUX OR CLAUDE.
+//
+// tmux's conf has `mouse on`, so it asks every attached terminal for mouse
+// reports, and a fullscreen Claude (Remote-Session.ps1, 2026-10-12) asks tmux
+// for them too. A drag then went to Claude, which ignores it because clicks
+// are off, and nothing was ever selected. Before that it went to tmux's
+// copy-mode, whose copy never reached the clipboard either. Refusing the
+// request keeps xterm's own selection, and Ctrl+C copies it the way Windows
+// Terminal does: with a selection it copies, without one it is still Ctrl+C.
+// Only for a mouse: on a phone a tap stays a tap.
+const MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016])
+
+export function keepNativeSelection(term: XTerm): () => void {
+  const csi = term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) =>
+    params.length > 0 && params.every((p) => typeof p === 'number' && MOUSE_MODES.has(p)))
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true
+    if (e.key.toLowerCase() !== 'c' || !term.hasSelection()) return true
+    void copyText(term.getSelection())
+    term.clearSelection()
+    e.preventDefault()
+    return false
+  })
+  return () => csi.dispose()
+}
+
+// One scroll line per this many pixels of wheel travel.
+const WHEEL_LINE_PX = 40
+
+// The wheel scrolls through the socket, never xterm: the backend moves tmux's
+// copy-mode for an inline session or Claude's own view for a fullscreen one
+// (routes/terminal.ts). Captured on the host so xterm never sees the event:
+// with mouse reports refused, xterm would turn it into arrow keys, which page
+// through the prompt's history instead. Positive lines are older output.
+export function wheelScroll(host: HTMLElement, scroll: (lines: number) => void): () => void {
+  let acc = 0
+  const onWheel = (e: WheelEvent) => {
+    e.stopPropagation()
+    // A trackpad pinch arrives as a ctrl+wheel. It is a zoom, not a scroll,
+    // so the browser keeps it.
+    if (e.ctrlKey || e.metaKey) return
+    e.preventDefault()
+    // Firefox can report a notch in lines (deltaMode 1) rather than pixels.
+    const px = e.deltaMode === 1
+      ? e.deltaY * WHEEL_LINE_PX
+      : e.deltaMode === 2 ? e.deltaY * host.clientHeight : e.deltaY
+    acc += px
+    const steps = Math.trunc(acc / WHEEL_LINE_PX)
+    if (!steps) return
+    acc -= steps * WHEEL_LINE_PX
+    // Wheel up is a negative deltaY.
+    scroll(-steps)
+  }
+  host.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  return () => host.removeEventListener('wheel', onWheel, { capture: true })
+}

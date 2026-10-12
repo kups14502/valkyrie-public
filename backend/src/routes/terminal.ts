@@ -9,8 +9,8 @@ import { requireStrongAuth, authorizeStrongUpgrade, viaCloudflare } from '../mid
 import { isAllowedHost, isAllowedOrigin } from '../middleware/origin.js'
 import {
   MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
-  attachArgs, createSession, endScroll, ensureServer, hasSession, killSession, listSessions,
-  remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion,
+  APP_SCROLL_END, attachArgs, createSession, endScroll, ensureServer, hasSession, killSession, listSessions,
+  paneTakesWheel, remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion, wheelInput,
   type TermMode, type TermSession,
 } from '../terminal/tmux.js'
 import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
@@ -293,7 +293,8 @@ type ClientMsg =
   | { t: 'i'; d: string }
   | { t: 'r'; cols: number; rows: number }
   // Swipe-to-scroll. The client sends a line delta, never a key: what moves
-  // the view is a tmux copy-mode command, see scrollPane.
+  // the view is a tmux copy-mode command (scrollPane) or, for a fullscreen
+  // Claude, wheel reports this side types for it (wheelInput).
   | { t: 's'; lines: number }
   | { t: 'se' }
   // "are you still there". A phone that comes back from the background cannot
@@ -361,13 +362,35 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
   // async tmux call, so everything the client sends is serialized through one
   // chain: a keystroke must never overtake the cancel that makes it mean what
   // the user typed. One microtask per keystroke, at phone typing speed.
-  let inCopy = false
+  //
+  // A fullscreen Claude scrolls its own view instead, which a keystroke does
+  // not bring back by itself, so leaving sends its jump-to-bottom. Which of
+  // the two the last scroll moved is only known once it has run, and the
+  // leave runs after it in the same chain, so it reads the answer then.
+  let scrolled = false
+  let scrolledApp = false
   let chain: Promise<unknown> = Promise.resolve()
   const run = (fn: () => unknown) => { chain = chain.then(fn).catch(() => {}) }
   const leaveCopy = () => {
-    if (!inCopy) return
-    inCopy = false
-    run(() => endScroll(name))
+    if (!scrolled) return
+    scrolled = false
+    run(async () => {
+      if (scrolledApp) pty.write(APP_SCROLL_END)
+      else await endScroll(name)
+    })
+  }
+
+  // Where a wheel report lands, kept in step with the client's size.
+  let size = { cols, rows }
+  // One tmux call per second at most, not one per wheel notch.
+  let wheelCheckedAt = 0
+  let wheelApp = false
+  const takesWheel = async () => {
+    if (Date.now() - wheelCheckedAt > 1_000) {
+      wheelApp = await paneTakesWheel(name)
+      wheelCheckedAt = Date.now()
+    }
+    return wheelApp
   }
 
   ws.on('message', (raw, isBinary) => {
@@ -383,8 +406,12 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
     if (msg.t === 's') {
       const lines = Number(msg.lines)
       if (!Number.isFinite(lines) || lines === 0) return
-      inCopy = true
-      run(() => scrollPane(name, lines))
+      scrolled = true
+      run(async () => {
+        scrolledApp = await takesWheel()
+        if (scrolledApp) pty.write(wheelInput(lines, size.cols, size.rows))
+        else await scrollPane(name, lines)
+      })
       return
     }
     if (msg.t === 'se') {
@@ -398,6 +425,7 @@ function bridge(ws: WebSocket, name: string, cols: number, rows: number): void {
     if (msg.t === 'r') {
       const c = clampInt(String(msg.cols), 20, 400, cols)
       const r = clampInt(String(msg.rows), 8, 200, rows)
+      size = { cols: c, rows: r }
       try { pty.resize(c, r) } catch { /* pty already gone */ }
     }
   })

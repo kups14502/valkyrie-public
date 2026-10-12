@@ -318,6 +318,37 @@ export async function endScroll(name: string): Promise<void> {
   await tmux(['send-keys', '-t', name, '-X', 'cancel'], 5_000).catch(() => {})
 }
 
+// Everything above is for Claude's inline renderer. A session started since
+// 2026-10-12 runs fullscreen (Remote-Session.ps1 forces it): it draws on the
+// alternate screen, so tmux keeps no history of it and copy-mode would scroll
+// an empty buffer. It also asks for the mouse, and tmux's WheelUpPane binding
+// hands a wheel event straight to a pane that did, so the scroll goes to
+// Claude's own view instead. Anything else (an inline session from before, a
+// plain shell) keeps copy-mode.
+export async function paneTakesWheel(name: string): Promise<boolean> {
+  if (!SESSION_NAME_RE.test(name)) return false
+  try {
+    const out = await tmux(['display-message', '-p', '-t', name, '#{alternate_on}#{mouse_any_flag}'], 5_000)
+    return out.trim() === '11'
+  } catch {
+    return false
+  }
+}
+
+// SGR wheel reports for the attach client to type, aimed at the middle of its
+// screen. tmux reads them as that client's mouse and forwards them to the pane.
+// 64 is wheel up (older output), which is positive lines here as in scrollPane.
+export function wheelInput(lines: number, cols: number, rows: number): string {
+  const n = Math.min(200, Math.abs(Math.trunc(lines)))
+  const x = Math.max(1, Math.floor(cols / 2))
+  const y = Math.max(1, Math.floor(rows / 2))
+  return `\x1b[<${lines > 0 ? 64 : 65};${x};${y}M`.repeat(n)
+}
+
+// Ctrl+End, Claude's "jump to bottom". Measured on 2.1.280: it moves neither
+// the prompt's cursor nor the highlight in an open menu.
+export const APP_SCROLL_END = '\x1b[1;5F'
+
 // --------------------------------------------------------------- create ----
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {

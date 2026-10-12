@@ -13,8 +13,8 @@ import {
   killTermSession, openTermSession, termLabel, type TermOpen, type TermOpenResult, type TermSession,
 } from '../lib/api'
 import {
-  TERM_FONT_FAMILY, errText, readTermTheme as readTheme, readUiZoom, relIso, relative, setTermZoom,
-  termWsUrl as wsUrl, toCtrl,
+  TERM_FONT_FAMILY, errText, keepNativeSelection, readTermTheme as readTheme, readUiZoom, relIso, relative,
+  setTermZoom, termWsUrl as wsUrl, toCtrl, wheelScroll,
 } from '../lib/term'
 import { readText as readClipboard } from '../lib/clipboard'
 import { useProfile } from '../lib/deviceMode'
@@ -90,6 +90,9 @@ function isEditableFocused(): boolean {
   if (!(el instanceof HTMLElement)) return false
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
 }
+
+// A mouse or trackpad drives the screen, not a finger.
+const hasMouse = () => window.matchMedia('(pointer: fine)').matches
 
 const KEY = 'inline-flex min-h-10 items-center justify-center gap-1 border border-[var(--color-border)] text-[11px] uppercase tracking-[0.08em] text-[var(--color-text-dim)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.12)] active:text-[var(--color-accent)] hover:border-[var(--color-accent)]/50'
 
@@ -627,6 +630,15 @@ export default function TerminalPage() {
     }
   }, [scrollBy, leaveScroll])
 
+  // B3. A mouse: the laptop, or a project's session opened full screen. The
+  //     wheel and a drag work as they do in the project pane (wheelScroll and
+  //     keepNativeSelection in lib/term.ts). A phone keeps its swipe above.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host || !hasMouse()) return
+    return wheelScroll(host, scrollBy)
+  }, [scrollBy])
+
   // C. One terminal + one socket per selected session. `gen` is the reconnect
   //    handle: bumping it tears the pair down and builds them again.
   useEffect(() => {
@@ -651,6 +663,7 @@ export default function TerminalPage() {
     term.open(host)
     termRef.current = term
     fitRef.current = fit
+    const releaseMouse = hasMouse() ? keepNativeSelection(term) : null
 
     const ta = term.textarea
     if (ta) {
@@ -734,6 +747,7 @@ export default function TerminalPage() {
     return () => {
       onData.dispose()
       onResize.dispose()
+      releaseMouse?.()
       // Null these BEFORE close() so a dying generation cannot stamp
       // conn:'closed' over the generation replacing it.
       ws.onclose = null

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { TERM_FONT_FAMILY, readTermTheme, readUiZoom, setTermZoom, termWsUrl } from '../lib/term'
+import {
+  TERM_FONT_FAMILY, keepNativeSelection, readTermTheme, readUiZoom, setTermZoom, termWsUrl, wheelScroll,
+} from '../lib/term'
 
 // One tmux session as a pane inside another page: the project page puts it
 // beside its tabs on a desktop. Built from the VR workspace's pane (Vr.tsx)
@@ -29,9 +31,6 @@ export type TermConn = 'connecting' | 'live' | 'closed'
 // 25s and answers a probe with one.
 const SILENT_MS = 45_000
 const PROBE_MS = 8_000
-
-// One tmux line per this many pixels of wheel travel.
-const WHEEL_LINE_PX = 40
 
 export default function TermPane({ name, font = 13, focused = true, onConn, register, className }: {
   name: string
@@ -130,6 +129,7 @@ export default function TermPane({ name, font = 13, focused = true, onConn, regi
     term.open(host)
     termRef.current = term
     fitRef.current = fit
+    const releaseMouse = keepNativeSelection(term)
 
     const ta = term.textarea
     if (ta) {
@@ -204,6 +204,7 @@ export default function TermPane({ name, font = 13, focused = true, onConn, regi
     return () => {
       onData.dispose()
       onResize.dispose()
+      releaseMouse()
       // Null these BEFORE close() so a dying generation cannot stamp
       // conn:'closed' over the generation replacing it.
       ws.onclose = null
@@ -296,36 +297,17 @@ export default function TermPane({ name, font = 13, focused = true, onConn, regi
     }
   }, [])
 
-  // The wheel scrolls tmux's history through the socket, not xterm's buffer
-  // (about one screen under tmux) and not tmux's own mouse handling, which
+  // The wheel goes through the socket, not tmux's own mouse handling, which
   // leaves the pane in a copy-mode the backend does not know about, so the next
   // keys read as copy-mode commands. The backend tracks the socket's scroll
-  // message and leaves copy-mode before the next keystroke. Captured on the
-  // host so xterm never sees the event.
+  // message and undoes it before the next keystroke.
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    let acc = 0
-    const onWheel = (e: WheelEvent) => {
-      e.stopPropagation()
-      // A trackpad pinch arrives as a ctrl+wheel. It is a zoom, not a scroll,
-      // so the browser keeps it.
-      if (e.ctrlKey || e.metaKey) return
-      e.preventDefault()
-      // Firefox can report a notch in lines (deltaMode 1) rather than pixels.
-      const px = e.deltaMode === 1
-        ? e.deltaY * WHEEL_LINE_PX
-        : e.deltaMode === 2 ? e.deltaY * host.clientHeight : e.deltaY
-      acc += px
-      const steps = Math.trunc(acc / WHEEL_LINE_PX)
-      if (!steps) return
-      acc -= steps * WHEEL_LINE_PX
+    return wheelScroll(host, (lines) => {
       const ws = wsRef.current
-      // Wheel up is a negative deltaY and positive lines are older output.
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 's', lines: -steps }))
-    }
-    host.addEventListener('wheel', onWheel, { passive: false, capture: true })
-    return () => host.removeEventListener('wheel', onWheel, { capture: true })
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 's', lines }))
+    })
   }, [])
 
   useEffect(() => { if (focused) termRef.current?.focus() }, [focused])
