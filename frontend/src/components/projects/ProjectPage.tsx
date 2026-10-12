@@ -408,10 +408,15 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   // come back when it is closed or a tab is picked. A session wins over a file.
   const showTerm = term.embedded && term.selected !== null
   const showFile = term.embedded && !showTerm && openFile !== null
+  // Then the page is exactly main's height and never scrolls: the pane takes
+  // what the header and tabs leave, and only the terminal (or the file) and
+  // the side columns scroll inside themselves. A pane sized from 100dvh
+  // overshot the window, more so at a UI zoom above 1 (index.css, --ui-zoom).
+  const fill = showTerm || showFile
 
   return (
-    <div className="mx-auto max-w-[1700px] space-y-4">
-      <header className="space-y-1.5">
+    <div className={`vk-proj mx-auto max-w-[1700px] ${fill ? 'flex h-full flex-col gap-4' : 'space-y-4'}`}>
+      <header className="shrink-0 space-y-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
           <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
           <span>/</span>
@@ -467,13 +472,14 @@ export function ProjectPage({ projectId }: { projectId: string }) {
         )}
       </header>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+      <div className={`flex flex-col gap-4 lg:flex-row lg:gap-6 ${fill ? 'min-h-0 flex-1' : 'lg:items-start'}`}>
         <SidePanel
           id="sessions"
           title="sessions"
           count={liveCount}
           icon={<SquareTerminal size={14} />}
           width="lg:w-72"
+          fill={fill}
           actions={(
             <button
               type="button"
@@ -497,8 +503,8 @@ export function ProjectPage({ projectId }: { projectId: string }) {
           />
         </SidePanel>
 
-        <main className="min-w-0 flex-1 space-y-4">
-          <nav className="flex items-center gap-x-5 overflow-x-auto border-b border-[var(--color-border)] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
+        <main className={`min-w-0 flex-1 ${fill ? 'flex min-h-0 flex-col gap-4' : 'space-y-4'}`}>
+          <nav className="flex shrink-0 items-center gap-x-5 overflow-x-auto border-b border-[var(--color-border)] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -524,7 +530,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
           {showTerm && term.selected ? (
             <section
               ref={paneRef}
-              className="flex h-[calc(100dvh-15rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)]"
+              className="flex min-h-0 flex-1 flex-col border border-[var(--color-border)] bg-[var(--color-bg)]"
             >
               <SelectedTerm
                 key={term.selected}
@@ -539,7 +545,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
               />
             </section>
           ) : showFile && openFile ? (
-            <section className="flex h-[calc(100dvh-15rem)] min-h-[420px] flex-col border border-[var(--color-border)] bg-[var(--color-bg)]">
+            <section className="flex min-h-0 flex-1 flex-col border border-[var(--color-border)] bg-[var(--color-bg)]">
               <FileView
                 key={openFile}
                 projectId={projectId}
@@ -568,6 +574,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
           count={d.files.length}
           icon={<FileText size={14} />}
           width="lg:w-80 xl:w-96"
+          fill={fill}
         >
           <FileExplorer projectId={projectId} doc={d} term={term} openFile={openFile} onOpenFile={setOpenFile} />
         </SidePanel>

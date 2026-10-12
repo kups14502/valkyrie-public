@@ -393,7 +393,10 @@ function Shell() {
             <Route path="/meals" element={<PageContainer><Meals /></PageContainer>} />
             <Route path="/sessions" element={<PageContainer><Sessions /></PageContainer>} />
             <Route path="/projects" element={<PageContainer><Projects /></PageContainer>} />
-            <Route path="/projects/:projectId" element={<PageContainer><Projects /></PageContainer>} />
+            {/* Bare: an open session fills the window, so the page sizes itself
+                to main's height (ProjectPage) and a wrapper here would break the
+                h-full chain. The page caps its own width. */}
+            <Route path="/projects/:projectId" element={<Projects />} />
             {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
                 exists for prose line length, and a non-positioned wrapper between
                 main and an absolute inset-0 page root is dead weight. */}

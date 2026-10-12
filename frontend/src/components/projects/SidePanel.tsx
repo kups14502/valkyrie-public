@@ -4,7 +4,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 // A column beside the project's tabs on a desktop, a section above or below
 // them on a phone. Collapsed, the desktop column shrinks to a thin rail with
 // its icon and count, so the tabs get the room. The choice is kept per panel
-// on this device.
+// on this device. With fill, the page is pinned to the window, so the column
+// takes the row's height and scrolls inside it.
 
 const read = (key: string, fallback: boolean): boolean => {
   try {
@@ -15,7 +16,7 @@ const read = (key: string, fallback: boolean): boolean => {
   }
 }
 
-export function SidePanel({ id, title, count, icon, width, actions, defaultOpen = true, children }: {
+export function SidePanel({ id, title, count, icon, width, actions, fill = false, defaultOpen = true, children }: {
   id: string
   title: string
   count?: number
@@ -23,6 +24,7 @@ export function SidePanel({ id, title, count, icon, width, actions, defaultOpen 
   // The open width on a desktop, as a Tailwind class (lg:w-72).
   width: string
   actions?: ReactNode
+  fill?: boolean
   defaultOpen?: boolean
   children: ReactNode
 }) {
@@ -38,7 +40,7 @@ export function SidePanel({ id, title, count, icon, width, actions, defaultOpen 
   return (
     <aside
       className={`min-w-0 lg:sticky lg:top-0 lg:shrink-0 ${open
-        ? `${width} lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto`
+        ? `${width} ${fill ? '' : 'lg:max-h-[calc(100dvh-7rem)]'} lg:overflow-y-auto`
         : 'lg:w-9'}`}
     >
       {!open && (
