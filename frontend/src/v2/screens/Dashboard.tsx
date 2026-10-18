@@ -1,17 +1,16 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode,
+  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode,
 } from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, Segmented, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick, useTrade,
-  useTracker, useUsage,
-  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeVM,
+  ago, nyDayKey, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick,
+  useTrade, useTracker, useUsage,
+  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession,
 } from '../kit/data'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { useSetting } from '../kit/theme'
-import { useReducedMotion } from '../kit/motion'
 import { apiErrorText } from '../../lib/api'
 import { fetchTrackerSkips, shiftDateKey } from '../../lib/supplementsApi'
 import { useDailyTracker, useTrackerDays, workoutFor } from '../../lib/dailyTracker'
@@ -20,7 +19,7 @@ import { useQuickSessions } from '../../lib/quickSessions'
 import './dashboard.css'
 
 // Dashboard: one page with everything Valkyrie does, in the order Brendon
-// uses it. A trade ticker line on top (scrolls only when it does not fit),
+// uses it. A trade ticker line on top (the newest session, bot online, 7 days),
 // quick start, lights (a plate that switches them all), the daily tracker,
 // the calendar (today first, then the next six days as compact rows), AI
 // (live and asking sessions, usage meters), media (playing or newest added,
@@ -191,209 +190,90 @@ function settled(qc: QueryClient, fire: () => void): Promise<void> {
   })
 }
 
-// ---------- trade ticker: one line on top, scrolling only when it does not fit ----------
+// ---------- trade ticker: one line on top, three facts ----------
 
-/** what System > Trades reads that the kit's TradeVM does not carry (its 'tradeSys' query) */
-type TradePeek = { lastTrade: string | null; lastTradeAt: number | null; marketReason: string }
+const NY = 'America/New_York'
+const nyWeekday = new Intl.DateTimeFormat('en-US', { timeZone: NY, weekday: 'short' })
+const nyDate = new Intl.DateTimeFormat('en-US', { timeZone: NY, month: 'short', day: 'numeric' })
 
-const isTradeSys = (k: readonly unknown[]) => k[0] === 'v2' && k[1] === 'tradeSys'
-
-/**
- * The last trade and the market reason, read from System's own trade query
- * (System stays mounted, so it is always polling). Read only: this never
- * creates that query, so its persisted first paint stays System's. null until
- * System's first read lands, or when its shape no longer has these fields.
- */
-function useTradePeek(): TradePeek | null {
-  const qc = useQueryClient()
-  const subscribe = useCallback(
-    (cb: () => void) => qc.getQueryCache().subscribe((e) => { if (isTradeSys(e.query.queryKey)) cb() }),
-    [qc],
-  )
-  const raw = useSyncExternalStore(subscribe, () => qc.getQueryData<unknown>(['v2', 'tradeSys']))
-  return useMemo(() => {
-    if (!raw || typeof raw !== 'object') return null
-    const r = raw as Record<string, unknown>
-    return {
-      lastTrade: typeof r.lastTrade === 'string' && r.lastTrade ? r.lastTrade : null,
-      lastTradeAt: typeof r.lastTradeAt === 'number' && Number.isFinite(r.lastTradeAt) ? r.lastTradeAt : null,
-      marketReason: typeof r.marketReason === 'string' ? r.marketReason : '',
-    }
-  }, [raw])
+/** "$12.34", "$123", "$1,234" (cents only under $100, so the line fits a 360 px phone) */
+const money = (v: number) => {
+  const a = Math.abs(v)
+  return a >= 100 ? `$${Math.round(a).toLocaleString('en-US')}` : `$${a.toFixed(2)}`
 }
-
-const usd0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`
+const signedMoney = (v: number) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${money(v)}`
 const signed = (v: number, d = 2) => `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(d)}`
-/** "sell HPE" out of "sell HPE at the broker on 2026-10-15" (the bot's own words when it reads otherwise) */
-const tradeShort = (s: string) => {
-  const m = /^(buy|sell)\s+(\S+)/i.exec(s)
-  if (m) return `${m[1].toLowerCase()} ${m[2]}`
-  return s.length > 28 ? `${s.slice(0, 27)}…` : s
-}
 
-/** a held finger longer than this pauses the line to read it, and does not open Trades on release */
-const HOLD_MS = 450
-/** marquee speed, px per second */
-const TICKER_PX_S = 34
-
-/** Bot health in one word: down and stale are alerts, so is a rules hash that drifted. */
-function botWord(t: TradeVM): { text: string; alert: boolean } {
-  if (!t.up) return { text: 'down', alert: true }
-  if (t.stale) return { text: 'stale', alert: true }
-  if (t.rulesOk === false) return { text: 'rules drift', alert: true }
-  return { text: 'ok', alert: false }
+/** the session's day, said only when it is not today: "Fri", or "Oct 9" when it is over a week back */
+function sessionDay(s: TradeSession, now: number): string | null {
+  if (s.day === nyDayKey(now)) return null
+  return now - s.at < 6 * 86_400_000 ? nyWeekday.format(s.at) : nyDate.format(s.at)
 }
 
 /**
- * The ticker's cells, as nodes and as one plain line for the accessible name.
- * The equity is its own node: it stays pinned beside the label, only the
- * cells after it scroll.
- */
-function tickerCells(t: TradeVM, peek: TradePeek | null, now: number, age: string | null): { eq: ReactNode; cells: ReactNode[]; said: string } {
-  const cells: ReactNode[] = []
-  const said: string[] = []
-  const sep = (k: string) => <i key={`s-${k}`} className="hm-tk-sep" aria-hidden />
-
-  const eq = (
-    <span className="hm-tk-cell">
-      <b className="hm-tk-eq">{t.equity != null ? usd0(t.equity) : '--'}</b>
-      {t.equitySource === 'day_open' && <span className="hm-tk-k">day open</span>}
-    </span>
-  )
-  said.push(`equity ${t.equity != null ? usd0(t.equity) : 'unknown'}${t.equitySource === 'day_open' ? ' at day open' : ''}`)
-
-  if (t.changeUsd != null) {
-    const up = t.changeUsd >= 0
-    cells.push(
-      <span key="chg" className="hm-tk-cell" title={t.windowDays ? `Trading P&L over the last ${t.windowDays} days` : 'Trading P&L'}>
-        <Icon name={up ? 'trades' : 'down'} size={12} tone="fg" className="hm-ic" />
-        <span className="hm-tk-v">{up ? '+' : '-'}${Math.abs(t.changeUsd).toFixed(2)}</span>
-        {t.changePct != null && <span className="hm-tk-v">{signed(t.changePct)}%</span>}
-        {t.windowDays ? <span className="hm-tk-k">{t.windowDays}d</span> : null}
-      </span>,
-    )
-    said.push(`${t.windowDays ? `${t.windowDays} day ` : ''}change ${up ? 'plus' : 'minus'} $${Math.abs(t.changeUsd).toFixed(2)}`)
-  }
-
-  const reason = !t.marketOpen && peek?.marketReason ? peek.marketReason : ''
-  if (cells.length) cells.push(sep('mkt'))
-  cells.push(
-    <span key="mkt" className="hm-tk-cell" data-lit={t.marketOpen || undefined}>
-      <span className="hm-tk-k">Mkt</span>
-      <span className="hm-tk-v">{t.marketOpen ? 'open' : 'closed'}</span>
-      {reason && <span className="hm-tk-d">{reason}</span>}
-    </span>,
-  )
-  said.push(`market ${t.marketOpen ? 'open' : 'closed'}${reason ? `, ${reason}` : ''}`)
-
-  const bot = botWord(t)
-  cells.push(sep('bot'))
-  cells.push(
-    <span key="bot" className="hm-tk-cell" title={t.upDetail || undefined}>
-      <span className="hm-tk-k">Bot</span>
-      <span className={cx('hm-tk-v', bot.alert && 'hm-alert')}>{bot.text}</span>
-    </span>,
-  )
-  said.push(`bot ${bot.text}`)
-
-  if (t.targetTrips > 0) {
-    cells.push(sep('trips'))
-    cells.push(
-      <span key="trips" className="hm-tk-cell" title="Live round trips toward the pre-registered target">
-        <span className="hm-tk-k">Trips</span>
-        <span className="hm-tk-v">{t.liveTrips ?? '--'}<span className="hm-tk-d">/{t.targetTrips}</span></span>
-      </span>,
-    )
-    said.push(`${t.liveTrips ?? 'unknown'} of ${t.targetTrips} live trips`)
-  }
-
-  if (peek?.lastTrade) {
-    const short = tradeShort(peek.lastTrade)
-    cells.push(sep('last'))
-    cells.push(
-      <span key="last" className="hm-tk-cell" title={peek.lastTrade}>
-        <span className="hm-tk-k">Last</span>
-        <span className="hm-tk-v">{short}</span>
-        {peek.lastTradeAt != null && <span className="hm-tk-d">{ago(peek.lastTradeAt, now)} ago</span>}
-      </span>,
-    )
-    said.push(`last trade ${short}${peek.lastTradeAt != null ? `, ${ago(peek.lastTradeAt, now)} ago` : ''}`)
-  }
-
-  if (age) {
-    cells.push(sep('age'))
-    cells.push(<span key="age" className="hm-tk-cell hm-old-tag">{age} old</span>)
-    said.push(`${age} old`)
-  }
-  return { eq, cells, said: said.join(', ') }
-}
-
-/**
- * The trade bot as a stock-ticker line: equity, the change with its window,
- * market, bot health, live trips, last trade. It scrolls as a marquee only
- * when it is wider than the screen, never under reduced motion, and stops
- * while the dashboard is not the active tab. A finger on it pauses it; a tap
- * opens System > Trades, a hold only pauses.
+ * The trade bot in one line: whether it is up or down money on the newest
+ * trading session (arrow and amount; the day when it is not today), whether
+ * the bot is online (up and not stale), and the 7-day change. A tap opens
+ * System > Trades. Reads every 60 s while the dashboard is the visible tab.
  */
 function TradeTicker({ active, i }: { active: boolean; i: number }) {
   const { go } = useShell()
-  const trade = useTrade()
-  const peek = useTradePeek()
+  const trade = useTrade(active)
   const now = useTick(30_000)
-  const reduced = useReducedMotion()
   const t = trade.data
+  // the data on screen is the last good read, not current: dim, and the online word gives way to its age
   const age = oldAge(trade, now, 10 * 60_000)
+  const s = t ? tradeSession(t, now) : null
+  const online = !!t && t.up && !t.stale
+  const said: string[] = []
 
-  const vp = useRef<HTMLSpanElement>(null)
-  const run = useRef<HTMLSpanElement>(null)
-  // the width of one run of cells while it is wider than the line, else 0
-  const [over, setOver] = useState(0)
-  useLayoutEffect(() => {
-    const v = vp.current
-    const r = run.current
-    if (!v || !r) return
-    const check = () => setOver(r.scrollWidth > v.clientWidth + 1 ? r.scrollWidth : 0)
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(v)
-    ro.observe(r)
-    return () => ro.disconnect()
-  }, [])
-  const moving = over > 0 && active && !reduced
-
-  const downAt = useRef(0)
-  const open = () => {
-    const held = moving && downAt.current > 0 && performance.now() - downAt.current > HOLD_MS
-    downAt.current = 0
-    if (!held) go(SYSTEM, 'trades')
+  let cells: ReactNode = <span className="hm-tk-d">{trade.failed ? 'Trade bot not answering' : 'Reading the trade bot'}</span>
+  if (t) {
+    const day = s ? sessionDay(s, now) : null
+    const dir = !s || s.flat || s.change === 0 ? 'flat' : s.change > 0 ? 'up' : 'down'
+    if (s) said.push(`${day ?? 'today'} ${dir === 'flat' ? 'flat' : `${dir} ${money(s.change)}`}${s.flat ? ', not live' : ''}`)
+    else said.push('no session yet')
+    said.push(age ? `bot last read ${age} ago, ${online ? 'online' : 'offline'} then` : `bot ${online ? 'online' : 'offline'}`)
+    const wk = t.changeUsd
+    const wkDays = t.windowDays ?? 7
+    if (wk != null) said.push(`${wkDays} day ${wk < 0 ? 'down' : 'up'} ${money(wk)}`)
+    cells = (
+      <>
+        <span
+          className="hm-tk-cell"
+          data-dir={dir}
+          data-flat={s?.flat || undefined}
+          title={s?.flat ? 'Not live: the bot repeated its day-open figure all session' : s?.running ? 'Today so far, to the live equity read' : 'The newest trading session, close to close'}
+        >
+          {dir !== 'flat' && <Icon name={dir === 'up' ? 'trades' : 'down'} size={13} tone={dir === 'up' ? 'fg' : 'acc2'} className="hm-ic" />}
+          <b className="hm-tk-v">{s ? signedMoney(s.flat ? 0 : s.change) : '--'}</b>
+          {day && <span className="hm-tk-k">{day}</span>}
+        </span>
+        <span className="hm-tk-cell hm-tk-bot" data-on={(online && !age) || undefined} data-off={(!online && !age) || undefined} title={t.upDetail || undefined}>
+          <i className="hm-tk-dot" aria-hidden />
+          <span className="hm-tk-word">{age ? `${age} old` : online ? 'Online' : 'Offline'}</span>
+        </span>
+        <span className="hm-tk-cell" data-dir={wk == null || wk === 0 ? 'flat' : wk > 0 ? 'up' : 'down'} title={`Deposit-adjusted trading change over the last ${wkDays} days`}>
+          <span className="hm-tk-k">{wkDays}D</span>
+          <b className="hm-tk-v">{wk != null ? signedMoney(wk) : '--'}</b>
+          {t.changePct != null && <span className="hm-tk-pct">{signed(t.changePct)}%</span>}
+        </span>
+      </>
+    )
   }
-
-  const body = t ? tickerCells(t, peek, now, age) : null
-  const alert = t ? botWord(t).alert : false
-  const content = body ? body.cells : (
-    <span className="hm-tk-cell hm-tk-d">{trade.failed ? 'Trade bot not answering' : 'Reading the trade bot'}</span>
-  )
 
   return (
     <Press
       className={cx('hm-tk vl-build', age && 'hm-old')}
       style={bi(i)}
-      data-over={over ? '' : undefined}
-      onPointerDown={() => { downAt.current = performance.now() }}
-      onPress={open}
-      aria-label={`Trade bot${body ? `: ${body.said}` : trade.failed ? ', not answering' : ''}. Open Trades`}
+      onPress={() => go(SYSTEM, 'trades')}
+      aria-label={`Trade bot${t ? `: ${said.join(', ')}` : trade.failed ? ', not answering' : ''}. Open Trades`}
     >
       <span className="hm-tk-label">
-        <HIcon name="trades" lit={!!t?.marketOpen && !alert} tone={alert ? 'acc2' : undefined} />
-        Trade
+        <HIcon name="trades" lit={online && !age} tone={t && !online ? 'acc2' : undefined} />
+        <span className="hm-tk-name">Trade</span>
       </span>
-      {body && <span className="hm-tk-fix" aria-hidden>{body.eq}</span>}
-      <span className="hm-tk-vp" ref={vp} aria-hidden>
-        <span className="hm-tk-track" data-run={moving || undefined} style={{ '--tk-dur': `${Math.max(8, Math.round(over / TICKER_PX_S))}s` } as Vars}>
-          <span className="hm-tk-run" ref={run}>{content}</span>
-          {moving && <span className="hm-tk-run">{content}</span>}
-        </span>
-      </span>
+      <span className="hm-tk-cells" aria-hidden>{cells}</span>
       <Chevron />
     </Press>
   )
@@ -901,8 +781,8 @@ function resetLabel(iso: string | null, now: number): string {
 
 /**
  * AI: the live sessions (asking first, then working; desktop adds the idle
- * ones) and the usage meters of the account being burned. The head, the rows
- * and the meters open AI > Sessions.
+ * ones) and the usage meters of the account being burned. The head and the rows
+ * open AI > Sessions, the meters AI > Usage.
  */
 function AiBlock({ wide, i }: { wide: boolean; i: number }) {
   const { go } = useShell()
@@ -943,7 +823,7 @@ function AiBlock({ wide, i }: { wide: boolean; i: number }) {
           <Press className="hm-srow hm-dim" onPress={open}>Nothing live. Open the board</Press>
         </div>
       ) : null}
-      <Press className="hm-g-meters" onPress={open} aria-label="Usage meters, open AI">
+      <Press className="hm-g-meters" onPress={() => go(AI, 'usage')} aria-label="Usage meters, open AI usage">
         <span className="hm-meters" data-old={uAge ? '' : undefined}>
           <Meter label="5h" value={u?.five ?? null} note={resetLabel(u?.fiveResetsAt ?? null, now)} />
           <Meter label="Week" value={u?.week ?? null} note={resetLabel(u?.weekResetsAt ?? null, now)} ticks={7} />

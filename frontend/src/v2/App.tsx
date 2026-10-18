@@ -24,8 +24,8 @@ const Skin = lazy(() => import('./screens/Skin'))
 const SCREENS: ScreenDef[] = [
   // Dashboard draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there
   { id: 'dashboard', label: 'Dashboard', Component: Dashboard, floor: false },
-  // list screens keep the floor faint so rows never sit on bright dots
-  { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }], Component: Claude, floor: 'faint' },
+  // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
+  { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
   {

@@ -31,6 +31,7 @@
   opacity: .78;
 }
 .sys-key[data-c='cpu'] { background: var(--hot); opacity: 1; box-shadow: 0 0 4px var(--hot); }
+.sys-key[data-c='eq'] { background: var(--fg); opacity: 1; box-shadow: 0 0 4px var(--fg); }
 .sys-key[data-c='dash'] { background: repeating-linear-gradient(90deg, var(--fg) 0 3px, transparent 3px 6px); opacity: .6; }
 .sys-key:first-child { margin-left: 0; }
 
@@ -51,11 +52,10 @@
 
 /* ---------- Hosts layout ---------- */
 
-/* phone: hosts, then the selected host, then Claude usage */
+/* phone: hosts, then the selected host (AI usage lives on AI > Usage) */
 .sys-hosts { display: flex; flex-direction: column; gap: 8px; }
 .sys-hosts-panel { order: 0; }
 .sys-detail { order: 1; }
-.sys-usage { order: 2; }
 
 @media (min-width: 640px) {
   .sys-hosts {
@@ -66,7 +66,6 @@
     align-items: start;
   }
   .sys-hosts-panel { grid-column: 1; grid-row: 1; }
-  .sys-usage { grid-column: 1; grid-row: 2; }
   .sys-detail { grid-column: 2; grid-row: 1 / span 2; }
 }
 @media (min-width: 1100px) {
@@ -256,42 +255,6 @@
   .sys-chart-cap { font-size: 11px; }
 }
 
-/* ---------- usage ---------- */
-
-.sys-usage-top { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.sys-usage-big { display: flex; flex-direction: column; gap: 0; min-width: 0; }
-.sys-usage-big > span { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 15px; color: var(--dim); }
-.sys-usage-big > b { font-size: 24px; line-height: 28px; font-weight: 600; letter-spacing: -.02em; color: var(--ink-hi); }
-.sys-usage-big > b small { font-size: 12px; font-weight: 500; color: var(--dim); margin-left: 1px; letter-spacing: 0; }
-.sys-usage-big > em { margin-top: 1px; font-style: normal; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
-
-.sys-accts { margin-top: 10px; }
-.sys-acct {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px;
-  align-items: center;
-  gap: 12px;
-  min-height: 34px;
-  padding: 3px 0;
-  font-size: 12px;
-  border-top: 1px solid var(--line);
-}
-.sys-acct-head { min-height: 20px; padding: 0; font-size: 10.5px; color: var(--dim); border-top: 0; }
-.sys-acct-head > span + span { text-align: right; }
-.sys-acct-name { display: flex; flex-direction: column; min-width: 0; line-height: 15px; }
-.sys-acct-name em { font-style: normal; font-size: 10px; line-height: 12px; color: var(--dim); }
-.sys-acct-cell { display: flex; flex-direction: column; gap: 0; }
-.sys-acct-cell b { font-size: 12px; line-height: 14px; font-weight: 600; text-align: right; }
-.sys-acct-cell .vl-bar { min-width: 0; height: 9px; }
-.sys-acct-dead { grid-column: span 2; display: flex; align-items: center; justify-content: flex-end; gap: 5px; font-weight: 600; color: var(--acc2); }
-.sys-acct[data-dead] .sys-acct-name { color: var(--acc2); }
-
-@media (min-width: 1100px) {
-  .sys-accts { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
-  .sys-acct-head:nth-child(1) { grid-column: 1; }
-  .sys-acct { grid-template-columns: minmax(0, 1fr) 80px 80px; }
-}
-
 /* ---------- services ---------- */
 
 .sys-svc { display: flex; flex-direction: column; gap: 8px; }
@@ -455,7 +418,8 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
 .sys-timer-next em, .sys-timer-last { font-style: normal; font-size: 11px; color: var(--dim); white-space: nowrap; }
 .sys-timer-last { text-align: right; }
 
-/* ---------- trades ---------- */
+/* ---------- trades: the scheme accent for the equity, the alert color only for a loss
+   (and a bot that is down or stale), dim tones for anything not live; never the yellow ---------- */
 
 .sys-read-caps {
   display: flex;
@@ -474,7 +438,12 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
 .sys-trade-top { padding: 4px 2px 2px; }
 .sys-trade-what { margin-top: 10px; font-size: 11.5px; font-weight: 600; color: var(--text); }
 .sys-trade-what em { font-style: normal; font-weight: 500; color: var(--dim); }
-.sys-trade-what[data-day-open] { color: var(--hot); letter-spacing: .02em; }
+.sys-trade-what[data-kind='live'] { color: var(--fg); text-shadow: var(--text-glow); }
+.sys-trade-what[data-kind='live'] em { text-shadow: none; }
+.sys-trade-what[data-kind='day_open'], .sys-trade-what[data-kind='read'] { color: var(--dim); letter-spacing: .02em; }
+/* a figure that is not a live read is shown, never lit */
+.sys-trade-what[data-kind='day_open'] + .sys-trade-eq,
+.sys-trade-what[data-kind='read'] + .sys-trade-eq { color: var(--text); text-shadow: none; }
 .sys-trade-eq {
   margin-top: 2px;
   font-size: 42px;
@@ -495,7 +464,7 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
   margin-top: 8px;
   font-size: 11.5px;
   line-height: 15px;
-  color: var(--hot);
+  color: var(--text);
 }
 .sys-trade-warn .vl-icon { margin-top: 0; }
 
@@ -507,9 +476,9 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
 .sys-kv b > .sys-nw { white-space: nowrap; }
 .sys-kv b em { font-style: normal; font-weight: 500; color: var(--dim); }
 .sys-kv b[data-bad] { color: var(--acc2); }
-.sys-kv b[data-open] { color: var(--hot); }
+.sys-kv b[data-open] { color: var(--fg); text-shadow: var(--text-glow); }
 .sys-kv .sys-kv-dim { font-weight: 500; color: var(--dim); }
-.sys-kv .sys-kv-dim[data-stale] { color: var(--hot); }
+.sys-kv .sys-kv-dim[data-stale] { color: var(--acc2); }
 .sys-kv-trips { flex-wrap: wrap; row-gap: 3px; }
 .sys-kv-trips .vl-bar { flex: 1 0 100%; height: 10px; }
 

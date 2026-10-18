@@ -89,6 +89,10 @@ function cutPoly(pts: V2[], cut: number): V2[] {
  * ribbon's own plane (so a point reads against the same scale), and a marker
  * on the newest point with its value. A repeated fallback figure is dashed,
  * dim and unfilled. Draws in once, then drifts slowly; drag to turn it.
+ *
+ * Colors: the scheme accent (palette.fg) for the line, the ribbon, the wall
+ * and the marker; the dim tone for the not-live tail and every label. Never
+ * palette.hot (the yellow), so the chart takes the scheme on every scheme.
  */
 export function EquityChart(props: EquityChartProps) {
   const { className, style, ariaLabel } = props
@@ -223,11 +227,12 @@ export function EquityChart(props: EquityChartProps) {
       )
       cam.focal *= s.fit.k; cam.ox = s.fit.ox; cam.oy = s.fit.oy
 
-      const fg: RGB = parseColor(p.palette.fg), hot: RGB = parseColor(p.palette.hot)
+      // the series in the accent (`line`), the not-live tail and the labels in the dim tone
+      const fg: RGB = parseColor(p.palette.fg), line: RGB = fg, dim: RGB = parseColor(p.palette.dim)
       // deep colors (blue, violet, red) need more alpha to read on black
       const boost = (c: RGB) => clamp(Math.sqrt(0.8 / Math.max(0.05, (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255)), 1, 1.7)
-      const comp = boost(fg), compH = boost(hot)
-      const white = mixRGB(hot, [255, 255, 255], 0.5)
+      const comp = boost(fg)
+      const white = mixRGB(line, [255, 255, 255], 0.5)
       const WH = s.wallH
       const lo = p.lo, hi = p.hi > p.lo ? p.hi : p.lo + 1
       const Y = (v: number) => (clamp(v, lo, hi) - lo) / (hi - lo) * WH
@@ -374,19 +379,19 @@ export function EquityChart(props: EquityChartProps) {
           S.fillStyle = rgba(col, a)
           S.fill()
         }
-        curtain(live, hot, 0.3 * compH)
-        curtain(tail, fg, 0.06 * comp)
-        face(live, hot, 0.13 * compH)
-        face(tail, fg, 0.05 * comp)
+        curtain(live, line, 0.3 * comp)
+        curtain(tail, dim, 0.06 * comp)
+        face(live, line, 0.13 * comp)
+        face(tail, dim, 0.05 * comp)
 
         // baseline where the curtain meets the floor
         S.beginPath()
         if (live.length > 1 && P(live[0][0], 0, 0)) { S.moveTo(out[0], out[1]); if (P(live[live.length - 1][0], 0, 0)) S.lineTo(out[0], out[1]) }
-        S.strokeStyle = rgba(hot, 0.3); S.lineWidth = 0.9; S.stroke()
+        S.strokeStyle = rgba(line, 0.3); S.lineWidth = 0.9; S.stroke()
         if (tail.length > 1) {
           S.beginPath()
           if (P(tail[0][0], 0, 0)) { S.moveTo(out[0], out[1]); if (P(tail[tail.length - 1][0], 0, 0)) S.lineTo(out[0], out[1]) }
-          S.strokeStyle = rgba(fg, 0.14); S.stroke()
+          S.strokeStyle = rgba(dim, 0.14); S.stroke()
         }
 
         // drop lines, one per reading (live part only)
@@ -397,15 +402,15 @@ export function EquityChart(props: EquityChartProps) {
           if (!P(x, 0, 0)) continue
           S.moveTo(ax, ay); S.lineTo(out[0], out[1])
         }
-        S.strokeStyle = rgba(hot, 0.1 * compH); S.lineWidth = 0.6; S.stroke()
+        S.strokeStyle = rgba(line, 0.1 * comp); S.lineWidth = 0.6; S.stroke()
 
         // back edges: thin, the tail dashed
         S.beginPath(); trace([S], live, -DEPTH)
-        S.strokeStyle = rgba(hot, 0.34); S.lineWidth = 0.8; S.stroke()
+        S.strokeStyle = rgba(line, 0.34); S.lineWidth = 0.8; S.stroke()
         if (tail.length > 1) {
           S.setLineDash([2, 4])
           S.beginPath(); trace([S], tail, -DEPTH)
-          S.strokeStyle = rgba(fg, 0.22); S.lineWidth = 0.8; S.stroke()
+          S.strokeStyle = rgba(dim, 0.3); S.lineWidth = 0.8; S.stroke()
           S.setLineDash([])
         }
 
@@ -419,18 +424,18 @@ export function EquityChart(props: EquityChartProps) {
             if (!P(endP[0], 0, z)) continue
             S.moveTo(ax, ay); S.lineTo(out[0], out[1])
           }
-          S.strokeStyle = tail.length > 1 ? rgba(fg, 0.2) : rgba(hot, 0.4); S.lineWidth = 0.8; S.stroke()
+          S.strokeStyle = tail.length > 1 ? rgba(dim, 0.28) : rgba(line, 0.4); S.lineWidth = 0.8; S.stroke()
         }
 
         // the value line: sharp + glow; the tail dashed and dim, no glow
         S.beginPath(); G.beginPath()
         trace([S, G], live, 0)
-        S.strokeStyle = rgba(hot, 0.95); S.lineWidth = 1.8; S.stroke()
-        G.strokeStyle = rgba(hot, 0.6); G.lineWidth = 5.5; G.stroke()
+        S.strokeStyle = rgba(line, 0.95); S.lineWidth = 1.8; S.stroke()
+        G.strokeStyle = rgba(line, 0.6); G.lineWidth = 5.5; G.stroke()
         if (tail.length > 1) {
           S.setLineDash([3, 4])
           S.beginPath(); trace([S], tail, 0)
-          S.strokeStyle = rgba(fg, 0.55); S.lineWidth = 1.3; S.stroke()
+          S.strokeStyle = rgba(dim, 0.75); S.lineWidth = 1.3; S.stroke()
           S.setLineDash([])
         }
 
@@ -447,16 +452,16 @@ export function EquityChart(props: EquityChartProps) {
               ctx.fillStyle = rgba(white, a)
               ctx.beginPath(); ctx.arc(headPx[0], headPx[1], 2.6, 0, 6.2832); ctx.fill()
             }
-            G.strokeStyle = rgba(hot, 0.5 + 0.4 * pulse); G.lineWidth = 2
+            G.strokeStyle = rgba(line, 0.5 + 0.4 * pulse); G.lineWidth = 2
             G.beginPath(); G.arc(headPx[0], headPx[1], 6 + pulse * 3.5, 0, 6.2832); G.stroke()
-            S.strokeStyle = rgba(hot, 0.7); S.lineWidth = 1
+            S.strokeStyle = rgba(line, 0.7); S.lineWidth = 1
             S.beginPath(); S.arc(headPx[0], headPx[1], 5.5, 0, 6.2832); S.stroke()
           } else {
-            S.strokeStyle = rgba(fg, 0.65); S.lineWidth = 1.1
+            S.strokeStyle = rgba(dim, 0.85); S.lineWidth = 1.1
             S.beginPath(); S.arc(headPx[0], headPx[1], 4, 0, 6.2832); S.stroke()
             if (liveEndPx) {
               for (const [ctx, a] of [[S, 0.95], [G, 0.7]] as const) {
-                ctx.fillStyle = rgba(hot, a)
+                ctx.fillStyle = rgba(line, a)
                 ctx.beginPath(); ctx.arc(liveEndPx[0], liveEndPx[1], 2.4, 0, 6.2832); ctx.fill()
               }
             }
@@ -486,7 +491,7 @@ export function EquityChart(props: EquityChartProps) {
         let prevY = -Infinity
         for (const l of placed) {
           const y = Math.max(l.y, prevY + fs + 2)
-          label(l.text, Math.max(right, S.measureText(l.text).width + 2), y, rgba(fg, 0.82 * gridA))
+          label(l.text, Math.max(right, S.measureText(l.text).width + 2), y, rgba(dim, 0.95 * gridA))
           prevY = y
         }
         // day labels under the floor's front edge, centered in their slot
@@ -501,7 +506,7 @@ export function EquityChart(props: EquityChartProps) {
           const room = Math.abs(cxp - ax) * 2 - 8
           const text = d.long && S.measureText(d.long).width <= room ? d.long : d.label
           if (S.measureText(text).width > room + 6) continue
-          label(text, cxp, cyp, rgba(fg, 0.66 * gridA))
+          label(text, cxp, cyp, rgba(dim, 0.8 * gridA))
         }
       }
       // the newest value beside its marker
@@ -520,10 +525,10 @@ export function EquityChart(props: EquityChartProps) {
         S.textAlign = 'left'
         S.textBaseline = 'alphabetic'
         S.font = canvasFont(fs + 1, 600)
-        label(p.lastLabel, x, y, hasTail ? rgba(mixRGB(fg, [255, 255, 255], 0.35), 0.95 * labelA) : rgba(hot, labelA))
+        label(p.lastLabel, x, y, hasTail ? rgba(mixRGB(dim, [255, 255, 255], 0.25), 0.95 * labelA) : rgba(line, labelA))
         if (note) {
           S.font = canvasFont(fs - 0.5)
-          label(note, x + vw, y, rgba(mixRGB(fg, [255, 255, 255], 0.2), 0.7 * labelA))
+          label(note, x + vw, y, rgba(dim, 0.85 * labelA))
         }
       }
 

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api, fetchAIUsage, fetchHosts, fetchLights, fetchMediaDownloads, fetchMediaRequests,
   fetchMusicRecent, fetchPlexRecent, fetchServices, fetchSessionList, fetchTradeBotStatus,
@@ -115,9 +115,13 @@ function markDataPainted(live: boolean): void {
 /** Re-renders every `ms` so "ago" labels and clocks stay current. */
 export function useTick(ms = 1000): number {
   const [now, setNow] = useState(() => Date.now())
+  const mounted = useRef(false)
   useEffect(() => {
+    // a new pace (a tab coming into view ticks faster) starts from the real time, not the last slow tick
+    const kick = mounted.current ? setTimeout(() => setNow(Date.now()), 0) : 0
+    mounted.current = true
     const t = setInterval(() => setNow(Date.now()), ms)
-    return () => clearInterval(t)
+    return () => { clearTimeout(kick); clearInterval(t) }
   }, [ms])
   return now
 }
@@ -389,17 +393,59 @@ export type TradeVM = {
   spendTotal: number
   /** the history window the change figures cover, in days */
   windowDays: number | null
+  /**
+   * ms epoch of the newest equity sample (portfolio.live_equity_sampled_at),
+   * null when the backend does not send it yet: equitySampleTime() then falls
+   * back to generatedAt minus equityAgeMin.
+   */
+  equitySampledAt: number | null
+  /** why the market is closed ("weekend"), '' when open or unknown */
+  marketReason: string
+  callsTotal: number
+  callsToday: number
+  /** the bot's own line for its last trade ("sell HPE at the broker on ..."), null when none */
+  lastTrade: string | null
+  lastTradeAt: number | null
 }
 
 const reviveTrade = (d: unknown): TradeVM | undefined => {
   if (!d || typeof d !== 'object') return undefined
   const t = d as Partial<TradeVM>
-  return { equitySource: null, equityAgeMin: null, upDetail: '', liveTrips: null, targetTrips: 0, rulesOk: null, spendTotal: 0, windowDays: null, ...t, generatedAt: t.generatedAt ?? null } as TradeVM
+  return {
+    equitySource: null, equityAgeMin: null, upDetail: '', liveTrips: null, targetTrips: 0, rulesOk: null, spendTotal: 0, windowDays: null,
+    equitySampledAt: null, marketReason: '', callsTotal: 0, callsToday: 0, lastTrade: null, lastTradeAt: null,
+    ...t,
+    generatedAt: t.generatedAt ?? null,
+  } as TradeVM
 }
 
-export function useTrade(): Live<TradeVM> {
-  return useLive('trade', async (): Promise<TradeVM> => {
+const msOf = (iso: unknown): number | null => {
+  if (typeof iso !== 'string' || !iso) return null
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? t : null
+}
+
+/** fields of /api/tradebot/status that src/lib's TradeBotDoc does not type (yet) */
+type TradeExtras = {
+  portfolio: { live_equity_sampled_at?: string | null }
+  productivity?: { last_trade_detail?: string | null; last_trade_at?: string | null }
+}
+
+/** how often the trade status is read while the ticker or Trades is on screen, and otherwise */
+const TRADE_LIVE_MS = 60_000
+const TRADE_IDLE_MS = 5 * 60_000
+
+/**
+ * The trade bot's status. `on` = the Dashboard ticker or System > Trades is
+ * the visible tab: then it is read every 60 s (and at once when it comes into
+ * view with a read older than that); otherwise every 5 minutes. Every caller
+ * shares one query, so the fastest caller sets the pace.
+ */
+export function useTrade(on = false): Live<TradeVM> {
+  const qc = useQueryClient()
+  const live = useLive('trade', async (): Promise<TradeVM> => {
     const t = await fetchTradeBotStatus()
+    const x = t as typeof t & TradeExtras
     return {
       up: t.up,
       marketOpen: t.market.is_open,
@@ -418,8 +464,107 @@ export function useTrade(): Live<TradeVM> {
       rulesOk: t.experiment.rules_ok,
       spendTotal: t.spend.total_usd,
       windowDays: t.history?.window_days ?? null,
+      equitySampledAt: msOf(x.portfolio.live_equity_sampled_at),
+      marketReason: t.market.reason ?? '',
+      callsTotal: t.spend.calls_total,
+      callsToday: t.spend.calls_today,
+      lastTrade: x.productivity?.last_trade_detail || null,
+      lastTradeAt: msOf(x.productivity?.last_trade_at),
     }
-  }, 60_000, { revive: reviveTrade })
+  }, on ? TRADE_LIVE_MS : TRADE_IDLE_MS, { revive: reviveTrade })
+  const { updatedAt } = live
+  useEffect(() => {
+    if (on && Date.now() - updatedAt > TRADE_LIVE_MS) void qc.refetchQueries({ queryKey: ['v2', 'trade'], type: 'active' })
+    // only when it comes into view; the interval keeps it fresh after that
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, qc])
+  return live
+}
+
+// New York calendar day ("2026-10-16"): trading days are New York days, whatever the phone's zone
+const NY_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+export const nyDayKey = (ms: number): string => NY_DAY.format(ms)
+
+/**
+ * ms epoch the equity figure was read at the broker: the backend's sample
+ * time when it sends one, else generatedAt minus equityAgeMin, else null.
+ */
+export function equitySampleTime(t: TradeVM): number | null {
+  if (t.equitySampledAt != null) return t.equitySampledAt
+  if (t.equityAgeMin != null && t.generatedAt != null) return t.generatedAt - t.equityAgeMin * 60_000
+  return null
+}
+
+/** a broker read younger than this is "live" */
+export const EQUITY_LIVE_MS = 10 * 60_000
+
+export type EquityAge = {
+  /** live = a broker read under 10 minutes old; read = an older broker read; day_open = the 09:40 fallback */
+  kind: 'live' | 'read' | 'day_open' | 'unknown'
+  /** ms epoch of the read, null when unknown */
+  at: number | null
+}
+
+/** How old the equity figure really is, by its source and sample time. */
+export function equityAge(t: TradeVM, now: number): EquityAge {
+  if (t.equitySource === 'day_open') return { kind: 'day_open', at: equitySampleTime(t) }
+  const at = equitySampleTime(t)
+  if (t.equitySource !== 'sample') return { kind: 'unknown', at }
+  if (at == null) return { kind: 'read', at: null }
+  return { kind: now - at <= EQUITY_LIVE_MS ? 'live' : 'read', at }
+}
+
+export type TradeSession = {
+  /** New York day key of the session */
+  day: string
+  /** ms epoch of the figure the change runs to */
+  at: number
+  /** equity at the end of the session (or now, while it runs) minus the close before it */
+  change: number
+  /** the session is today and still running: the change runs to a live broker read */
+  running: boolean
+  /**
+   * every reading of the session repeats the close before it while the equity
+   * is the day-open fallback: the bot was repeating one figure, so the change
+   * is not a real measurement
+   */
+  flat: boolean
+}
+
+/**
+ * The newest trading session's change: from the last reading of the trading
+ * day before it to its last reading. While the market is open and the equity
+ * is a live read from today, the session runs to that read. History points are
+ * market-hours samples, so on a weekend or a holiday the newest day in them is
+ * the last session. A window holding one day only measures from that day's
+ * first reading. Raw totals: a deposit on that day would count as a gain.
+ */
+export function tradeSession(t: TradeVM, now: number): TradeSession | null {
+  const pts = t.points
+  const last = pts[pts.length - 1]
+  const today = nyDayKey(now)
+  const age = equityAge(t, now)
+  let close: number, at: number, running = false
+  if (t.marketOpen && t.equity != null && age.kind === 'live' && age.at != null && nyDayKey(age.at) === today && (!last || age.at >= last.t)) {
+    close = t.equity
+    at = age.at
+    running = true
+  } else if (last) {
+    close = last.v
+    at = last.t
+  } else {
+    return null
+  }
+  const day = nyDayKey(at)
+  let base: number | null = null
+  for (let i = pts.length - 1; i >= 0; i--) {
+    if (nyDayKey(pts[i].t) < day) { base = pts[i].v; break }
+  }
+  if (base == null) base = pts.find((p) => nyDayKey(p.t) === day)?.v ?? null
+  if (base == null) return null
+  const b = base
+  const flat = !running && t.equitySource === 'day_open' && pts.every((p) => nyDayKey(p.t) !== day || p.v === b)
+  return { day, at, change: Math.round((close - b) * 100) / 100, running, flat }
 }
 
 // ---------- media ----------

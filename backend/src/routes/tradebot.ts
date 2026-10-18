@@ -5,12 +5,17 @@ import path from 'node:path'
 const router = Router()
 
 // Everything here is FILE-ONLY and read-only. The trade bot's own cron jobs are
-// the writers: status.py every 5 min, equity_sampler.py every 10 min, scan_v2
-// per cycle. This route never touches the broker, holds no credentials, and
-// does no work a request should wait on.
+// the writers: status.py every 5 min, equity_sampler.py every 10 min with the
+// broker snapshot and every other weekday-session minute equity-only
+// (--equity-only), scan_v2 per cycle. This route never touches the broker, holds
+// no credentials, and does no work a request should wait on.
 const BOT_DIR = '/home/brendon/trade-bot'
 const STATUS_FILE = path.join(BOT_DIR, 'logs', 'status.json')
 const SNAPSHOT_FILE = path.join(BOT_DIR, 'logs', 'broker_snapshot.json')
+// One line per equity sample, appended by equity_sampler.py. status.py folds the
+// newest one into status.json, but only every 5 minutes; reading the tail here
+// is what lets the page show a sample that is at most a minute old.
+const HISTORY_FILE = path.join(BOT_DIR, 'logs', 'equity_history.jsonl')
 const SCAN_LOG = path.join(BOT_DIR, 'logs', 'scan_v2.log')
 // The ledger of real judge calls. scan_v2 writes a row here only when it
 // actually paid an API bill, and only into the real logs dir - a --selftest
@@ -39,8 +44,31 @@ const RUN_WINDOW_MS = 120_000
 // replaces the pending one), so reaching this far back cannot pick up a
 // neighbouring run's names.
 const SHORTLIST_REACH_MS = 20 * 60_000
+// A history line is about 120 bytes, so this holds the newest few dozen samples:
+// plenty to find the newest one, and a fixed cost however large the file grows.
+const HISTORY_TAIL_BYTES = 8 * 1024
+// status.py's own rule (SAMPLE_MAX_AGE_S): an older sample is not "current"
+// equity, so it may not stand in for status.json's figure either.
+const SAMPLE_MAX_AGE_MS = 2 * 3600_000
+// The sampler and this server share one clock, so a sample from the future is a
+// bad row, not skew. Allow a little, never enough to pin a bogus row in place.
+const SAMPLE_FUTURE_SKEW_MS = 2 * 60_000
+// status.json reports its sample's age in minutes to 2 decimals (0.6s steps), so
+// the sample time recovered from it is only good to about a second.
+const SAMPLE_MATCH_MS = 1_000
+// The sampler writes zoned ISO times; a zoneless one would be read in whatever
+// zone this process runs in, which is a guess, so it is refused.
+const ZONED_ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/
 
 type StatusDoc = Record<string, unknown>
+
+/** One equity_history.jsonl row, as far as the live figure needs it. */
+type EquitySample = {
+  ms: number
+  ts: string
+  total: number
+  cash: number | null
+}
 
 type Realized = { pnl_usd: number | null; round_trips: number | null }
 type SnapPosition = {
@@ -632,6 +660,119 @@ async function readDecisions(): Promise<{
   }
 }
 
+// ---------- live equity ----------
+
+/**
+ * The newest usable sample in a tail of equity_history.jsonl, or null.
+ *
+ * Only complete lines count: whatever follows the last newline is an append in
+ * flight or a torn write, and either way it is not a sample yet. A row needs a
+ * zoned ts, a finite total and source "live" (a real broker read; v1_log
+ * backfill rows are history, never a live figure). The newest by ts wins rather
+ * than the last line, because --backfill appends older rows after newer ones.
+ * Non-throwing: anything unparseable is skipped.
+ */
+function newestSampleInTail(text: string): EquitySample | null {
+  const end = text.lastIndexOf('\n')
+  if (end === -1) return null
+  let best: EquitySample | null = null
+  for (const line of text.slice(0, end).split('\n')) {
+    const t = line.trim()
+    if (!t.startsWith('{')) continue
+    let row: unknown
+    try {
+      row = JSON.parse(t)
+    } catch {
+      continue
+    }
+    if (!isObj(row) || row.source !== 'live') continue
+    const ts = typeof row.ts === 'string' ? row.ts : ''
+    if (!ZONED_ISO_RE.test(ts)) continue
+    const ms = Date.parse(ts)
+    const total = fnum(row.total)
+    if (!Number.isFinite(ms) || total == null) continue
+    if (best == null || ms > best.ms) best = { ms, ts, total, cash: fnum(row.cash) }
+  }
+  return best
+}
+
+/** Reads only the tail, so the cost stays flat as the 90-day file grows. */
+async function readNewestSample(file: string = HISTORY_FILE): Promise<EquitySample | null> {
+  const text = await readTail(file, HISTORY_TAIL_BYTES)
+  return text ? newestSampleInTail(text) : null
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * status.json with portfolio.live_* taken from `sample` when that sample is
+ * newer than the one status.py used, plus portfolio.live_equity_sampled_at.
+ *
+ * Never fabricates. The sample must be current by status.py's own rule (no
+ * older than 2 h, not from the future), and it must be strictly newer than
+ * status.json's figure: when that figure is itself a sample, its time is
+ * recovered as generated_at minus live_equity_age_min, and when that cannot be
+ * recovered the sample has to postdate generated_at, which no sample status.py
+ * could have used does. A day_open fallback (or no figure) means
+ * status.py had no current sample, so any current one is newer. live_cash moves
+ * with live_equity so the pair always comes from one row.
+ *
+ * live_equity_sampled_at is the exact time of the sample behind live_equity, or
+ * null when that is not known exactly; live_equity_age_min is recomputed
+ * against `nowMs` whenever it is. Without a portfolio block nothing is added.
+ */
+function applyNewestSample(status: StatusDoc, sample: EquitySample | null, nowMs: number): StatusDoc {
+  const portfolio = status.portfolio
+  if (!isObj(portfolio)) return status
+
+  const generatedMs = Date.parse(String(status.generated_at ?? ''))
+  const ageMin = fnum(portfolio.live_equity_age_min)
+  const isSample = portfolio.live_equity_source === 'sample'
+  const statusSampleMs = isSample && Number.isFinite(generatedMs) && ageMin != null
+    ? generatedMs - ageMin * 60_000
+    : null
+
+  const age = sample ? nowMs - sample.ms : NaN
+  const current = sample != null && age >= -SAMPLE_FUTURE_SKEW_MS && age <= SAMPLE_MAX_AGE_MS
+
+  let newer = false
+  if (sample && current) {
+    if (!isSample) newer = true
+    else if (statusSampleMs != null) newer = sample.ms > statusSampleMs + SAMPLE_MATCH_MS
+    else newer = Number.isFinite(generatedMs) && sample.ms > generatedMs
+  }
+
+  if (sample && newer) {
+    return {
+      ...status,
+      portfolio: {
+        ...portfolio,
+        live_equity: sample.total,
+        live_cash: sample.cash,
+        live_equity_source: 'sample',
+        live_equity_age_min: round2(age / 60_000),
+        live_equity_sampled_at: new Date(sample.ms).toISOString(),
+      },
+    }
+  }
+
+  // Not newer, but possibly the very sample status.py used: then its exact time
+  // is known, and its age can be given as of now rather than as of generated_at.
+  const same = sample != null && statusSampleMs != null &&
+    Math.abs(sample.ms - statusSampleMs) <= SAMPLE_MATCH_MS &&
+    fnum(portfolio.live_equity) === sample.total
+  return {
+    ...status,
+    portfolio: same && sample
+      ? {
+          ...portfolio,
+          live_equity_age_min: round2((nowMs - sample.ms) / 60_000),
+          live_equity_sampled_at: new Date(sample.ms).toISOString(),
+        }
+      : { ...portfolio, live_equity_sampled_at: null },
+  }
+}
+
 // ---------- status ----------
 
 type StatusResult =
@@ -661,7 +802,8 @@ async function readStatus(): Promise<StatusResult> {
 router.get('/tradebot/status', async (_req, res) => {
   const result = await readStatus()
   if (!result.ok) return res.status(503).json({ error: 'status unavailable', detail: result.detail })
-  res.json({ ...result.status, stale: result.stale })
+  const status = applyNewestSample(result.status, await readNewestSample(), Date.now())
+  res.json({ ...status, stale: result.stale })
 })
 
 let pageCache: { at: number; data: PagePayload } | null = null
@@ -676,13 +818,13 @@ router.get('/tradebot/page', async (_req, res) => {
   // Same contract as /tradebot/status: without status.json there is no page.
   if (!status.ok) return res.status(503).json({ error: 'status unavailable', detail: status.detail })
 
-  const [[broker, brokerError], decisionResult, config] = await Promise.all([
-    readSnapshot(), readDecisions(), readCaps(),
+  const [[broker, brokerError], decisionResult, config, sample] = await Promise.all([
+    readSnapshot(), readDecisions(), readCaps(), readNewestSample(),
   ])
 
   const data: PagePayload = {
     generated_at: new Date().toISOString(),
-    status: status.status,
+    status: applyNewestSample(status.status, sample, Date.now()),
     stale: status.stale,
     broker,
     broker_error: brokerError,
@@ -701,5 +843,9 @@ router.get('/tradebot/page', async (_req, res) => {
   pageCache = { at: Date.now(), data }
   res.json(data)
 })
+
+// Named exports for the tail-parser tests only; the app mounts the default.
+export { newestSampleInTail, readNewestSample, applyNewestSample }
+export type { EquitySample }
 
 export default router

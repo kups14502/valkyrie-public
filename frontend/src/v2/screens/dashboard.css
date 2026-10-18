@@ -48,7 +48,7 @@
   .hm-col { gap: 9px; }
 }
 
-/* ---------- trade ticker: a slim line, label fixed left, the cells scroll only when they overflow ---------- */
+/* ---------- trade ticker: a slim line, label left, three cells (session, bot, 7 days), never scrolls ---------- */
 
 .hm-tk {
   position: relative;
@@ -66,6 +66,7 @@
   font-variant-numeric: tabular-nums;
   -webkit-touch-callout: none;
   user-select: none;
+  container: hm-tk / inline-size;
 }
 /* a 44 px target around the 34 px line */
 .hm-tk::after { content: ''; position: absolute; inset: -5px 0; }
@@ -83,37 +84,46 @@
   text-transform: uppercase;
   color: var(--fg);
 }
-/* the equity stays put beside the label; only the cells after it scroll */
-.hm-tk-fix { flex: none; display: inline-flex; align-items: baseline; white-space: nowrap; line-height: 16px; }
-.hm-tk-fix .hm-tk-k { letter-spacing: .08em; }
-.hm-tk-vp { position: relative; flex: 1; min-width: 0; overflow: hidden; }
-/* only an overflowing line fades at its ends */
-.hm-tk[data-over] .hm-tk-vp {
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 22px), transparent);
+.hm-tk-cells {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text);
 }
-.hm-tk:not([data-over]) .hm-tk-vp { -webkit-mask-image: none; mask-image: none; }
-.hm-tk-track { display: flex; width: max-content; }
-.hm-tk-track[data-run] { animation: hm-tk var(--tk-dur, 20s) linear infinite; will-change: transform; }
-@keyframes hm-tk { to { transform: translate3d(-50%, 0, 0); } }
-/* a finger on the line (or the mouse over it) holds it still */
-.hm-tk[data-pressed] .hm-tk-track { animation-play-state: paused; }
-@media (hover: hover) { .hm-tk:hover .hm-tk-track { animation-play-state: paused; } }
-html[data-motion='reduced'] .hm-tk-track { animation: none; }
-@media (prefers-reduced-motion: reduce) { .hm-tk-track { animation: none; } }
-.hm-tk-run { flex: none; display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--text); }
-/* the gap between the end of one run and the start of the next */
-.hm-tk-track[data-run] .hm-tk-run { padding-right: 40px; }
-.hm-tk-cell { display: inline-flex; align-items: baseline; gap: 5px; }
+.hm-tk-cell { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
 .hm-tk-cell > .vl-icon { align-self: center; }
-.hm-tk-eq { font-size: 15px; font-weight: 700; color: var(--ink-hi); text-shadow: var(--num-glow); letter-spacing: -.01em; }
-/* the key of a cell: small accent caps, tracked */
+.hm-tk-v { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
+/* up: the accent, lit; down: the alert color; flat or not live: quiet */
+.hm-tk-cell[data-dir='up'] .hm-tk-v { color: var(--fg); text-shadow: var(--text-glow); }
+.hm-tk-cell[data-dir='down'] .hm-tk-v { color: var(--acc2); }
+.hm-tk-cell[data-flat] .hm-tk-v { color: var(--dim); font-weight: 600; }
+/* the key of a cell: small caps, tracked */
 .hm-tk-k { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
-.hm-tk-v { color: var(--text); }
+.hm-tk-pct { display: none; color: var(--dim); }
 .hm-tk-d { color: var(--dim); }
-.hm-tk-cell[data-lit] .hm-tk-v { color: var(--fg); text-shadow: var(--text-glow); }
-.hm-tk-sep { flex: none; width: 3px; height: 3px; background: var(--faint); transform: rotate(45deg); }
-.hm-tk.hm-old .hm-tk-eq, .hm-tk.hm-old .hm-tk-v { color: var(--dim); text-shadow: none; }
+/* the bot: a dot that glows while it is online, the word in small caps */
+.hm-tk-bot { align-items: center; }
+.hm-tk-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.hm-tk-word { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+.hm-tk-bot[data-on] .hm-tk-dot { background: var(--fg); box-shadow: 0 0 4px var(--fg), 0 0 9px color-mix(in srgb, var(--fg) 55%, transparent); }
+.hm-tk-bot[data-on] .hm-tk-word { color: var(--fg); }
+.hm-tk-bot[data-off] .hm-tk-dot { background: var(--acc2); }
+.hm-tk-bot[data-off] .hm-tk-word { color: var(--acc2); }
+.hm-tk.hm-old .hm-tk-v { color: var(--dim); text-shadow: none; }
+/* narrow phones (under ~375 px): the label keeps its icon, the word goes */
+@container hm-tk (max-width: 349px) { .hm-tk-name { display: none; } }
+/* room to spare (landscape, tablets, desktop): the 7-day percent too */
+@container hm-tk (min-width: 520px) {
+  .hm-tk-pct { display: inline; }
+  .hm-tk-cells { justify-content: flex-start; gap: 28px; }
+}
 
 /* ---------- section head on the floor: icon + label .... value ---------- */
 

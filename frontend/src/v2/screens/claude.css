@@ -1,4 +1,4 @@
-/* AI screen (Claude.tsx: Sessions, Projects) in the red HUD language: outlined panels
+/* AI screen (Claude.tsx: Sessions, Projects, Usage) in the red HUD language: outlined panels
    with a dark fill, line icons leading headers, rows and actions, lit plates for
    the selected and primary things. Colors come from the kit's CSS variables, so
    the mode morph reaches everything here. Only transform and opacity animate. */
@@ -116,9 +116,17 @@
 }
 .vc-glass[data-pressed] .vl-icon { color: var(--plate-ink); }
 
-/* the week window (the strip already carries 5h) as a gauge panel */
-.vc-week.vl-panel { padding: 7px 10px 8px; }
+/* usage on Sessions: the account being burned, 5h and week as two small meters; a press opens AI > Usage */
+.vc-week.vl-panel { display: flex; flex-direction: column; width: 100%; padding: 7px 10px 8px; text-align: left; }
+.vc-week[data-pressed] { --panel-line: color-mix(in srgb, var(--fg) 92%, transparent); }
 .vc-week-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.vc-week-go { flex: none; margin-left: auto; }
+.vc-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+.vc-mini-m { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vc-mini-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; font-size: 11px; line-height: 16px; color: var(--dim); }
+.vc-mini-head b { font-size: 15px; line-height: 18px; font-weight: 600; color: var(--ink-hi); text-shadow: var(--num-glow); }
+.vc-mini-head b small { font-size: 10px; font-weight: 500; color: var(--dim); margin-left: 1px; }
+.vc-mini-head b[data-high] { color: var(--acc2); text-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 55%, transparent); }
 /* Valkyrie's section label: accent caps, tracked (matches .vl-panel-label) */
 .vc-week-label { flex: none; font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); }
 .vc-acct {
@@ -816,6 +824,49 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
   .vc-sicon::before { animation: none; opacity: .7; }
 }
 
+/* ---------- AI > Usage: the hottest account's windows, then every account ---------- */
+
+.vc-usage { display: flex; flex-direction: column; gap: 10px; padding: 8px 12px 14px 10px; }
+.vc-u-head { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 22px; }
+.vc-u-head > .vl-icon { flex: none; }
+.vc-u-label { flex: none; font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); }
+.vc-u-head .vc-fresh { flex: none; }
+.vc-u-count { margin-left: auto; font-size: 11px; color: var(--text); white-space: nowrap; }
+.vc-u-count em { font-style: normal; color: var(--acc2); }
+.vc-u-big { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+.vc-u-meter { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vc-u-mlabel { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 15px; color: var(--dim); }
+.vc-u-meter > b { font-size: 34px; line-height: 38px; font-weight: 600; letter-spacing: -.02em; color: var(--ink-hi); text-shadow: var(--num-glow); }
+.vc-u-meter > b small { font-size: 14px; font-weight: 500; color: var(--dim); margin-left: 2px; letter-spacing: 0; text-shadow: none; }
+.vc-u-meter > b[data-high] { color: var(--acc2); text-shadow: 0 0 12px color-mix(in srgb, var(--acc2) 55%, transparent); }
+.vc-u-meter .vl-bar { margin-top: 3px; }
+.vc-u-meter > em { margin-top: 3px; font-style: normal; font-size: 11px; line-height: 14px; color: var(--dim); white-space: nowrap; }
+.vc-u-empty { display: flex; align-items: center; gap: 7px; padding: 10px 0 4px; font-size: 12px; line-height: 16px; color: var(--dim); }
+.vc-u-empty[data-failed] { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+
+.vc-u-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px 76px;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  border-top: 1px solid var(--line);
+}
+.vc-u-cols { min-height: 20px; padding: 2px 0 0; margin-top: 4px; border-top: 0; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.vc-u-cols > span + span { text-align: right; }
+.vc-u-name { display: flex; flex-direction: column; min-width: 0; line-height: 16px; color: var(--text); }
+.vc-u-name em { font-style: normal; font-size: 10.5px; line-height: 13px; color: var(--dim); }
+/* the account the big meters show: its name in the accent */
+.vc-u-row[data-top] .vc-u-name > span { color: var(--fg); text-shadow: var(--text-glow); }
+.vc-u-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vc-u-cell b { font-size: 13px; line-height: 15px; font-weight: 600; text-align: right; color: var(--ink-hi); }
+.vc-u-cell b[data-high] { color: var(--acc2); }
+.vc-u-cell .vl-bar { min-width: 0; height: 9px; }
+.vc-u-dead { grid-column: span 2; display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-weight: 600; color: var(--acc2); }
+.vc-u-row[data-dead] .vc-u-name > span { color: var(--acc2); }
+
 /* ---------- wide layouts ---------- */
 
 @media (min-width: 640px) {
@@ -830,6 +881,14 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
   .vc-counts { flex-wrap: wrap; row-gap: 6px; }
   .vc-stat.vl-panel { flex: 1; min-width: 0; }
   .vc-fresh { order: 2; flex-basis: 100%; margin-left: 0; }
+  .vc-u-head .vc-fresh { order: 0; flex-basis: auto; margin-left: auto; }
+  .vc-usage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 12px 18px;
+    align-items: start;
+    padding: 12px 20px 18px 12px;
+  }
 }
 /* landscape phone: short, keep the side column inside the visible height */
 @media (min-width: 640px) and (max-height: 480px) {
@@ -843,6 +902,9 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
   .vc-front, .vc-prow { min-height: 46px; padding-top: 5px; padding-bottom: 5px; }
   .vc-ghead { min-height: 30px; }
   .vc-main { gap: 8px; }
+  .vc-usage { padding-top: 6px; }
+  .vc-u-meter > b { font-size: 28px; line-height: 32px; }
+  .vc-u-row { min-height: 36px; padding: 2px 0; }
 }
 @media (min-width: 1200px) {
   .vc {
@@ -854,6 +916,9 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
   .vc[data-detail] { grid-template-columns: 260px minmax(0, 600px) minmax(0, 460px); column-gap: 28px; }
   .vc-side { top: 26px; }
   .vc-stat b { font-size: 28px; line-height: 32px; }
+  .vc-usage { grid-template-columns: minmax(0, 460px) minmax(0, 640px); justify-content: center; gap: 14px 28px; padding-top: 26px; }
+  .vc-u-meter > b { font-size: 42px; line-height: 46px; }
+  .vc-u-row { grid-template-columns: minmax(0, 1fr) 96px 96px; }
 }
 
 /* a refused write, inline where a sheet's backdrop covers the toasts */

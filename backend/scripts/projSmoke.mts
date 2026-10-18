@@ -32,9 +32,12 @@ if (!dataDir || real(dataDir) === real(LIVE_DIR) || !process.env.LILKUPS_BIN) {
 // Reminder states are read from here. Kept inside the scratch dir unless the
 // operator says otherwise, so the run never even reads the real list.
 process.env.LILKUPS_STORE ||= path.join(dataDir, 'reminders.json')
+// odin's private area table names businesses and may not hold 'work'; a
+// missing file means the one client area 'work' (lib/projectAreas.ts).
+process.env.PROJECT_AREAS_FILE = path.join(dataDir, 'no-areas.json')
 
-// Imported only now: the store opens its database, and lilkups.ts reads its
-// paths, at import time.
+// Imported only now: the store opens its database, and lilkups.ts and
+// projectAreas.ts read their paths, at import time.
 const S = await import('../src/lib/projectsStore.js')
 const { addLilkupsReminder } = await import('../src/lib/lilkups.js')
 

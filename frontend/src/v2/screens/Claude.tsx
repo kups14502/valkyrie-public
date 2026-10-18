@@ -23,7 +23,8 @@ import { shortName } from '../../lib/quickSessions'
 import { readOpenMode, seedTerminal } from '../../lib/sessionLaunch'
 import './claude.css'
 
-// AI (Claude.tsx, the /m/ai tab): the session board and Valkyrie Projects in the red HUD language:
+// AI (Claude.tsx, the /m/ai tab): the session board, Valkyrie Projects and Usage
+// (every account's 5h and week windows, /m/ai/usage) in the red HUD language:
 // thin outlined panels with a dark fill, line icons leading every header, row
 // and action, lit plates for the selected and primary things, and glow only on
 // what is lit (working, asking, selected). Every write is the session board's
@@ -279,6 +280,7 @@ const byUrgency = (a: Counted, b: Counted) => urgency(b) - urgency(a) || b.updat
 // ---------- the screen ----------
 
 type UndoItem = { key: number; rows: SessionVM[]; title: string; pending: boolean }
+type Tab = 'sessions' | 'projects' | 'usage'
 type Recover = { done: number; total: number }
 const RECENT_SHOWN = 8
 
@@ -291,7 +293,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const wide = useMedia('(min-width: 640px)')
   const short = useMedia('(min-width: 640px) and (max-height: 480px)')
   const desk = useMedia('(min-width: 1200px)')
-  const tab = sub === 'projects' ? 'projects' : 'sessions'
+  const tab: Tab = sub === 'projects' || sub === 'usage' ? sub : 'sessions'
 
   const [area, setArea] = useState('all')
   const [picker, setPicker] = useState(false)
@@ -738,94 +740,97 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
 
   return (
     <div className="vc-root">
-      <div className="vc" data-detail={desk || undefined} data-fab={!wide || undefined}>
-        <aside className="vc-side">
-          <Summary
-            tab={tab}
-            hasBoard={hasBoard}
-            live={live}
-            asking={asking}
-            board={sessions}
-            projects={projects}
-            projCount={projList.length}
-            projAsking={projAsking}
-            nextReminder={nextReminder}
-            now={now}
-            onNew={wide ? () => setPicker(true) : undefined}
-          />
-          {!short && filter}
-        </aside>
-
-        <main className="vc-main">
-          {short && filter && <div className="vc-filter-top">{filter}</div>}
-          {tab === 'sessions' ? (
-            hasBoard ? (
-              <SessionBoard
-                board={board}
-                area={shownArea}
-                now={now}
-                hostLabel={hostLabel}
-                openRow={openRow}
-                setOpenRow={setOpenRow}
-                expRow={expRow}
-                onToggle={toggleRow}
-                recentAll={recentAll}
-                onToggleRecent={toggleRecent}
-                rowEls={rowEls.current}
-                busy={busy}
-                paneOf={paneOf}
-                where={where}
-                recover={recover}
-                onRecover={(rows) => void recoverDesk(rows)}
-                onOpen={(s) => void openSession(s)}
-                onDone={(s) => markDone([s])}
-                onStop={stop}
-              />
-            ) : (
-              <>
-                <div className="vc-empty vl-build" style={iv(4)} data-failed={sessions.failed || undefined}>
-                  {sessions.failed ? (
-                    <>
-                      <b><Icon name="alert" size={15} tone="acc2" glow />Session board did not answer</b>
-                      <span>{sessions.error?.message ?? 'no reply'}. Trying again every 15 s.</span>
-                    </>
-                  ) : (
-                    <span><Icon name="thor" size={15} tone="dim" className="vl-pulse" />Reading the board from {hostLabel(HOME_HOST)}</span>
-                  )}
-                </div>
-                {!desk && <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />}
-              </>
-            )
-          ) : (
-            <ProjectBoard
-              list={projList}
-              area={shownArea}
-              loading={!projects.data}
-              failed={projects.failed}
-              error={projects.error}
+      {tab === 'usage' ? <UsageView now={now} /> : (
+        <div className="vc" data-detail={desk || undefined} data-fab={!wide || undefined}>
+          <aside className="vc-side">
+            <Summary
+              tab={tab}
+              hasBoard={hasBoard}
+              live={live}
+              asking={asking}
+              board={sessions}
+              projects={projects}
+              projCount={projList.length}
+              projAsking={projAsking}
+              nextReminder={nextReminder}
               now={now}
-              selected={detail?.id ?? null}
-              onOpen={(p) => setProjId(p.id)}
+              onNew={wide ? () => setPicker(true) : undefined}
+              onUsage={() => setSub('usage')}
             />
-          )}
-        </main>
-
-        {desk && (
-          <aside className="vc-detail">
-            {tab === 'sessions' ? (
-              <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />
-            ) : detail ? (
-              <div className="vc-detail-card vl-panel vl-build-on" key={detail.id}>
-                <div className="vc-detail-head vl-build" style={iv(0)}>
-                  <Icon name="projects" size={18} tone="fg" glow />
-                  <span className="vc-detail-name">{detail.name}</span>
-                </div>
-                <ProjectDetail p={detail} index={index} lookup={lookup} now={now} hostLabel={hostLabel} showArea />
-              </div>
-            ) : null}
+            {!short && filter}
           </aside>
-        )}
-      </div>
+
+          <main className="vc-main">
+            {short && filter && <div className="vc-filter-top">{filter}</div>}
+            {tab === 'sessions' ? (
+              hasBoard ? (
+                <SessionBoard
+                  board={board}
+                  area={shownArea}
+                  now={now}
+                  hostLabel={hostLabel}
+                  openRow={openRow}
+                  setOpenRow={setOpenRow}
+                  expRow={expRow}
+                  onToggle={toggleRow}
+                  recentAll={recentAll}
+                  onToggleRecent={toggleRecent}
+                  rowEls={rowEls.current}
+                  busy={busy}
+                  paneOf={paneOf}
+                  where={where}
+                  recover={recover}
+                  onRecover={(rows) => void recoverDesk(rows)}
+                  onOpen={(s) => void openSession(s)}
+                  onDone={(s) => markDone([s])}
+                  onStop={stop}
+                />
+              ) : (
+                <>
+                  <div className="vc-empty vl-build" style={iv(4)} data-failed={sessions.failed || undefined}>
+                    {sessions.failed ? (
+                      <>
+                        <b><Icon name="alert" size={15} tone="acc2" glow />Session board did not answer</b>
+                        <span>{sessions.error?.message ?? 'no reply'}. Trying again every 15 s.</span>
+                      </>
+                    ) : (
+                      <span><Icon name="thor" size={15} tone="dim" className="vl-pulse" />Reading the board from {hostLabel(HOME_HOST)}</span>
+                    )}
+                  </div>
+                  {!desk && <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />}
+                </>
+              )
+            ) : (
+              <ProjectBoard
+                list={projList}
+                area={shownArea}
+                loading={!projects.data}
+                failed={projects.failed}
+                error={projects.error}
+                now={now}
+                selected={detail?.id ?? null}
+                onOpen={(p) => setProjId(p.id)}
+              />
+            )}
+          </main>
+
+          {desk && (
+            <aside className="vc-detail">
+              {tab === 'sessions' ? (
+                <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />
+              ) : detail ? (
+                <div className="vc-detail-card vl-panel vl-build-on" key={detail.id}>
+                  <div className="vc-detail-head vl-build" style={iv(0)}>
+                    <Icon name="projects" size={18} tone="fg" glow />
+                    <span className="vc-detail-name">{detail.name}</span>
+                  </div>
+                  <ProjectDetail p={detail} index={index} lookup={lookup} now={now} hostLabel={hostLabel} showArea />
+                </div>
+              ) : null}
+            </aside>
+          )}
+        </div>
+      )}
 
       {/* bottom of the page: the undo bar, or (phone) New session in thumb reach */}
       <div className="vc-undo-anchor" aria-live="polite">
@@ -835,7 +840,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
             <span className="vc-undo-text">Done: <b>{undo.title}</b></span>
             <Press className="vc-undo-btn" disabled={undo.pending} onPress={undoDone}><Icon name="undo" size={15} tone="hot" />Undo</Press>
           </div>
-        ) : !wide ? (
+        ) : !wide && tab !== 'usage' ? (
           <NewButton className="vc-fab" onPress={() => setPicker(true)} />
         ) : null}
       </div>
@@ -923,7 +928,7 @@ function StatPlate({ icon, value, label, state, tone = 'fg' }: {
   )
 }
 
-function Summary({ tab, hasBoard, live, asking, board, projects, projCount, projAsking, nextReminder, now, onNew }: {
+function Summary({ tab, hasBoard, live, asking, board, projects, projCount, projAsking, nextReminder, now, onNew, onUsage }: {
   tab: 'sessions' | 'projects'
   hasBoard: boolean
   live: number
@@ -936,6 +941,8 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
   now: number
   /** wide layouts: New session sits in the header; the phone pins it at the bottom right */
   onNew?: () => void
+  /** opens AI > Usage */
+  onUsage: () => void
 }) {
   const sess = tab === 'sessions'
   const hasProj = projects.data !== undefined
@@ -964,7 +971,7 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
         )}
       </div>
       {onNew && <div className="vc-new-row vl-build" style={iv(1)}><NewButton onPress={onNew} /></div>}
-      {sess && <UsageLine now={now} />}
+      {sess && <UsageLine now={now} onOpen={onUsage} />}
       {/* the terminal skin preview (Skin.tsx, /m/ai/skin): a recorded sample, nothing is sent */}
       {sess && (
         <Press className="vl-link" style={{ alignSelf: 'flex-start' }} onPress={() => navigate('/m/ai/skin')}>
@@ -975,41 +982,164 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
   )
 }
 
+/** "6:10 AM" today, "Mon 8:00 PM" this week; null when unknown or past */
+const resetAt = (iso: string | null, now: number): string | null => {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  return Number.isFinite(t) && t > now ? dayClock(t, now) : null
+}
+/** at 85% a window is close to its limit: the alert color */
+const usageHigh = (v: number | null | undefined) => v != null && v >= 85
+
 /**
- * What the strip lacks: the strip already shows 5h %, so this shows the week
- * window as the bar, which account the numbers follow, both resets, and any
- * account that is signed out.
+ * The account being burned: both windows as two small meters, their resets,
+ * and any account that is signed out. A press opens AI > Usage.
  */
-function UsageLine({ now }: { now: number }) {
+function UsageLine({ now, onOpen }: { now: number; onOpen: () => void }) {
   const usage = useUsage()
   const u = usage.data
-  const week = u?.week ?? null
-  const weekAt = u?.weekResetsAt ? Date.parse(u.weekResetsAt) : NaN
-  const fiveAt = u?.fiveResetsAt ? Date.parse(u.fiveResetsAt) : NaN
   const dead = (u?.accounts ?? []).filter((a) => a.dead)
-  const high = week !== null && week >= 85
+  const high = usageHigh(u?.five) || usageHigh(u?.week)
+  const fiveAt = resetAt(u?.fiveResetsAt ?? null, now)
+  const weekAt = resetAt(u?.weekResetsAt ?? null, now)
   return (
-    <section className="vc-week vl-panel vl-build" style={iv(2)} title={u?.label ? `AI weekly window, ${u.label}` : 'AI weekly window'}>
-      <header className="vc-week-head">
+    <Press
+      className="vc-week vl-panel vl-build"
+      style={iv(2)}
+      onPress={onOpen}
+      aria-label={`AI usage${u ? `, ${u.label ?? 'no account'}: 5 hours ${u.five ?? 'unknown'}%, week ${u.week ?? 'unknown'}%` : ''}. Open Usage`}
+    >
+      <span className="vc-week-head">
         <Icon name="gauge" size={14} tone={high ? 'acc2' : 'dim'} glow={high} />
-        <span className="vc-week-label">Week</span>
+        <span className="vc-week-label">Usage</span>
         <span className="vc-acct">{u?.label ?? '--'}</span>
-        <span className="vc-week-val" data-high={high || undefined}>{week ?? '--'}<small>%</small></span>
-      </header>
-      <Bar value={week} ticks={7} tone={high ? 'acc2' : 'fg'} className="vc-meter-bar" />
-      <div className="vc-meter-sub">
-        {Number.isFinite(weekAt) && weekAt > now && <span>resets {dayClock(weekAt, now)}</span>}
-        {Number.isFinite(fiveAt) && fiveAt > now && <span>5h resets {clock(fiveAt)}</span>}
+        <Icon name="go" size={12} tone="dim" className="vc-week-go" />
+      </span>
+      <span className="vc-mini">
+        <MiniMeter label="5h" value={u?.five ?? null} ticks={5} />
+        <MiniMeter label="Week" value={u?.week ?? null} ticks={7} />
+      </span>
+      <span className="vc-meter-sub">
+        {fiveAt && <span>5h resets {fiveAt}</span>}
+        {weekAt && <span>week resets {weekAt}</span>}
         {usage.failed && <span data-warn><Icon name="offline" size={11} tone="acc2" />usage unreachable</span>}
-      </div>
+      </span>
       {dead.length > 0 && (
-        <div className="vc-meter-sub vc-dead" title={dead.map((a) => a.label).join(', ')}>
+        <span className="vc-meter-sub vc-dead" title={dead.map((a) => a.label).join(', ')}>
           <span><Icon name="alert" size={11} tone="faint" />{dead.length === 1 ? `${dead[0].label} signed out` : `${dead.length} accounts signed out`}</span>
-        </div>
+        </span>
       )}
-    </section>
+    </Press>
   )
 }
+
+function MiniMeter({ label, value, ticks }: { label: string; value: number | null; ticks: number }) {
+  const high = usageHigh(value)
+  return (
+    <span className="vc-mini-m">
+      <span className="vc-mini-head">
+        <span>{label}</span>
+        <b data-high={high || undefined}>{value ?? '--'}<small>%</small></b>
+      </span>
+      <Bar value={value} ticks={ticks} tone={high ? 'acc2' : 'fg'} />
+    </span>
+  )
+}
+
+// ---------- usage: every account's 5h and week windows ----------
+
+/**
+ * AI > Usage: the hottest account's 5-hour and week windows as two big
+ * meters with their resets, then every account, hottest first, signed-out
+ * ones flagged, each with its own windows and resets. Reads only.
+ */
+function UsageView({ now }: { now: number }) {
+  const usage = useUsage()
+  const u = usage.data
+  const live = u?.accounts.filter((a) => !a.dead).length ?? 0
+  const dead = (u?.accounts.length ?? 0) - live
+  return (
+    <div className="vc-usage">
+      <section className="vc-u-top vl-panel vl-build" style={iv(0)} aria-label="Hottest account">
+        <header className="vc-u-head">
+          <Icon name="gauge" size={15} tone={usageHigh(u?.five) || usageHigh(u?.week) ? 'acc2' : 'fg'} glow={!!u} />
+          <span className="vc-u-label">Usage</span>
+          <span className="vc-acct">{u ? u.label ?? 'no live account' : ''}</span>
+          <Fresh q={usage} label="usage" now={now} />
+        </header>
+        {u ? (
+          <div className="vc-u-big">
+            <BigMeter label="5 hours" value={u.five} ticks={5} reset={resetAt(u.fiveResetsAt, now)} />
+            <BigMeter label="Week" value={u.week} ticks={7} reset={resetAt(u.weekResetsAt, now)} />
+          </div>
+        ) : (
+          <div className="vc-u-empty" data-failed={usage.failed || undefined}>
+            {usage.failed ? (
+              <><Icon name="alert" size={14} tone="acc2" glow />Usage did not answer: {usage.error?.message ?? 'no reply'}. Trying again every 30 s.</>
+            ) : (
+              <><Icon name="refresh" size={14} tone="dim" className="vl-pulse" />Reading usage</>
+            )}
+          </div>
+        )}
+      </section>
+
+      {u && u.accounts.length > 0 && (
+        <section className="vc-u-accts vl-panel vl-build" style={iv(1)} aria-label="Accounts">
+          <header className="vc-u-head">
+            <Icon name="claude" size={14} tone="dim" />
+            <span className="vc-u-label">Accounts</span>
+            <span className="vc-u-count">{live} live{dead ? <em> · {dead} signed out</em> : null}</span>
+          </header>
+          <div className="vc-u-row vc-u-cols" aria-hidden><span /><span>5h</span><span>Week</span></div>
+          {u.accounts.map((a, k) => {
+            const f = resetAt(a.fiveResetsAt, now)
+            const w = resetAt(a.weekResetsAt, now)
+            return (
+              <div key={a.id} className="vc-u-row vl-build" style={iv(2 + k)} data-dead={a.dead || undefined} data-top={(!a.dead && k === 0) || undefined}>
+                <span className="vc-u-name">
+                  <span className="vl-ellipsis">{a.label}</span>
+                  {a.dead ? <em>Sign-in expired</em> : (f || w) ? <em className="vl-ellipsis">{[f && `5h ${f}`, w && `week ${w}`].filter(Boolean).join(' · ')}</em> : null}
+                </span>
+                {a.dead ? (
+                  <span className="vc-u-dead"><Icon name="alert" size={14} tone="acc2" glow />Signed out</span>
+                ) : (
+                  <>
+                    <UsageCell value={a.five} ticks={5} />
+                    <UsageCell value={a.week} ticks={7} />
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </section>
+      )}
+    </div>
+  )
+}
+
+function BigMeter({ label, value, ticks, reset }: { label: string; value: number | null; ticks: number; reset: string | null }) {
+  const high = usageHigh(value)
+  return (
+    <div className="vc-u-meter">
+      <span className="vc-u-mlabel"><Icon name="gauge" size={13} tone={high ? 'acc2' : 'dim'} glow={high} />{label}</span>
+      <b data-high={high || undefined}>{value ?? '--'}<small>%</small></b>
+      <Bar value={value} ticks={ticks} tone={high ? 'acc2' : 'fg'} />
+      <em>{reset ? `resets ${reset}` : NBSP}</em>
+    </div>
+  )
+}
+
+function UsageCell({ value, ticks }: { value: number | null; ticks: number }) {
+  const high = usageHigh(value)
+  return (
+    <span className="vc-u-cell">
+      <b data-high={high || undefined}>{value ?? '--'}%</b>
+      <Bar value={value} ticks={ticks} tone={high ? 'acc2' : 'fg'} />
+    </span>
+  )
+}
+
+const NBSP = String.fromCharCode(160)
 
 // ---------- area filter: a row of plates, the picked one lit ----------
 

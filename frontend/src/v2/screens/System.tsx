@@ -3,9 +3,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Press, cx, toast } from '../kit/ui'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
-import { ago, useHosts, useLive, useTick, useTrade, useUsage, type HostVM, type Live } from '../kit/data'
+import { ago, equityAge, useHosts, useLive, useTick, useTrade, type HostVM, type Live, type TradeVM } from '../kit/data'
 import {
-  fetchLauncher, fetchServices, fetchTradeBotStatus, restartService,
+  fetchLauncher, fetchServices, restartService,
   type LauncherEntry, type ServiceContainer, type ServicesStatus, type ServiceTimer, type ServiceUnit,
 } from '../../lib/api'
 import { HOST_POSE, Hero, heroModel, hostModel, type HostModelId } from '../kit/hero'
@@ -18,7 +18,8 @@ import './system.css'
 // System: Hosts (one icon-led row per host; the selected one as gauge plates
 // with its x-ray model as a small accent and its last hour as an honest
 // chart), Services (odin's containers and units that matter, timers, web
-// apps) and Trades (the trade bot's equity, experiment and health).
+// apps) and Trades (the trade bot's equity, experiment and health, read every
+// 60 s while it is on screen). AI usage lives on AI > Usage.
 // Reads only, except Restart on a down service (two taps: it restarts the real
 // container or unit on odin). Icons glow only when lit (online, selected, live,
 // down); everything else is dim.
@@ -73,11 +74,6 @@ const nyMinutes = (ms: number) => {
 }
 /** "2:00 AM" on the same day, "Sun 9:00 AM" on another */
 const when = (ms: number, now: number) => (fmtDayKey.format(ms) === fmtDayKey.format(now) ? fmtTime.format(ms) : `${fmtWeekday.format(ms)} ${fmtTime.format(ms)}`)
-const futureAt = (iso: string | null, now: number): string | null => {
-  if (!iso) return null
-  const t = Date.parse(iso)
-  return Number.isFinite(t) && t > now ? when(t, now) : null
-}
 
 /** amber from 80%, red from 90% (the dashboard's usageColor) */
 const loadTone = (v: number | null): Tone => (v == null ? 'fg' : v >= 90 ? 'acc2' : v >= 80 ? 'hot' : 'fg')
@@ -276,22 +272,6 @@ function toSvcVM(s: ServicesStatus): SvcSysVM {
 /** odin's services with the dashboard's rules (scope, health, plumbing folded) plus timers. */
 const useServicesSys = () => useLive('servicesSys', async () => toSvcVM(await fetchServices()), 30_000)
 
-type TradeExtraVM = { marketReason: string; callsTotal: number; callsToday: number; lastTrade: string | null; lastTradeAt: number | null }
-
-/** The trade bot fields the kit's TradeVM does not carry (market reason, judge calls, last trade). */
-const useTradeExtra = () => useLive('tradeSys', async (): Promise<TradeExtraVM> => {
-  const t = await fetchTradeBotStatus()
-  const prod = (t as unknown as { productivity?: { last_trade_detail?: string | null; last_trade_at?: string | null } }).productivity
-  const at = prod?.last_trade_at ? Date.parse(prod.last_trade_at) : NaN
-  return {
-    marketReason: t.market.reason ?? '',
-    callsTotal: t.spend.calls_total,
-    callsToday: t.spend.calls_today,
-    lastTrade: prod?.last_trade_detail ?? null,
-    lastTradeAt: Number.isFinite(at) ? at : null,
-  }
-}, 60_000)
-
 // ---------- screen ----------
 
 export default function System({ active, sub }: ScreenProps) {
@@ -300,7 +280,7 @@ export default function System({ active, sub }: ScreenProps) {
   const [picked, setPicked] = useSetting<string>('sysHost', 'thor')
   const hosts = useHosts()
   const svc = useServicesSys()
-  const trade = useTrade()
+  const trade = useTrade(active && view === 'trades')
   const list = hosts.data ?? []
   const selected = list.find((h) => h.id === picked) ?? list.find((h) => h.id === 'thor') ?? list[0] ?? null
   const pose = poseFor(selected ? hostModel(selected.id) : null)
@@ -397,7 +377,6 @@ function HostsView({ on, selected, onPick }: { on: boolean; selected: HostVM | n
           <div className="sys-empty">{hosts.failed ? 'Hosts unreachable' : 'Loading hosts'}</div>
         )}
       </Block>
-      <UsagePanel i={4 + list.length} on={on} />
       {selected && <HostDetail ref={detailRef} host={selected} on={on} epoch={epoch} t1={t1} i={2 + list.length} />}
     </div>
   )
@@ -625,67 +604,6 @@ function HostRow({ h, k, t1, selected, onPick }: { h: HostVM; k: number; t1: num
         <span className="sys-host-offline">No stats published</span>
       )}
     </Press>
-  )
-}
-
-function UsagePanel({ i, on }: { i: number; on: boolean }) {
-  const usage = useUsage()
-  const now = useTick(on ? 30_000 : 120_000)
-  const u = usage.data
-  // nothing to show yet: no empty frame
-  if (!u) return null
-  const tone = (v: number | null): Tone => (v != null && v >= 85 ? 'acc2' : 'fg')
-  const fiveAt = futureAt(u.fiveResetsAt, now)
-  const weekAt = futureAt(u.weekResetsAt, now)
-  const gauge = (v: number | null) => <Ico name="gauge" size={13} lit={tone(v) === 'acc2'} tone={tone(v) === 'acc2' ? 'acc2' : 'dim'} />
-  return (
-    <Block
-      className="sys-usage"
-      label="AI usage"
-      icon={<Ico name="ai" />}
-      value={<span className="sys-dimval">{u.label ?? ''}{usage.failed && <Fresh live={usage} now={now} />}</span>}
-      i={i}
-    >
-      <div className="sys-usage-top vl-build" style={iv(i + 1)}>
-        <div className="sys-usage-big">
-          <span>{gauge(u.five)}5 hours</span>
-          <b data-tone={tone(u.five)}>{u.five ?? '--'}<small>%</small></b>
-          <Bar value={u.five} tone={tone(u.five)} ticks={5} />
-          {fiveAt && <em>resets {fiveAt}</em>}
-        </div>
-        <div className="sys-usage-big">
-          <span>{gauge(u.week)}Week</span>
-          <b data-tone={tone(u.week)}>{u.week ?? '--'}<small>%</small></b>
-          <Bar value={u.week} tone={tone(u.week)} ticks={7} />
-          {weekAt && <em>resets {weekAt}</em>}
-        </div>
-      </div>
-      {u.accounts.length > 0 && (
-        <div className="sys-accts">
-          <div className="sys-acct sys-acct-head vl-build" style={iv(i + 2)}><span>Account</span><span>5h</span><span>Week</span></div>
-          {u.accounts.map((a, k) => {
-            const f = futureAt(a.fiveResetsAt, now)
-            const w = futureAt(a.weekResetsAt, now)
-            return (
-              <div key={a.id} className="sys-acct vl-build" style={iv(i + 3 + k)} data-dead={a.dead || undefined}>
-                <span className="sys-acct-name">
-                  <span className="vl-ellipsis">{a.label}</span>
-                  {!a.dead && (f || w) && <em className="vl-ellipsis">{[f && `5h ${f}`, w && `week ${w}`].filter(Boolean).join(' · ')}</em>}
-                </span>
-                {a.dead ? (
-                  <span className="sys-acct-dead"><Ico name="alert" size={13} lit tone="acc2" />Sign-in expired</span>
-                ) : (
-                  <>
-                    <span className="sys-acct-cell"><b data-tone={tone(a.five)}>{a.five ?? '--'}%</b><Bar value={a.five} tone={tone(a.five)} ticks={5} /></span>
-                    <span className="sys-acct-cell"><b data-tone={tone(a.week)}>{a.week ?? '--'}%</b><Bar value={a.week} tone={tone(a.week)} ticks={7} /></span>
-                  </>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </Block>
   )
 }
 
@@ -953,18 +871,39 @@ function AppsList({ on }: { on: boolean }) {
 
 // ---------- Trades ----------
 
+/** what the equity figure is, by its real age: "Live, 40s ago", "Last read 2h ago", "Day-open equity" */
+function EquityWhat({ t, now }: { t: TradeVM | undefined; now: number }) {
+  const age = t ? equityAge(t, now) : null
+  const kind = age?.kind ?? 'unknown'
+  return (
+    <div className="sys-trade-what" data-kind={kind}>
+      {kind === 'day_open' ? 'Day-open equity'
+        : kind === 'live' ? <>Live<em>, {age?.at != null ? `${ago(age.at, now)} ago` : 'just now'}</em></>
+          : kind === 'read' ? <>Last read<em>{age?.at != null ? ` ${ago(age.at, now)} ago` : ' at the broker'}</em></>
+            : 'Equity'}
+    </div>
+  )
+}
+
 function TradesView({ on }: { on: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const pageH = usePageHeight(rootRef)
-  const trade = useTrade()
-  const extra = useTradeExtra()
+  const trade = useTrade(on)
   const palette = usePalette()
   const reduced = useReducedMotion()
   const now = useTick(on ? 10_000 : 120_000)
   const { epoch } = useOpening(on)
   const t = trade.data
-  const x = extra.data
-  const pts = useMemo(() => t?.points ?? [], [t?.points])
+  // the history, plus the live read as its newest point while the market is
+  // open and the read is newer (the history is sampled less often than that)
+  const fetchedAt = trade.updatedAt
+  const pts = useMemo(() => {
+    const base = t?.points ?? []
+    if (!t || !t.marketOpen || t.equity == null) return base
+    const age = equityAge(t, fetchedAt)
+    const last = base[base.length - 1]
+    return age.kind === 'live' && age.at != null && (!last || age.at > last.t) ? [...base, { t: age.at, v: t.equity }] : base
+  }, [t, fetchedAt])
   const dayOpen = t?.equitySource === 'day_open'
 
   // the trailing run of identical totals: the bot repeating one figure, not new readings
@@ -1015,7 +954,7 @@ function TradesView({ on }: { on: boolean }) {
   const windowLabel = t?.windowDays ? `${t.windowDays}-day change` : pts.length > 1 ? `since ${fmtDate.format(pts[0].t)}` : 'change'
   const trips = t?.liveTrips
   const tripPct = trips != null && t?.targetTrips ? (trips / t.targetTrips) * 100 : null
-  const lastTrade = x?.lastTrade ? (/^(buy|sell)\s+(\S+)/i.exec(x.lastTrade)?.slice(1, 3).join(' ') ?? x.lastTrade) : null
+  const lastTrade = t?.lastTrade ? (/^(buy|sell)\s+(\S+)/i.exec(t.lastTrade)?.slice(1, 3).join(' ') ?? t.lastTrade) : null
   const vars: Vars = { '--trade-h': `${Math.max(180, (pageH || 600) - 110)}px` }
 
   return (
@@ -1027,9 +966,7 @@ function TradesView({ on }: { on: boolean }) {
             <span>Trade bot</span>
             <span className="sys-read-state" data-state={t?.up ? 'on' : 'off'} data-bad={(t && !t.up) || undefined}>{!t ? 'No data' : t.up ? 'Up' : 'Down'}</span>
           </div>
-          <div className="sys-trade-what" data-day-open={dayOpen || undefined}>
-            {dayOpen ? 'Day-open equity' : t?.equitySource === 'sample' ? <>Live equity{t.equityAgeMin != null && <em> · read {t.equityAgeMin < 1 ? 'just now' : `${Math.round(t.equityAgeMin)}m ago`}</em>}</> : 'Equity'}
-          </div>
+          <EquityWhat t={t} now={now} />
           <div className="sys-trade-eq">
             {dollars != null ? <>${dollars}<small>{cents}</small></> : '--'}
           </div>
@@ -1041,7 +978,7 @@ function TradesView({ on }: { on: boolean }) {
           </div>
           {dayOpen && (
             <div className="sys-trade-warn">
-              <Icon name="alert" size={15} tone="hot" glow />
+              <Icon name="alert" size={15} tone="dim" />
               Not a live reading.{flatFrom != null ? ` Unchanged since ${fmtWeekday.format(pts[flatFrom].t)} ${fmtTime.format(pts[flatFrom].t)}.` : ' The bot shows its 9:40 AM day-open total.'}
             </div>
           )}
@@ -1052,13 +989,13 @@ function TradesView({ on }: { on: boolean }) {
             <b data-bad={(t && !t.up) || undefined}>{t ? t.upDetail || (t.up ? 'Up' : 'Down') : '--'}</b>
           </div>
           <div className="sys-kv vl-build" style={iv(3)}>
-            <span><Ico name="clock" lit={!!t?.marketOpen} tone={t?.marketOpen ? 'hot' : undefined} />Market</span>
-            <b data-open={t?.marketOpen || undefined}>{t ? (t.marketOpen ? 'Open' : 'Closed') : '--'}{t && !t.marketOpen && x?.marketReason && <em> · {x.marketReason}</em>}</b>
+            <span><Ico name="clock" lit={!!t?.marketOpen} />Market</span>
+            <b data-open={t?.marketOpen || undefined}>{t ? (t.marketOpen ? 'Open' : 'Closed') : '--'}{t && !t.marketOpen && t.marketReason && <em> · {t.marketReason}</em>}</b>
           </div>
           <div className="sys-kv sys-kv-trips vl-build" style={iv(4)}>
             <span><Ico name="refresh" />Live round trips</span>
             <b>{trips != null ? <>{trips}<em> / {t?.targetTrips}</em></> : <em>not known yet</em>}</b>
-            {tripPct != null && <Bar value={tripPct} tone="hot" ticks={10} />}
+            {tripPct != null && <Bar value={tripPct} tone="fg" ticks={10} />}
           </div>
           <div className="sys-kv vl-build" style={iv(5)}>
             <span><Ico name={t?.rulesOk === false ? 'alert' : 'done'} lit={t?.rulesOk === false} tone={t?.rulesOk === false ? 'acc2' : undefined} />Rules</span>
@@ -1066,16 +1003,16 @@ function TradesView({ on }: { on: boolean }) {
           </div>
           <div className="sys-kv vl-build" style={iv(6)}>
             <span><Ico name="gauge" />Judge spend</span>
-            <b>{t ? <><span className="sys-nw">{usd(t.spendToday)}<em> today</em></span><em> · </em><span className="sys-nw">{usd(t.spendTotal)}<em> total{x ? ` (${x.callsTotal} calls)` : ''}</em></span></> : '--'}</b>
+            <b>{t ? <><span className="sys-nw">{usd(t.spendToday)}<em> today</em></span><em> · </em><span className="sys-nw">{usd(t.spendTotal)}<em> total ({t.callsTotal} calls)</em></span></> : '--'}</b>
           </div>
           {lastTrade && (
             <div className="sys-kv vl-build" style={iv(7)}>
               <span><Ico name="trades" />Last trade</span>
-              <b>{lastTrade}{x?.lastTradeAt != null && <em> · {fmtWeekday.format(x.lastTradeAt)} {fmtDate.format(x.lastTradeAt)}</em>}</b>
+              <b>{lastTrade}{t?.lastTradeAt != null && <em> · {fmtWeekday.format(t.lastTradeAt)} {fmtDate.format(t.lastTradeAt)}</em>}</b>
             </div>
           )}
           <div className="sys-kv vl-build" style={iv(8)}>
-            <span><Ico name={trade.failed || t?.stale ? 'offline' : 'online'} lit={!!(trade.failed || t?.stale)} tone={trade.failed || t?.stale ? 'hot' : undefined} />Status</span>
+            <span><Ico name={trade.failed || t?.stale ? 'offline' : 'online'} lit={!!(trade.failed || t?.stale)} tone={trade.failed || t?.stale ? 'acc2' : undefined} />Status</span>
             <b className="sys-kv-dim" data-stale={t?.stale || trade.failed || undefined}>
               {trade.failed ? `unreachable, showing ${ago(trade.updatedAt, now)} old` : t?.stale ? 'Stale: the bot has not reported lately' : t?.generatedAt ? `written ${ago(t.generatedAt, now)} ago` : '--'}
             </b>
@@ -1110,7 +1047,7 @@ function TradesView({ on }: { on: boolean }) {
               />
             </div>
             <div className="sys-chart-cap sys-trade-legend">
-              <span><i className="sys-key" data-c="cpu" />Equity, trading days only</span>
+              <span><i className="sys-key" data-c="eq" />Equity, trading days only</span>
               {dayOpen && flatFrom != null && <span><i className="sys-key" data-c="dash" />repeated figure, not live</span>}
             </div>
           </>

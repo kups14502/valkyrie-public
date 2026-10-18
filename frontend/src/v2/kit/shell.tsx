@@ -7,7 +7,7 @@ import { applyPalette, saveMode, storedMode, useFont, useStoredMode, type Mode }
 import {
   animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, useSwipePager, type MotionSetting,
 } from './motion'
-import { useHosts, useLights, useTick, useUsage, type HostVM, type MediaVM } from './data'
+import { useHosts, useLights, useTick, type HostVM, type MediaVM } from './data'
 import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, toast, type DotFloorHandle, type ToastOptions } from './ui'
 import { Icon, hostIcon, isIconName, type IconName } from './icons'
 import { musicImg, type MusicTrack } from '../../lib/api'
@@ -260,16 +260,12 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
   settingsOpen?: boolean
 }) {
   const hosts = useHosts()
-  const usage = useUsage()
   const now = useTick(5000)
   const list = [...(hosts.data ?? [])].sort((a, b) => hostRank(a.id) - hostRank(b.id) || a.label.localeCompare(b.label))
-  const five = usage.data?.five ?? null
   const d = new Date(now)
   const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
   const date = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`
   const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-  const fiveV: CSSVars = { '--v': five === null ? 0 : Math.max(0, Math.min(100, five)) / 100 }
-  const account = usage.data?.label ?? null
   return (
     <div className="vl-strip" data-center={center ? '' : undefined}>
       <div className="vl-strip-left">
@@ -291,13 +287,6 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
             })}
           </span>
         )}
-        <span className="vl-strip-five" data-high={(five !== null && five >= 85) || undefined} title={`AI 5-hour window${account ? `: ${account}` : ''}`} style={fiveV}>
-          {/* wide screens name the account the number belongs to (the hottest one) */}
-          {account && <span className="vl-strip-acct">{account}</span>}
-          <span className="vl-strip-k">5h</span>
-          <span className="vl-strip-meter" aria-hidden><i /></span>
-          <span className="vl-strip-v">{five === null ? '--' : five}%</span>
-        </span>
       </div>
       {center && <div className="vl-strip-center" key={center.split(' ')[0]}>{center}</div>}
       <div className="vl-strip-right">
@@ -320,8 +309,6 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
     </div>
   )
 }
-
-type CSSVars = Record<`--${string}`, string | number>
 
 // ---------- left rail: a quiet scroll indicator ----------
 
