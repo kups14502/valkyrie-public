@@ -1,0 +1,342 @@
+/* Settings (Settings.tsx, the shell's /m/settings screen), plus the v2-wide Density setting.
+   Plain CSS on top of v2.css. Unlayered on purpose: these rules win over the
+   Tailwind utilities and the kit components (both layered). */
+
+/* ===========================================================================
+   Settings layout
+   ========================================================================= */
+
+.st { container: st / inline-size; }
+.st-grid { display: flex; flex-direction: column; gap: 22px; max-width: 760px; padding-top: 4px; }
+.st-controls { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 380px; min-width: 0; }
+.st-grid > .st-rows { margin-top: -6px; width: 100%; max-width: 380px; }
+
+/* two columns once the column is wide: controls and the device rows left, Speed right */
+@container st (min-width: 700px) {
+  .st-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 32px; row-gap: 16px; align-items: start; max-width: none; }
+  .st-controls { grid-area: 1 / 1; }
+  .st-grid > .st-rows { grid-area: 2 / 1; margin-top: 0; }
+  .st-speed { grid-area: 1 / 2 / 4 / 3; }
+}
+
+/* ---------- glass plates (f016): label row, then the segmented plate ---------- */
+.st-plate { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.st-plate-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 16px; }
+/* Valkyrie's section label (HomePanels SectionTitle): uppercase, tracked wide, the accent with its glow */
+.st-plate-label, .st-section {
+  flex: none; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--fg); text-shadow: 0 0 8px color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.st-plate-note { display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0; font-size: 11px; line-height: 14px; color: var(--dim); text-align: right; }
+.st-note-icon { vertical-align: 0; }
+.st-short { display: none; }
+.st-plate .st-seg { height: 40px; }
+/* five cells share the width: tighter padding so "Desktop" fits on the phone */
+.st-plate[data-cells='5'] .vl-seg-cell { padding: 0 4px; }
+
+/* cell content: an icon (when the option is a thing) and the label */
+.st-cell { display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.st-cell-icon { vertical-align: 0; }
+.st-cell-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Device: the icon over the label, so five cells fit a phone and read like a dock */
+.st-plate[data-stack] .st-seg { height: 50px; }
+.st-plate[data-stack] .vl-seg-cell[data-icon] .st-cell { flex-direction: column; gap: 3px; }
+.st-plate[data-stack] .vl-seg-cell[data-icon] .st-cell-label { font-size: 11px; line-height: 13px; }
+
+/* ---------- Appearance: Valkyrie's schemes as a grid of glass plates ---------- */
+.st-pick { display: flex; flex-direction: column; gap: 4px; }
+.st-schemes {
+  --gap: 4px;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: 48px;
+  gap: var(--gap);
+}
+/* one scheme: its color dot over its name; the unlit glass sits under the sliding lit plate (::before z 0, plate z 1, content z 2) */
+.st-scheme {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-width: 0; padding: 0 2px;
+  font-size: 10px; line-height: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 80%, transparent);
+  transition: color .2s;
+}
+.st-scheme::before {
+  content: ''; position: absolute; inset: 0; z-index: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 13%, transparent), color-mix(in srgb, var(--fg) 5%, transparent)), rgba(0, 0, 0, .6);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent);
+  transition: opacity .15s;
+}
+.st-scheme > :not(.st-lit) { position: relative; z-index: 2; }
+.st-scheme-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-scheme[data-on] { color: var(--plate-ink); text-shadow: 0 0 5px rgba(0, 0, 0, .45); }
+.st-scheme[data-pressed]:not([data-on])::before { background: color-mix(in srgb, var(--fg) 24%, transparent); }
+.st-scheme[data-pressed]:not([data-on]) { color: var(--fg); }
+
+/* the scheme's own color: a filled dot with its glow (it does not morph with the UI) */
+.st-dot {
+  flex: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 2px var(--c), 0 0 8px color-mix(in srgb, var(--c) 70%, transparent);
+  transition: transform .18s var(--ease);
+}
+/* on the lit plate (the same color) a dark ring keeps the dot readable */
+.st-scheme[data-on] .st-dot { box-shadow: 0 0 0 2px rgba(0, 0, 0, .6), 0 0 0 3px color-mix(in srgb, var(--plate-ink) 70%, transparent), 0 0 12px var(--c); }
+.st-scheme[data-pressed] .st-dot { transform: scale(1.25); }
+/* Custom with nothing stored yet: an empty ring */
+.st-dot[data-empty] { background: none; box-shadow: inset 0 0 0 1px var(--dim); }
+
+/* the lit plate (vl-seg-plate's look): it slides to the picked cell; Custom lights its own */
+.st-lit {
+  position: absolute; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 10%), transparent), color-mix(in srgb, var(--fg) var(--plate), transparent));
+  border: 1.5px solid var(--plate-edge);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--fg) 48%, transparent), 0 0 4px color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.st-scheme-plate {
+  top: 0; left: 0;
+  width: calc((100% - 4 * var(--gap)) / 5);
+  height: calc((100% - var(--gap)) / 2);
+  transform: translate(calc(var(--col) * (100% + var(--gap))), calc(var(--row) * (100% + var(--gap))));
+  transition: transform .32s var(--ease), opacity .2s;
+}
+.st-schemes[data-custom] .st-scheme-plate { opacity: 0; }
+.st-custom-lit { inset: 0; opacity: 0; transition: opacity .2s; }
+.st-custom-cell[data-on] .st-custom-lit { opacity: 1; }
+
+/* Custom (2 of 5 columns) and the hex field with its swatch (3 of 5), like Valkyrie's ThemePicker */
+.st-custom { isolation: isolate; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.st-custom-cell { grid-column: span 2; flex-direction: row; gap: 8px; min-height: 40px; }
+.st-hex {
+  grid-column: span 3; display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 40px; padding: 0 10px;
+  background: rgba(0, 0, 0, .6);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.st-hex:focus-within { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 10px color-mix(in srgb, var(--fg) 22%, transparent); }
+.st-hex[data-bad] { box-shadow: inset 0 0 0 1px var(--acc2); }
+.st-swatch {
+  flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  box-shadow: 0 0 7px color-mix(in srgb, var(--c) 70%, transparent);
+}
+.st-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.st-swatch::-webkit-color-swatch { border: 0; border-radius: 0; }
+.st-swatch::-moz-color-swatch { border: 0; border-radius: 0; }
+.st-hex-input {
+  flex: 1 1 auto; width: 0; min-width: 0; height: 38px; padding: 0; border: 0; outline: 0; background: none;
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; letter-spacing: .06em;
+  color: var(--text); caret-color: var(--fg);
+}
+.st-hex-input::placeholder { color: var(--faint); }
+.st-hex-err { flex: none; font-size: 10.5px; font-weight: 600; color: var(--acc2); white-space: nowrap; }
+/* iOS zooms the page into any focused field under 16 px */
+@media (pointer: coarse) { .st-hex-input { font-size: 16px; } }
+
+/* the two-cell plates take 2/3 of the width, so every cell matches the three-cell row; the hero can sit in the gutter */
+.st-pair { position: relative; }
+.st-plates { display: flex; flex-direction: column; gap: 14px; width: calc(200% / 3); }
+/* touches pass through to the hero layer underneath (orbit); the slotted element fills the gutter */
+.st-gutter { position: absolute; top: 0; right: 0; bottom: 0; left: calc(200% / 3 + 12px); display: flex; flex-direction: column; pointer-events: none; }
+/* the slotted element is a one-cell grid, so the hero it holds stretches to the gutter */
+.st-gutter > * { flex: 1 1 auto; min-height: 0; display: grid; }
+/* SettingsScreen's own hero: takes touches (orbit), its floor fades out at the gutter's edges, no hotspots */
+.st-hero-slot { height: 100%; min-height: 120px; pointer-events: auto; }
+.st-hero {
+  width: 100%;
+  height: 100%;
+  -webkit-mask-image: radial-gradient(ellipse 70% 62% at 50% 50%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(ellipse 70% 62% at 50% 50%, #000 55%, transparent 100%);
+}
+.st-hero [data-hotspot] { display: none; }
+
+/* One column (phone): the rows under the plates carry the black canvas, so
+   the hero's floor never shows through them. The two-column layout needs no fill. */
+.st-grid > .st-rows { background: #000; }
+.st-speed { background: linear-gradient(180deg, rgba(0, 0, 0, 0), #000 28px); }
+@container st (min-width: 700px) {
+  .st-grid > .st-rows, .st-speed { background: none; }
+}
+
+/* ---------- Notifications / Build rows ---------- */
+.st-rows { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.st-row { display: flex; align-items: center; gap: 10px; min-height: 44px; min-width: 0; font-size: 12px; line-height: 15px; }
+.st-row-icon { flex: none; vertical-align: 0; }
+.st-row-label { flex: none; width: 13.5ch; font-weight: 600; color: color-mix(in srgb, var(--fg) 92%, transparent); }
+.st-row-value { flex: 1; color: var(--text); }
+.st-row-sub { color: var(--dim); }
+.st-row-act { flex: none; }
+
+/* ---------- Speed ---------- */
+.st-speed { display: flex; flex-direction: column; min-width: 0; container-type: inline-size; container-name: speed; }
+.st-speed-title { display: inline-flex; align-items: center; gap: 7px; }
+.st-sum { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 4px; }
+.st-sum-label { font-size: 11px; line-height: 14px; font-weight: 500; color: color-mix(in srgb, var(--fg) 72%, transparent); }
+.st-sum-num { font-size: 30px; line-height: 34px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--fg); }
+.st-sum-num small { margin-left: 4px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
+.st-sum-dl { display: grid; grid-template-columns: auto auto; column-gap: 12px; row-gap: 2px; padding-bottom: 4px; font-size: 12px; line-height: 15px; }
+.st-sum-dl dt { color: var(--dim); }
+.st-sum-dl dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.st-note { font-size: 11px; line-height: 15px; color: var(--dim); }
+/* the summary sits in one thin chamfered panel (f011): the number, its parts, what painted from cache */
+.st-sum-panel { margin-top: 8px; padding: 8px 12px 9px; }
+.st-sum-panel .st-sum { margin-top: 0; }
+.st-sum-panel .st-note { margin-top: 3px; }
+
+.st-head { display: flex; align-items: flex-end; gap: 8px; margin-top: 16px; padding-bottom: 3px; }
+.st-head-title { flex: 1; min-width: 0; font-size: 12px; line-height: 15px; font-weight: 600; color: var(--fg); }
+.st-head-sub { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--dim); }
+.st-head-alert { margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--acc2); }
+.st-col { flex: none; white-space: nowrap; font-size: 10px; line-height: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; text-align: right; color: var(--dim); }
+.st-col-time { width: 60px; }
+.st-col-cache { width: 64px; }
+
+/* the shared time axis the row lanes sit on */
+.st-axis { position: relative; height: 17px; border-top: 1px solid var(--line-strong); margin-bottom: 1px; }
+.st-tick { position: absolute; top: 0; padding-top: 4px; transform: translateX(-50%); font-size: 10.5px; line-height: 12px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-tick::before { content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 3px; background: var(--line-strong); }
+.st-tick[data-edge='start'] { transform: none; }
+.st-tick[data-edge='start']::before { left: 0; }
+.st-tick[data-edge='end'] { transform: translateX(-100%); }
+.st-tick[data-edge='end']::before { left: auto; right: 0; }
+
+.st-src {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 60px 64px;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 0 5px;
+  text-align: left;
+  touch-action: manipulation;
+}
+.st-src[data-pressed], .st-src[data-open] { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.st-src-ico { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
+.st-src-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.st-src-name { font-size: 12.5px; line-height: 15px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-src-sub { font-size: 11px; line-height: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-src-time { font-size: 12.5px; line-height: 15px; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-src-cache { font-size: 12px; line-height: 15px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-src[data-state='idle'] .st-src-sub { color: var(--faint); }
+/* the row's bottom hairline is its lane on the shared axis */
+.st-lane { position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; overflow: hidden; pointer-events: none; }
+.st-lane > i { position: absolute; top: 0; bottom: 0; display: block; }
+.st-detail { display: flex; flex-direction: column; gap: 2px; padding: 0 0 8px 12px; font-size: 11px; line-height: 15px; color: var(--dim); }
+.st-detail-path { display: grid; grid-template-columns: minmax(0, 1fr) 70px 56px; gap: 8px; font-variant-numeric: tabular-nums; }
+.st-detail-path > span + span { text-align: right; color: var(--text); }
+.st-empty { min-height: 34px; display: flex; align-items: center; font-size: 12px; color: var(--dim); }
+
+/* two-column layout or a wide Speed column: the path sits beside the name, one line per source */
+@container st (min-width: 700px) {
+  .st-src { min-height: 30px; padding: 3px 0 4px; }
+  .st-src-main { flex-direction: row; align-items: baseline; gap: 8px; }
+  .st-src-name { flex: none; max-width: 55%; }
+  .st-src-sub { flex: 1 1 0; }
+}
+@container speed (min-width: 520px) {
+  .st-src { min-height: 30px; padding: 3px 0 4px; }
+  .st-src-main { flex-direction: row; align-items: baseline; gap: 10px; }
+  .st-src-name { flex: none; max-width: 45%; }
+  .st-src-sub { flex: 1 1 0; }
+}
+
+/* landscape phone: each label left of its plate, 32 px plates, so the plates take about half the first view */
+@media (max-height: 500px) {
+  .st-grid { gap: 16px; }
+  .st-controls { gap: 8px; }
+  .st-plates { gap: 8px; width: 100%; }
+  /* the device rows move under Speed, so the Speed summary shows in the first view */
+  .st-grid > .st-rows { order: 3; margin-top: 0; }
+  .st-plate { display: grid; grid-template-columns: 84px minmax(0, 1fr); column-gap: 8px; align-items: center; }
+  .st-plate-label { gap: 5px; font-size: 10.5px; letter-spacing: .14em; }
+  /* Appearance keeps its label above the grid: ten plates need the full width */
+  .st-plate.st-appear { display: flex; align-items: stretch; gap: 6px; }
+  .st-appear .st-plate-head { flex-direction: row; align-items: center; justify-content: flex-start; }
+  .st-schemes { grid-auto-rows: 40px; }
+  .st-schemes .st-scheme { gap: 4px; }
+  .st-dot { width: 10px; height: 10px; }
+  .st-custom-cell, .st-hex { min-height: 34px; }
+  .st-hex-input { height: 32px; }
+  .st-plate[data-cells='2'] .vl-seg-cell { padding: 0 4px; font-size: 12px; }
+  .st-plate[data-cells='5'] .vl-seg-cell { padding: 0 2px; font-size: 12px; }
+  .st-plate-head { flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; min-height: 0; }
+  .st-plate-note { max-width: 100%; text-align: left; font-size: 11px; line-height: 13px; }
+  .st-long { display: none; }
+  .st-short { display: inline; }
+  /* a note with no short form is left out here, its icon too */
+  .st-plate-note:not(:has(.st-short)) { display: none; }
+  .st-plate .st-seg { height: 32px; }
+  /* Device in one 32 px row: icon-only cells (Auto keeps its word), named for screen readers */
+  .st-plate[data-stack] .st-seg { height: 32px; }
+  .st-plate[data-stack] .vl-seg-cell[data-icon] .st-cell-label { display: none; }
+  .st-plate[data-cells='2'] .st-seg { width: calc(200% / 3); }
+  .st-gutter { left: calc(92px + (100% - 92px) * 2 / 3 + 10px); }
+  .st-row-label { width: 13.5ch; }
+}
+
+/* ===========================================================================
+   Density (Settings): Compact is the default look. Comfortable
+   gives every list row and control more room, 44 px+ touch rows, larger
+   plates and panels, across all screens. Keyed on html[data-density], which
+   main.tsx sets before the first frame and Settings sets on change.
+   ========================================================================= */
+
+/* kit components */
+html[data-density='comfortable'] .vl-row { min-height: 44px; }
+html[data-density='comfortable'] .vl-seg { height: 46px; }
+html[data-density='comfortable'] .vl-seg-cell { font-size: 13.5px; }
+html[data-density='comfortable'] .vl-link { min-height: 40px; font-size: 13px; }
+html[data-density='comfortable'] .vl-btn { min-height: 48px; padding: 0 22px; font-size: 14px; }
+html[data-density='comfortable'] .vl-panel { padding: 12px 14px 13px; }
+html[data-density='comfortable'] .vl-panel[data-dense] { padding: 9px 11px 10px; }
+html[data-density='comfortable'] .vl-panel-body { margin-top: 9px; }
+html[data-density='comfortable'] .vl-optrow { min-height: 54px; }
+html[data-density='comfortable'] .vl-preset { min-height: 52px; }
+@media (max-width: 639px) {
+  html[data-density='comfortable'] .vl-screen { padding: 12px 14px 20px; }
+}
+
+/* Settings */
+html[data-density='comfortable'] .st-controls,
+html[data-density='comfortable'] .st-plates { gap: 18px; }
+html[data-density='comfortable'] .st-plate .st-seg { height: 48px; }
+html[data-density='comfortable'] .st-schemes { grid-auto-rows: 56px; }
+html[data-density='comfortable'] .st-custom-cell,
+html[data-density='comfortable'] .st-hex { min-height: 48px; }
+html[data-density='comfortable'] .st-plate[data-stack] .st-seg { height: 56px; }
+html[data-density='comfortable'] .st-row { min-height: 52px; font-size: 13px; }
+html[data-density='comfortable'] .st-src { min-height: 50px; padding: 6px 0 7px; }
+html[data-density='comfortable'] .st-src-name { font-size: 13.5px; line-height: 17px; }
+html[data-density='comfortable'] .st-src-sub { font-size: 11.5px; line-height: 14px; }
+
+/* Home */
+html[data-density='comfortable'] .hm-tick { min-height: 62px; }
+html[data-density='comfortable'] .hm-start,
+html[data-density='comfortable'] .hm-chip { min-height: 50px; }
+html[data-density='comfortable'] .hm-evrow { min-height: 42px; }
+html[data-density='comfortable'] .hm-day .hm-evrow { min-height: 46px; }
+html[data-density='comfortable'] .hm-g-row { min-height: 52px; }
+html[data-density='comfortable'] .hm-dayhead { min-height: 40px; }
+
+/* Claude */
+html[data-density='comfortable'] .vc-front,
+html[data-density='comfortable'] .vc-prow,
+html[data-density='comfortable'] .vc-pd-srow { min-height: 62px; padding-top: 10px; padding-bottom: 10px; }
+html[data-density='comfortable'] .vc-fbtn { height: 46px; }
+html[data-density='comfortable'] .vc-more { min-height: 40px; }
+
+/* Lights */
+html[data-density='comfortable'] .lt-bulb,
+html[data-density='comfortable'] .lt-bulb-id { min-height: 52px; }
+html[data-density='comfortable'] .lt-rgb { min-height: 48px; }
+
+/* Media */
+html[data-density='comfortable'] .vm-req { min-height: 54px; }
+html[data-density='comfortable'] .vm-dl { padding: 12px 0 11px; }
+
+/* System */
+html[data-density='comfortable'] .sys-svc-row { min-height: 40px; }
+html[data-density='comfortable'] .sys-kv { min-height: 38px; }
+html[data-density='comfortable'] .sys-acct { min-height: 40px; }

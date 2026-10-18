@@ -59,10 +59,12 @@ export function resolveProfile(mode: DeviceMode = getDeviceMode()): Profile {
     mode,
     resolved,
     // Each form factor has its own home screen; the desktop keeps the full one.
+    // The phone opens on v2 (src/v2, /m/*); the classic phone home stays at
+    // /phone (v2 Settings > Classic, the menu, the command palette).
     home: resolved === 'desktop' ? '/dashboard'
       : resolved === 'ipad' ? '/pad'
         : resolved === 'vr' ? '/vr'
-          : '/phone',
+          : '/m/dashboard',
     size: resolved === 'ipad' || resolved === 'vr' ? 'pad' : 'normal',
   }
 }

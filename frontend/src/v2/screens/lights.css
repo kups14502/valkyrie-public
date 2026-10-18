@@ -1,0 +1,439 @@
+/* Lights screen (screens/Lights.tsx), red HUD style. Colors come from v2's
+   CSS variables, so a mode change morphs everything; bulb icons, chips and
+   swatches keep their real colors because they are data. Lit things (on,
+   selected) glow; everything else is a dim line. Only transform and opacity
+   animate. */
+
+/* ---------- layout ---------- */
+/* phone: one column in this order: master, presets, room, bulbs, Thor RGB */
+.lt-layout { display: flex; flex-direction: column; gap: 6px; }
+.lt-layout.vl-screen { padding-bottom: 12px; }
+.lt-col { display: contents; }
+.lt-p-master { order: 0; }
+.lt-p-presets { order: 1; }
+.lt-p-room { order: 2; }
+.lt-p-bulbs { order: 3; }
+.lt-p-rgb { order: 4; }
+
+/* landscape, tablet, desktop: master + presets | bulbs | room + Thor RGB */
+@media (min-width: 640px) {
+  .lt-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 262px) minmax(0, 1fr) minmax(0, 206px);
+    column-gap: 8px;
+    align-items: start;
+  }
+  .lt-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  /* the control columns lean toward the room (f005), the room stays square-on */
+  .lt-col-a, .lt-col-b { transform: perspective(1400px) rotateY(5deg); transform-origin: 0% 50%; }
+}
+@media (min-width: 1100px) {
+  .lt-layout {
+    grid-template-columns: minmax(0, 392px) minmax(0, 470px) minmax(0, 430px);
+    column-gap: 18px;
+    padding-left: 22px;
+    padding-top: 18px;
+  }
+  .lt-col { gap: 8px; }
+}
+
+/* ---------- headers: a leading icon, then the label ---------- */
+.lt-hd-ic { margin-right: 6px; vertical-align: -2px; }
+/* the lit count is the screen's two-second number */
+.lt-count { display: inline-flex; align-items: baseline; gap: 5px; font-size: 14px; font-weight: 500; color: var(--text); text-shadow: none; }
+.lt-count b {
+  font-size: 26px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--ink-hi);
+  text-shadow: var(--text-glow);
+}
+/* Home Assistant stopped answering: the last good count stays, but it stops shouting */
+.lt-count[data-stale] b { color: var(--dim); text-shadow: none; }
+.lt-count-na { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 600; color: var(--acc2); }
+.lt-dimval { font-weight: 500; color: var(--dim); }
+.lt-note { margin-top: 6px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+/* freshness sits in the panel value (right end), quiet: never in the uppercase label */
+.lt-bulbs-val { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; }
+.lt-age { font-size: 10.5px; font-weight: 500; color: var(--dim); text-shadow: none; }
+.lt-age[data-bad] { color: var(--acc2); }
+.lt-bad { display: inline-flex; align-items: center; gap: 4px; color: var(--acc2); }
+
+/* ---------- plates ----------
+   dim glass: a dark red fill under a faint line. lit: the solid red plate with
+   a bright edge and a soft outer glow (f005 "Custom", f016 selected cell). */
+.lt-mpwr, .lt-pre {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 17%, transparent), color-mix(in srgb, var(--fg) 7%, transparent)),
+    rgba(0, 0, 0, .6);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 26%, transparent), inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent);
+  transition: transform .12s var(--ease), opacity .25s;
+}
+.lt-mpwr[data-on], .lt-pre[data-on] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 10%), transparent), color-mix(in srgb, var(--fg) var(--plate), transparent));
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--fg) 94%, transparent),
+    var(--glow);
+}
+.lt-mpwr[data-pressed], .lt-pre[data-pressed] { transform: scale(.95); filter: brightness(1.25); }
+
+/* ---------- all lights: the big power plate + the glass bar ---------- */
+.lt-master { display: flex; align-items: center; gap: 8px; }
+.lt-mpwr {
+  flex: none;
+  width: 78px;
+  height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.lt-mpwr::after { content: ''; position: absolute; inset: -2px; }
+.lt-mpwr-cap {
+  padding-left: .24em;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.lt-mpwr[data-on] .lt-mpwr-cap { color: var(--plate-ink); text-shadow: var(--plate-shadow); }
+
+/* ---------- presets: 4 x 2 glass plates, chip + name (+ sun / moon) ---------- */
+.lt-pres {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.lt-pre {
+  height: 38px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px 0 8px;
+  text-align: left;
+}
+.lt-pre::after { content: ''; position: absolute; inset: -3px -2px; }
+.lt-chip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--sw);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.lt-pre-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lt-pre-ic { flex: none; }
+.lt-pre[data-on] .lt-pre-name { color: var(--plate-ink); font-weight: 600; text-shadow: var(--plate-shadow); }
+.lt-pre[data-on] .lt-chip { box-shadow: 0 0 0 1px var(--plate-ink), 0 0 8px var(--sw); }
+/* nothing lit to color: the plates dim, a tap says why */
+.lt-pres[data-idle] .lt-pre { opacity: .5; }
+/* a narrow column: the chip becomes a cap line over a centered name, no sun / moon */
+@container (max-width: 300px) {
+  .lt-pre { justify-content: center; padding: 3px 3px 0; }
+  .lt-chip { position: absolute; left: 0; right: 0; top: 0; width: auto; height: 3px; box-shadow: none; }
+  .lt-pre[data-on] .lt-chip { box-shadow: 0 0 6px var(--sw); }
+  .lt-pre-name { flex: 0 1 auto; font-size: 11.5px; text-align: center; }
+  .lt-pre-ic { display: none; }
+}
+
+/* ---------- glass brightness bar ---------- */
+.lt-sl {
+  --v: 0;
+  --h: 22px;
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  touch-action: pan-y;
+  cursor: pointer;
+  outline: none;
+}
+.lt-sl[data-size='lg'] { --h: 54px; height: 54px; }
+.lt-sl[data-disabled] { cursor: default; opacity: .45; }
+.lt-sl:focus-visible .lt-sl-bar { outline: 1px solid var(--line-strong); outline-offset: 2px; }
+.lt-sl-bar {
+  position: relative;
+  width: 100%;
+  height: var(--h);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 17%, transparent), color-mix(in srgb, var(--fg) 7%, transparent)),
+    rgba(0, 0, 0, .62);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent), inset 0 1px 0 color-mix(in srgb, var(--fg) 26%, transparent);
+  transition: transform .22s var(--ease);
+}
+/* an off bulb: the bar folds to a 2 px hairline (transform only), the hit box stays 44 px */
+.lt-sl[data-look='line'] .lt-sl-bar {
+  transform: scaleY(calc(2 / 22));
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  box-shadow: none;
+}
+.lt-sl[data-look='line'][data-pressed] .lt-sl-bar { background: color-mix(in srgb, var(--fg) 70%, transparent); }
+.lt-sl-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(calc(var(--v) / 100));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 14%), transparent), color-mix(in srgb, var(--fg) calc(var(--plate) - 10%), transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 85%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--fg) 45%, transparent);
+  transition: transform .22s var(--ease), opacity .22s;
+}
+/* lit, brightness unknown: a dim full track with no head, never a made-up level */
+.lt-sl[data-unknown] .lt-sl-fill { transform: none; opacity: .3; }
+.lt-sl-head {
+  position: absolute;
+  inset: 0;
+  transform: translateX(calc(var(--v) * 1% - 100%));
+  transition: transform .22s var(--ease), opacity .2s;
+  pointer-events: none;
+}
+.lt-sl-head i {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fg);
+  box-shadow: 0 0 8px var(--fg), 0 0 2px var(--fg);
+}
+.lt-sl-head[data-zero],
+.lt-sl[data-unknown] .lt-sl-head { opacity: 0; }
+.lt-sl[data-drag] .lt-sl-fill,
+.lt-sl[data-drag] .lt-sl-head { transition: none; }
+.lt-sl[data-pressed] .lt-sl-bar { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 40%, transparent), 0 0 10px color-mix(in srgb, var(--fg) 22%, transparent); }
+/* the room average inside the master bar, right end (f016 "100%"). Drawn twice:
+   body text over the dark glass, and plate ink clipped to the filled part, so it
+   reads at any level on dark-ink and light-ink schemes alike */
+.lt-sl-reads { position: absolute; inset: 0; pointer-events: none; }
+.lt-sl-in { position: absolute; inset: 0; clip-path: inset(0 calc(100% - var(--v) * 1%) 0 0); }
+.lt-sl-read {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--text);
+  text-shadow: 0 0 4px rgba(0, 0, 0, .7), 0 0 1px rgba(0, 0, 0, .8);
+  pointer-events: none;
+}
+.lt-sl-in .lt-sl-read { color: var(--plate-ink); text-shadow: var(--plate-shadow); }
+.lt-sl-read small { font-size: 11px; margin-left: 1px; }
+.lt-pct {
+  flex: none;
+  width: 32px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.lt-pct small { font-size: 9px; margin-left: 1px; }
+
+/* ---------- bulbs ---------- */
+.lt-bulbs > * + * { border-top: 1px solid var(--line); }
+.lt-bulb-wrap { position: relative; min-width: 0; }
+/* selected row (and its color strip): a lit edge and a faint wash, faded with opacity */
+.lt-bulb-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0 -10px;
+  border-left: 2px solid var(--fg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fg) 16%, transparent), color-mix(in srgb, var(--fg) 4%, transparent) 70%, transparent);
+  opacity: 0;
+  transition: opacity .25s;
+  pointer-events: none;
+}
+.lt-bulb-wrap[data-sel]::before { opacity: 1; }
+.lt-bulb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  min-width: 0;
+}
+.lt-bulb-id {
+  flex: none;
+  width: 126px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.lt-bulb-id[data-pressed] .lt-bulb-name { color: var(--fg); text-shadow: var(--text-glow); }
+.lt-bulb-ic { flex: none; }
+.lt-bulb-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-hi);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lt-bulb-more { flex: none; margin-left: -3px; }
+/* an off bulb's name is body text; a lit one keeps the accent */
+.lt-bulb[data-off] .lt-bulb-name { color: var(--text); font-weight: 500; }
+.lt-bulb[data-na] { opacity: .45; }
+.lt-na { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-size: 11.5px; color: var(--dim); }
+.lt-empty { min-height: 34px; display: flex; align-items: center; font-size: 12px; color: var(--dim); }
+
+/* a bulb's power: a dim line box; on, the f005 lit option (bright edge, red wash, glow) */
+.lt-tg {
+  flex: none;
+  width: 40px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 24%, transparent);
+  transition: transform .12s var(--ease);
+}
+.lt-tg::after { content: ''; position: absolute; inset: -7px -3px; }
+.lt-tg[data-on] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 24%, transparent), color-mix(in srgb, var(--fg) 12%, transparent)), rgba(0, 0, 0, .5);
+  box-shadow:
+    inset 0 0 0 1.5px var(--fg),
+    var(--glow);
+}
+.lt-tg[data-pressed] { transform: scale(.92); filter: brightness(1.25); }
+/* a command in flight: the control already shows what was asked, so it waits at full strength, not dimmed */
+.lt-tg[data-busy]:disabled, .lt-mpwr[data-busy]:disabled,
+.lt-pres[data-busy] .lt-pre:disabled, .lt-sws[data-busy] .lt-sw:disabled { opacity: 1; cursor: progress; }
+
+/* a lit bulb's own colors, under its row while it is selected */
+.lt-strip { position: relative; padding: 2px 0 8px; }
+.lt-sws { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.lt-sw {
+  height: 34px;
+  min-width: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .2), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, .28)),
+    color-mix(in srgb, var(--sw) 80%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28);
+  transition: transform .12s var(--ease);
+  animation: lt-sw-in .28s var(--ease) both;
+  animation-delay: calc(var(--n) * 18ms);
+}
+.lt-sw::after { content: ''; position: absolute; inset: -5px -2px; }
+.lt-sw[data-on] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .26), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, .18)),
+    var(--sw);
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+  box-shadow: 0 0 10px var(--sw), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+.lt-sw[data-pressed] { transform: scale(.92); filter: brightness(1.25); }
+@keyframes lt-sw-in {
+  from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.9); }
+  to { opacity: 1; transform: none; }
+}
+html[data-motion='reduced'] .lt-sw { animation: vl-fade .12s linear both; }
+@media (prefers-reduced-motion: reduce) {
+  .lt-sw { animation: vl-fade .12s linear both; }
+}
+
+/* ---------- room: a compact panel, the f011 map box ---------- */
+.lt-p-room.vl-panel { padding: 0; }
+.lt-room { position: relative; height: 150px; }
+.lt-room-hd {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 7px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--text);
+  pointer-events: none;
+}
+/* "Room" is a Valkyrie section label, like every panel label */
+.lt-room-label { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); }
+.lt-room-sel { min-width: 0; font-weight: 600; color: var(--fg); text-shadow: var(--text-glow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Thor RGB ---------- */
+.lt-rgb { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+/* a Valkyrie section label: accent caps, tracked */
+.lt-rgb-name { display: flex; align-items: center; font-size: 11px; line-height: 18px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); white-space: nowrap; }
+.lt-rgb-name .lt-hd-ic { margin-right: 7px; vertical-align: 0; }
+.lt-rgb-state { padding-left: 22px; margin-top: 1px; font-size: 11px; line-height: 14px; color: var(--dim); }
+.lt-part { display: inline-block; max-width: 100%; }
+.lt-rgb-ctl { flex: none; transition: opacity .25s; }
+/* thor not answering, not set up, or not checked yet: the plates stay visible but cannot be pressed */
+.lt-rgb-ctl[data-locked] { opacity: .4; }
+.lt-rgb-seg { width: 184px; height: 40px; }
+.lt-seg-none .vl-seg-plate { opacity: 0; }
+/* a press in flight: the pressed cell (cells follow the plate) breathes a line until thor agrees */
+.lt-rgb-ctl[data-pending] { cursor: progress; }
+.lt-rgb-ctl[data-pending='relight'] .vl-seg-cell:nth-child(2),
+.lt-rgb-ctl[data-pending='dark'] .vl-seg-cell:nth-child(3) {
+  box-shadow: inset 0 0 0 1px var(--fg);
+  animation: lt-wait 1.4s ease-in-out infinite;
+}
+@keyframes lt-wait { 50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent); } }
+html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: none; }
+@media (prefers-reduced-motion: reduce) { .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: none; } }
+
+/* the narrow room column (landscape, tablet): Thor RGB stacks, the plates span it */
+@media (min-width: 640px) and (max-width: 1099px) {
+  .lt-rgb { flex-direction: column; align-items: stretch; gap: 6px; }
+  .lt-rgb-seg { width: 100%; height: 36px; }
+  .lt-rgb-state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+/* phone: mono is wide, so the status gets the full row (one line, not three) and the plates go under it */
+@media (max-width: 639px) {
+  .lt-rgb { flex-direction: column; align-items: stretch; gap: 7px; padding-bottom: 1px; }
+  .lt-rgb-seg { width: 100%; }
+  /* room for "Kitchen Light" beside its color icon */
+  .lt-bulb-id { width: 140px; }
+}
+
+@media (min-width: 1100px) {
+  .lt-bulb-id { width: 150px; }
+  .lt-pres, .lt-sws { gap: 6px; }
+  .lt-room { height: 292px; }
+}
+
+/* landscape phone (the reference's own aspect): every control above the fold */
+@media (min-width: 640px) and (max-height: 500px) {
+  .lt-layout.vl-screen { padding-bottom: 4px; }
+  .lt-room { height: 142px; }
+  .lt-mpwr { width: 66px; height: 46px; gap: 4px; }
+  .lt-sl[data-size='lg'] { --h: 46px; height: 46px; }
+  .lt-pre { height: 34px; }
+  .lt-bulb, .lt-bulb-id { min-height: 40px; }
+  .lt-bulb { gap: 6px; }
+  .lt-bulb .lt-sl { margin: -2px 0; }
+  .lt-bulb-id { width: 124px; gap: 6px; }
+  .lt-bulb .lt-sl { min-width: 56px; }
+  .lt-bulb-name { font-size: 12.5px; }
+  .lt-pct { width: 28px; }
+  .lt-tg { width: 36px; height: 28px; }
+  .lt-tg::after { inset: -8px -3px; }
+  .lt-count b { font-size: 22px; }
+  .lt-strip { padding: 0 0 4px; }
+  .lt-sw { height: 30px; }
+}

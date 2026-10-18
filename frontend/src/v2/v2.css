@@ -1,0 +1,1495 @@
+/* Valkyrie v2 (src/v2). Loaded with the v2 chunk and never unloaded, so every
+   rule that could touch the classic pages is keyed on html[data-v2], which
+   src/v2/App.tsx sets only while v2 is mounted: the tokens, the base rules and
+   the overrides of src/index.css below. Everything else is a v2 class
+   (vl-, hm-, vc-, lt-, vm-, sys-, st-) or a v2 html attribute (data-motion,
+   data-font, data-density, data-mode, data-lum) that the classic pages never use.
+   Tailwind comes from src/index.css, whose scanner already covers src/v2. */
+
+/* ---------------------------------------------------------------------------
+   Tokens. The palette variables are registered so a mode change (applyPalette
+   in kit/theme.ts) interpolates every color in ~450 ms instead of snapping.
+   Derived colors use color-mix on var(--fg), so they morph with it.
+   @property is global by nature; none of these names exist in the classic app
+   (it uses --color-*), so registering them changes nothing there.
+   ------------------------------------------------------------------------- */
+
+@property --fg { syntax: '<color>'; inherits: true; initial-value: #f4f4f4; }
+@property --dim { syntax: '<color>'; inherits: true; initial-value: #9a9a9a; }
+/* body text: Valkyrie's --color-text, a pale tint of the accent (kit/theme.ts paletteFor) */
+@property --text { syntax: '<color>'; inherits: true; initial-value: #c0fff9; }
+@property --faint { syntax: '<color>'; inherits: true; initial-value: #4a4a4a; }
+@property --hot { syntax: '<color>'; inherits: true; initial-value: #f0b44a; }
+@property --acc2 { syntax: '<color>'; inherits: true; initial-value: #ff2a2a; }
+/* The look per scheme. kit/theme.ts (lookFor) doses every one of these by the
+   accent's luminance, never by its name: a bright accent (Cyan, Matrix, Yellow,
+   White) reads at low alpha, takes dark ink on a lit plate and a softer glow; a
+   deep one (Violet, Red, Pink) gets stronger lines and fills and light ink.
+   Defaults below are Valkyrie's default cyan. */
+/* selected-plate fill strength and the ink on it */
+@property --plate { syntax: '<percentage>'; inherits: true; initial-value: 82%; }
+@property --plate-ink { syntax: '<color>'; inherits: true; initial-value: #001f1b; }
+/* hairline, panel outline, panel fill top and bottom, white lifted into a lit plate's edge */
+@property --line-a { syntax: '<percentage>'; inherits: true; initial-value: 20%; }
+@property --panel-a { syntax: '<percentage>'; inherits: true; initial-value: 34%; }
+@property --fill-a { syntax: '<percentage>'; inherits: true; initial-value: 7%; }
+@property --fill-b { syntax: '<percentage>'; inherits: true; initial-value: 2%; }
+@property --edge-w { syntax: '<percentage>'; inherits: true; initial-value: 10%; }
+/* the ink of a reading (panel values, stats): the accent, lifted toward white on deep schemes */
+@property --ink-hi { syntax: '<color>'; inherits: true; initial-value: #00ffe5; }
+/* glow strength: 1 on deep accents, less on bright ones so the bloom never turns to haze */
+@property --glow-k { syntax: '<number>'; inherits: true; initial-value: .7; }
+
+html[data-v2] {
+  --fg: #00ffe5;
+  --text: #c0fff9;
+  --dim: #5accc1;
+  --faint: #286f68;
+  --hot: #ffe500;
+  --acc2: #ff1744;
+  --fg-rgb: 0, 255, 229;
+  --hot-rgb: 255, 229, 0;
+  --acc2-rgb: 255, 23, 68;
+
+  --line-a: 20%;
+  --panel-a: 34%;
+  --fill-a: 7%;
+  --fill-b: 2%;
+  --edge-w: 10%;
+  --ink-hi: #00ffe5;
+  --glow-k: .7;
+  --plate: 82%;
+  --plate-ink: #001f1b;
+  /* text-shadow under plate ink: none under dark ink (a black halo smears it), a soft dark one under light ink */
+  --plate-shadow: none;
+
+  --line: color-mix(in srgb, var(--fg) var(--line-a), transparent);
+  --line-strong: color-mix(in srgb, var(--fg) 50%, transparent);
+  --glow: 0 0 14px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 42%), transparent), 0 0 3px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 60%), transparent);
+  /* Valkyrie's accent glow on text (its wordmark and section titles), dosed */
+  --text-glow: 0 0 9px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent);
+  --hot-glow: 0 0 10px color-mix(in srgb, var(--hot) calc(var(--glow-k) * 80%), transparent);
+  /* a number that matters: a quieter glow than a lit label */
+  --num-glow: 0 0 8px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent), 0 0 1px #000;
+  --panel-line: color-mix(in srgb, var(--fg) var(--panel-a), transparent);
+  --panel-fill:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--fill-a), transparent), color-mix(in srgb, var(--fg) var(--fill-b), transparent) 70%),
+    rgba(0, 0, 0, .8);
+  /* a lit plate's edge: the line color lifted toward white (f005 "Custom") */
+  --plate-edge: color-mix(in srgb, var(--fg), #fff var(--edge-w));
+  --icon-glow: drop-shadow(0 0 2.5px color-mix(in srgb, currentColor calc(var(--glow-k) * 95%), transparent)) drop-shadow(0 0 7px color-mix(in srgb, currentColor calc(var(--glow-k) * 55%), transparent));
+
+  --morph: 450ms;
+  --ease: cubic-bezier(.22, .8, .24, 1);
+  /* Valkyrie's font (JetBrains Mono) is the default; Settings > Font: Sans switches to Inter Tight */
+  /* v2-named: --font-mono / --font-sans are Tailwind's theme variables */
+  --v2-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --v2-font-sans: 'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font: var(--v2-font-mono);
+
+  --strip-h: 26px;
+  --rail-w: 30px;
+
+  transition:
+    --fg var(--morph) ease, --text var(--morph) ease, --dim var(--morph) ease, --faint var(--morph) ease,
+    --hot var(--morph) ease, --acc2 var(--morph) ease, --plate var(--morph) ease, --plate-ink var(--morph) ease,
+    --line-a var(--morph) ease, --panel-a var(--morph) ease, --fill-a var(--morph) ease, --fill-b var(--morph) ease,
+    --edge-w var(--morph) ease, --ink-hi var(--morph) ease, --glow-k var(--morph) ease;
+}
+html[data-v2][data-font='sans'] { --font: var(--v2-font-sans); }
+html[data-v2][data-motion='reduced'] { --morph: 120ms; }
+@media (prefers-reduced-motion: reduce) { html[data-v2] { --morph: 120ms; } }
+
+/* first frames: paint the stored/forced mode without a morph */
+html[data-v2][data-boot], html[data-v2][data-boot] * { transition: none !important; }
+
+@media (max-width: 639px) {
+  html[data-v2] { --rail-w: 18px; --strip-h: 24px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+   ------------------------------------------------------------------------- */
+
+/* html keeps src/index.css's height (it divides by the UI zoom); the shell is
+   position: fixed. #root is listed with body because src/index.css sets the
+   classic font, color and features on #root itself. */
+html[data-v2], html[data-v2] body, html[data-v2] #root {
+  margin: 0;
+  background: #000;
+}
+
+html[data-v2] body, html[data-v2] #root {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.3;
+  /* body copy is Valkyrie's --color-text (a pale tint of the accent); lit things use --fg */
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+/* mono (the default): Valkyrie's feature settings, no ligatures or contextual
+   alternates (so "->" and "!=" stay two characters), figures already tabular.
+   JetBrains Mono runs about a quarter wider than Inter Tight: a slight negative
+   tracking takes some of that back without the letters touching. */
+html[data-v2]:not([data-font='sans']) body, html[data-v2]:not([data-font='sans']) #root {
+  font-feature-settings: 'liga' 0, 'calt' 0, 'tnum' 1;
+  letter-spacing: -.02em;
+  /* one step smaller everywhere, screens included: JetBrains Mono's x-height
+     (.55) matches Inter Tight's, so this draws mono about 5% smaller than the
+     same px in sans and every px size in every screen's CSS shrinks with it */
+  font-size-adjust: .52;
+}
+
+@layer base {
+  :where(html[data-v2]) button { font: inherit; color: inherit; touch-action: manipulation; }
+  :where(html[data-v2]) img { -webkit-user-drag: none; }
+}
+
+/* src/index.css rules that the v2 design never had. Same specificity as the
+   rules they undo (this file loads later), so every v2 class still wins. */
+/* index.css's unlayered `button, input, select, textarea { font: inherit }`
+   beats every layered rule: put the layered cascade (the kit components,
+   Tailwind) back in charge, as it is without index.css */
+:where(html[data-v2]) :is(button, input, select, textarea) { font: revert-layer; }
+/* index.css caps svg and canvas at 100% of their box */
+:where(html[data-v2]) :is(svg, canvas) { max-width: revert-layer; }
+/* the classic scanline overlay; v2 safe areas are the strip's and the dock's own */
+html[data-v2] body::after { content: none; }
+html[data-v2] body { padding: 0; }
+
+/* ---------------------------------------------------------------------------
+   Keyframes
+   ------------------------------------------------------------------------- */
+
+/* rows build in from a slight 3D tilt (motion-a.jpg), staggered by --i */
+@keyframes vl-build {
+  from { opacity: 0; transform: perspective(900px) translate3d(-16px, 0, 0) rotateY(18deg); }
+  55% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vl-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vl-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .4; transform: scale(.78); }
+}
+@keyframes vl-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: .12; }
+}
+/* Valkyrie's terminal cursor (src/index.css .cursor-blink): on half the second, off half */
+@keyframes vl-cursor {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+/* the dock caret settles with a small drop after sliding */
+@keyframes vl-caret {
+  0% { opacity: .2; transform: translateY(3px) scaleX(.6); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+/* toasts drop in under the status strip */
+@keyframes vl-toast-in {
+  from { opacity: 0; transform: translate3d(0, -6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vl-toast-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(0, -4px, 0); }
+}
+@keyframes vl-spin { to { transform: rotate(360deg); } }
+
+.vl-pulse { animation: vl-pulse 1.6s ease-in-out infinite; }
+.vl-blink { animation: vl-blink 1.1s steps(1, end) infinite; }
+/* the blinking accent "_" after VALKYRIE//SYS and Valkyrie's clocks; put it on any span */
+.vl-cursor { display: inline-block; color: var(--fg); animation: vl-cursor 1s step-end infinite; }
+html[data-motion='reduced'] .vl-cursor { animation: none; }
+@media (prefers-reduced-motion: reduce) { .vl-cursor { animation: none; } }
+
+@layer components {
+  /* ---------------------------------------------------------------------------
+     Build-in. Elements with .vl-build animate while their page carries
+     data-building (the shell sets it for ~1.4 s when a tab is opened by tap,
+     key or deep link) or inside .vl-build-on (plays once on mount).
+     ------------------------------------------------------------------------- */
+  .vl-page[data-building] .vl-build,
+  .vl-build-on .vl-build {
+    animation: vl-build .46s var(--ease) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
+    backface-visibility: hidden;
+  }
+  .vl-page[data-building] { animation: vl-fade .18s linear both; }
+
+  html[data-motion='reduced'] .vl-page[data-building] .vl-build,
+  html[data-motion='reduced'] .vl-build-on .vl-build {
+    animation: vl-fade .12s linear both;
+    animation-delay: 0s;
+  }
+  html[data-motion='reduced'] .vl-pulse,
+  html[data-motion='reduced'] .vl-blink { animation: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .vl-page[data-building] .vl-build,
+    .vl-build-on .vl-build { animation: vl-fade .12s linear both; animation-delay: 0s; }
+    .vl-pulse, .vl-blink { animation: none; }
+  }
+
+  /* a 3D tilted plane for a stack of plates or option rows: put rows inside */
+  .vl-tilt {
+    transform: perspective(1100px) rotateY(13deg) rotateX(4deg);
+    transform-origin: 0% 50%;
+  }
+  .vl-tilt-r {
+    transform: perspective(1100px) rotateY(-13deg) rotateX(4deg);
+    transform-origin: 100% 50%;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Text
+     ------------------------------------------------------------------------- */
+  /* Valkyrie's small label: dim, uppercase, tracked (its chip and menu labels) */
+  .vl-label {
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .vl-caps {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+  }
+  /* Valkyrie's section title ("> lights"): accent caps, tracked wide, with its glow */
+  .vl-section {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--fg);
+    text-shadow: var(--text-glow);
+  }
+  .vl-section-prompt { opacity: .55; letter-spacing: 0; margin-right: -.1em; }
+  .vl-section-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 32px; }
+  /* body copy and the quiet tones, Valkyrie's --color-text / -dim / -faint */
+  .vl-text { color: var(--text); }
+  .vl-num { font-variant-numeric: tabular-nums; }
+  .vl-glow-text { text-shadow: var(--text-glow); }
+  .vl-hot { color: var(--hot); }
+  .vl-acc2 { color: var(--acc2); }
+  .vl-dim { color: var(--dim); }
+  .vl-faint { color: var(--faint); }
+
+  /* ---------------------------------------------------------------------------
+     Press
+     ------------------------------------------------------------------------- */
+  .vl-press {
+    position: relative;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+    outline: none;
+  }
+  .vl-press:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 2px; }
+  .vl-press:disabled { cursor: default; opacity: .4; }
+  /* grows the touch target to >= 44 px without moving anything */
+  .vl-hit::after {
+    content: '';
+    position: absolute;
+    inset: -8px -6px;
+  }
+
+  /* glass button: the f016 plate on its own (one primary action per screen) */
+  .vl-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--plate-ink);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--plate), transparent), color-mix(in srgb, var(--fg) calc(var(--plate) - 22%), transparent)), rgba(0, 0, 0, .6);
+    border: 1px solid var(--plate-edge);
+    box-shadow: var(--glow), inset 0 1px 0 color-mix(in srgb, var(--plate-edge) 70%, transparent);
+    text-shadow: var(--plate-shadow);
+    transition: transform .12s var(--ease), filter .12s;
+  }
+  .vl-btn[data-pressed] { transform: scale(.97); filter: brightness(1.25); }
+  /* a thin outlined box: a secondary control that still reads as one (Button kind="line") */
+  .vl-btn-line {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    border: 1px solid var(--panel-line);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--fill-a) + 4%), transparent), color-mix(in srgb, var(--fg) var(--fill-b), transparent)), rgba(0, 0, 0, .55);
+    transition: transform .12s var(--ease);
+  }
+  .vl-btn-line::after { content: ''; position: absolute; inset: -4px 0; }
+  .vl-btn-line[data-lit] { color: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
+  .vl-btn-line[data-pressed] { transform: scale(.97); border-color: var(--fg); background: color-mix(in srgb, var(--fg) 22%, transparent); }
+  /* secondary action: plain small text */
+  .vl-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    font-size: 12px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--text) 82%, transparent);
+  }
+  .vl-link[data-lit] { color: var(--fg); }
+  .vl-link[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
+  .vl-link[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+
+  /* icon-only control (IconButton): a 44 px target around a thin line icon */
+  .vl-iconbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 44px;
+    min-height: 44px;
+    flex: none;
+    transition: transform .12s var(--ease);
+  }
+  .vl-iconbtn .vl-icon { transition: color .2s, filter .2s; }
+  .vl-iconbtn[data-pressed] { transform: scale(.9); }
+  .vl-iconbtn[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+  .vl-iconbtn-badge {
+    position: absolute;
+    top: 5px;
+    right: 3px;
+    min-width: 12px;
+    font-size: 9px;
+    line-height: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    color: var(--fg);
+    pointer-events: none;
+  }
+  .vl-iconbtn:not([data-lit]) .vl-iconbtn-badge { color: var(--dim); }
+
+  /* icon-led labels (Label, OptionRow, Stat with `icon`) */
+  .vl-label-icon, .vl-stat-label-icon { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  .vl-optrow-label-icon { display: inline-flex; align-items: center; gap: 8px; }
+  .vl-seg-cell-icon { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+  /* ---------------------------------------------------------------------------
+     Panel: 1 px chamfered border, header label .... value
+     ------------------------------------------------------------------------- */
+  .vl-panel {
+    --ch: 6px;
+    position: relative;
+    padding: 8px 10px 9px;
+    border: 1px solid var(--panel-line);
+    background: var(--panel-fill);
+    clip-path: polygon(var(--ch) 0, 100% 0, 100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%, 0 100%, 0 var(--ch));
+    min-width: 0;
+  }
+  /* the panel's thing is on / live / asking: the outline a step brighter */
+  .vl-panel[data-lit] { --panel-line: color-mix(in srgb, var(--fg) 92%, transparent); }
+  .vl-panel::before,
+  .vl-panel::after {
+    content: '';
+    position: absolute;
+    width: calc(var(--ch) * 1.4142 + 1px);
+    height: 2px;
+    background: var(--panel-line);
+    transform: rotate(-45deg);
+    pointer-events: none;
+  }
+  .vl-panel::before { left: -1px; top: calc(var(--ch) - 2px); transform-origin: 0 50%; }
+  .vl-panel::after { right: -1px; bottom: calc(var(--ch) - 2px); transform-origin: 100% 50%; }
+  .vl-panel[data-dense] { padding: 6px 8px 7px; --ch: 5px; }
+
+  .vl-panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+  /* Valkyrie's section label: accent caps, tracked; it glows only while the panel is lit */
+  .vl-panel-label {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .vl-panel[data-lit] .vl-panel-label { text-shadow: var(--text-glow); }
+  /* no icon: Valkyrie's "> " prompt leads the label instead */
+  .vl-panel-head > .vl-panel-label:not(:empty)::before { content: '> '; opacity: .55; letter-spacing: 0; }
+  /* icon + label, the icon leading (Panel `icon`) */
+  .vl-panel-title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .vl-panel-head:has(> .vl-panel-title) { align-items: center; }
+  .vl-panel-value {
+    font-size: 14px;
+    line-height: 16px;
+    font-weight: 700;
+    color: var(--ink-hi);
+    white-space: nowrap;
+    text-shadow: var(--num-glow);
+  }
+  .vl-panel-unit {
+    margin-left: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--dim);
+    text-shadow: none;
+  }
+  .vl-panel-body { margin-top: 6px; min-width: 0; color: var(--text); }
+  .vl-panel[data-dense] .vl-panel-body { margin-top: 4px; }
+
+  /* ---------------------------------------------------------------------------
+     Bar: ruler track with ticks, gradient fill brightening to a head
+     ------------------------------------------------------------------------- */
+  .vl-bar {
+    --tone: var(--fg);
+    position: relative;
+    height: 12px;
+    min-width: 40px;
+  }
+  .vl-bar[data-tone='hot'] { --tone: var(--hot); }
+  .vl-bar[data-tone='acc2'] { --tone: var(--acc2); }
+  .vl-bar-track {
+    position: absolute;
+    inset: 0;
+    --tick: color-mix(in srgb, var(--tone) 42%, transparent);
+    background:
+      linear-gradient(var(--tick), var(--tick)) left bottom / 100% 1px no-repeat,
+      linear-gradient(var(--tick), var(--tick)) left bottom / 1px 7px no-repeat,
+      linear-gradient(var(--tick), var(--tick)) right bottom / 1px 7px no-repeat,
+      repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px calc(100% / var(--ticks))) left bottom / 100% 4px no-repeat;
+  }
+  .vl-bar-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 2px;
+    height: 4px;
+    transform-origin: 0 50%;
+    transform: scaleX(calc(var(--v) / 100));
+    background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 18%, transparent), color-mix(in srgb, var(--tone) 70%, transparent) 70%, var(--tone));
+    transition: transform .6s var(--ease);
+  }
+  .vl-bar-head {
+    position: absolute;
+    inset: 0;
+    transform: translateX(calc(var(--v) * 1% - 100%));
+    transition: transform .6s var(--ease);
+    pointer-events: none;
+  }
+  .vl-bar-head i {
+    position: absolute;
+    right: -1px;
+    bottom: 1px;
+    width: 2px;
+    height: 7px;
+    background: var(--tone);
+    box-shadow: 0 0 6px var(--tone);
+  }
+  .vl-bar[data-empty] .vl-bar-head { opacity: 0; }
+
+  /* ---------------------------------------------------------------------------
+     Segmented: dim glass bar, the selected cell a raised glowing plate
+     ------------------------------------------------------------------------- */
+  /* the unlit bar is a dark outlined strip in the accent (f005), dosed by luminance through --fill-a / --panel-a */
+  .vl-seg {
+    position: relative;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    height: 38px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--fill-a) + 6%), transparent), color-mix(in srgb, var(--fg) calc(var(--fill-b) + 3%), transparent)), rgba(0, 0, 0, .7);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) calc(var(--panel-a) * .7), transparent);
+  }
+  .vl-seg-plate {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    left: 0;
+    width: calc(100% / var(--n));
+    transform: translateX(calc(var(--k) * 100%));
+    transition: transform .32s var(--ease);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 10%), transparent), color-mix(in srgb, var(--fg) var(--plate), transparent));
+    border: 1.5px solid var(--plate-edge);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 48%), transparent), 0 0 4px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 60%), transparent);
+    pointer-events: none;
+  }
+  .vl-seg-cell {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    padding: 0 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--text) 82%, transparent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color .2s;
+  }
+  .vl-seg-cell::after { content: ''; position: absolute; inset: -4px 0; }
+  .vl-seg-cell[data-on] {
+    color: var(--plate-ink);
+    font-weight: 700;
+    text-shadow: var(--plate-shadow);
+  }
+  .vl-seg-cell[data-pressed]:not([data-on]) { background: color-mix(in srgb, var(--fg) 14%, transparent); color: var(--fg); }
+
+  /* ---------------------------------------------------------------------------
+     OptionRow: label left, options right, active option boxed + glowing
+     ------------------------------------------------------------------------- */
+  .vl-optrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    column-gap: 10px;
+    min-height: 46px;
+    padding: 4px 8px 4px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--fg) 60%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--fill-a) + 5%), transparent), color-mix(in srgb, var(--fg) var(--fill-b), transparent) 85%), rgba(0, 0, 0, .55);
+  }
+  .vl-optrow + .vl-optrow { margin-top: 5px; }
+  .vl-optrow-label {
+    flex: 1 0 auto;
+    max-width: 100%;
+    padding: 6px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vl-optrow-opts { display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
+  .vl-opt {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--dim);
+    border: 1.5px solid transparent;
+    white-space: nowrap;
+    transition: color .2s;
+  }
+  .vl-opt::after { content: ''; position: absolute; inset: -7px -1px; }
+  /* the active option is a solid lit plate with light ink (f005 "Sport", "Balance") */
+  .vl-opt[data-on] {
+    color: var(--plate-ink);
+    font-weight: 600;
+    border-color: var(--plate-edge);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--plate), transparent), color-mix(in srgb, var(--fg) calc(var(--plate) - 16%), transparent));
+    box-shadow: var(--glow);
+    text-shadow: var(--plate-shadow);
+  }
+  .vl-opt[data-pressed]:not([data-on]) { color: var(--fg); border-color: var(--line-strong); }
+
+  /* ---------------------------------------------------------------------------
+     PresetStack: a layered column of plates, the active one lit
+     ------------------------------------------------------------------------- */
+  .vl-presets { display: flex; flex-direction: column; gap: 6px; }
+  .vl-preset {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    min-height: 44px;
+    padding: 6px 12px 7px;
+    margin-left: calc(var(--i, 0) * 3px);
+    text-align: left;
+    border-top: 1px solid color-mix(in srgb, var(--fg) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--fill-a) + 4%), transparent), color-mix(in srgb, var(--fg) var(--fill-b), transparent)), rgba(0, 0, 0, .55);
+  }
+  .vl-preset-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 16px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .vl-preset-swatch {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .vl-preset-detail {
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 500;
+    color: var(--dim);
+  }
+  .vl-preset[data-on] {
+    border: 1.5px solid var(--plate-edge);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 6%), transparent), color-mix(in srgb, var(--fg) calc(var(--plate) - 12%), transparent));
+    box-shadow: var(--glow);
+  }
+  .vl-preset[data-on] .vl-preset-name,
+  .vl-preset[data-on] .vl-preset-detail { color: var(--plate-ink); text-shadow: var(--plate-shadow); }
+  .vl-preset[data-pressed]:not([data-on]) { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+
+  /* ---------------------------------------------------------------------------
+     Stat
+     ------------------------------------------------------------------------- */
+  .vl-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  /* Valkyrie's chip: a dim tracked caps label, the number in the accent */
+  .vl-stat-label { font-size: 10px; line-height: 14px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .vl-stat-value {
+    font-weight: 700;
+    color: var(--ink-hi);
+    white-space: nowrap;
+    letter-spacing: -.01em;
+    text-shadow: var(--num-glow);
+  }
+  .vl-stat[data-size='sm'] .vl-stat-value { font-size: 14px; line-height: 17px; }
+  .vl-stat[data-size='md'] .vl-stat-value { font-size: 18px; line-height: 22px; }
+  .vl-stat[data-size='lg'] .vl-stat-value { font-size: 26px; line-height: 30px; letter-spacing: -.02em; }
+  .vl-stat-unit { margin-left: 3px; font-size: .55em; font-weight: 500; color: var(--dim); letter-spacing: 0; text-shadow: none; }
+
+  /* ---------------------------------------------------------------------------
+     Diamond hotspot
+     ------------------------------------------------------------------------- */
+  .vl-diamond {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+  }
+  .vl-diamond-mark {
+    position: relative;
+    width: 9px;
+    height: 9px;
+    transform: rotate(45deg);
+    border: 1.5px solid var(--fg);
+    background: rgba(0, 0, 0, .45);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--fg) 55%, transparent);
+    transition: transform .18s var(--ease);
+  }
+  .vl-diamond-mark::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    background: var(--fg);
+    opacity: .0;
+  }
+  .vl-diamond[data-on] .vl-diamond-mark { border-color: var(--hot); box-shadow: var(--hot-glow); }
+  .vl-diamond[data-on] .vl-diamond-mark::after { background: var(--hot); opacity: 1; }
+  .vl-diamond[data-pressed] .vl-diamond-mark { transform: rotate(45deg) scale(1.35); }
+  .vl-diamond-label {
+    position: absolute;
+    left: 31px;
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--fg);
+    text-shadow: 0 0 4px #000, 0 0 8px #000;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Beam: CSS light cone (blurred wrapper, clipped cone inside)
+     ------------------------------------------------------------------------- */
+  .vl-beam {
+    position: absolute;
+    width: 340px;
+    height: 170px;
+    pointer-events: none;
+    filter: blur(7px);
+    opacity: var(--beam, 1);
+  }
+  .vl-beam-cone {
+    position: absolute;
+    inset: 0;
+    clip-path: polygon(0 44%, 100% 0, 100% 100%, 0 56%);
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--fg) 62%, transparent), color-mix(in srgb, var(--fg) 22%, transparent) 55%, transparent),
+      radial-gradient(ellipse at 0% 50%, color-mix(in srgb, var(--fg) 40%, transparent), transparent 60%);
+  }
+  .vl-beam-core {
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    width: 26px;
+    height: 16px;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: var(--fg);
+    opacity: .85;
+  }
+
+  /* ---------------------------------------------------------------------------
+     DotFloor: canvas painted by kit/ui.tsx
+     ------------------------------------------------------------------------- */
+  .vl-floor {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    transition: opacity .5s ease;
+  }
+  /* list screens: rows never sit on bright dots; the phone dims it more */
+  .vl-floor.vl-floor-faint { opacity: .6; }
+  @media (max-width: 639px) { .vl-floor.vl-floor-faint { opacity: .36; } }
+
+  /* the hero's scrim: dims the floor on the content side of its anchor (kit/hero.tsx) */
+  .vl-hero-scrim {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transition: opacity .4s ease;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Toasts
+     ------------------------------------------------------------------------- */
+  .vl-toasts {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+    z-index: 40;
+  }
+  .vl-toast {
+    display: flex;
+    align-items: center;
+    max-width: min(90vw, 460px);
+    min-width: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    color: var(--text);
+    background: rgba(0, 0, 0, .92);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 22%), transparent);
+    animation: vl-toast-in .2s var(--ease) both;
+  }
+  .vl-toast[data-leaving] { animation: vl-toast-out .18s ease-in both; }
+  /* a long message wraps to a second line (mono is wide) instead of losing its end */
+  .vl-toast-msg {
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    text-wrap: pretty;
+  }
+  /* a toast with an action takes touches; the rest of the stack lets them through */
+  .vl-toast[data-action] { pointer-events: auto; padding-right: 2px; }
+  .vl-toast-btn {
+    flex: none;
+    min-height: 26px;
+    margin: -4px 0 -4px 10px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    color: var(--fg);
+    border-left: 1px solid var(--line);
+    text-shadow: var(--text-glow);
+  }
+  .vl-toast-btn::after { content: ''; position: absolute; inset: -10px -4px; }
+  .vl-toast-btn[data-pressed] { color: var(--hot); text-shadow: var(--hot-glow); }
+  html[data-motion='reduced'] .vl-toast { animation: vl-fade .12s linear both; }
+  html[data-motion='reduced'] .vl-toast[data-leaving] { animation: none; opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .vl-toast { animation: vl-fade .12s linear both; }
+    .vl-toast[data-leaving] { animation: none; opacity: 0; }
+  }
+
+  /* ---------------------------------------------------------------------------
+     Lists: one row per item with thin dividers
+     ------------------------------------------------------------------------- */
+  .vl-rows > * + * { border-top: 1px solid var(--line); }
+  .vl-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 34px;
+    min-width: 0;
+    color: var(--text);
+  }
+  .vl-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* horizontal snap scroller: carries data-no-swipe in markup */
+  .vl-hscroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pan-y;
+    scrollbar-width: none;
+  }
+  .vl-hscroll::-webkit-scrollbar { display: none; }
+  .vl-hscroll > * { scroll-snap-align: start; flex: none; }
+
+  /* screen content padding inside a page */
+  .vl-screen { padding: 10px 14px 18px; min-height: 100%; }
+  html[data-density='comfortable'] .vl-screen { padding: 16px 20px 26px; }
+  @media (max-width: 639px) { .vl-screen { padding: 8px 10px 16px; } }
+}
+
+/* ===========================================================================
+   Shell: the header (status strip, tabs, hairline with the caret, sub-tabs),
+   scroll rail, content pager, the lights button and the player bar
+   ========================================================================= */
+
+.vl-shell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+  -webkit-user-select: none;
+  user-select: none;
+  /* room every page keeps at its bottom for the lights button (or the player bar) */
+  --foot-pad: calc(64px + env(safe-area-inset-bottom));
+  /* one column that never grows past the viewport: a wide strip or tab row clips itself instead of widening every row */
+  grid-template-columns: minmax(0, 1fr);
+}
+.vl-shell-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.vl-shell > :not(.vl-shell-backdrop) { position: relative; z-index: 1; }
+.vl-shell > .vl-head { z-index: 3; }
+/* toasts hang under the header, over the page top: never over the last row
+   of a page, never over the lights button or the player bar */
+.vl-mid > .vl-shell-toasts {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  z-index: 6;
+  width: max-content;
+  max-width: calc(100% - 20px);
+}
+
+/* ---- header: the strip, then the tabs; the scroll area starts under it ---- */
+.vl-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* the floor fades in under the header's last few px */
+  background: linear-gradient(180deg, #000 calc(100% - 8px), rgba(0, 0, 0, 0));
+}
+
+/* ---- status strip: tiny tracked caps ---- */
+.vl-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: calc(var(--strip-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left));
+  font-size: 9.5px;
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text);
+  white-space: nowrap;
+  /* over the tab row: the gear's touch target reaches down into it */
+  z-index: 2;
+}
+/* left and right grow from 0 and never shrink below their content, so the
+   center sits at the true middle when it fits and slides right (then
+   ellipsizes) when the left group is wide: it can never overlap */
+.vl-strip-left { display: flex; flex: 1 1 0; align-items: center; gap: 12px; min-width: 0; }
+.vl-strip-right { display: flex; flex: 1 1 0; align-items: center; justify-content: flex-end; }
+/* VALKYRIE//SYS_ as in Valkyrie's header: bold, tracked, the accent with its glow */
+.vl-strip-name {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--fg);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 85%), transparent), 0 0 1px #000;
+}
+.vl-strip-slash { opacity: .4; }
+.vl-strip-name .vl-cursor { margin-left: .02em; }
+.vl-strip-hosts { display: flex; align-items: center; gap: 8px; }
+.vl-host { display: inline-flex; align-items: center; gap: 5px; }
+/* one small icon per host: lit with a soft glow while online, dim and flat offline, acc2 when stale */
+.vl-host .vl-icon { vertical-align: 0; transition: color .3s, filter .3s, opacity .3s; }
+.vl-host .vl-icon-glow { filter: drop-shadow(0 0 2px color-mix(in srgb, currentColor 85%, transparent)) drop-shadow(0 0 5px color-mix(in srgb, currentColor 40%, transparent)); }
+.vl-host[data-state='off'] .vl-icon { color: color-mix(in srgb, var(--fg) 36%, transparent); }
+.vl-host[data-state='stale'] .vl-icon { color: var(--acc2); }
+.vl-host b {
+  display: none;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+.vl-host[data-state='off'] b { color: color-mix(in srgb, var(--fg) 38%, transparent); }
+.vl-host[data-state='stale'] b { color: var(--acc2); }
+.vl-strip-five { display: inline-flex; align-items: center; gap: 6px; }
+.vl-strip-k { letter-spacing: .12em; color: var(--dim); }
+.vl-strip-meter {
+  position: relative;
+  width: 30px;
+  height: 3px;
+  background: color-mix(in srgb, var(--fg) 20%, transparent);
+  overflow: hidden;
+}
+.vl-strip-meter i {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(var(--v, 0));
+  background: var(--fg);
+  transition: transform .6s var(--ease);
+}
+.vl-strip-five[data-high] .vl-strip-meter i { background: var(--acc2); }
+.vl-strip-five[data-high] .vl-strip-v { color: var(--acc2); }
+.vl-strip-v { letter-spacing: .02em; color: var(--fg); }
+.vl-strip-center {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: var(--strip-h);
+  line-height: var(--strip-h);
+  text-align: center;
+  letter-spacing: .1em;
+  font-weight: 600;
+  color: var(--text);
+  animation: vl-fade .3s ease both;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* which account the 5h number is (the hottest one): wide screens only */
+.vl-strip-acct {
+  display: none;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+@media (min-width: 1100px) {
+  .vl-strip-acct { display: inline; }
+  .vl-strip-name { font-size: 13px; line-height: 16px; }
+}
+/* the date dim, the clock in Valkyrie's text tone (its clocks are --color-text) */
+.vl-strip-right { font-weight: 600; letter-spacing: .04em; }
+.vl-strip-date { color: var(--dim); }
+.vl-strip-time { color: var(--text); }
+/* mid widths (landscape phone, small tablets): host labels give way to the screen's context */
+@media (min-width: 640px) and (max-width: 1099px) {
+  .vl-strip[data-center] .vl-host b { display: none; }
+  .vl-strip[data-center] .vl-strip-hosts { gap: 7px; }
+}
+.vl-strip-right b { font-weight: 600; color: var(--faint); margin: 0 5px; }
+/* the Settings gear: dim at rest, lit with the glow while Settings is open; a 44 px target */
+.vl-strip-gear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: var(--strip-h);
+  margin: 0 -4px 0 8px;
+  color: var(--dim);
+}
+.vl-strip-gear::after { content: ''; position: absolute; inset: -10px -11px -10px -11px; }
+.vl-strip-gear .vl-icon { vertical-align: 0; transition: color .2s, filter .2s, transform .3s var(--ease); }
+.vl-strip-gear[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); transform: rotate(30deg); }
+.vl-strip-gear[data-on] .vl-icon { transform: rotate(60deg); }
+@media (min-width: 640px) {
+  .vl-strip { font-size: 10px; }
+  .vl-host b { display: inline; }
+  .vl-strip-hosts { gap: 9px; }
+  .vl-strip-meter { width: 38px; }
+}
+@media (max-width: 639px) { .vl-strip-center { display: none; } }
+/* narrow phones (iPhone mini, SE): the host icons, the meter and the gaps tighten so the strip fits 360 px */
+@media (max-width: 400px) {
+  .vl-strip { gap: 8px; padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); }
+  .vl-strip-left { gap: 9px; }
+  .vl-strip-hosts { gap: 5px; }
+  .vl-host .vl-icon { width: 10px; height: 10px; }
+  .vl-strip-five { gap: 5px; }
+  .vl-strip-meter { width: 20px; }
+  .vl-strip-name { font-size: 10.5px; letter-spacing: .06em; }
+}
+/* phones: the weekday goes first, then (under 375 px) the date, so the wordmark, hosts, 5h and clock always fit */
+@media (max-width: 430px) { .vl-strip-wd { display: none; } }
+@media (max-width: 374px) { .vl-strip-date, .vl-strip-right b { display: none; } }
+@media (max-width: 329px) { .vl-strip-name { display: none; } }
+
+/* ---- middle row: rail + pager ---- */
+.vl-mid {
+  display: grid;
+  grid-template-columns: calc(var(--rail-w) + env(safe-area-inset-left)) minmax(0, 1fr);
+  min-height: 0;
+}
+
+/* ---- left rail: thin, quiet scroll indicator ---- */
+.vl-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* the rail ends above the lights button in the corner */
+  padding: 4px 0 var(--foot-pad) env(safe-area-inset-left);
+  min-height: 0;
+}
+.vl-rail-btn {
+  width: 100%;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--fg) 58%, transparent);
+  transition: opacity .25s, color .2s;
+}
+.vl-rail-btn[data-pressed] { color: var(--fg); filter: drop-shadow(0 0 4px var(--fg)); }
+/* the active screen's icon, red with the glow (the reference's lit car icon in the rail) */
+.vl-rail-icon {
+  width: 100%;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin: 2px 0 4px;
+}
+.vl-rail-icon .vl-icon { animation: vl-fade .3s ease both; }
+.vl-rail-icon[data-pressed] .vl-icon { transform: scale(.9); }
+.vl-rail-btn[data-off] { opacity: .28; }
+.vl-rail:not([data-scroll]) .vl-rail-btn { opacity: 0; pointer-events: none; }
+.vl-rail-track {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  touch-action: none;
+  cursor: grab;
+  /* one column of fine dots, the reference's rail */
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--fg) 34%, transparent) 0 .7px, transparent 1.1px);
+  background-size: 100% 6px;
+  background-position: center top;
+  background-repeat: repeat-y;
+  opacity: .7;
+  transition: opacity .3s;
+}
+.vl-rail:not([data-scroll]) .vl-rail-track { opacity: .35; cursor: default; }
+.vl-rail-thumb {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 24px;
+  margin-left: -1px;
+  background: var(--fg);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--fg) 70%, transparent);
+  opacity: .75;
+  will-change: transform;
+  transition: opacity .3s;
+}
+.vl-rail[data-moving] .vl-rail-thumb { opacity: 1; }
+.vl-rail:not([data-scroll]) .vl-rail-thumb { opacity: 0; }
+
+/* phone: no rail column; the indicator floats over the page's left padding,
+   shows only while the page can scroll, and never takes a touch */
+@media (max-width: 639px) {
+  .vl-mid { grid-template-columns: minmax(0, 1fr); }
+  .vl-rail {
+    position: absolute;
+    left: env(safe-area-inset-left);
+    top: 6px;
+    bottom: var(--foot-pad);
+    width: 6px;
+    padding: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .vl-rail-btn, .vl-rail-icon { display: none; }
+  .vl-rail-track { background: none; opacity: 1; }
+  /* at rest the phone shows nothing; the thumb fades in while the page scrolls */
+  .vl-rail-thumb { width: 2px; margin-left: -1px; opacity: 0; box-shadow: none; transition: opacity .5s ease; }
+  .vl-rail[data-moving] .vl-rail-thumb { opacity: .75; box-shadow: 0 0 5px color-mix(in srgb, var(--fg) 70%, transparent); transition-duration: .12s; }
+}
+
+/* ---- content pager ---- */
+.vl-pager {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  touch-action: pan-y;
+  overscroll-behavior: none;
+}
+.vl-pager[data-swiping] { cursor: grabbing; }
+.vl-page {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
+  /* the last row scrolls clear of the lights button (or the player bar) */
+  padding-bottom: var(--foot-pad);
+  /* no will-change: five full-page layers held forever cost memory on the
+     phone; the pager's translate3d promotes a page while it moves */
+}
+.vl-page::-webkit-scrollbar { display: none; }
+/* keeps text legible where it crosses floor dots; glows override it */
+.vl-page, .vl-head, .vl-foot, .vl-set { text-shadow: 0 0 3px #000, 0 0 1px #000; }
+
+/* ---- header tabs: primary tabs, hairline with the caret notch, the active tab's sub-tabs ---- */
+.vl-head { --tab-h: 38px; --sub-h: 30px; }
+.vl-nav {
+  position: relative;
+  display: grid;
+  grid-template-rows: var(--tab-h) 1px auto;
+  min-width: 0;
+  padding: 0 calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left));
+}
+.vl-nav-prims {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  justify-self: center;
+  width: 100%;
+  max-width: 760px;
+  min-width: 0;
+}
+.vl-nav-line {
+  height: 1px;
+  align-self: center;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--fg) 8%, transparent),
+    color-mix(in srgb, var(--fg) 66%, transparent) 14%,
+    color-mix(in srgb, var(--fg) 66%, transparent) 86%,
+    color-mix(in srgb, var(--fg) 8%, transparent));
+}
+/* the sub-tab row folds away on a tab without sub-tabs. No overflow clip, so
+   the sub-tabs' touch targets reach a few px below the header; clip-path keeps
+   the sliding group inside the row's sides. */
+.vl-nav-subs {
+  position: relative;
+  height: 0;
+  min-width: 0;
+  clip-path: inset(0 0 -10px 0);
+  transition: height .26s var(--ease);
+}
+.vl-nav-subs[data-on] { height: var(--sub-h); }
+.vl-nav-subs[data-scroll] { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+.vl-nav-subs::-webkit-scrollbar { display: none; }
+.vl-subs-group {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  white-space: nowrap;
+}
+.vl-nav[data-ready] .vl-subs-group { transition: transform .34s var(--ease); }
+
+.vl-notch {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 7px;
+  margin-left: -7px;
+  pointer-events: none;
+  color: var(--fg);
+}
+.vl-nav[data-ready] .vl-notch { transition: transform .34s var(--ease); }
+.vl-notch svg { display: block; overflow: visible; animation: vl-caret .4s var(--ease) both; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--fg) 80%, transparent)); }
+
+.vl-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 9px;
+  white-space: nowrap;
+  /* Valkyrie's nav labels: uppercase, tracked, dim until lit; only the active one glows */
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition: color .2s, text-shadow .2s;
+}
+.vl-tab[data-on] { color: var(--fg); font-weight: 700; text-shadow: var(--text-glow); }
+.vl-tab[data-pressed] { color: var(--fg); text-shadow: 0 0 10px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 100%), transparent); }
+.vl-tab-prim { font-size: 12px; letter-spacing: .14em; }
+.vl-tab-prim::after { content: ''; position: absolute; inset: 0 0 -6px; }
+/* sub-tabs: a step smaller and quieter; the active one lit with a softer glow */
+.vl-tab-sub { min-width: 40px; padding: 0 10px; font-size: 10.5px; letter-spacing: .14em; color: color-mix(in srgb, var(--dim) 88%, transparent); }
+.vl-tab-sub[data-on] { font-weight: 600; text-shadow: 0 0 7px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 60%), transparent); }
+.vl-tab-sub::after { content: ''; position: absolute; inset: 0 0 -8px; }
+@media (hover: hover) and (pointer: fine) {
+  .vl-tab:not([data-on]):hover { color: var(--text); }
+}
+
+/* ---- Settings: its header row in place of the tabs, and the full screen over the pager ---- */
+.vl-setbar {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-rows: var(--tab-h) 1px;
+  align-items: center;
+  min-width: 0;
+  padding: 0 calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left));
+}
+.vl-setbar-back {
+  grid-column: 1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  height: 100%;
+  min-width: 44px;
+  padding: 0 10px 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.vl-setbar-back span { overflow: hidden; text-overflow: ellipsis; }
+.vl-setbar-back svg { flex: none; color: var(--fg); }
+.vl-setbar-back[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
+.vl-setbar-title {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+  white-space: nowrap;
+}
+.vl-setbar-title .vl-icon { vertical-align: 0; }
+.vl-setbar > .vl-nav-line { grid-column: 1 / -1; grid-row: 2; }
+.vl-setbar-notch { left: 50%; top: calc(var(--tab-h) - 6px); }
+
+.vl-set {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  background: #000;
+  padding: 0 env(safe-area-inset-right) var(--foot-pad) calc(var(--rail-w) + env(safe-area-inset-left));
+  animation: vl-fade .18s linear both;
+}
+.vl-set::-webkit-scrollbar { display: none; }
+
+/* phone portrait: the tabs share the full width; tighter type */
+@media (max-width: 639px) {
+  .vl-head { --tab-h: 40px; --sub-h: 32px; }
+  .vl-nav, .vl-setbar { padding: 0 calc(6px + env(safe-area-inset-right)) 0 calc(6px + env(safe-area-inset-left)); }
+  .vl-nav-prims { justify-content: space-between; }
+  .vl-tab-prim { padding: 0 5px; font-size: 11.5px; letter-spacing: .12em; }
+  .vl-tab-sub { padding: 0 8px; font-size: 10.5px; letter-spacing: .12em; }
+  .vl-set { padding-left: env(safe-area-inset-left); }
+}
+/* narrow phones (iPhone mini, SE): five tabs still fit 360 px */
+@media (max-width: 380px) {
+  .vl-tab-prim { padding: 0 3px; font-size: 11px; letter-spacing: .08em; }
+  .vl-tab-sub { padding: 0 6px; letter-spacing: .08em; }
+}
+/* landscape phone: everything a notch shorter */
+@media (min-width: 640px) and (max-height: 480px) {
+  .vl-head { --tab-h: 32px; --sub-h: 26px; }
+}
+/* reduced motion: the caret, the sub-tab row and its fold jump instead of gliding */
+html[data-motion='reduced'] .vl-nav[data-ready] .vl-notch,
+html[data-motion='reduced'] .vl-nav[data-ready] .vl-subs-group,
+html[data-motion='reduced'] .vl-nav-subs { transition-duration: .01s; }
+html[data-motion='reduced'] .vl-notch svg { animation: vl-fade .12s linear both; }
+@media (prefers-reduced-motion: reduce) {
+  .vl-nav[data-ready] .vl-notch, .vl-nav[data-ready] .vl-subs-group, .vl-nav-subs { transition-duration: .01s; }
+  .vl-notch svg { animation: vl-fade .12s linear both; }
+}
+
+/* ---- the lights button: bottom-left on every tab; with music, the left end of the player bar ---- */
+.vl-shell > .vl-foot {
+  position: absolute;
+  z-index: 4;
+  left: calc(10px + env(safe-area-inset-left));
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  transition: opacity .2s, visibility 0s;
+}
+.vl-shell > .vl-foot[data-bar] {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(60px + env(safe-area-inset-bottom));
+  gap: 12px;
+  padding: 0 calc(4px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(10px + env(safe-area-inset-left));
+}
+/* a sheet or dialog open inside the shell has the bottom to itself (Claude's sheets portal above everything anyway) */
+.vl-shell:has([aria-modal='true']) > .vl-foot { opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s; }
+
+.vl-lamp {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--fg) 14%, transparent), transparent 72%),
+    #000;
+  border: 1px solid color-mix(in srgb, var(--fg) calc(var(--panel-a) + 6%), transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .85);
+  transition: transform .12s var(--ease), border-color .3s, box-shadow .3s;
+}
+.vl-lamp::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
+.vl-lamp .vl-icon { vertical-align: 0; transition: color .3s, filter .3s; }
+.vl-lamp[data-lit] {
+  border-color: color-mix(in srgb, var(--fg) 92%, transparent);
+  background:
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--fg) 30%, transparent), color-mix(in srgb, var(--fg) 6%, transparent) 70%),
+    #000;
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent),
+    0 0 3px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent),
+    inset 0 0 10px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.vl-lamp[data-pressed] { transform: scale(.92); }
+.vl-lamp[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+
+/* ---- player bar: only while something plays ---- */
+.vl-foot-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 6%, transparent), transparent 70%), #000;
+  border-top: 1px solid var(--line);
+  animation: vl-mini-rise .32s var(--ease) both;
+}
+.vl-foot[data-leaving] .vl-foot-bg { animation: vl-mini-sink .24s ease-in both; }
+.vl-mini {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 560px;
+  height: 100%;
+  animation: vl-mini-pop .3s var(--ease) both;
+}
+.vl-mini[data-leaving] { animation: vl-mini-drop .24s ease-in both; }
+.vl-mini img, .vl-mini-art {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.vl-mini-text { display: flex; flex: 1; flex-direction: column; min-width: 0; animation: vl-fade .25s ease both; }
+.vl-mini-text b { font-size: 12.5px; line-height: 15px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vl-mini-text span { font-size: 11px; line-height: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vl-mini-btn {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--fg) 84%, transparent);
+}
+.vl-mini-btn[data-on] { color: var(--fg); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--fg) 70%, transparent)); }
+.vl-mini-btn[data-pressed] { color: var(--fg); filter: drop-shadow(0 0 4px var(--fg)); transform: scale(.9); }
+.vl-mini-close { width: 40px; color: color-mix(in srgb, var(--fg) 52%, transparent); }
+/* the track's progress runs along the bar's top edge */
+.vl-mini-prog { position: absolute; left: 0; right: 0; top: -1px; height: 1px; }
+.vl-mini-prog i { position: absolute; inset: 0; transform-origin: 0 50%; background: var(--fg); box-shadow: 0 0 4px var(--fg); transition: transform 1s linear; }
+@keyframes vl-mini-pop { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: none; } }
+@keyframes vl-mini-drop { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate3d(0, 6px, 0); } }
+@keyframes vl-mini-rise { from { transform: translate3d(0, 100%, 0); } to { transform: none; } }
+@keyframes vl-mini-sink { from { transform: none; } to { transform: translate3d(0, 100%, 0); } }
+html[data-motion='reduced'] .vl-mini, html[data-motion='reduced'] .vl-foot-bg { animation: vl-fade .12s linear both; }
+html[data-motion='reduced'] .vl-mini[data-leaving], html[data-motion='reduced'] .vl-foot[data-leaving] .vl-foot-bg { animation: none; opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .vl-mini, .vl-foot-bg { animation: vl-fade .12s linear both; }
+  .vl-mini[data-leaving], .vl-foot[data-leaving] .vl-foot-bg { animation: none; opacity: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Icons (kit/icons.tsx). Thin line icons in the palette color; .vl-icon-glow
+   gives a lit icon the soft bloom of the reference's red frames.
+   ------------------------------------------------------------------------- */
+@layer components {
+  .vl-icon { flex: none; display: inline-block; vertical-align: -0.18em; transition: color var(--morph) ease; }
+  .vl-icon-fg { color: var(--fg); }
+  .vl-icon-dim { color: var(--dim); }
+  .vl-icon-faint { color: var(--faint); }
+  .vl-icon-hot { color: var(--hot); }
+  .vl-icon-acc2 { color: var(--acc2); }
+  .vl-icon-ink { color: var(--plate-ink); }
+  .vl-icon-glow { filter: var(--icon-glow); }
+}

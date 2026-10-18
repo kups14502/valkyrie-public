@@ -111,6 +111,8 @@ const Terminal = lazyRoute('terminal', () => import('./pages/Terminal'))
 const Vr = lazyRoute('vr', () => import('./pages/Vr'))
 const Calendar = lazyRoute('calendar', () => import('./pages/Calendar'))
 const Meals = lazyRoute('meals', () => import('./pages/Meals'))
+// Valkyrie v2 (src/v2): its own shell at /m/*, outside the classic Shell below.
+const V2 = lazyRoute('v2', () => import('./v2/App'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -427,6 +429,19 @@ function Shell() {
   )
 }
 
+// /m/*: v2 brings its own header, tabs and player bar, so it renders without the
+// classic header, menu, player bar and command palette. Black while its chunk
+// loads, so the phone never flashes the classic loading line.
+function V2Route() {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<div className="fixed inset-0 bg-black" />}>
+        <V2 />
+      </Suspense>
+    </ErrorBoundary>
+  )
+}
+
 function logout() {
   setAuthSkipped(false)
   clearToken()
@@ -445,7 +460,10 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthGate>
         <BrowserRouter>
-          <Shell />
+          <Routes>
+            <Route path="/m/*" element={<V2Route />} />
+            <Route path="*" element={<Shell />} />
+          </Routes>
         </BrowserRouter>
       </AuthGate>
     </QueryClientProvider>
