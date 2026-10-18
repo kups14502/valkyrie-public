@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { accessSync, constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs'
+import { homedir, userInfo } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 
@@ -39,6 +39,11 @@ const exec = promisify(execFile)
 // The first cut of this ran Claude on odin in odin's own checkouts. That was
 // the wrong machine: Brendon's work is on thor, and a "valkyrie" session on
 // odin is not a session he ever opens by hand.
+//
+// Odin is back as a BACKUP host, never the default: when thor is asleep or
+// unreachable, a pane can run Claude Code on this box instead (host 'odin'
+// below). Same rule as thor: the client sends a target KEY, and the directory
+// comes from a private file on this box that no request can write.
 
 export const TMUX_BIN = process.env.VALKYRIE_TMUX_BIN || '/usr/bin/tmux'
 const SOCKET = process.env.VALKYRIE_TMUX_SOCKET || 'valkyrie'
@@ -79,6 +84,175 @@ export const MODES: TermMode[] = ['new', 'resume', 'shell']
 // here is one thor will at least look up.
 export const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+// Where a pane's program runs. 'thor' is the pane's ssh into thor, as it has
+// always been. 'odin' runs the program on this box itself.
+export type TermHost = 'thor' | 'odin'
+export const TERM_HOSTS: TermHost[] = ['thor', 'odin']
+
+// ----------------------------------------------------------------- odin ----
+
+// The odin launch targets: [{ "key": "...", "label": "...", "dir": "..." }].
+// Private to this box and never committed, like thor's launch-targets.json.
+// Without the file there is one target, the home directory.
+const ODIN_TARGETS_PATH = process.env.VALKYRIE_ODIN_TARGETS
+  || path.join(homedir(), '.config', 'valkyrie', 'odin-targets.json')
+// The native installer's link, by absolute path: the tmux server's PATH comes
+// from the systemd user manager, which need not include ~/.local/bin. Not
+// resolved through the link, so `claude update` applies to the next pane.
+export const ODIN_CLAUDE = process.env.VALKYRIE_ODIN_CLAUDE
+  || path.join(homedir(), '.local', 'bin', 'claude')
+
+export type OdinTarget = { key: string; label: string; dir: string }
+export type OdinTargetList = {
+  targets: OdinTarget[]
+  // 'invalid' is a file that does not parse to a list: the default target
+  // stands in, so the backup host still opens, and the page says why.
+  source: 'config' | 'default' | 'invalid'
+}
+
+const ODIN_LABEL_MAX = 40
+let odinParsed: { mtimeMs: number; list: OdinTarget[] | null } | null = null
+
+const expandHome = (p: string): string =>
+  p === '~' ? homedir() : p.startsWith('~/') ? path.join(homedir(), p.slice(2)) : p
+
+function isDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// null when the file does not parse to a list. Bad entries are dropped one by
+// one, each said out loud, so one typo does not take the rest down.
+function parseOdinTargets(raw: string): OdinTarget[] | null {
+  let data: unknown
+  try {
+    data = JSON.parse(raw)
+  } catch (err) {
+    console.warn(`[terminal] ${ODIN_TARGETS_PATH} is not JSON:`, (err as Error).message)
+    return null
+  }
+  const items = Array.isArray(data) ? data : (data as { targets?: unknown } | null)?.targets
+  if (!Array.isArray(items)) {
+    console.warn(`[terminal] ${ODIN_TARGETS_PATH} is not a list of targets`)
+    return null
+  }
+  const seen = new Set<string>()
+  const out: OdinTarget[] = []
+  for (const item of items) {
+    const r = (item ?? {}) as Record<string, unknown>
+    const key = typeof r.key === 'string' ? r.key : ''
+    const dir = typeof r.dir === 'string' ? expandHome(r.dir.trim()) : ''
+    // eslint-disable-next-line no-control-regex
+    const label = (typeof r.label === 'string' ? r.label : key).replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!TARGET_RE.test(key) || seen.has(key)) {
+      console.warn(`[terminal] odin target skipped: bad or repeated key ${JSON.stringify(key)}`)
+      continue
+    }
+    if (!dir || !path.isAbsolute(dir)) {
+      console.warn(`[terminal] odin target ${key} skipped: dir must be an absolute path`)
+      continue
+    }
+    seen.add(key)
+    out.push({ key, label: (label || key).slice(0, ODIN_LABEL_MAX), dir: path.normalize(dir) })
+  }
+  return out
+}
+
+// Read on every call (one stat, and a parse only when the file changed), so an
+// edit to the file applies to the next open without a restart. A directory that
+// has gone missing drops out of the list rather than failing at open.
+export function odinTargets(): OdinTargetList {
+  const fallback = (): OdinTarget[] => [{ key: 'home', label: 'Odin home', dir: homedir() }]
+  let mtimeMs: number
+  try {
+    mtimeMs = statSync(ODIN_TARGETS_PATH).mtimeMs
+  } catch {
+    return { targets: fallback(), source: 'default' }
+  }
+  if (!odinParsed || odinParsed.mtimeMs !== mtimeMs) {
+    let raw = ''
+    try {
+      raw = readFileSync(ODIN_TARGETS_PATH, 'utf8')
+    } catch (err) {
+      console.warn(`[terminal] could not read ${ODIN_TARGETS_PATH}:`, (err as Error).message)
+    }
+    odinParsed = { mtimeMs, list: raw ? parseOdinTargets(raw) : null }
+  }
+  if (!odinParsed.list) return { targets: fallback(), source: 'invalid' }
+  return { targets: odinParsed.list.filter((t) => isDir(t.dir)), source: 'config' }
+}
+
+export function findOdinTarget(key: string): OdinTarget | null {
+  if (!TARGET_RE.test(key)) return null
+  return odinTargets().targets.find((t) => t.key === key) ?? null
+}
+
+export function odinClaudeReady(): boolean {
+  try {
+    accessSync(ODIN_CLAUDE, fsConstants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The pane's program on odin goes through this fixed script, and every
+// variable part (the directory, the program and its arguments) arrives as a
+// positional argument, never inside the script text. It sets what
+// Remote-Session.ps1 sets on thor (fullscreen forced, mouse clicks off, the
+// wheel on), puts ~/.local/bin on PATH for Claude's own tools, and treats a
+// quit (0, or 130 for Ctrl-C) as a clean finish so the pane closes. Any other
+// exit resets the terminal modes a dead TUI leaves on, prints one line, and
+// exits non-zero, so remain-on-exit=failed keeps that line on screen.
+const ODIN_WRAP = [
+  'cd -- "$1" || { printf "\\n  odin: cannot open %s\\n" "$1"; exit 2; }',
+  'shift',
+  'export CLAUDE_CODE_NO_FLICKER=1 CLAUDE_CODE_DISABLE_MOUSE_CLICKS=1',
+  'unset CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN CLAUDE_CODE_DISABLE_MOUSE',
+  'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac',
+  'printf "odin  %s\\n" "$PWD"',
+  '"$@"',
+  's=$?',
+  'case $s in 0|130) exit 0 ;; esac',
+  'printf "\\033[?1000l\\033[?1002l\\033[?1003l\\033[?1006l\\033[?25h\\033[?1049l"',
+  'printf "\\n  odin: %s exited with %s\\n" "${1##*/}" "$s"',
+  'exit "$s"',
+].join('\n')
+
+const SH_BIN = '/bin/sh'
+
+function loginShell(): string {
+  try {
+    const s = userInfo().shell
+    if (s && path.isAbsolute(s) && existsSync(s)) return s
+  } catch { /* no passwd entry */ }
+  return '/bin/bash'
+}
+
+// The pane on odin: its directory and argv. Same validation as remoteCommand,
+// narrower scope: a new Claude or a shell in an odin target. Projects, agent
+// runs and the desk stay on thor, where their files and MCP wiring live, and a
+// resume would need the transcript's own folder, which only thor tracks.
+export function odinCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk'>): { dir: string; argv: string[] } {
+  if (o.mode === 'resume' || o.resumeId) throw Object.assign(new Error('odin opens new sessions and shells, not resumes'), { status: 400 })
+  if (o.projectId || o.runId || o.desk) throw Object.assign(new Error('projects, agent runs and new-project sessions start on thor'), { status: 400 })
+  if (!o.target || !TARGET_RE.test(o.target)) throw Object.assign(new Error('target must be an odin target key'), { status: 400 })
+  const t = findOdinTarget(o.target)
+  if (!t) throw Object.assign(new Error(`no odin target named '${o.target}'`), { status: 400 })
+  let program: string[]
+  if (o.mode === 'shell') {
+    program = [loginShell(), '-l']
+  } else {
+    if (!odinClaudeReady()) throw Object.assign(new Error(`claude is not installed at ${ODIN_CLAUDE}`), { status: 503 })
+    program = [ODIN_CLAUDE]
+    if (o.newId && UUID_RE.test(o.newId)) program.push('--session-id', o.newId)
+  }
+  return { dir: t.dir, argv: [SH_BIN, '-c', ODIN_WRAP, 'valkyrie-odin', t.dir, ...program] }
+}
 
 function baseArgs(): string[] {
   const a = ['-L', SOCKET]
@@ -359,7 +533,10 @@ const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
 
 export type CreateOpts = {
   mode: TermMode
+  // Where the program runs; thor when absent, as every caller before odin.
+  host?: TermHost
   // A launch-target key (new, shell) — validated against TARGET_RE by the route.
+  // On odin it is a key from odin-targets.json instead of thor's list.
   target?: string
   // A conversation id (resume) — validated against UUID_RE by the route.
   resumeId?: string
@@ -487,7 +664,16 @@ export function sshArgs(remote: string): string[] {
 }
 
 export async function createSession(o: CreateOpts): Promise<string> {
-  if (!sshPresent()) throw Object.assign(new Error(`ssh is not installed at ${SSH_BIN}`), { status: 503 })
+  const host: TermHost = o.host ?? 'thor'
+  if (!TERM_HOSTS.includes(host)) throw Object.assign(new Error(`host must be one of ${TERM_HOSTS.join(', ')}`), { status: 400 })
+  if (host === 'thor' && !sshPresent()) throw Object.assign(new Error(`ssh is not installed at ${SSH_BIN}`), { status: 503 })
+
+  // Validates before anything is spawned, and before the tmux server is
+  // touched, so a bad request costs nothing.
+  const pane = host === 'odin'
+    ? odinCommand(o)
+    : { dir: homedir(), argv: sshArgs(remoteCommand(o)) }
+
   await ensureServer()
   const open = await listSessions()
   if (open.length >= MAX_SESSIONS) {
@@ -497,20 +683,18 @@ export async function createSession(o: CreateOpts): Promise<string> {
     )
   }
 
-  // Validates before anything is spawned.
-  const remote = remoteCommand(o)
-
   const name = `vk-${randomBytes(5).toString('hex')}`
   const cols = clamp(o.cols, 20, 400, 80)
   const rows = clamp(o.rows, 8, 200, 24)
 
   // -x/-y size the window now. Without them a detached session starts 80x24
   // and Claude Code paints its first frame to that, which on a phone means a
-  // wrapped mess until the first resize lands. -c is this box's home purely
-  // because tmux needs a cwd for the pane; nothing in it runs here.
+  // wrapped mess until the first resize lands. For thor, -c is this box's home
+  // purely because tmux needs a cwd for the pane; nothing in it runs here. For
+  // odin it is the target's directory, where the program does run.
   const args = [
-    'new-session', '-d', '-s', name, '-c', homedir(), '-x', String(cols), '-y', String(rows),
-    '--', ...sshArgs(remote),
+    'new-session', '-d', '-s', name, '-c', pane.dir, '-x', String(cols), '-y', String(rows),
+    '--', ...pane.argv,
   ]
 
   await tmux(args, 20_000)
@@ -526,7 +710,7 @@ export async function createSession(o: CreateOpts): Promise<string> {
   // symptom was a session strip full of raw ids.
   await Promise.all([
     setOpt(name, '@vk_label', o.label.slice(0, 60)),
-    setOpt(name, '@vk_host', 'thor'),
+    setOpt(name, '@vk_host', host),
     setOpt(name, '@vk_mode', o.mode),
     setOpt(name, '@vk_target', o.mode === 'resume' ? (o.resumeId ?? '') : (o.target ?? '')),
     setOpt(name, '@vk_sid', o.mode === 'resume' ? (o.resumeId ?? '') : (o.mode === 'new' ? (o.newId ?? '') : '')),

@@ -804,8 +804,11 @@ export type TermStatus = {
 // new or shell session opened with `project` to that project's launch target.
 // automationRev is the rev of the brief the run sheet showed; the backend
 // answers 409 "changed since" when the stored brief is newer.
+// host 'odin' runs the program on odin itself (the backup when thor is down),
+// with target a key from odin's own list (GET /terminal/odin-targets); absent
+// is thor. Odin takes new and shell only, with no project, agent or desk.
 export type TermOpen =
-  | { mode: 'new' | 'shell'; target?: string; project?: string; automation?: string; automationRev?: number; desk?: boolean; prompt?: string; label?: string; cols?: number; rows?: number }
+  | { mode: 'new' | 'shell'; host?: 'thor' | 'odin'; target?: string; project?: string; automation?: string; automationRev?: number; desk?: boolean; prompt?: string; label?: string; cols?: number; rows?: number }
   | { mode: 'resume'; sessionId: string; project?: string; label?: string; cols?: number; rows?: number }
 
 // conversationId is the id minted for a new session, and runId the automation

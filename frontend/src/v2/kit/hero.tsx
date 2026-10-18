@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import {
-  Camera, FRAME_FX, LAPTOP_FX, PHONE_FX, POSES, SERVER_FX, TABLET_FX, TOWER_FX, WireScene, compile, frameHeadset, laptop, odinServer, phone, tablet, thorTower,
+  Camera, FRAME_FX, LAPTOP_FX, ODIN_FX, PHONE_FX, POSES, TABLET_FX, TOWER_FX, WireScene, compile, frameHeadset, laptop, odinRig, phone, tablet, thorTower,
   type Beam, type CameraPose, type Flow, type Model, type Vec3,
 } from './three'
 import { useHosts } from './data'
@@ -9,8 +9,8 @@ import { useReducedMotion } from './motion'
 import { useShell } from './shell'
 import { cx } from './ui'
 
-// The x-ray hero (reference f018/f016): thor's tower (or odin's server, per
-// Settings > Hero) on its own 3D dot floor, front-fan beams, airflow, and
+// The x-ray hero (reference f018/f016): thor's tower (or odin's laptop and
+// RAID enclosure, per Settings > Hero) on its own 3D dot floor, and its
 // internals glowing by the host's live load. `host` can show any device model:
 // frame's headset, mimir's laptop, and the phone and tablet slabs.
 //
@@ -40,10 +40,12 @@ export const HERO_IDS: readonly HeroId[] = ['thor', 'odin']
 export type HostModelId = HeroId | 'frame' | 'mimir' | 'phone' | 'tablet'
 export const HOST_MODEL_IDS: readonly HostModelId[] = ['thor', 'odin', 'frame', 'mimir', 'phone', 'tablet']
 
-const BUILD: Record<HostModelId, () => Model> = { thor: thorTower, odin: odinServer, frame: frameHeadset, mimir: laptop, phone, tablet }
+// odin is the real rig (laptop + RAID enclosure, models/odin.ts); the older odinServer box stays exported but unused here.
+// frame is built without the ergo kit's optional top strap (frameHeadset({ topStrap: true }) adds it).
+const BUILD: Record<HostModelId, () => Model> = { thor: thorTower, odin: odinRig, frame: () => frameHeadset(), mimir: laptop, phone, tablet }
 // Beams and airflow are OFF on every hero since 2026-10-17 ("the pc looks like the car"); kept for reference only.
 export const HERO_FX: Record<HostModelId, { beams: Beam[]; flow: Flow[] }> = {
-  thor: TOWER_FX, odin: SERVER_FX, frame: FRAME_FX, mimir: LAPTOP_FX, phone: PHONE_FX, tablet: TABLET_FX,
+  thor: TOWER_FX, odin: ODIN_FX, frame: FRAME_FX, mimir: LAPTOP_FX, phone: PHONE_FX, tablet: TABLET_FX,
 }
 const built: Partial<Record<HostModelId, Model>> = {}
 /** Shared, memoized model per id (built on first use). */
@@ -55,11 +57,12 @@ export function hostModel(hostId: string): HostModelId | null {
 }
 
 /**
- * Suggested POSES name per model for System > Hosts. thor and odin keep the
- * poses System already uses; the headset, laptop and slabs read best from the
- * raised front 3/4 ('device'), where the strap loop, keyboard and camera bump show.
+ * Suggested POSES name per model for System > Hosts. thor keeps the pose
+ * System already uses; odin's rig, the headset, the laptop and the slabs read
+ * best from the raised front 3/4 ('device'), where the enclosure's bays, the
+ * strap loop, the keyboard and the camera bump show.
  */
-export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'home', frame: 'device', mimir: 'device', phone: 'device', tablet: 'device' }
+export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'device', frame: 'device', mimir: 'device', phone: 'device', tablet: 'device' }
 
 /** Settings > Hero ('v2.hero'). */
 export function useHeroId(): [HeroId, (v: HeroId) => void] {

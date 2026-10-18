@@ -8,10 +8,10 @@ import { randomUUID } from 'node:crypto'
 import { requireStrongAuth, authorizeStrongUpgrade, viaCloudflare } from '../middleware/auth.js'
 import { isAllowedHost, isAllowedOrigin } from '../middleware/origin.js'
 import {
-  MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TMUX_BIN, UUID_RE,
-  APP_SCROLL_END, attachArgs, createSession, endScroll, ensureServer, hasSession, killSession, listSessions,
-  paneTakesWheel, remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion, wheelInput,
-  type TermMode, type TermSession,
+  MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TERM_HOSTS, TMUX_BIN, UUID_RE,
+  APP_SCROLL_END, attachArgs, createSession, endScroll, ensureServer, findOdinTarget, hasSession, killSession, listSessions,
+  odinClaudeReady, odinTargets, paneTakesWheel, remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion, wheelInput,
+  type TermHost, type TermMode, type TermSession,
 } from '../terminal/tmux.js'
 import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
@@ -19,7 +19,9 @@ import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDe
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
-// thor, and the bytes ride a websocket.
+// thor, and the bytes ride a websocket. A pane opened with host 'odin' runs its
+// program on this box instead (the backup when thor is down); everything after
+// the open (list, attach, scroll, kill) treats it like any other pane.
 //
 // What to open comes from elsewhere: the launch targets from thor's launcher
 // agent (GET /hosts/thor/launch-targets, filtered to the ones flagged for the
@@ -55,6 +57,21 @@ router.get('/terminal/status', async (_req, res) => {
     remote: remoteLabel(),
     serverUp: serverUp(),
     maxSessions: MAX_SESSIONS,
+  })
+})
+
+// The backup host's launch targets (odin-targets.json on this box, see
+// terminal/tmux.ts). Keys and labels only: the directories never leave here,
+// and an open names a key, exactly as a thor open does.
+router.get('/terminal/odin-targets', (_req, res) => {
+  const { targets, source } = odinTargets()
+  const ready = odinClaudeReady()
+  res.json({
+    host: 'odin',
+    ready,
+    detail: ready ? null : 'the claude CLI is not installed on odin',
+    source,
+    targets: targets.map(({ key, label }) => ({ key, label })),
   })
 })
 
@@ -125,6 +142,17 @@ router.post('/terminal/sessions', async (req, res) => {
     return res.status(400).json({ error: 'a new-project session is mode new, with no project or agent' })
   }
   if (prompt.length > DESK_PROMPT_MAX) return res.status(400).json({ error: `the description is longer than ${DESK_PROMPT_MAX} characters` })
+  // Where the pane's program runs. Absent is thor, so every older client sends
+  // exactly what it always did. Odin is the backup: a new Claude or a shell in
+  // one of its own targets, nothing that needs thor's project wiring.
+  const host = (body.host == null ? 'thor' : String(body.host)) as TermHost
+  if (!TERM_HOSTS.includes(host)) return res.status(400).json({ error: `host must be one of ${TERM_HOSTS.join(', ')}` })
+  if (host === 'odin') {
+    if (mode === 'resume') return res.status(400).json({ error: 'odin opens new sessions and shells, not resumes' })
+    if (projectKey !== undefined || automation !== undefined || desk) {
+      return res.status(400).json({ error: 'projects, agent runs and new-project sessions start on thor' })
+    }
+  }
   const hidden = hiddenFrom(req)
   let project: Project | null = null
   if (projectKey !== undefined) {
@@ -157,6 +185,11 @@ router.post('/terminal/sessions', async (req, res) => {
     target = project ? project.targetKey : desk ? DESK_TARGET : String(body.target ?? '')
     if (!TARGET_RE.test(target)) return res.status(400).json({ error: 'target must be a launch-target key' })
     fallback = target
+    if (host === 'odin') {
+      const t = findOdinTarget(target)
+      if (!t) return res.status(400).json({ error: `no odin target named '${target}'` })
+      fallback = t.label
+    }
     // The conversation id is minted HERE and handed to claude, rather than read
     // back afterwards. A chip opened on a target could otherwise never name the
     // conversation running in it: the label froze at 'personal' for the life of
@@ -174,7 +207,7 @@ router.post('/terminal/sessions', async (req, res) => {
     let name: string
     try {
       name = await createSession({
-        mode, target, resumeId, newId, label,
+        mode, host, target, resumeId, newId, label,
         cols: Number(body.cols), rows: Number(body.rows),
         projectId: project?.id, runId: run?.id ?? deskRun ?? undefined, desk,
       })

@@ -513,7 +513,8 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
 .sys-kv-trips { flex-wrap: wrap; row-gap: 3px; }
 .sys-kv-trips .vl-bar { flex: 1 0 100%; height: 10px; }
 
-.sys-trade-ribbon { position: relative; height: 156px; margin: 0 -4px; }
+/* the 3D equity chart: tall enough on a phone for the floor, the ribbon and its labels */
+.sys-trade-ribbon { position: relative; height: 200px; margin: 0 -4px; }
 .sys-trade-legend { margin-top: 4px; flex-wrap: wrap; justify-content: flex-start; column-gap: 14px; white-space: normal; }
 
 @media (min-width: 640px) {
@@ -530,5 +531,5 @@ html[data-motion='reduced'] .sys-svc-act[data-sending] .sys-ico { animation: non
   .sys-trade-eq { font-size: 50px; line-height: 52px; }
   .sys-trade-eq small { font-size: 24px; }
   .sys-trade-chg { font-size: 17px; }
-  .sys-trade-ribbon { height: 290px; }
+  .sys-trade-ribbon { height: 340px; }
 }

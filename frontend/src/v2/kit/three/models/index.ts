@@ -2,9 +2,10 @@ import type { CameraPose } from '../engine'
 
 export { thorTower, TOWER_FX } from './tower'
 export { odinServer, SERVER_FX } from './server'
+export { odinRig, ODIN_FX } from './odin'
 export { room, bulbSpots } from './room'
 export { Builder, AX, rrLoop } from './build'
-export { frameHeadset, FRAME_FX } from './frame'
+export { frameHeadset, FRAME_FX, type FrameOptions } from './frame'
 export { laptop, LAPTOP_FX } from './laptop'
 export { phone, tablet, PHONE_FX, TABLET_FX } from './slate'
 

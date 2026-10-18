@@ -1,29 +1,33 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode,
+} from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, Segmented, cx, dismissToast, toast } from '../kit/ui'
 import {
   ago, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick, useTrade,
   useTracker, useUsage,
-  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM,
+  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeVM,
 } from '../kit/data'
-import { Hero, heroModel, useHeroId } from '../kit/hero'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
+import { useSetting } from '../kit/theme'
+import { useReducedMotion } from '../kit/motion'
 import { apiErrorText } from '../../lib/api'
 import { fetchTrackerSkips, shiftDateKey } from '../../lib/supplementsApi'
 import { useDailyTracker, useTrackerDays, workoutFor } from '../../lib/dailyTracker'
-import { useLightsControl } from '../../lib/lights'
+import { lightColor, useLightsControl } from '../../lib/lights'
 import { useQuickSessions } from '../../lib/quickSessions'
 import './dashboard.css'
 
-// Dashboard: one page with everything Valkyrie does, skimmable in a few
-// seconds. The thor card (live CPU / Mem / Disk beside the small x-ray model;
-// its diamonds light the matching row), the daily tracker, the calendar (today
-// first, then the next six days as compact rows), quick start, and one glance
-// panel: AI (live and asking sessions, usage meters), lights (a plate that
-// switches them all), hosts, media (playing or newest added, downloads) and
-// trade. Phone: one column, the thor card first. From 640 px: two columns.
-// Desktop: three (live sessions and media on the right).
+// Dashboard: one page with everything Valkyrie does, in the order Brendon
+// uses it. A trade ticker line on top (scrolls only when it does not fit),
+// quick start, lights (a plate that switches them all), the daily tracker,
+// the calendar (today first, then the next six days as compact rows), AI
+// (live and asking sessions, usage meters), media (playing or newest added,
+// downloads) and every host at the bottom (CPU / Mem / Disk, battery where
+// the host has one). Phone: one column in that order. From 640 px: the
+// ticker over two columns. Desktop: three (AI in the middle, media and the
+// hosts on the right).
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -68,37 +72,34 @@ export default function Dashboard({ active }: ScreenProps) {
 
   const wide = useMedia('(min-width: 1200px)')
 
-  // the part picked on the model (a diamond): its readout row lights for a few seconds
-  const [part, setPart] = useState<string | null>(null)
-  useEffect(() => {
-    if (!part) return
-    const t = setTimeout(() => setPart(null), 6000)
-    return () => clearTimeout(t)
-  }, [part])
-  const shownPart = active ? part : null
-  const pick = (id: string) => setPart((cur) => (cur === id ? null : id))
-
+  // Phone: the column wrappers dissolve, so the blocks read top to bottom in
+  // this order. From 640 px the first wrapper is the left column; desktop
+  // splits the rest into a middle and a right column.
   return (
     <div className="hm">
       <div className="vl-screen hm-layout" data-cols={wide ? 3 : 2}>
-        <div className="hm-col hm-main">
+        <TradeTicker active={active} i={0} />
+        <div className="hm-col hm-a">
+          <QuickStart />
+          <LightsBlock i={3} />
           <Tracker />
           <Calendar />
-          <QuickStart />
         </div>
-        <div className="hm-col hm-side">
-          <Panel className="hm-block" i={0}>
-            <div className="hm-block-text"><HostReadout part={shownPart} /></div>
-            <div className="hm-block-hero">
-              <Hero active={active} pose="home" fill={0.86} className="hm-hero" activeHotspot={shownPart} onHotspot={pick} />
+        {wide ? (
+          <>
+            <div className="hm-col hm-b">
+              <AiBlock wide i={9} />
             </div>
-          </Panel>
-          <Glances wide={wide} />
-        </div>
-        {wide && (
-          <div className="hm-col hm-third">
-            <SessionsPanel i={10} />
-            <Panel className="hm-glance" i={11} dense><MediaGlance posters={8} /></Panel>
+            <div className="hm-col hm-c">
+              <Panel className="hm-glance" i={10} dense><MediaGlance posters={8} /></Panel>
+              <Systems i={11} />
+            </div>
+          </>
+        ) : (
+          <div className="hm-col hm-b">
+            <AiBlock wide={false} i={9} />
+            <Panel className="hm-glance" i={10} dense><MediaGlance posters={6} /></Panel>
+            <Systems i={11} />
           </div>
         )}
       </div>
@@ -190,89 +191,210 @@ function settled(qc: QueryClient, fire: () => void): Promise<void> {
   })
 }
 
-// ---------- the thor card ----------
+// ---------- trade ticker: one line on top, scrolling only when it does not fit ----------
 
-/** "Up 3d 4h", "Up 5h", "Up 12m" from seconds */
-function upLabel(sec: number | null): string | null {
-  if (sec == null || sec <= 0) return null
-  const m = Math.floor(sec / 60)
-  if (m < 60) return `Up ${Math.max(1, m)}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `Up ${h}h`
-  const d = Math.floor(h / 24)
-  return h % 24 && d < 10 ? `Up ${d}d ${h % 24}h` : `Up ${d}d`
-}
+/** what System > Trades reads that the kit's TradeVM does not carry (its 'tradeSys' query) */
+type TradePeek = { lastTrade: string | null; lastTradeAt: number | null; marketReason: string }
 
-/** "20.4 of 31.1 GB", "2.8 of 3.6 TB" (GiB in, binary units, as Windows shows them) */
-const size = (used: number, total: number) => total >= 1000
-  ? `${(used / 1024).toFixed(1)} of ${(total / 1024).toFixed(1)} TB`
-  : `${Math.round(used * 10) / 10} of ${Math.round(total * 10) / 10} GB`
-
-/** The fact for a part picked on the model (a diamond); null when nothing is picked. */
-function partDetail(part: string | null, h: HostVM | undefined, heroId: string, on: boolean, failed: boolean): string | null {
-  if (!part) return null
-  if (!on) return h ? 'Offline' : failed ? 'Not answering' : 'No data'
-  if (part === 'cpu') {
-    const peak = Math.max(-1, ...(h?.history ?? []).map((p) => p.cpu ?? -1))
-    return peak >= 0 ? `1h peak ${Math.round(peak)}%` : `${h?.cpu ?? '--'}% now`
-  }
-  if (part === 'mem') return h?.memUsedGb != null && h.memTotalGb != null ? size(h.memUsedGb, h.memTotalGb) : `${h?.mem ?? '--'}% used`
-  if (part === 'disk') return h?.diskUsedGb != null && h.diskTotalGb != null ? size(h.diskUsedGb, h.diskTotalGb) : `${h?.disk ?? '--'}% used`
-  if (part === 'gpu') return heroId === 'thor' ? 'RTX 5080, no live metric' : 'No live metric'
-  if (part === 'fans') return h?.cpu != null ? `No fan sensor, CPU ${h.cpu}%` : 'No fan sensor'
-  return null
-}
-
-const READ_ROWS = [
-  { id: 'cpu', icon: 'cpu', label: 'CPU' },
-  { id: 'mem', icon: 'mem', label: 'Mem' },
-  { id: 'disk', icon: 'disk', label: 'Disk' },
-] as const
+const isTradeSys = (k: readonly unknown[]) => k[0] === 'v2' && k[1] === 'tradeSys'
 
 /**
- * The hero machine's live load: CPU, Mem and Disk rows with bars, and one
- * detail line (cores and uptime, or the fact for the part picked on the
- * model, whose row lights). Tapping it opens System > Hosts.
+ * The last trade and the market reason, read from System's own trade query
+ * (System stays mounted, so it is always polling). Read only: this never
+ * creates that query, so its persisted first paint stays System's. null until
+ * System's first read lands, or when its shape no longer has these fields.
  */
-function HostReadout({ part }: { part: string | null }) {
+function useTradePeek(): TradePeek | null {
+  const qc = useQueryClient()
+  const subscribe = useCallback(
+    (cb: () => void) => qc.getQueryCache().subscribe((e) => { if (isTradeSys(e.query.queryKey)) cb() }),
+    [qc],
+  )
+  const raw = useSyncExternalStore(subscribe, () => qc.getQueryData<unknown>(['v2', 'tradeSys']))
+  return useMemo(() => {
+    if (!raw || typeof raw !== 'object') return null
+    const r = raw as Record<string, unknown>
+    return {
+      lastTrade: typeof r.lastTrade === 'string' && r.lastTrade ? r.lastTrade : null,
+      lastTradeAt: typeof r.lastTradeAt === 'number' && Number.isFinite(r.lastTradeAt) ? r.lastTradeAt : null,
+      marketReason: typeof r.marketReason === 'string' ? r.marketReason : '',
+    }
+  }, [raw])
+}
+
+const usd0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`
+const signed = (v: number, d = 2) => `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(d)}`
+/** "sell HPE" out of "sell HPE at the broker on 2026-10-15" (the bot's own words when it reads otherwise) */
+const tradeShort = (s: string) => {
+  const m = /^(buy|sell)\s+(\S+)/i.exec(s)
+  if (m) return `${m[1].toLowerCase()} ${m[2]}`
+  return s.length > 28 ? `${s.slice(0, 27)}…` : s
+}
+
+/** a held finger longer than this pauses the line to read it, and does not open Trades on release */
+const HOLD_MS = 450
+/** marquee speed, px per second */
+const TICKER_PX_S = 34
+
+/** Bot health in one word: down and stale are alerts, so is a rules hash that drifted. */
+function botWord(t: TradeVM): { text: string; alert: boolean } {
+  if (!t.up) return { text: 'down', alert: true }
+  if (t.stale) return { text: 'stale', alert: true }
+  if (t.rulesOk === false) return { text: 'rules drift', alert: true }
+  return { text: 'ok', alert: false }
+}
+
+/**
+ * The ticker's cells, as nodes and as one plain line for the accessible name.
+ * The equity is its own node: it stays pinned beside the label, only the
+ * cells after it scroll.
+ */
+function tickerCells(t: TradeVM, peek: TradePeek | null, now: number, age: string | null): { eq: ReactNode; cells: ReactNode[]; said: string } {
+  const cells: ReactNode[] = []
+  const said: string[] = []
+  const sep = (k: string) => <i key={`s-${k}`} className="hm-tk-sep" aria-hidden />
+
+  const eq = (
+    <span className="hm-tk-cell">
+      <b className="hm-tk-eq">{t.equity != null ? usd0(t.equity) : '--'}</b>
+      {t.equitySource === 'day_open' && <span className="hm-tk-k">day open</span>}
+    </span>
+  )
+  said.push(`equity ${t.equity != null ? usd0(t.equity) : 'unknown'}${t.equitySource === 'day_open' ? ' at day open' : ''}`)
+
+  if (t.changeUsd != null) {
+    const up = t.changeUsd >= 0
+    cells.push(
+      <span key="chg" className="hm-tk-cell" title={t.windowDays ? `Trading P&L over the last ${t.windowDays} days` : 'Trading P&L'}>
+        <Icon name={up ? 'trades' : 'down'} size={12} tone="fg" className="hm-ic" />
+        <span className="hm-tk-v">{up ? '+' : '-'}${Math.abs(t.changeUsd).toFixed(2)}</span>
+        {t.changePct != null && <span className="hm-tk-v">{signed(t.changePct)}%</span>}
+        {t.windowDays ? <span className="hm-tk-k">{t.windowDays}d</span> : null}
+      </span>,
+    )
+    said.push(`${t.windowDays ? `${t.windowDays} day ` : ''}change ${up ? 'plus' : 'minus'} $${Math.abs(t.changeUsd).toFixed(2)}`)
+  }
+
+  const reason = !t.marketOpen && peek?.marketReason ? peek.marketReason : ''
+  if (cells.length) cells.push(sep('mkt'))
+  cells.push(
+    <span key="mkt" className="hm-tk-cell" data-lit={t.marketOpen || undefined}>
+      <span className="hm-tk-k">Mkt</span>
+      <span className="hm-tk-v">{t.marketOpen ? 'open' : 'closed'}</span>
+      {reason && <span className="hm-tk-d">{reason}</span>}
+    </span>,
+  )
+  said.push(`market ${t.marketOpen ? 'open' : 'closed'}${reason ? `, ${reason}` : ''}`)
+
+  const bot = botWord(t)
+  cells.push(sep('bot'))
+  cells.push(
+    <span key="bot" className="hm-tk-cell" title={t.upDetail || undefined}>
+      <span className="hm-tk-k">Bot</span>
+      <span className={cx('hm-tk-v', bot.alert && 'hm-alert')}>{bot.text}</span>
+    </span>,
+  )
+  said.push(`bot ${bot.text}`)
+
+  if (t.targetTrips > 0) {
+    cells.push(sep('trips'))
+    cells.push(
+      <span key="trips" className="hm-tk-cell" title="Live round trips toward the pre-registered target">
+        <span className="hm-tk-k">Trips</span>
+        <span className="hm-tk-v">{t.liveTrips ?? '--'}<span className="hm-tk-d">/{t.targetTrips}</span></span>
+      </span>,
+    )
+    said.push(`${t.liveTrips ?? 'unknown'} of ${t.targetTrips} live trips`)
+  }
+
+  if (peek?.lastTrade) {
+    const short = tradeShort(peek.lastTrade)
+    cells.push(sep('last'))
+    cells.push(
+      <span key="last" className="hm-tk-cell" title={peek.lastTrade}>
+        <span className="hm-tk-k">Last</span>
+        <span className="hm-tk-v">{short}</span>
+        {peek.lastTradeAt != null && <span className="hm-tk-d">{ago(peek.lastTradeAt, now)} ago</span>}
+      </span>,
+    )
+    said.push(`last trade ${short}${peek.lastTradeAt != null ? `, ${ago(peek.lastTradeAt, now)} ago` : ''}`)
+  }
+
+  if (age) {
+    cells.push(sep('age'))
+    cells.push(<span key="age" className="hm-tk-cell hm-old-tag">{age} old</span>)
+    said.push(`${age} old`)
+  }
+  return { eq, cells, said: said.join(', ') }
+}
+
+/**
+ * The trade bot as a stock-ticker line: equity, the change with its window,
+ * market, bot health, live trips, last trade. It scrolls as a marquee only
+ * when it is wider than the screen, never under reduced motion, and stops
+ * while the dashboard is not the active tab. A finger on it pauses it; a tap
+ * opens System > Trades, a hold only pauses.
+ */
+function TradeTicker({ active, i }: { active: boolean; i: number }) {
   const { go } = useShell()
-  const hosts = useHosts()
-  const [heroId] = useHeroId()
+  const trade = useTrade()
+  const peek = useTradePeek()
   const now = useTick(30_000)
-  const h = hosts.data?.find((x) => x.id === heroId)
-  const on = !!h && h.online && !h.stale
-  const age = oldAge(hosts, now, 60_000)
-  const label = h?.label ?? heroId
-  const status = !h ? (hosts.failed ? 'Not answering' : '--') : !h.online ? 'Offline' : h.stale ? 'Stale' : null
-  const partLabel = part ? heroModel(heroId).hotspots.find((x) => x.id === part)?.label ?? cap(part) : null
-  const detail = partDetail(part, h, heroId, on, hosts.failed)
-  const facts = on ? [h?.cores ? `${h.cores} cores` : null, upLabel(h?.uptime ?? null)].filter(Boolean).join(' · ') : ''
+  const reduced = useReducedMotion()
+  const t = trade.data
+  const age = oldAge(trade, now, 10 * 60_000)
+
+  const vp = useRef<HTMLSpanElement>(null)
+  const run = useRef<HTMLSpanElement>(null)
+  // the width of one run of cells while it is wider than the line, else 0
+  const [over, setOver] = useState(0)
+  useLayoutEffect(() => {
+    const v = vp.current
+    const r = run.current
+    if (!v || !r) return
+    const check = () => setOver(r.scrollWidth > v.clientWidth + 1 ? r.scrollWidth : 0)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(v)
+    ro.observe(r)
+    return () => ro.disconnect()
+  }, [])
+  const moving = over > 0 && active && !reduced
+
+  const downAt = useRef(0)
+  const open = () => {
+    const held = moving && downAt.current > 0 && performance.now() - downAt.current > HOLD_MS
+    downAt.current = 0
+    if (!held) go(SYSTEM, 'trades')
+  }
+
+  const body = t ? tickerCells(t, peek, now, age) : null
+  const alert = t ? botWord(t).alert : false
+  const content = body ? body.cells : (
+    <span className="hm-tk-cell hm-tk-d">{trade.failed ? 'Trade bot not answering' : 'Reading the trade bot'}</span>
+  )
 
   return (
-    <Press className="hm-rd" data-old={age ? '' : undefined} onPress={() => go(SYSTEM, 'hosts')} aria-label={`${cap(label)} load, open System`}>
-      <span className="hm-rd-head">
-        <HIcon name={hostIcon(heroId)} lit={on} size={15} />
-        <span className="vl-caps hm-rd-name">{label}</span>
-        {status
-          ? <span className={cx('hm-rd-status', !!h?.online && h.stale && 'hm-alert')}>{status}</span>
-          : age ? <span className="hm-rd-status hm-old-tag">{age} old</span> : null}
-        <Chevron />
+    <Press
+      className={cx('hm-tk vl-build', age && 'hm-old')}
+      style={bi(i)}
+      data-over={over ? '' : undefined}
+      onPointerDown={() => { downAt.current = performance.now() }}
+      onPress={open}
+      aria-label={`Trade bot${body ? `: ${body.said}` : trade.failed ? ', not answering' : ''}. Open Trades`}
+    >
+      <span className="hm-tk-label">
+        <HIcon name="trades" lit={!!t?.marketOpen && !alert} tone={alert ? 'acc2' : undefined} />
+        Trade
       </span>
-      {READ_ROWS.map((r) => {
-        const v = on ? h?.[r.id] ?? null : null
-        const sel = part === r.id
-        return (
-          <span key={r.id} className="hm-rd-row" data-on={sel || undefined}>
-            <HIcon name={r.icon} lit={sel} size={13} />
-            <span className="hm-rd-label">{r.label}</span>
-            <Bar className="hm-rd-bar" value={v} ticks={4} tone={sel ? 'hot' : 'fg'} />
-            <span className="hm-rd-val">{v != null ? <>{v}<small>%</small></> : '--'}</span>
-          </span>
-        )
-      })}
-      <span className="hm-rd-detail vl-ellipsis" data-on={partLabel && detail ? '' : undefined}>
-        {partLabel && detail ? <><b>{partLabel}</b> · {detail}</> : facts || ' '}
+      {body && <span className="hm-tk-fix" aria-hidden>{body.eq}</span>}
+      <span className="hm-tk-vp" ref={vp} aria-hidden>
+        <span className="hm-tk-track" data-run={moving || undefined} style={{ '--tk-dur': `${Math.max(8, Math.round(over / TICKER_PX_S))}s` } as Vars}>
+          <span className="hm-tk-run" ref={run}>{content}</span>
+          {moving && <span className="hm-tk-run">{content}</span>}
+        </span>
       </span>
+      <Chevron />
     </Press>
   )
 }
@@ -434,7 +556,7 @@ function Tracker() {
         label="Daily Tracker"
         icon="done"
         lit={count === items.length}
-        i={1}
+        i={4}
         mid={showPick ? (
           <Segmented
             className="hm-daypick"
@@ -455,7 +577,7 @@ function Tracker() {
           <Press
             key={it.id}
             className="hm-tick vl-build"
-            style={bi(2 + k)}
+            style={bi(5 + k)}
             data-on={it.taken || undefined}
             data-busy={pending[it.id] ? '' : undefined}
             aria-pressed={it.taken}
@@ -560,7 +682,7 @@ function Calendar() {
           <Old age={age} />
         </>
       ) : undefined}
-      i={5}
+      i={8}
     >
       {!events ? (
         <p className="hm-quiet">{cal.failed ? 'Calendar not answering' : 'Reading the calendar'}</p>
@@ -675,18 +797,18 @@ function QuickStart() {
       <Head
         label="Quick Start"
         icon="start"
-        i={6}
+        i={1}
         value={down
           ? <span className="hm-dim">thor not answering<Old age={age} /></span>
           : !targets.data ? <span className="hm-dim">Reading thor</span>
           : <span className="hm-dim">New AI session on thor</span>}
       />
       {ghosts ? (
-        <div className="hm-starts vl-build" style={{ ...bi(7), '--n': 3 } as Vars} aria-hidden>
+        <div className="hm-starts vl-build" style={{ ...bi(2), '--n': 3 } as Vars} aria-hidden>
           {[0, 1, 2].map((k) => <span key={k} className="hm-start" data-ghost="" />)}
         </div>
       ) : kinds.length ? (
-        <div className="hm-starts vl-build" style={{ ...bi(7), '--n': Math.min(3, kinds.length) } as Vars} data-down={down || undefined}>
+        <div className="hm-starts vl-build" style={{ ...bi(2), '--n': Math.min(3, kinds.length) } as Vars} data-down={down || undefined}>
           {kinds.map((t) => {
             const busy = quick.busy === t.key
             return (
@@ -706,13 +828,13 @@ function QuickStart() {
           })}
         </div>
       ) : (
-        <p className="hm-quiet hm-starts-empty vl-build" style={bi(7)}>No phone targets on thor</p>
+        <p className="hm-quiet hm-starts-empty vl-build" style={bi(2)}>No phone targets on thor</p>
       )}
     </section>
   )
 }
 
-// ---------- AI sessions (glance rows and the desktop panel) ----------
+// ---------- AI: live sessions and usage ----------
 
 const ACT_RANK: Record<SessionVM['activity'], number> = { asking: 0, working: 1, idle: 2, closed: 3 }
 
@@ -770,45 +892,6 @@ function SessionLine({ s, host, now }: { s: SessionVM; host: string; now: number
   )
 }
 
-/** Desktop column: every live session, asking first, then working, then idle. */
-function SessionsPanel({ i }: { i: number }) {
-  const { go } = useShell()
-  const sessions = useSessions()
-  const now = useTick(30_000)
-  const hostLabel = useHostLabel()
-  const list = liveSessions(sessions.data, true)
-  const shown = list.slice(0, 8)
-  return (
-    <Panel className="hm-sessions" icon="claude" lit={aiLit(sessions)} label="Live Sessions" value={<SessionCount s={sessions} now={now} />} i={i}>
-      {!sessions.data ? (
-        <p className="hm-quiet">{sessions.failed ? 'The session board is not answering' : 'Reading the session board'}</p>
-      ) : !list.length ? (
-        <Press className="hm-quiet hm-srow-empty" onPress={() => go(AI, 'sessions')}>Nothing live. Open the board</Press>
-      ) : (
-        <div className="vl-rows">
-          {shown.map((s) => (
-            <Press key={s.id} className="vl-row hm-srow" data-old={sessions.failed || undefined} onPress={() => go(AI, 'sessions')}>
-              <SessionLine s={s} host={hostLabel(s.host)} now={now} />
-            </Press>
-          ))}
-          {list.length > shown.length && (
-            <Press className="vl-row hm-srow hm-faint" onPress={() => go(AI, 'sessions')}>+{list.length - shown.length} more live</Press>
-          )}
-        </div>
-      )}
-    </Panel>
-  )
-}
-
-// ---------- glances ----------
-
-const HOST_ORDER = ['thor', 'odin', 'frame', 'mimir']
-
-function sortHosts(list: HostVM[]): HostVM[] {
-  const rank = (id: string) => { const i = HOST_ORDER.indexOf(id); return i < 0 ? 99 : i }
-  return [...list].sort((a, b) => rank(a.id) - rank(b.id) || a.label.localeCompare(b.label))
-}
-
 function resetLabel(iso: string | null, now: number): string {
   if (!iso) return ''
   const t = Date.parse(iso)
@@ -816,43 +899,51 @@ function resetLabel(iso: string | null, now: number): string {
   return t - now < 20 * 3_600_000 ? `Resets ${clock(t)}` : `Resets ${weekday(t)} ${clock(t)}`
 }
 
-/** One dense panel. Desktop moves the session rows and media to the third column. */
-function Glances({ wide }: { wide: boolean }) {
+/**
+ * AI: the live sessions (asking first, then working; desktop adds the idle
+ * ones) and the usage meters of the account being burned. The head, the rows
+ * and the meters open AI > Sessions.
+ */
+function AiBlock({ wide, i }: { wide: boolean; i: number }) {
   const { go } = useShell()
   const usage = useUsage()
-  const hosts = useHosts()
   const sessions = useSessions()
-  const trade = useTrade()
   const now = useTick(30_000)
   const hostLabel = useHostLabel()
 
   const u = usage.data
   const uAge = oldAge(usage, now)
   const dead = u?.accounts.filter((a) => a.dead).length ?? 0
-  const hostList = sortHosts(hosts.data ?? [])
-  const online = hostList.filter((h) => h.online && !h.stale).length
-  const hAge = oldAge(hosts, now, 60_000)
-  const busy = wide ? [] : liveSessions(sessions.data, false).slice(0, 2)
-
-  const t = trade.data
-  const tAge = oldAge(trade, now, 10 * 60_000)
-  const up = (t?.changeUsd ?? 0) >= 0
-  const tradeAlert = t ? (!t.up ? 'Bot down' : t.stale ? 'Stale' : null) : null
+  const list = liveSessions(sessions.data, wide)
+  const shown = list.slice(0, wide ? 8 : 3)
+  const lit = aiLit(sessions)
+  const open = () => go(AI, 'sessions')
 
   return (
-    <Panel className="hm-glance" i={9} dense>
-      <Press className="hm-g" onPress={() => go(AI, 'sessions')} aria-label="AI usage and sessions, open AI">
-        <span className="hm-g-head">
-          <span className="hm-g-label"><HIcon name="claude" lit={aiLit(sessions)} />AI</span>
-          {u?.label && <span className="hm-g-acct vl-ellipsis" title="The account the usage meters show">{u.label}</span>}
-          <span className="hm-g-value"><SessionCount s={sessions} now={now} /></span>
-          <Chevron />
-        </span>
-        {busy.length > 0 && (
-          <span className="hm-g-sessions" data-old={sessions.failed || undefined}>
-            {busy.map((s) => <span key={s.id} className="hm-srow"><SessionLine s={s} host={hostLabel(s.host)} now={now} /></span>)}
-          </span>
-        )}
+    <Panel className="hm-glance hm-ai" i={i} dense lit={lit}>
+      <Press className="hm-g-head hm-g-press" onPress={open} aria-label="AI sessions and usage, open AI">
+        <span className="hm-g-label" data-lit={lit || undefined}><HIcon name="claude" lit={lit} />AI</span>
+        {u?.label && <span className="hm-g-acct vl-ellipsis" title="The account the usage meters show">{u.label}</span>}
+        <span className="hm-g-value"><SessionCount s={sessions} now={now} /></span>
+        <Chevron />
+      </Press>
+      {shown.length > 0 ? (
+        <div className="hm-g-sessions" data-old={sessions.failed || undefined}>
+          {shown.map((s) => (
+            <Press key={s.id} className="hm-srow" onPress={open} aria-label={`${s.title || s.project || 'Untitled session'}, ${s.activity}, open AI`}>
+              <SessionLine s={s} host={hostLabel(s.host)} now={now} />
+            </Press>
+          ))}
+          {list.length > shown.length && (
+            <Press className="hm-srow hm-faint" onPress={open}>+{list.length - shown.length} more {wide ? 'live' : 'busy'}</Press>
+          )}
+        </div>
+      ) : wide && sessions.data ? (
+        <div className="hm-g-sessions">
+          <Press className="hm-srow hm-dim" onPress={open}>Nothing live. Open the board</Press>
+        </div>
+      ) : null}
+      <Press className="hm-g-meters" onPress={open} aria-label="Usage meters, open AI">
         <span className="hm-meters" data-old={uAge ? '' : undefined}>
           <Meter label="5h" value={u?.five ?? null} note={resetLabel(u?.fiveResetsAt ?? null, now)} />
           <Meter label="Week" value={u?.week ?? null} note={resetLabel(u?.weekResetsAt ?? null, now)} ticks={7} />
@@ -863,55 +954,6 @@ function Glances({ wide }: { wide: boolean }) {
             {dead > 0 && <span className="hm-alert">{dead} sign-in{dead > 1 ? 's' : ''} expired</span>}
           </span>
         )}
-      </Press>
-
-      <LightsRow />
-
-      <Press className="hm-g" onPress={() => go(SYSTEM, 'hosts')} aria-label="Hosts, open System">
-        <span className="hm-g-head">
-          <span className="hm-g-label"><HIcon name="system" />Hosts</span>
-          <span className={cx('hm-g-value', hAge && 'hm-old')}>
-            {hosts.data ? <><b>{online}</b>/{hostList.length} online · CPU<Old age={hAge} /></> : hosts.failed ? 'not answering' : '--'}
-          </span>
-          <Chevron />
-        </span>
-        <span className="hm-hosts" style={{ '--n': Math.max(1, hostList.length) } as Vars} data-old={hAge ? '' : undefined}>
-          {hostList.map((h) => {
-            const on = h.online && !h.stale
-            return (
-              <span key={h.id} className="hm-host" data-off={!on || undefined} data-stale={(h.online && h.stale) || undefined}>
-                <span className="hm-host-name">
-                  <Icon name={hostIcon(h.id)} size={13} tone={on ? 'fg' : h.online && h.stale ? 'acc2' : 'faint'} glow={on} className="hm-ic" />
-                  <span className="vl-ellipsis">{cap(h.label)}</span>
-                </span>
-                <span className="hm-host-cpu">{on && h.cpu != null ? <>{h.cpu}<small>%</small></> : on ? 'on' : h.online && h.stale ? 'stale' : 'off'}</span>
-                {on && h.battery && <span className="hm-host-batt">{h.battery.percent}% batt</span>}
-              </span>
-            )
-          })}
-        </span>
-      </Press>
-
-      {!wide && <MediaGlance posters={6} />}
-
-      <Press className="hm-g hm-g-row" onPress={() => go(SYSTEM, 'trades')} aria-label="Trade bot, open Trades">
-        <span className="hm-g-label">
-          <HIcon name={t?.changeUsd != null && !up ? 'down' : 'trades'} tone={tradeAlert ? 'acc2' : undefined} />Trade
-        </span>
-        <span className={cx('hm-trade', tAge && 'hm-old')}>
-          <b>{t?.equity != null ? `$${Math.round(t.equity).toLocaleString('en-US')}` : trade.failed ? 'not answering' : '--'}</b>
-          {t?.equitySource === 'day_open' && <span className="hm-dim">day open</span>}
-          {t?.changeUsd != null && (
-            <span className="hm-chg vl-ellipsis" title={t.windowDays ? `Trading P&L over the last ${t.windowDays} days` : 'Trading P&L'}>
-              {t.windowDays ? <span className="hm-dim">{t.windowDays}d </span> : null}
-              {up ? '+' : '-'}${Math.abs(t.changeUsd).toFixed(2)}
-              {t.changePct != null ? ` · ${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}
-            </span>
-          )}
-          {tradeAlert ? <span className="hm-alert">{tradeAlert}</span> : t ? <span className="hm-dim">{t.marketOpen ? 'Open' : 'Closed'}</span> : null}
-          {tAge && <span className="hm-old-tag">{tAge} old</span>}
-        </span>
-        <Chevron />
       </Press>
     </Panel>
   )
@@ -931,8 +973,100 @@ function Meter({ label, value, note, ticks }: { label: string; value: number | n
   )
 }
 
-/** "Lights 2 of 5 on" (opens Lights) and one glass plate that switches them all. */
-function LightsRow() {
+// ---------- systems: every host, one row each ----------
+
+// the order the hosts read in (unknown ids go last, by label); labels always come from the data
+const HOST_ORDER = ['thor', 'odin', 'frame', 'mimir']
+
+function sortHosts(list: HostVM[]): HostVM[] {
+  const rank = (id: string) => { const i = HOST_ORDER.indexOf(id); return i < 0 ? 99 : i }
+  return [...list].sort((a, b) => rank(a.id) - rank(b.id) || a.label.localeCompare(b.label))
+}
+
+type HostCell = { key: string; icon: IconName; label: string; v: number | null; alert: boolean }
+
+/** CPU, Mem, and Disk; a host with a battery shows the battery in place of the disk. */
+function hostCells(h: HostVM): HostCell[] {
+  const cells: HostCell[] = [
+    { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
+    { key: 'mem', icon: 'mem', label: 'Mem', v: h.mem, alert: (h.mem ?? 0) >= 90 },
+  ]
+  if (h.battery) {
+    const b = h.battery
+    cells.push({ key: 'bat', icon: b.charging ? 'charging' : 'battery', label: b.charging ? 'Battery, charging' : 'Battery', v: b.percent, alert: !b.charging && b.percent <= 15 })
+  } else {
+    cells.push({ key: 'disk', icon: 'disk', label: 'Disk', v: h.disk, alert: (h.disk ?? 0) >= 90 })
+  }
+  return cells
+}
+
+function HostLine({ h, onPress }: { h: HostVM; onPress: () => void }) {
+  const on = h.online && !h.stale
+  const stale = h.online && h.stale
+  const label = cap(h.label)
+  const cells = hostCells(h)
+  const said = on ? cells.map((c) => `${c.label} ${c.v != null ? `${c.v}%` : 'unknown'}`).join(', ') : stale ? 'stale' : 'offline'
+  return (
+    <Press className="hm-hrow" data-off={!on || undefined} data-stale={stale || undefined} onPress={onPress} aria-label={`${label}: ${said}. Open in System`}>
+      <Icon name={hostIcon(h.id)} size={14} tone={on ? 'fg' : stale ? 'acc2' : 'faint'} glow={on} className="hm-ic" />
+      <span className="hm-hrow-name vl-ellipsis">{label}</span>
+      {on ? cells.map((c) => (
+        <span key={c.key} className="hm-mini" data-alert={c.alert || undefined} title={c.label}>
+          <Icon name={c.icon} size={11} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
+          <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
+          <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
+        </span>
+      )) : <span className="hm-hrow-off">{stale ? 'Stale' : 'Offline'}</span>}
+      <Chevron />
+    </Press>
+  )
+}
+
+/** Every host from /api/hosts: icon, name, its load as mini bars. A row opens System > Hosts with that host picked. */
+function Systems({ i }: { i: number }) {
+  const { go } = useShell()
+  const hosts = useHosts()
+  // System > Hosts keeps its pick under this setting; writing it first lands on the tapped host
+  const [, setSysHost] = useSetting<string>('sysHost', 'thor')
+  const now = useTick(30_000)
+  const list = sortHosts(hosts.data ?? [])
+  const online = list.filter((h) => h.online && !h.stale).length
+  const age = oldAge(hosts, now, 60_000)
+  const open = (id?: string) => {
+    if (id) setSysHost(id)
+    go(SYSTEM, 'hosts')
+  }
+
+  return (
+    <Panel className="hm-glance hm-sys" i={i} dense>
+      <Press className="hm-g-head hm-g-press" onPress={() => open()} aria-label="Hosts, open System">
+        <span className="hm-g-label"><HIcon name="system" />Systems</span>
+        <span className={cx('hm-g-value', age && 'hm-old')}>
+          {hosts.data ? <><b>{online}</b>/{list.length} online<Old age={age} /></> : hosts.failed ? 'not answering' : '--'}
+        </span>
+        <Chevron />
+      </Press>
+      {list.length ? (
+        <div className="hm-hrows" data-old={age ? '' : undefined}>
+          {list.map((h) => <HostLine key={h.id} h={h} onPress={() => open(h.id)} />)}
+        </div>
+      ) : (
+        <p className="hm-quiet hm-g-quiet">{!hosts.data ? (hosts.failed ? 'Hosts not answering' : 'Reading hosts') : 'No hosts reporting'}</p>
+      )}
+    </Panel>
+  )
+}
+
+// ---------- lights ----------
+
+/** more bulbs than this and the color pips are left out (the count says it) */
+const MAX_PIPS = 10
+
+/**
+ * "Lights 2 of 5 on" (opens Lights) with a pip per bulb in its real color,
+ * and one glass plate that switches them all.
+ */
+function LightsBlock({ i }: { i: number }) {
   const { go } = useShell()
   const qc = useQueryClient()
   // the persisted view model paints the first frame; the real control (shared
@@ -942,7 +1076,9 @@ function LightsRow() {
   const ctl = useLightsControl()
   const now = useTick(30_000)
   const real = ctl.lights.data ? ctl.all : null
-  const list = real ? real.map((l) => ({ id: l.entity_id, on: l.on, unavailable: l.unavailable })) : cached.data ?? []
+  const list = real
+    ? real.map((l) => ({ id: l.entity_id, name: l.name, on: l.on, unavailable: l.unavailable, color: lightColor(l) }))
+    : cached.data ?? []
   const avail = list.filter((l) => !l.unavailable)
   const on = avail.filter((l) => l.on).length
   const offline = list.length - avail.length
@@ -982,33 +1118,48 @@ function LightsRow() {
   }
 
   return (
-    <div className="hm-g hm-g-split">
-      <Press className="hm-g-main" onPress={() => go(LIGHTS)} aria-label="Lights, open Lights">
-        <span className="hm-g-label"><HIcon name={on > 0 ? 'bulb' : 'bulbOff'} lit={on > 0} />Lights</span>
-        <span className={cx('hm-g-value', age && 'hm-old')}>
-          {real || cached.data ? <><b>{on}</b> of {avail.length} on</> : cached.failed || ctl.lights.isError ? 'not answering' : '--'}
-          {offline > 0 && <span className="hm-faint"> · {offline} offline</span>}
-          <Old age={age} />
-        </span>
-        <Chevron />
-      </Press>
-      <Press
-        className="hm-plate"
-        data-on={on > 0 || undefined}
-        data-busy={busy || undefined}
-        aria-pressed={on > 0}
-        aria-busy={busy || undefined}
-        aria-label={on > 0 ? 'Turn all lights off' : 'Turn all lights on'}
-        // the switch needs the control's own read: it sends to the bulbs that read reachable
-        disabled={!real || !avail.length || busy}
-        onPress={toggle}
-      >
-        <span className="hm-plate-in">
-          <Icon name="power" size={12} tone={on > 0 ? 'ink' : 'dim'} />
-          {on > 0 ? 'On' : 'Off'}
-        </span>
-      </Press>
-    </div>
+    <Panel className="hm-glance hm-lights" i={i} dense lit={on > 0}>
+      <div className="hm-g hm-g-split">
+        <Press className="hm-g-main" onPress={() => go(LIGHTS)} aria-label="Lights, open Lights">
+          <span className="hm-g-label" data-lit={on > 0 || undefined}><HIcon name={on > 0 ? 'bulb' : 'bulbOff'} lit={on > 0} />Lights</span>
+          {list.length > 0 && list.length <= MAX_PIPS && (
+            <span className="hm-pips" aria-hidden>
+              {list.map((l) => (
+                <i
+                  key={l.id}
+                  title={l.name}
+                  data-on={(l.on && !l.unavailable) || undefined}
+                  data-off={l.unavailable || undefined}
+                  style={l.on && !l.unavailable ? ({ '--c': l.color } as Vars) : undefined}
+                />
+              ))}
+            </span>
+          )}
+          <span className={cx('hm-g-value', age && 'hm-old')}>
+            {real || cached.data ? <><b>{on}</b> of {avail.length} on</> : cached.failed || ctl.lights.isError ? 'not answering' : '--'}
+            {offline > 0 && <span className="hm-faint"> · {offline} offline</span>}
+            <Old age={age} />
+          </span>
+          <Chevron />
+        </Press>
+        <Press
+          className="hm-plate"
+          data-on={on > 0 || undefined}
+          data-busy={busy || undefined}
+          aria-pressed={on > 0}
+          aria-busy={busy || undefined}
+          aria-label={on > 0 ? 'Turn all lights off' : 'Turn all lights on'}
+          // the switch needs the control's own read: it sends to the bulbs that read reachable
+          disabled={!real || !avail.length || busy}
+          onPress={toggle}
+        >
+          <span className="hm-plate-in">
+            <Icon name="power" size={12} tone={on > 0 ? 'ink' : 'dim'} />
+            {on > 0 ? 'On' : 'Off'}
+          </span>
+        </Press>
+      </div>
+    </Panel>
   )
 }
 

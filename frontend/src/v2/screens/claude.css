@@ -759,6 +759,9 @@
 .vc-host[data-off] .vc-host-head { border-bottom-color: var(--line); }
 .vc-host[data-off] .vc-host-how { color: color-mix(in srgb, var(--acc2) 80%, var(--dim)); }
 .vc-host[data-off] .vc-pd-none { padding-top: 0; color: color-mix(in srgb, var(--acc2) 70%, var(--dim)); }
+/* thor from the page: in the page, or on thor's own screen */
+.vc-way .vl-seg { height: 34px; }
+.vc-way .vl-seg-cell { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .vc-tnote { margin: 0; font-size: 11px; color: color-mix(in srgb, var(--acc2) 80%, var(--dim)); }
 .vc-tsec-label { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--dim); margin-bottom: 6px; }
 .vc-plates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }

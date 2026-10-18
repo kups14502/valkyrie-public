@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useIntent, useShell, type ScreenProps } from '../kit/shell'
-import { Bar, Press, cx, toast } from '../kit/ui'
+import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import {
   ago, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useTick, useUsage,
@@ -35,11 +35,22 @@ import './claude.css'
 // 'v2-new-session' (opens AI > Sessions and the target picker), send the
 // shell intent 'claude:new-session', or open /m/ai/sessions?new=1 (the param
 // is removed once the picker opens).
+//
+// The picker offers three places: thor in the page (the default, a tmux pane
+// on odin running Claude on thor over SSH), thor's own screen (Windows Terminal
+// on thor's desk, so the session lives on thor and survives a dropped
+// connection), and odin (Claude on odin itself, the backup when thor is down).
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
 
 const HOME_HOST = 'thor'
+/** The backup host: its panes run Claude on odin itself (backend terminal/tmux.ts, host 'odin'). */
+const BACKUP_HOST = 'odin'
+// The picker's busy keys for thor's screen and for odin, beside `${host}:${target}`
+// for the rest. '@' never starts a host name, so no key can collide.
+const SCREEN_SLOT = '@screen'
+const ODIN_SLOT = '@odin'
 
 // ---------- areas ----------
 
@@ -630,35 +641,17 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     else toast(`Reopened ${rows.length} ${dest}`)
   }
 
-  // New session, NewSession's rules: in the page where the host can page and
-  // the board opens in the page; here over SSH for thor from the desktop app
-  // elsewhere; otherwise the host's own agent opens it on its screen.
-  const startNew = async (t: TargetVM, h: SessionHost) => {
+  // One start at a time, from any of the picker's places. `slot` is the
+  // plate's busy key; a refusal shows in the picker as well as a toast.
+  const launch = async (slot: string, fail: string, fn: () => Promise<void>) => {
     if (startingRef.current) return
     startingRef.current = true
-    setStarting(`${h.host}:${t.key}`)
+    setStarting(slot)
     setStartErr(null)
     try {
-      if (where.inPage && h.canPage) {
-        const r = await openTermSession({ mode: 'new', target: t.key, label: t.label })
-        seedTerminal(qc, r)
-        setPicker(false)
-        navigate(termPath(r.name))
-        return
-      }
-      if (where.remote && h.host === HOME_HOST) {
-        await openNewSessionHere(t.key, undefined, t.group)
-        toast(`${t.label} opened here`)
-      } else {
-        const r = await startSessionOnHost(h.host, t.key)
-        if (!r.ok) throw new Error(r.detail ?? 'could not start it')
-        toast(`${t.label} started on ${hostLabel(h.host)}`)
-      }
-      setPicker(false)
-      // Claude takes a moment to register, so give the board something to find
-      setTimeout(refreshBoard, 2_500)
+      await fn()
     } catch (e) {
-      const msg = `Could not start ${t.label} on ${hostLabel(h.host)}: ${errText(e)}`
+      const msg = `${fail}: ${errText(e)}`
       setStartErr(msg)
       toast(msg, { ms: 5000 })
     } finally {
@@ -666,6 +659,49 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       setStarting(null)
     }
   }
+
+  // New session, NewSession's rules: in the page where the host can page and
+  // the board opens in the page; here over SSH for thor from the desktop app
+  // elsewhere; otherwise the host's own agent opens it on its screen.
+  const startNew = (t: TargetVM, h: SessionHost) => launch(`${h.host}:${t.key}`, `Could not start ${t.label} on ${hostLabel(h.host)}`, async () => {
+    if (where.inPage && h.canPage) {
+      const r = await openTermSession({ mode: 'new', target: t.key, label: t.label })
+      seedTerminal(qc, r)
+      setPicker(false)
+      navigate(termPath(r.name))
+      return
+    }
+    if (where.remote && h.host === HOME_HOST) {
+      await openNewSessionHere(t.key, undefined, t.group)
+      toast(`${t.label} opened here`)
+    } else {
+      const r = await startSessionOnHost(h.host, t.key)
+      if (!r.ok) throw new Error(r.detail ?? 'could not start it')
+      toast(`${t.label} started on ${hostLabel(h.host)}`)
+    }
+    setPicker(false)
+    // Claude takes a moment to register, so give the board something to find
+    setTimeout(refreshBoard, 2_500)
+  })
+
+  // Thor's own screen: Windows Terminal on thor's desk through its launcher
+  // agent, so the session lives on thor and a dropped connection cannot end it.
+  const startOnScreen = (t: TargetVM) => launch(`${SCREEN_SLOT}:${t.key}`, `Could not open ${t.label} on ${hostLabel(HOME_HOST)}'s screen`, async () => {
+    const r = await startSessionOnHost(HOME_HOST, t.key)
+    if (!r.ok) throw new Error(r.detail ?? 'could not start it')
+    toast(`${t.label} opened on ${hostLabel(HOME_HOST)}'s screen`)
+    setPicker(false)
+    setTimeout(refreshBoard, 2_500)
+  })
+
+  // Odin, the backup: Claude runs on odin itself, in a pane the terminal page
+  // attaches to like any other.
+  const startOnOdin = (t: TargetVM) => launch(`${ODIN_SLOT}:${t.key}`, `Could not start ${t.label} on ${hostLabel(BACKUP_HOST)}`, async () => {
+    const r = await openTermSession({ mode: 'new', host: 'odin', target: t.key, label: t.label, ...phoneGrid() })
+    seedTerminal(qc, r)
+    setPicker(false)
+    navigate(termPath(r.name))
+  })
   const toggleRow = useCallback((id: string) => {
     captureFlip()
     setOpenRow(null)
@@ -812,6 +848,8 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
           starting={starting}
           error={startErr}
           onPick={(t, h) => void startNew(t, h)}
+          onScreen={(t) => void startOnScreen(t)}
+          onOdin={(t) => void startOnOdin(t)}
         />
       </Sheet>
 
@@ -901,6 +939,7 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
 }) {
   const sess = tab === 'sessions'
   const hasProj = projects.data !== undefined
+  const navigate = useNavigate()
   return (
     <div className="vc-sum">
       <div className="vc-counts vl-build" style={iv(0)}>
@@ -926,6 +965,12 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
       </div>
       {onNew && <div className="vc-new-row vl-build" style={iv(1)}><NewButton onPress={onNew} /></div>}
       {sess && <UsageLine now={now} />}
+      {/* the terminal skin preview (Skin.tsx, /m/ai/skin): a recorded sample, nothing is sent */}
+      {sess && (
+        <Press className="vl-link" style={{ alignSelf: 'flex-start' }} onPress={() => navigate('/m/ai/skin')}>
+          <Icon name="ai" size={13} tone="dim" />Try the new terminal (preview)
+        </Press>
+      )}
     </div>
   )
 }
@@ -1865,29 +1910,67 @@ function useRemoteTargets(host: string): Live<TargetVM[]> {
   }, 5 * 60_000)
 }
 
-function TargetPicker({ area, hostLabel, where, starting, error, onPick }: {
+// The odin targets (GET /terminal/odin-targets): keys and labels from a private
+// file on odin, never paths. `ready` is false when odin has no claude CLI.
+type OdinTargets = { ready: boolean; detail: string | null; targets: TargetVM[] }
+
+function useOdinTargets(): Live<OdinTargets> {
+  return useLive<OdinTargets>('claude.odinTargets', async () => {
+    const d = (await api.get<{ ready?: unknown; detail?: unknown; targets?: unknown }>('/terminal/odin-targets')).data
+    if (!Array.isArray(d.targets)) throw new Error('odin targets: bad response')
+    return {
+      ready: d.ready !== false,
+      detail: typeof d.detail === 'string' ? d.detail : null,
+      targets: (d.targets as Record<string, unknown>[])
+        .filter((t) => typeof t.key === 'string')
+        .map((t): TargetVM => {
+          const key = String(t.key)
+          return { key, label: typeof t.label === 'string' && t.label ? t.label : key, phone: true, project: false, group: null }
+        }),
+    }
+  }, 5 * 60_000)
+}
+
+type ThorWay = 'page' | 'screen'
+
+function TargetPicker({ area, hostLabel, where, starting, error, onPick, onScreen, onOdin }: {
   area: string
   hostLabel: (id: string) => string
   where: Where
-  /** `${host}:${target}` while that start is in flight */
+  /** the in-flight start's busy key: `${host}:${target}`, or a slot's */
   starting: string | null
   /** the last start the host refused */
   error: string | null
   onPick: (t: TargetVM, h: SessionHost) => void
+  /** thor's own screen: Windows Terminal on its desk, so the session lives on thor */
+  onScreen: (t: TargetVM) => void
+  /** the backup host: Claude on odin itself, in a pane the page attaches to */
+  onOdin: (t: TargetVM) => void
 }) {
   // /api/session-hosts: which machines can start a session (falls back to thor on an older backend)
   const hosts = useLive<SessionHost[]>('claude.sessionHosts', fetchSessionHosts, 5 * 60_000)
+  const [way, setWay] = useState<ThorWay>('page')
   const list = (hosts.data?.length ? hosts.data : THOR_ONLY)
     .slice()
     .sort((a, b) => Number(b.host === HOME_HOST) - Number(a.host === HOME_HOST) || Number(b.canLaunch) - Number(a.canLaunch) || a.host.localeCompare(b.host))
+  // Odin sits right under thor, and leads while thor is not answering: that is when the backup is the point.
+  const thorAt = list.findIndex((h) => h.host === HOME_HOST)
+  const odinAt = thorAt >= 0 && !list[thorAt].canLaunch ? 0 : thorAt + 1
+  const rows: (SessionHost | null)[] = [...list.slice(0, odinAt), null, ...list.slice(odinAt)]
   return (
     <div className="vc-targets vl-build-on">
       {error && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{error}</p>}
-      {list.map((h, n) => {
+      {rows.map((h, n) => {
+        if (!h) return <OdinSection key={ODIN_SLOT} k0={n * 6} starting={starting} hostLabel={hostLabel} onPick={onOdin} />
         // the in-page terminal is a pane on odin that reaches thor only, and offers the phone targets
         const inPage = where.inPage && h.canPage
         const here = !inPage && where.remote && h.host === HOME_HOST
-        const props = { host: h.host, area, k0: n * 6 + 1, phoneOnly: inPage, starting, onPick: (t: TargetVM) => onPick(t, h) }
+        // From the page, thor can also open on its own screen through its launcher agent.
+        const canScreen = inPage && h.host === HOME_HOST && h.canLaunch
+        const screen = canScreen && way === 'screen'
+        const props: TargetListProps = screen
+          ? { host: h.host, slot: SCREEN_SLOT, area, k0: n * 6 + 2, phoneOnly: false, starting, onPick: onScreen }
+          : { host: h.host, area, k0: n * 6 + (canScreen ? 2 : 1), phoneOnly: inPage, starting, onPick: (t: TargetVM) => onPick(t, h) }
         return (
           <section key={h.host} className="vc-host" data-off={!h.canLaunch || undefined}>
             <header className="vc-host-head vl-build" style={iv(n * 6)}>
@@ -1896,10 +1979,19 @@ function TargetPicker({ area, hostLabel, where, starting, error, onPick }: {
               <span className="vc-host-how">
                 {!h.canLaunch && <Icon name={!h.reachable ? 'offline' : 'alert'} size={12} tone="acc2" />}
                 {h.canLaunch
-                  ? inPage ? 'opens in the page' : here ? 'opens on this screen' : 'opens on its screen'
+                  ? screen ? `opens on ${hostLabel(h.host)}'s screen` : inPage ? 'opens in the page' : here ? 'opens on this screen' : 'opens on its screen'
                   : !h.reachable ? 'not answering' : 'cannot start sessions'}
               </span>
             </header>
+            {canScreen && (
+              <div className="vc-way vl-build" style={iv(n * 6 + 1)}>
+                <Segmented<ThorWay>
+                  options={[{ value: 'page', label: 'In page', icon: 'phone' }, { value: 'screen', label: 'On screen', icon: 'thor' }]}
+                  value={way}
+                  onChange={setWay}
+                />
+              </div>
+            )}
             {!h.canLaunch ? (
               <p className="vc-pd-none vl-build" style={iv(n * 6 + 1)}>
                 {!h.reachable ? `${hostLabel(h.host)} did not answer${h.detail ? ` (${h.detail})` : ''}. Try again in a minute.` : h.detail ?? 'no launcher agent'}
@@ -1916,7 +2008,48 @@ function TargetPicker({ area, hostLabel, where, starting, error, onPick }: {
   )
 }
 
-type TargetListProps = { host: string; area: string; k0: number; phoneOnly: boolean; starting: string | null; onPick: (t: TargetVM) => void }
+// Odin, the backup: Claude Code on odin itself in one of odin's own targets,
+// opened in the page like a thor pane. It needs neither thor nor its agent.
+function OdinSection({ k0, starting, hostLabel, onPick }: {
+  k0: number
+  starting: string | null
+  hostLabel: (id: string) => string
+  onPick: (t: TargetVM) => void
+}) {
+  const q = useOdinTargets()
+  const name = hostLabel(BACKUP_HOST)
+  const notReady = q.data?.ready === false
+  const lit = !!q.data?.targets.length && !notReady && !(q.failed && !q.data)
+  const targets: Live<TargetVM[]> = { ...q, data: q.data?.targets }
+  return (
+    <section className="vc-host" data-off={notReady || (q.failed && !q.data) || undefined}>
+      <header className="vc-host-head vl-build" style={iv(k0)}>
+        <Icon name={hostIcon(BACKUP_HOST)} size={17} tone={lit ? 'fg' : 'faint'} glow={lit} />
+        <span className="vc-host-name">{name}</span>
+        <span className="vc-host-how">
+          {notReady && <Icon name="alert" size={12} tone="acc2" />}
+          {notReady ? 'no claude here' : `backup, runs on ${name}`}
+        </span>
+      </header>
+      {notReady ? (
+        <p className="vc-pd-none vl-build" style={iv(k0 + 1)}>{q.data?.detail ?? `${name} cannot start Claude`}</p>
+      ) : (
+        <TargetList q={targets} host={name} slot={ODIN_SLOT} area="" k0={k0 + 1} phoneOnly={false} starting={starting} onPick={onPick} />
+      )}
+    </section>
+  )
+}
+
+type TargetListProps = {
+  host: string
+  /** the busy key's prefix, when it is not the host (thor's screen, odin) */
+  slot?: string
+  area: string
+  k0: number
+  phoneOnly: boolean
+  starting: string | null
+  onPick: (t: TargetVM) => void
+}
 
 function ThorTargets(props: TargetListProps) {
   return <TargetList q={useLaunchTargets()} {...props} />
@@ -1926,7 +2059,7 @@ function RemoteTargets(props: TargetListProps) {
   return <TargetList q={useRemoteTargets(props.host)} {...props} />
 }
 
-function TargetList({ q, host, area, k0, phoneOnly, starting, onPick }: TargetListProps & { q: Live<TargetVM[]> }) {
+function TargetList({ q, host, slot, area, k0, phoneOnly, starting, onPick }: TargetListProps & { q: Live<TargetVM[]> }) {
   const list = (q.data ?? []).filter((t) => !phoneOnly || t.phone)
   if (!list.length) {
     const why = q.failed ? `${host} did not answer: ${q.error?.message ?? 'no reply'}` : q.isFetching || !q.data ? 'Reading targets' : `No launch targets on ${host}`
@@ -1946,7 +2079,7 @@ function TargetList({ q, host, area, k0, phoneOnly, starting, onPick }: TargetLi
           <div className="vc-tsec-label vl-build" style={iv(k++)}>{s.label}</div>
           <div className="vc-plates">
             {s.items.map((t) => {
-              const mine = starting === `${host}:${t.key}`
+              const mine = starting === `${slot ?? host}:${t.key}`
               return (
                 <Press
                   key={t.key}

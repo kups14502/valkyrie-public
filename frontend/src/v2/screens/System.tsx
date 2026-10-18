@@ -10,6 +10,7 @@ import {
 } from '../../lib/api'
 import { HOST_POSE, Hero, heroModel, hostModel, type HostModelId } from '../kit/hero'
 import { TrackRibbon } from '../kit/three'
+import { EquityChart } from '../kit/three/EquityChart'
 import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
 import './system.css'
@@ -63,6 +64,13 @@ const fmtTime = new Intl.DateTimeFormat('en-US', { timeZone: NY, hour: 'numeric'
 const fmtWeekday = new Intl.DateTimeFormat('en-US', { timeZone: NY, weekday: 'short' })
 const fmtDate = new Intl.DateTimeFormat('en-US', { timeZone: NY, month: 'short', day: 'numeric' })
 const fmtDayKey = new Intl.DateTimeFormat('en-CA', { timeZone: NY, year: 'numeric', month: '2-digit', day: '2-digit' })
+const fmtHM = new Intl.DateTimeFormat('en-US', { timeZone: NY, hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+/** minutes after midnight, New York time */
+const nyMinutes = (ms: number) => {
+  let h = 0, m = 0
+  for (const p of fmtHM.formatToParts(ms)) { if (p.type === 'hour') h = Number(p.value) % 24; else if (p.type === 'minute') m = Number(p.value) }
+  return h * 60 + m
+}
 /** "2:00 AM" on the same day, "Sun 9:00 AM" on another */
 const when = (ms: number, now: number) => (fmtDayKey.format(ms) === fmtDayKey.format(now) ? fmtTime.format(ms) : `${fmtWeekday.format(ms)} ${fmtTime.format(ms)}`)
 const futureAt = (iso: string | null, now: number): string | null => {
@@ -975,14 +983,27 @@ function TradesView({ on }: { on: boolean }) {
     const mid = (min + max) / 2
     // at least 2% of equity tall, so a small move draws small
     const half = Math.max(((max - min) / 2) * 1.15, Math.abs(t?.equity ?? mid) * 0.01, 0.5)
-    const lo = mid - half
-    const pct = (v: number) => ((v - lo) / (2 * half)) * 100
-    const ticks = max > min ? [{ v: pct(max), label: usd(max) }, { v: pct(min), label: usd(min) }] : [{ v: pct(max), label: usd(max) }]
-    const xTicks: { at: number; label: string }[] = []
-    pts.forEach((p, k) => {
-      if (k === 0 || fmtDayKey.format(p.t) !== fmtDayKey.format(pts[k - 1].t)) xTicks.push({ at: k / (pts.length - 1), label: fmtWeekday.format(p.t) })
+    const ticks = max > min ? [{ v: max, label: usd(max) }, { v: min, label: usd(min) }] : [{ v: max, label: usd(max) }]
+    // x by trading time: one equal slot per trading day, the market session
+    // across it, no nights or weekends (every point is a market-hours sample)
+    const keys = pts.map((p) => fmtDayKey.format(p.t))
+    const mins = pts.map((p) => nyMinutes(p.t))
+    const open = Math.floor(Math.min(9.5 * 60, ...mins) / 30) * 30
+    const close = Math.ceil(Math.max(16 * 60, ...mins) / 30) * 30
+    const order = new Map<string, number>()
+    keys.forEach((k) => { if (!order.has(k)) order.set(k, order.size) })
+    const nd = order.size
+    const points = pts.map((p, k) => ({ x: (order.get(keys[k])! + clamp((mins[k] - open) / (close - open), 0, 1)) / nd, v: p.v }))
+    const days = [...order.keys()].map((key, d) => {
+      const at = pts[keys.indexOf(key)].t
+      return { x0: d / nd, x1: (d + 1) / nd, label: fmtWeekday.format(at), long: `${fmtWeekday.format(at)} ${fmtDate.format(at)}` }
     })
-    return { series: vals.map(pct), ticks, xTicks, rangePct: min > 0 ? ((max - min) / min) * 100 : 0 }
+    const first = vals[0], last = vals[vals.length - 1]
+    return {
+      points, days, ticks, lo: mid - half, hi: mid + half, last,
+      rangePct: min > 0 ? ((max - min) / min) * 100 : 0,
+      aria: `Equity from ${usd(first)} to ${usd(last)}, high ${usd(max)}, low ${usd(min)}, over ${nd} trading day${nd === 1 ? '' : 's'}`,
+    }
   }, [pts, t?.equity])
 
   const neg = (t?.changeUsd ?? 0) < 0
@@ -1071,13 +1092,17 @@ function TradesView({ on }: { on: boolean }) {
         {chart ? (
           <>
             <div className="sys-trade-ribbon">
-              <TrackRibbon
+              <EquityChart
                 key={epoch}
-                honest
-                series={chart.series}
+                points={chart.points}
+                lo={chart.lo}
+                hi={chart.hi}
                 ticks={chart.ticks}
-                xTicks={chart.xTicks}
+                days={chart.days}
                 tailFrom={dayOpen && flatFrom != null ? flatFrom : undefined}
+                lastLabel={usd(chart.last)}
+                lastNote={dayOpen && flatFrom != null ? 'not live' : undefined}
+                ariaLabel={chart.aria}
                 palette={palette}
                 paused={!on}
                 motion={reduced ? 'reduced' : 'full'}
@@ -1085,7 +1110,7 @@ function TradesView({ on }: { on: boolean }) {
               />
             </div>
             <div className="sys-chart-cap sys-trade-legend">
-              <span><i className="sys-key" data-c="cpu" />Equity, market hours only</span>
+              <span><i className="sys-key" data-c="cpu" />Equity, trading days only</span>
               {dayOpen && flatFrom != null && <span><i className="sys-key" data-c="dash" />repeated figure, not live</span>}
             </div>
           </>

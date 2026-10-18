@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react'
+import { Suspense, lazy, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
 import { V2Shell, type LegacyMap, type ScreenDef } from './kit/shell'
@@ -9,6 +9,10 @@ import Media from './screens/Media'
 import System from './screens/System'
 import { SettingsScreen } from './screens/Settings'
 import './v2.css'
+
+// AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
+// recorded sample. Its own chunk, since it carries xterm.
+const Skin = lazy(() => import('./screens/Skin'))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside
 // the classic Shell (no classic header, menu or player bar). URLs are
@@ -92,6 +96,7 @@ export default function V2App() {
   return (
     <Routes>
       <Route index element={<Navigate to="dashboard" replace />} />
+      <Route path="ai/skin" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Skin /></Suspense>} />
       <Route path=":screen/:sub?" element={<V2 />} />
     </Routes>
   )
