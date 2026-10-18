@@ -214,6 +214,10 @@ const ODIN_WRAP = [
   'export CLAUDE_CODE_NO_FLICKER=1 CLAUDE_CODE_DISABLE_MOUSE_CLICKS=1',
   'unset CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN CLAUDE_CODE_DISABLE_MOUSE',
   'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac',
+  // The account switcher's live store (lib/accountSwitch.ts). Only the
+  // credential moves: memory, hooks and transcripts stay in ~/.claude. Until
+  // the switcher has written the store, panes keep ~/.claude's own sign-in.
+  '[ -s "$HOME/.config/claude-switch/live/.credentials.json" ] && { CLAUDE_SECURESTORAGE_CONFIG_DIR="$HOME/.config/claude-switch/live"; export CLAUDE_SECURESTORAGE_CONFIG_DIR; }',
   'printf "odin  %s\\n" "$PWD"',
   '"$@"',
   's=$?',
@@ -490,6 +494,47 @@ export async function scrollPane(name: string, lines: number): Promise<void> {
 export async function endScroll(name: string): Promise<void> {
   if (!SESSION_NAME_RE.test(name)) return
   await tmux(['send-keys', '-t', name, '-X', 'cancel'], 5_000).catch(() => {})
+}
+
+// ------------------------------------------------------- account switch ----
+
+// The account switcher (lib/accountSwitch.ts) reads a pane's screen to find a
+// session that stopped on a usage limit, and types one line into that pane
+// after it moved the host to another account. These are its only two hooks
+// into a pane, both by the minted name.
+
+// The visible screen, wrapped lines joined. null when the pane cannot be read.
+export async function capturePane(name: string): Promise<string | null> {
+  if (!SESSION_NAME_RE.test(name)) return null
+  try {
+    return await tmux(['capture-pane', '-p', '-J', '-t', name], 5_000)
+  } catch {
+    return null
+  }
+}
+
+// True while the pane is in copy-mode (a swipe) or any other tmux mode. Keys
+// sent then go to the mode instead of Claude, so such a pane is left alone.
+export async function paneInMode(name: string): Promise<boolean> {
+  if (!SESSION_NAME_RE.test(name)) return true
+  try {
+    const out = await tmux(['display-message', '-p', '-t', name, '#{pane_in_mode}'], 5_000)
+    return out.trim() !== '0'
+  } catch {
+    return true
+  }
+}
+
+// One line of text, then Enter as its own key a moment later, so the Enter
+// is read as a key press rather than as the end of the typed burst.
+export async function typeLine(name: string, text: string): Promise<void> {
+  if (!SESSION_NAME_RE.test(name)) throw new Error('not a Valkyrie session name')
+  // eslint-disable-next-line no-control-regex
+  const clean = text.replace(/[\x00-\x1f\x7f]/g, ' ').trim()
+  if (!clean) throw new Error('nothing to type')
+  await tmux(['send-keys', '-t', name, '-l', '--', clean], 5_000)
+  await new Promise((r) => setTimeout(r, 400))
+  await tmux(['send-keys', '-t', name, 'Enter'], 5_000)
 }
 
 // Everything above is for Claude's inline renderer. A session started since

@@ -33,7 +33,10 @@ import supplementsRoute from './routes/supplements.js'
 import pushRoute from './routes/push.js'
 import projRoute from './routes/proj.js'
 import mcpRoute from './routes/mcp.js'
+import accountSwitchRoute from './routes/accountSwitch.js'
+import accountSigninRoute from './routes/accountSignin.js'
 import { startAlerts } from './alerts.js'
+import { startAccountSwitch } from './lib/accountSwitch.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
 // exception (e.g. a transient error inside a poller) would otherwise kill the
@@ -125,6 +128,8 @@ app.use('/api', supplementsRoute)
 app.use('/api', pushRoute)
 app.use('/api', projRoute)
 app.use('/api', mcpRoute)
+app.use('/api', accountSwitchRoute)
+app.use('/api', accountSigninRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
@@ -177,6 +182,8 @@ attachTerminalWs(server)
 server.listen(PORT, BIND, () => {
   console.log(`Valkyrie API listening on ${BIND}:${PORT}`)
   startAlerts()
+  // Idle until ~/.config/claude-switch/config.json turns it on.
+  startAccountSwitch()
 })
 
 // Optional second listener on the tailscale interface: tailnet devices talk to

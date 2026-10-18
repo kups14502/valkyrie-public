@@ -681,6 +681,21 @@ export function Glyph({ name, size = 12, className }: {
   }
 }
 
+// ---------- the command palette's open signal (kit/palette.tsx draws it) ----------
+
+/** The window event that opens the palette (Ctrl+K, the strip's search button). */
+export const PALETTE_EVENT = 'v2-palette-open'
+/** Set by the palette while it is on screen. */
+export const paletteState = { open: false }
+
+/** Open the command palette (kit/palette.tsx), from anywhere in v2. */
+export function openPalette(): void {
+  window.dispatchEvent(new Event(PALETTE_EVENT))
+}
+
+/** True while the palette is on screen: the shell's arrow keys and Escape leave it alone. */
+export const paletteOpen = (): boolean => paletteState.open
+
 // ---------- hooks ----------
 
 /** Run `fn` on an interval only while `on` is true. */

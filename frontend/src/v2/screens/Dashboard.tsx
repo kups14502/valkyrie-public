@@ -1,9 +1,10 @@
 import {
-  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode,
+  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
-import { Bar, Glyph, Panel, Press, Segmented, cx, dismissToast, toast } from '../kit/ui'
+import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
   ago, nyDayKey, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick,
   useTrade, useTracker, useUsage,
@@ -12,16 +13,22 @@ import {
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { useSetting } from '../kit/theme'
 import { apiErrorText } from '../../lib/api'
-import { fetchTrackerSkips, shiftDateKey } from '../../lib/supplementsApi'
+import { dateLabel, fetchTrackerSkips, parseDateKey, shiftDateKey } from '../../lib/supplementsApi'
 import { useDailyTracker, useTrackerDays, workoutFor } from '../../lib/dailyTracker'
 import { lightColor, useLightsControl } from '../../lib/lights'
 import { useQuickSessions } from '../../lib/quickSessions'
+import { UpIcon, UploadRows } from '../kit/upload'
+import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } from '../kit/uploads'
+import { useNavigate } from 'react-router-dom'
+import { CalendarSheet, type CalendarOpen } from './Calendar'
 import './dashboard.css'
 
 // Dashboard: one page with everything Valkyrie does, in the order Brendon
 // uses it. A trade ticker line on top (the newest session, bot online, 7 days),
-// quick start, lights (a plate that switches them all), the daily tracker,
-// the calendar (today first, then the next six days as compact rows), AI
+// quick start, upload (pictures to thor, for the session just started),
+// lights (a plate that switches them all), the daily tracker (day stepping,
+// the other day's line, hold Exercise to skip), the calendar (today first,
+// then the next six days; a tap opens the calendar sheet), AI
 // (live and asking sessions, usage meters), media (playing or newest added,
 // downloads) and every host at the bottom (CPU / Mem / Disk, battery where
 // the host has one). Phone: one column in that order. From 640 px: the
@@ -49,6 +56,42 @@ function useMedia(query: string): boolean {
   return m
 }
 
+/** the UI zoom the desktop app applies to <html> (1 in a browser that never set one) */
+const uiZoom = () => {
+  const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom'))
+  return Number.isFinite(z) && z > 0 ? z : 1
+}
+
+/**
+ * The dashboard's own width in layout px. The desktop app zooms <html>, which
+ * media queries never see (a 1920 px monitor at zoom 1.2 has 1600 px of
+ * layout), so the column count comes from the element. A hidden page (width
+ * 0) keeps its last width.
+ */
+function useBoxWidth(ref: RefObject<HTMLElement | null>): number {
+  const [w, setW] = useState(() => (typeof window === 'undefined' ? 390 : window.innerWidth / uiZoom() - 40))
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const set = () => {
+      const cw = el.clientWidth
+      if (cw > 0) setW(cw)
+    }
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
+  return w
+}
+
+// column steps in layout px: two columns from a small tablet or a landscape
+// phone, three from an iPad in landscape or a desktop window; past XL the
+// three columns grow (a 2560 px monitor), centered, never stretched to the edges
+const TWO_COLS = 600
+const THREE_COLS = 1140
+const XL = 1800
+
 /**
  * "5m" when the data on screen is not current: the newest fetch failed (data
  * is the last good result), or a cold paint from a cache older than `maxMs`
@@ -69,28 +112,44 @@ export default function Dashboard({ active }: ScreenProps) {
     if (active) setPose('home')
   }, [active, setPose])
 
-  const wide = useMedia('(min-width: 1200px)')
+  const box = useRef<HTMLDivElement>(null)
+  const width = useBoxWidth(box)
+  const cols = width >= THREE_COLS ? 3 : width >= TWO_COLS ? 2 : 1
+  const wide = cols === 3
+  const xl = wide && width >= XL
+  // the calendar sheet (src/v2/screens/Calendar.tsx): opened from the Calendar block, closed when the tab is left
+  const [cal, setCal] = useState<CalendarOpen | null>(null)
+  const calSeed = useCalendar(7).data
+  useEffect(() => {
+    if (!active) setCal(null)
+  }, [active])
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
-  // this order. From 640 px the first wrapper is the left column; desktop
-  // splits the rest into a middle and a right column.
+  // this order. Two columns: the first wrapper is the left column, the rest
+  // the right. Three (desktop, iPad landscape): the doing column (quick start,
+  // upload, lights, tracker), then AI over the calendar, then media and the
+  // hosts, so the three end near the same height.
   return (
-    <div className="hm">
-      <div className="vl-screen hm-layout" data-cols={wide ? 3 : 2}>
+    <div className="hm" ref={box}>
+      <div className="vl-screen hm-layout" data-cols={cols} data-xl={xl || undefined}>
         <TradeTicker active={active} i={0} />
         <div className="hm-col hm-a">
           <QuickStart />
+          <UploadBlock wide={wide} />
           <LightsBlock i={3} />
           <Tracker />
-          <Calendar />
+          {!wide && <Calendar onOpen={setCal} />}
+          {!wide && <MealsLink />}
         </div>
         {wide ? (
           <>
             <div className="hm-col hm-b">
-              <AiBlock wide i={9} />
+              <AiBlock wide i={8} />
+              <Calendar onOpen={setCal} />
+              <MealsLink />
             </div>
             <div className="hm-col hm-c">
-              <Panel className="hm-glance" i={10} dense><MediaGlance posters={8} /></Panel>
+              <Panel className="hm-glance" i={10} dense><MediaGlance posters={xl ? 10 : 8} /></Panel>
               <Systems i={11} />
             </div>
           </>
@@ -102,6 +161,7 @@ export default function Dashboard({ active }: ScreenProps) {
           </div>
         )}
       </div>
+      <CalendarSheet open={cal} onClose={() => setCal(null)} seed={calSeed} />
     </div>
   )
 }
@@ -109,12 +169,26 @@ export default function Dashboard({ active }: ScreenProps) {
 // ---------- small pieces ----------
 
 /** A header or row icon: lit = full color with the glow (on, live, asking); otherwise dim and flat. */
+// Meals lives on its own page (/m/meals); this is its way in from the Dashboard.
+function MealsLink() {
+  const navigate = useNavigate()
+  return (
+    <Panel className="hm-glance" dense>
+      <Press className="hm-g-head hm-g-press" onPress={() => navigate('/m/meals')} aria-label="Meals, open today's log">
+        <span className="hm-g-label"><HIcon name="meals" />Meals</span>
+        <span className="hm-g-value">log and macros</span>
+        <Chevron />
+      </Press>
+    </Panel>
+  )
+}
+
 function HIcon({ name, lit, size = 14, tone, className }: { name: IconName; lit?: boolean; size?: number; tone?: IconTone; className?: string }) {
   return <Icon name={name} size={size} tone={tone ?? (lit ? 'fg' : 'dim')} glow={!!lit} className={cx('hm-ic', className)} />
 }
 
 /** Section title on the floor: icon and label left, value right, optional control between. */
-function Head({ label, icon, lit, value, i, mid }: { label: string; icon: IconName; lit?: boolean; value?: ReactNode; i: number; mid?: ReactNode }) {
+function Head({ label, icon, lit, value, i, mid }: { label: ReactNode; icon: IconName; lit?: boolean; value?: ReactNode; i: number; mid?: ReactNode }) {
   return (
     <div className="hm-head vl-build" style={bi(i)} data-mid={mid ? '' : undefined}>
       <span className="hm-head-label" data-lit={lit || undefined}><HIcon name={icon} lit={lit} />{label}</span>
@@ -124,10 +198,10 @@ function Head({ label, icon, lit, value, i, mid }: { label: string; icon: IconNa
   )
 }
 
-function Chevron() {
+function Chevron({ dir = 'right' }: { dir?: 'left' | 'right' }) {
   return (
     <svg className="hm-chev" width="7" height="10" viewBox="0 0 7 10" aria-hidden>
-      <path d="M1.5 1 5.5 5l-4 4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d={dir === 'left' ? 'M5.5 1 1.5 5l4 4' : 'M1.5 1 5.5 5l-4 4'} fill="none" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   )
 }
@@ -236,6 +310,7 @@ function TradeTicker({ active, i }: { active: boolean; i: number }) {
     said.push(age ? `bot last read ${age} ago, ${online ? 'online' : 'offline'} then` : `bot ${online ? 'online' : 'offline'}`)
     const wk = t.changeUsd
     const wkDays = t.windowDays ?? 7
+    const wkDir = wk == null || wk === 0 ? 'flat' : wk > 0 ? 'up' : 'down'
     if (wk != null) said.push(`${wkDays} day ${wk < 0 ? 'down' : 'up'} ${money(wk)}`)
     cells = (
       <>
@@ -245,7 +320,8 @@ function TradeTicker({ active, i }: { active: boolean; i: number }) {
           data-flat={s?.flat || undefined}
           title={s?.flat ? 'Not live: the bot repeated its day-open figure all session' : s?.running ? 'Today so far, to the live equity read' : 'The newest trading session, close to close'}
         >
-          {dir !== 'flat' && <Icon name={dir === 'up' ? 'trades' : 'down'} size={13} tone={dir === 'up' ? 'fg' : 'acc2'} className="hm-ic" />}
+          {/* a loss is --loss, never the yellow (dashboard.css): the arrow and the minus carry the direction */}
+          {dir !== 'flat' && <Icon name={dir === 'up' ? 'trades' : 'down'} size={13} tone={dir === 'up' ? 'fg' : 'acc2'} className={cx('hm-ic', dir === 'down' && 'hm-loss')} />}
           <b className="hm-tk-v">{s ? signedMoney(s.flat ? 0 : s.change) : '--'}</b>
           {day && <span className="hm-tk-k">{day}</span>}
         </span>
@@ -253,8 +329,10 @@ function TradeTicker({ active, i }: { active: boolean; i: number }) {
           <i className="hm-tk-dot" aria-hidden />
           <span className="hm-tk-word">{age ? `${age} old` : online ? 'Online' : 'Offline'}</span>
         </span>
-        <span className="hm-tk-cell" data-dir={wk == null || wk === 0 ? 'flat' : wk > 0 ? 'up' : 'down'} title={`Deposit-adjusted trading change over the last ${wkDays} days`}>
+        <span className="hm-tk-cell" data-dir={wkDir} title={`Deposit-adjusted trading change over the last ${wkDays} days`}>
           <span className="hm-tk-k">{wkDays}D</span>
+          {/* the arrow carries the direction, as on the day; a four-figure week needs its room on a phone */}
+          {wkDir !== 'flat' && Math.abs(wk ?? 0) < 1000 && <Icon name={wkDir === 'up' ? 'trades' : 'down'} size={13} tone={wkDir === 'up' ? 'fg' : 'acc2'} className={cx('hm-ic hm-tk-wkic', wkDir === 'down' && 'hm-loss')} />}
           <b className="hm-tk-v">{wk != null ? signedMoney(wk) : '--'}</b>
           {t.changePct != null && <span className="hm-tk-pct">{signed(t.changePct)}%</span>}
         </span>
@@ -287,15 +365,16 @@ const TRACK_IDS = [
   { id: 'sf', label: 'SF' },
 ] as const
 
-type Day = 'yesterday' | 'today'
-const DAY_OPTS: { value: Day; label: string }[] = [{ value: 'yesterday', label: 'Yesterday' }, { value: 'today', label: 'Today' }]
-/** Before this hour a tick is usually for the day that just ended, so the tracker offers it first. */
+/** Before this hour a tick is usually for the day that just ended, so the tracker opens on it while it is open. */
 const LATE_NIGHT_END = 4
+/** How long a press on Exercise is held to skip the day. */
+const HOLD_MS = 520
 
 type TrackId = (typeof TRACK_IDS)[number]['id']
 type TickState = { taken: boolean; at: number; known: boolean }
 /** the streak before a tick went out, and whether today was complete then */
 type StreakHold = { base: number; allBefore: boolean; settled: boolean }
+type TrackerLib = Record<TrackId, ReturnType<typeof useTrackerDays>>
 
 /** at: ms when ticked, -1 when ticked at an unknown time, 0 when not ticked */
 function tickState(taken: boolean, takenAt: string | null): TickState {
@@ -303,6 +382,69 @@ function tickState(taken: boolean, takenAt: string | null): TickState {
   return { taken, at: taken ? (Number.isNaN(at) ? -1 : at) : 0, known: true }
 }
 
+/**
+ * A press held for HOLD_MS (touch or pen), or a right click (mouse): calls
+ * `onHold`. `consume()` tells the tap that follows a hold to do nothing.
+ */
+function useHold(onHold: () => void, enabled: boolean) {
+  const fire = useRef(onHold)
+  fire.current = onHold
+  const held = useRef(false)
+  const [holding, setHolding] = useState(false)
+  const lastPointer = useRef<string>('')
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    lastPointer.current = e.pointerType
+    held.current = false
+    if (!enabled || e.pointerType === 'mouse' || e.currentTarget.disabled) return
+    const id = e.pointerId, x0 = e.clientX, y0 = e.clientY
+    setHolding(true)
+    const timer = window.setTimeout(() => {
+      held.current = true
+      stop()
+      try { navigator.vibrate?.(12) } catch { /* no vibration */ }
+      fire.current()
+    }, HOLD_MS)
+    const move = (ev: PointerEvent) => { if (ev.pointerId === id && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) stop() }
+    const end = (ev: PointerEvent) => { if (ev.pointerId === id) stop() }
+    function stop() {
+      window.clearTimeout(timer)
+      setHolding(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+    window.addEventListener('pointermove', move, { passive: true })
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }
+  const onContextMenu = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    // the phone's own long-press menu never shows; a mouse's right click (or the menu key) is the hold
+    e.preventDefault()
+    if (enabled && (lastPointer.current === 'mouse' || lastPointer.current === '')) {
+      held.current = false
+      fire.current()
+    }
+  }
+  /** true once, right after a hold fired: the tap that ends the hold is not a tick */
+  const consume = () => {
+    const was = held.current
+    held.current = false
+    return was
+  }
+  return { holding, consume, props: enabled ? { onPointerDown, onContextMenu } : { onContextMenu: (e: ReactMouseEvent) => e.preventDefault() } }
+}
+
+/** "Today", "Yesterday", "Tomorrow", "Fri 16" */
+const dayName = (key: string, today: string) => cap(dateLabel(key, today))
+
+/**
+ * Supplements, Exercise and SF for one day under one streak. The head steps
+ * the day (chevrons both ways; Back to today when away from it). Late at night,
+ * while yesterday is still open, it opens on yesterday. A plate ticks the day
+ * shown; the line under it ticks the other day (yesterday, or today when the
+ * day shown is not today) without stepping. Holding Exercise skips its day
+ * (the rotation waits a day); holding it again takes the skip back.
+ */
 function Tracker() {
   const qc = useQueryClient()
   // The persisted view model paints the last known ticks in the first frame.
@@ -310,21 +452,25 @@ function Tracker() {
   // their reads land, and own the writes: optimistic tick, rollback on failure.
   const tracker = useTracker()
   const { today: todayKey, streak: liveStreak } = useDailyTracker()
-  const supplements = useTrackerDays('supplements', todayKey, todayKey)
-  const exercise = useTrackerDays('exercise', todayKey, todayKey, true)
-  const sf = useTrackerDays('sf', todayKey, todayKey)
-  const lib: Record<TrackId, typeof sf> = { supplements, exercise, sf }
+  const yKey = shiftDateKey(todayKey, -1)
+  const tmKey = shiftDateKey(todayKey, 1)
+  // today's window (yesterday, today, tomorrow): every day near today reads and writes through it
+  const near: TrackerLib = {
+    supplements: useTrackerDays('supplements', todayKey, todayKey),
+    exercise: useTrackerDays('exercise', todayKey, todayKey, true),
+    sf: useTrackerDays('sf', todayKey, todayKey),
+  }
   const cachedSkips = useLive('exerciseSkips', async () => (await fetchTrackerSkips('exercise')).skips, 5 * 60_000)
   const streakFetching = useIsFetching({ queryKey: ['daily', 'streak'] })
   const now = useTick(30_000)
-  const yKey = shiftDateKey(todayKey, -1)
   const t = tracker.data
 
-  // What the server says for one tracker on one day: the real window (yesterday,
-  // today, tomorrow) once it has landed, else the view model, which covers its
-  // own "today" and the day before. A cache written before midnight covers our
-  // yesterday only, so today reads as unknown until the fetch lands.
-  const server = (id: TrackId, key: string): TickState | null => {
+  // What the server says for one tracker on one day: the window that holds the
+  // day once it has landed, else the view model, which covers its own "today"
+  // and the day before. A cache written before midnight covers our yesterday
+  // only, so today reads as unknown until the fetch lands.
+  const isNear = (key: string) => key === todayKey || key === yKey || key === tmKey
+  const fromLib = (lib: TrackerLib, id: TrackId, key: string): TickState | null => {
     const d = lib[id].days?.find((x) => x.date === key)
     if (d) return tickState(d.taken, d.takenAt)
     const it = t?.items.find((x) => x.id === id)
@@ -334,30 +480,46 @@ function Tracker() {
     return null
   }
 
+  // the day shown: the one stepped to, else today (yesterday late at night while it is open)
+  const lateNight = new Date(now).getHours() < LATE_NIGHT_END
+  const yOpen = TRACK_IDS.some((d) => fromLib(near, d.id, yKey)?.taken === false)
+  const auto = lateNight && yOpen ? yKey : todayKey
+  const [pinned, setPinned] = useState<string | null>(null)
+  const key = pinned ?? auto
+  const step = (n: number) => {
+    const next = shiftDateKey(key, n)
+    setPinned(next === auto ? null : next)
+  }
+  const backToToday = () => setPinned(auto === todayKey ? null : todayKey)
+  // the shown day's own window, for a day away from today (the same query as `near` when it is today)
+  const view: TrackerLib = {
+    supplements: useTrackerDays('supplements', key, todayKey),
+    exercise: useTrackerDays('exercise', key, todayKey, true),
+    sf: useTrackerDays('sf', key, todayKey),
+  }
+  /** the hooks that read and write `day`: always the same ones for the same day, so a write and its read agree */
+  const libFor = (day: string): TrackerLib => (isNear(day) ? near : view)
+  const server = (id: TrackId, day: string) => fromLib(libFor(day), id, day)
+
   // A write on its way: shown at once (before the real window has landed the
   // hook has nothing to write into), and one per tracker until it settles.
   const [pending, setPending] = useState<Partial<Record<TrackId, { key: string; taken: boolean; at: number }>>>({})
   const inflight = useRef<Partial<Record<TrackId, Promise<boolean>>>>({})
-  const state = (id: TrackId, key: string): TickState => {
+  const state = (id: TrackId, day: string): TickState => {
     const p = pending[id]
-    if (p?.key === key) return { taken: p.taken, at: p.at, known: true }
-    return server(id, key) ?? { taken: false, at: 0, known: false }
+    if (p?.key === day) return { taken: p.taken, at: p.at, known: true }
+    return server(id, day) ?? { taken: false, at: 0, known: false }
   }
 
-  // late at night with yesterday still open: Yesterday / Today, Yesterday first
-  const lateNight = new Date(now).getHours() < LATE_NIGHT_END
-  const yOpen = TRACK_IDS.some((d) => server(d.id, yKey)?.taken === false)
-  const showPick = lateNight && yOpen
-  const [pick, setPick] = useState<{ key: string; day: Day } | null>(null)
-  const day: Day = showPick ? (pick?.key === todayKey ? pick.day : 'yesterday') : 'today'
-  const key = day === 'yesterday' ? yKey : todayKey
-  const otherKey = day === 'yesterday' ? todayKey : yKey
-
+  // the line under each plate: yesterday while today is shown, else today
+  const otherKey = key === todayKey ? yKey : todayKey
   const items = TRACK_IDS.map((d) => ({ ...d, ...state(d.id, key), other: state(d.id, otherKey) }))
   const allNow = TRACK_IDS.every((d) => state(d.id, todayKey).taken)
   const serverStreak = liveStreak ?? t?.streak ?? null
   const count = items.filter((x) => x.taken).length
   const age = oldAge(tracker, now)
+  const shownName = dayName(key, todayKey)
+  const otherName = dayName(otherKey, todayKey)
 
   // The server owns the streak and is asked again after each tick lands. Until
   // that answer is in, the streak follows today's ticks on screen: completing
@@ -370,10 +532,13 @@ function Tracker() {
     : serverStreak
 
   // the toast's Undo runs after later renders: it reads the newest values from here
-  const latest = useRef({ lib, allNow, serverStreak, held })
+  const latest = useRef({ libFor, allNow, serverStreak, held, todayKey })
   useEffect(() => {
-    latest.current = { lib, allNow, serverStreak, held }
+    latest.current = { libFor, allNow, serverStreak, held, todayKey }
   })
+
+  /** " for yesterday", " for Fri 16"; nothing for today */
+  const forDay = (day: string) => (day === latest.current.todayKey ? '' : ` for ${dateLabel(day, latest.current.todayKey)}`)
 
   const flip = (id: TrackId, day: string, next: boolean, undo = false) => {
     if (inflight.current[id]) return
@@ -381,12 +546,12 @@ function Tracker() {
     const { allNow: before, serverStreak: base, held: h } = latest.current
     setHold(h ? { ...h, settled: false } : base == null ? null : { base, allBefore: before, settled: false })
     setPending((p) => ({ ...p, [id]: { key: day, taken: next, at: next ? Date.now() : 0 } }))
-    const shown = undo ? 0 : toast(next ? `${label} done` : `${label} unticked`, {
+    const shown = undo ? 0 : toast(`${label} ${next ? 'done' : 'unticked'}${forDay(day)}`, {
       action: { label: 'Undo', run: () => void undoFlip(id, day, next) },
     })
     // the hook's toggle sends the opposite of the entry it is given
     const entry = { date: day, taken: !next, takenAt: null }
-    const run = settled(qc, () => latest.current.lib[id].toggle(entry))
+    const run = settled(qc, () => latest.current.libFor(day)[id].toggle(entry))
       .then(() => true, (e: unknown) => {
         if (shown) dismissToast(shown)
         toast(`${label} not saved: ${why(e)}`)
@@ -409,9 +574,43 @@ function Tracker() {
     flip(id, day, !did, true)
   }
 
-  const ex = lib.exercise
+  const ex = near.exercise
   const skips = !ex.loading && !ex.error ? ex.skips : cachedSkips.data
   const workout = (k: string) => (skips ? workoutFor(k, skips) : null)
+
+  // Skip (Exercise only): a held press skips the day shown, or takes its skip back.
+  // Skipping clears that day's tick, so Undo of a skip ticks it again when it was ticked.
+  const [skipping, setSkipping] = useState(false)
+  const skipRun = useRef<Promise<boolean> | null>(null)
+  const skip = (day: string, undo?: { retick: boolean }) => {
+    if (skipRun.current || inflight.current.exercise) return
+    const lib = latest.current.libFor(day).exercise
+    if (!lib.skip) return
+    const wasSkipped = !!skips?.includes(day)
+    const wasTicked = state('exercise', day).taken
+    setSkipping(true)
+    const shown = undo ? 0 : toast(wasSkipped ? `Exercise skip taken back${forDay(day)}` : `Exercise skipped${forDay(day)}`, {
+      action: { label: 'Undo', run: () => void undoSkip(day, wasTicked && !wasSkipped) },
+    })
+    const run = settled(qc, () => lib.skip?.(day))
+      .then(() => true, (e: unknown) => {
+        if (shown) dismissToast(shown)
+        toast(`Exercise skip not saved: ${why(e)}`)
+        return false
+      })
+      .finally(() => {
+        skipRun.current = null
+        setSkipping(false)
+        if (undo?.retick) flip('exercise', day, true, true)
+      })
+    skipRun.current = run
+  }
+  const undoSkip = async (day: string, retick: boolean) => {
+    if ((await skipRun.current) === false) return
+    skip(day, { retick })
+  }
+  const exHold = useHold(() => skip(key), !!near.exercise.skip)
+
   const stateLine = (it: (typeof items)[number]): ReactNode => {
     if (!it.known) return !t ? (tracker.failed ? 'Not answering' : 'Loading') : 'Checking'
     // no-break spaces: when the state wraps (mono is wide), it breaks after the workout, never inside "not yet" or "9:12 AM"
@@ -424,58 +623,97 @@ function Tracker() {
     }
     return it.taken ? (it.at > 0 ? `Done ${clock(it.at)}` : 'Done') : 'Not yet'
   }
-  const otherLine = (o: TickState) => {
-    const name = day === 'yesterday' ? 'Today' : 'Yesterday'
-    if (!o.known) return `${name}: --`
-    return `${name}: ${o.taken ? 'done' : day === 'yesterday' ? 'not yet' : 'open'}`
-  }
+  const otherWord = (o: TickState) => (!o.known ? '--' : o.taken ? 'done' : otherKey < todayKey ? 'open' : 'not yet')
 
   return (
-    <section className="hm-sec">
+    <section className="hm-sec hm-tracker">
       <Head
-        label="Daily Tracker"
+        label={<><span className="hm-tr-daily">Daily </span>Tracker</>}
         icon="done"
         lit={count === items.length}
         i={4}
-        mid={showPick ? (
-          <Segmented
-            className="hm-daypick"
-            options={DAY_OPTS}
-            value={day}
-            onChange={(v) => setPick({ key: todayKey, day: v })}
-          />
-        ) : undefined}
+        mid={(
+          <span className="hm-step" data-no-swipe role="group" aria-label="Day">
+            <Press className="hm-step-btn" aria-label={`The day before ${shownName.toLowerCase()}`} onPress={() => step(-1)}>
+              <Chevron dir="left" />
+            </Press>
+            <span className="hm-step-day" data-today={key === todayKey || undefined} aria-live="polite">{shownName}</span>
+            <Press className="hm-step-btn" aria-label={`The day after ${shownName.toLowerCase()}`} onPress={() => step(1)}>
+              <Chevron />
+            </Press>
+          </span>
+        )}
         value={streak === null ? (tracker.failed ? 'not answering' : '--') : (
           <>
-            <span className={cx('hm-streak', streak > 0 && 'hm-streak-on')}>{streak}</span> day streak
+            <span className={cx('hm-streak', streak > 0 && 'hm-streak-on')}>{streak}</span><span className="hm-streak-w"> day</span> streak
             <Old age={age} />
           </>
         )}
       />
-      <div className="hm-ticks" role="group" aria-label={`Daily tracker, ${day}, ${count} of 3 done`}>
-        {items.map((it, k) => (
-          <Press
-            key={it.id}
-            className="hm-tick vl-build"
-            style={bi(5 + k)}
-            data-on={it.taken || undefined}
-            data-busy={pending[it.id] ? '' : undefined}
-            aria-pressed={it.taken}
-            aria-busy={pending[it.id] ? true : undefined}
-            aria-label={`${it.label}, ${day}: ${it.taken ? 'done' : 'not done'}`}
-            disabled={!it.known || !!pending[it.id]}
-            onPress={() => flip(it.id, key, !it.taken)}
-          >
-            <span className="hm-tick-top">
-              <Icon name={it.id} size={15} tone={it.taken ? 'ink' : 'dim'} glow={it.taken} className="hm-tick-ic" />
-              <span className="hm-tick-name">{it.label}</span>
-            </span>
-            <span className="hm-tick-state">{stateLine(it)}</span>
-            <span className="hm-tick-other" data-open={(it.other.known && !it.other.taken) || undefined}>{otherLine(it.other)}</span>
-          </Press>
-        ))}
+      <div className="hm-ticks" role="group" aria-label={`Daily tracker, ${shownName}, ${count} of 3 done`}>
+        {items.map((it, k) => {
+          const isEx = it.id === 'exercise'
+          const busy = !!pending[it.id] && pending[it.id]?.key === key
+          const altBusy = !!pending[it.id] && pending[it.id]?.key === otherKey
+          return (
+            <div key={it.id} className="hm-tickw vl-build" style={bi(5 + k)}>
+              <Press
+                className="hm-tick"
+                data-on={it.taken || undefined}
+                data-busy={busy || (isEx && skipping) ? '' : undefined}
+                data-holding={(isEx && exHold.holding) || undefined}
+                aria-pressed={it.taken}
+                aria-busy={busy || undefined}
+                aria-label={`${it.label}, ${shownName.toLowerCase()}: ${it.taken ? 'done' : 'not done'}${isEx ? '. Hold to skip the day' : ''}`}
+                title={isEx ? 'Hold to skip this day (the rotation waits a day)' : undefined}
+                disabled={!it.known || !!pending[it.id] || (isEx && skipping)}
+                {...(isEx ? exHold.props : {})}
+                onPress={() => {
+                  if (isEx && exHold.consume()) return
+                  flip(it.id, key, !it.taken)
+                }}
+              >
+                <span className="hm-tick-top">
+                  <Icon name={it.id} size={15} tone={it.taken ? 'ink' : 'dim'} glow={it.taken} className="hm-tick-ic" />
+                  <span className="hm-tick-name">{it.label}</span>
+                </span>
+                <span className="hm-tick-state">{stateLine(it)}</span>
+              </Press>
+              <Press
+                className="hm-tick-alt"
+                data-on={(it.other.known && it.other.taken) || undefined}
+                data-open={(it.other.known && !it.other.taken) || undefined}
+                data-busy={altBusy || undefined}
+                aria-pressed={it.other.taken}
+                aria-label={`${it.label}, ${otherName.toLowerCase()}: ${it.other.taken ? 'done' : 'not done'}`}
+                disabled={!it.other.known || !!pending[it.id]}
+                onPress={() => flip(it.id, otherKey, !it.other.taken)}
+              >
+                <i className="hm-tick-box" aria-hidden>{it.other.taken && <Check />}</i>
+                <span className="vl-ellipsis">{otherName}: {otherWord(it.other)}</span>
+              </Press>
+            </div>
+          )
+        })}
       </div>
+      {key !== todayKey && (
+        <div className="hm-tr-away vl-build" style={bi(8)}>
+          <span className="hm-tr-away-k">Showing {fullDayLabel(key)}</span>
+          <Press className="vl-link vl-hit hm-tr-back" onPress={backToToday}>Back to today</Press>
+        </div>
+      )}
     </section>
+  )
+}
+
+/** "Friday, Oct 16" for a tracker date key */
+const fullDayLabel = (key: string) => parseDateKey(key).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+
+function Check() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden>
+      <path d="M1.5 5.2 4 7.6 8.6 2.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
   )
 }
 
@@ -512,19 +750,25 @@ function groupDays(days: DayRow[]): DayGroup[] {
   return out
 }
 
-function NextEvent({ e, meta, when, live }: { e: EventVM; meta: ReactNode; when: ReactNode; live?: boolean }) {
+function NextEvent({ e, meta, when, live, onPress }: { e: EventVM; meta: ReactNode; when: ReactNode; live?: boolean; onPress: () => void }) {
   return (
-    <div className="hm-next">
-      <div className="min-w-0 flex-1">
-        <div className="hm-next-title">{e.title || 'Busy'}</div>
-        <div className="hm-next-meta vl-ellipsis">{meta}</div>
-      </div>
-      <div className={cx('hm-next-when', live && 'hm-live')}>{when}</div>
-    </div>
+    <Press className="hm-next" onPress={onPress} aria-label={`${e.title || 'Busy'}, open its details`}>
+      <span className="min-w-0 flex-1">
+        <span className="hm-next-title">{e.title || 'Busy'}</span>
+        <span className="hm-next-meta vl-ellipsis">{meta}</span>
+      </span>
+      <span className={cx('hm-next-when', live && 'hm-live')}>{when}</span>
+    </Press>
   )
 }
 
-function Calendar() {
+/**
+ * Today first (the event on now or next, then the rest of today), then the
+ * next six days as compact rows. The head opens the calendar sheet on today's
+ * day view; an event opens it on its day with its details; a free row or
+ * "+N more" opens that day.
+ */
+function Calendar({ onOpen }: { onOpen: (o: CalendarOpen) => void }) {
   const cal = useCalendar(7)
   const now = useTick(30_000)
   const events = cal.data
@@ -549,62 +793,64 @@ function Calendar() {
   // nothing left today: the first timed event of the coming days carries the countdown
   const next = featured ? null : days.flatMap((d) => d.list).find((e) => !e.allDay && e.start > now) ?? null
   const age = cal.failed ? oldAge(cal, now) : null
+  const open = (dayMs: number, focus?: string) => onOpen({ day: dayMs, focus: focus ?? null })
 
   return (
-    <Panel
-      className="hm-cal"
-      icon="calendar"
-      lit={isLive}
-      label="Calendar"
-      value={events ? (
-        <>
-          {left > 0 ? <>{left}<span className="vl-panel-unit">left today</span></> : null}
+    <Panel className="hm-glance hm-cal" lit={isLive} i={8} dense>
+      <Press className="hm-g-head hm-g-press" onPress={() => open(day0)} aria-label="Calendar, open today's day view">
+        <span className="hm-g-label" data-lit={isLive || undefined}><HIcon name="calendar" lit={isLive} />Calendar</span>
+        <span className="hm-g-value">
+          {events && left > 0 ? <><b>{left}</b> left today</> : null}
           <Old age={age} />
-        </>
-      ) : undefined}
-      i={8}
-    >
-      {!events ? (
-        <p className="hm-quiet">{cal.failed ? 'Calendar not answering' : 'Reading the calendar'}</p>
-      ) : (
-        <>
-          {allDay.length > 0 && (
-            <span className="hm-tags">
-              {allDay.map((e) => <span key={e.id} className="hm-tag vl-ellipsis">{e.title}</span>)}
-            </span>
-          )}
-          {featured ? (
-            <NextEvent
-              e={featured}
-              live={isLive}
-              meta={<>{clock(featured.start)} to {clock(featured.end)}{featured.location ? ` · ${featured.location}` : ''}</>}
-              when={isLive ? <>Now<small>until {clock(featured.end)}</small></> : until(featured.start - now)}
-            />
-          ) : (
-            <p className="hm-cal-note">{past.length || allDay.length ? 'Nothing else today' : 'Nothing today'}</p>
-          )}
-          {rest.length > 0 && (
-            <span className="vl-rows hm-evrows">
-              {rest.slice(0, 4).map((e) => (
-                <span key={e.id} className="vl-row hm-evrow">
-                  <span className="hm-evtime">{clock(e.start)}</span>
-                  <span className="vl-ellipsis flex-1">{e.title || 'Busy'}</span>
-                  {e.start <= now && <span className="hm-live-tag">Now</span>}
-                </span>
-              ))}
-              {rest.length > 4 && <span className="vl-row hm-evrow hm-faint">+{rest.length - 4} more</span>}
-            </span>
-          )}
-          {past.length > 0 && featured && <span className="hm-earlier">{past.length} earlier today</span>}
-          <Ahead days={days} now={now} next={next} />
-        </>
-      )}
+        </span>
+        <Chevron />
+      </Press>
+      <div className="hm-cal-body">
+        {!events ? (
+          <p className="hm-quiet">{cal.failed ? 'Calendar not answering' : 'Reading the calendar'}</p>
+        ) : (
+          <>
+            {allDay.length > 0 && (
+              <span className="hm-tags">
+                {allDay.map((e) => (
+                  <Press key={e.id} className="hm-tag vl-ellipsis" onPress={() => open(day0, e.id)} aria-label={`${e.title || 'Busy'}, all day, open its details`}>{e.title}</Press>
+                ))}
+              </span>
+            )}
+            {featured ? (
+              <NextEvent
+                e={featured}
+                live={isLive}
+                meta={<>{clock(featured.start)} to {clock(featured.end)}{featured.location ? ` · ${featured.location}` : ''}</>}
+                when={isLive ? <>Now<small>until {clock(featured.end)}</small></> : until(featured.start - now)}
+                onPress={() => open(day0, featured.id)}
+              />
+            ) : (
+              <Press className="hm-cal-note" onPress={() => open(day0)}>{past.length || allDay.length ? 'Nothing else today' : 'Nothing today'}</Press>
+            )}
+            {rest.length > 0 && (
+              <span className="vl-rows hm-evrows">
+                {rest.slice(0, 4).map((e) => (
+                  <Press key={e.id} className="vl-row hm-evrow" onPress={() => open(day0, e.id)} aria-label={`${e.title || 'Busy'} at ${clock(e.start)}, open its details`}>
+                    <span className="hm-evtime">{clock(e.start)}</span>
+                    <span className="vl-ellipsis flex-1">{e.title || 'Busy'}</span>
+                    {e.start <= now && <span className="hm-live-tag">Now</span>}
+                  </Press>
+                ))}
+                {rest.length > 4 && <Press className="vl-row hm-evrow hm-faint" onPress={() => open(day0)}>+{rest.length - 4} more</Press>}
+              </span>
+            )}
+            {past.length > 0 && featured && <Press className="hm-earlier" onPress={() => open(day0)}>{past.length} earlier today</Press>}
+            <Ahead days={days} now={now} next={next} onOpen={open} />
+          </>
+        )}
+      </div>
     </Panel>
   )
 }
 
-/** The coming days as compact rows: a day tag on its first event, time, title; free runs fold into one row. */
-function Ahead({ days, now, next }: { days: DayRow[]; now: number; next: EventVM | null }) {
+/** The coming days as compact rows: a day tag on its first event, time, title; free runs fold into one row. Each row opens its day. */
+function Ahead({ days, now, next, onOpen }: { days: DayRow[]; now: number; next: EventVM | null; onOpen: (day: number, focus?: string) => void }) {
   const total = new Set(days.flatMap((d) => d.list.map((e) => e.id))).size
   return (
     <div className="hm-ahead">
@@ -613,27 +859,27 @@ function Ahead({ days, now, next }: { days: DayRow[]; now: number; next: EventVM
         <span>{total ? plural(total, 'event') : 'Nothing planned'}</span>
       </div>
       {groupDays(days).map((g) => g.kind === 'free' ? (
-        <div key={`f${g.a.i}`} className="hm-arow" data-free="">
+        <Press key={`f${g.a.i}`} className="hm-arow" data-free="" onPress={() => onOpen(g.a.from)} aria-label={`${dayTag(g.a.from)} free, open the day`}>
           <span className="hm-aday">{dayTag(g.a.from)}</span>
           <span className="hm-atitle">{g.a === g.b ? 'Free' : `Free through ${dayTag(g.b.from)}`}</span>
-        </div>
+        </Press>
       ) : (
         <div key={g.d.i} className="hm-aday-group">
           {g.d.list.slice(0, PER_DAY).map((e, k) => (
-            <div key={e.id} className="hm-arow">
+            <Press key={e.id} className="hm-arow" onPress={() => onOpen(g.d.from, e.id)} aria-label={`${dayTag(g.d.from)}, ${e.title || 'Busy'}, open its details`}>
               <span className="hm-aday">{k === 0 ? dayTag(g.d.from) : ''}</span>
               <span className="hm-atime" style={e.color ? { borderLeftColor: e.color } : undefined} title={e.source || undefined}>
                 {e.allDay ? 'All day' : e.start < g.d.from ? 'Cont.' : clock(e.start)}
               </span>
               <span className="hm-atitle">{e.title || 'Busy'}</span>
               {e === next && <span className="hm-awhen">{until(e.start - now)}</span>}
-            </div>
+            </Press>
           ))}
           {g.d.list.length > PER_DAY && (
-            <div className="hm-arow hm-faint">
+            <Press className="hm-arow hm-faint" onPress={() => onOpen(g.d.from)}>
               <span className="hm-aday" />
               <span className="hm-atitle">+{g.d.list.length - PER_DAY} more</span>
-            </div>
+            </Press>
           )}
         </div>
       ))}
@@ -710,6 +956,77 @@ function QuickStart() {
       ) : (
         <p className="hm-quiet hm-starts-empty vl-build" style={bi(2)}>No phone targets on thor</p>
       )}
+    </section>
+  )
+}
+
+// ---------- upload: pictures and videos to thor ----------
+
+/**
+ * Pictures and videos from the phone to C:\Thor\uploads on thor, under Quick
+ * Start: pick them (the camera, or any number from Photos and Files), watch
+ * each one go, then copy the path a session on thor needs. A failed file has
+ * Retry. On the desktop the block takes a drop. The queue, the transfer and
+ * the rows are kit/upload.tsx (shared with the AI > Sessions button).
+ */
+function UploadBlock({ wide }: { wide: boolean }) {
+  const pick = useUploadPicker('dashboard')
+  const list = useUploads()
+  // the camera plate only where there is a camera to open: touch screens
+  const touch = useMedia('(pointer: coarse)')
+  const [drop, setDrop] = useState(false)
+  const depth = useRef(0)
+  const { left, pct, failed } = uploadProgress(list)
+  const busy = left > 0
+
+  const files = (e: DragEvent<HTMLElement>) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
+  const endDrag = () => { depth.current = 0; setDrop(false) }
+  const plate = (key: string, icon: typeof UP_ICONS[keyof typeof UP_ICONS], label: string, open: () => void, title: string) => (
+    <Press key={key} className="hm-start" data-upload-open={key} onPress={() => {}} onClick={open} title={title}>
+      <UpIcon C={icon} size={14} tone="dim" className="hm-start-ic" />
+      <span className="vl-ellipsis">{label}</span>
+    </Press>
+  )
+
+  return (
+    <section
+      className="hm-sec hm-up"
+      data-drop={drop || undefined}
+      aria-label="Upload to thor"
+      onDragEnter={(e) => { if (!files(e)) return; e.preventDefault(); depth.current++; setDrop(true) }}
+      onDragOver={(e) => { if (!files(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+      onDragLeave={() => { if (--depth.current <= 0) endDrag() }}
+      onDrop={(e) => {
+        if (!files(e)) return
+        e.preventDefault()
+        endDrag()
+        const dropped = Array.from(e.dataTransfer.files)
+        if (dropped.length) addUploads(dropped, 'dashboard')
+      }}
+    >
+      {pick.inputs}
+      <div className="hm-head vl-build" style={bi(2)}>
+        <span className="hm-head-label" data-lit={busy || undefined}>
+          <UpIcon C={UP_ICONS.upload} size={14} tone={busy ? 'fg' : 'dim'} glow={busy} className={cx('hm-ic', busy && 'vl-pulse')} />
+          Upload
+        </span>
+        <span className="hm-head-value">
+          {busy
+            ? <><b className="hm-up-n">{left}</b> to go · {pct}%</>
+            : failed
+              ? <span className="hm-alert">{plural(failed, 'file')} failed</span>
+              : <span className="hm-dim">To {'C:\\Thor\\uploads'}</span>}
+        </span>
+      </div>
+      <div className="hm-starts vl-build" style={{ ...bi(3), '--n': touch ? 2 : 1 } as Vars}>
+        {touch
+          ? [
+            plate('camera', UP_ICONS.camera, 'Camera', pick.openCamera, 'Take a picture or a video and send it to thor'),
+            plate('files', UP_ICONS.image, 'Photos & files', pick.openFiles, 'Send pictures and videos to thor'),
+          ]
+          : plate('files', UP_ICONS.image, drop ? 'Drop to send' : 'Choose or drop pictures', pick.openFiles, 'Send pictures and videos to thor')}
+      </div>
+      <UploadRows limit={wide ? 5 : 3} />
     </section>
   )
 }

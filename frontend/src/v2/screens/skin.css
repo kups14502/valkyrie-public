@@ -506,6 +506,9 @@
 }
 /* the state in words where the side column has room for it */
 @media (min-width: 1100px) { .vsk-m-word { display: inline-flex; } }
+/* a big monitor without UI zoom (2560 px): a wider side column, so the plates and the activity list read at a
+   real size and the terminal stays near 200 columns instead of 250 */
+@media (min-width: 2200px) { .vsk-body { grid-template-columns: minmax(0, 1fr) 440px; column-gap: 16px; } }
 /* landscape phone: a shorter bar, a wider side, the question as plates only
    (the terminal shows its text), and the keys in one scrolling row */
 @media (min-width: 760px) and (max-height: 480px) {

@@ -1,8 +1,9 @@
-// ROUTES: every v2 route at phone, landscape and desktop size, on live data
-// (reads only; every write is answered in the browser). Each route must
-// render without console errors, keep the page inside the viewport, show the
-// tabs at the top and the lights button bottom-left, and have live data on
-// screen 8 s after it opened.
+// ROUTES: every v2 route on every screen v2 runs on, on live data (reads only;
+// every write is answered in the browser): the iPhone upright and on its side,
+// the iPad both ways, a 1600x900 window, and 1920x1080 and 2560x1440 monitors
+// at the app zoom Brendon uses (1.2). Each route must render without console
+// errors, keep the page inside the viewport, show the tabs at the top and the
+// lights button bottom-left, and have live data on screen 8 s after it opened.
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -29,9 +30,12 @@ export const ROUTES = [
   { path: '/m/system/services', tab: 'System', sub: 'Services', ready: { text: /\d+\s*up/i } },
   { path: '/m/system/trades', tab: 'System', sub: 'Trades', ready: { sel: '.sys-trade-eq', text: /\$\d/ } },
   { path: '/m/settings', settings: true, ready: { text: /appearance/i } },
+  // the full pages outside the tabs (Calendar.tsx PageFrame): the strip and a bar back to the Dashboard
+  { path: '/m/calendar', page: true, ready: { sel: '.cal-view', text: /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/ } },
+  { path: '/m/meals', page: true, ready: { sel: '.ml-totals[data-ready]', text: /calories/i } },
 ]
 
-const DEVICES = ['phone', 'landscape', 'desktop']
+export const ROUTE_DEVICES = ['phone', 'landscape', 'ipad', 'ipadland', 'desktop', 'desk1080', 'desk1440']
 
 function readyIn(spec) {
   const area = document.querySelector('.vl-page[data-active]') || document.querySelector('.vl-set') || document.querySelector('#root')
@@ -46,7 +50,7 @@ function readyIn(spec) {
 export function shellChecks(t, r, route) {
   const tag = `${route.path} @${t.test.device}`
   t.check(!r.crash, `${tag}: the crash screen is showing (render failed)`)
-  t.check(r.v2, `${tag}: html[data-v2] is missing`)
+  t.check(r.v2, `${tag}: html[data-v2] is missing (the page shows "${r.body}")`)
   t.check(r.docSW <= r.W + 1, `${tag}: the page is wider than the viewport (scrollWidth ${r.docSW} > ${r.W})${r.wide.length ? `: ${r.wide.join(', ')}` : ''}`)
   t.check(r.areaSW <= r.areaCW + 1, `${tag}: the screen's content is wider than the screen (${r.areaSW} > ${r.areaCW})`)
 
@@ -61,8 +65,8 @@ export function shellChecks(t, r, route) {
 
   if (route.shell === false) return
   // tabs at the top (Settings shows its own bar with the way back instead)
-  if (route.settings) {
-    t.check(r.setbar && r.setbar.t < Math.min(90, r.H * 0.25), `${tag}: the Settings bar is not at the top`)
+  if (route.settings || route.page) {
+    t.check(r.setbar && r.setbar.t < Math.min(90, r.H * 0.25), `${tag}: the ${route.page ? 'page' : 'Settings'} bar is not at the top`)
   } else {
     t.check(r.nav && r.nav.t < Math.min(90, r.H * 0.25), `${tag}: the tabs are not at the top (nav top ${r.nav ? Math.round(r.nav.t) : 'missing'})`)
     const labels = r.tabs.map((x) => x.label)
@@ -77,6 +81,8 @@ export function shellChecks(t, r, route) {
     }
   }
   t.check(r.gear, `${tag}: the Settings gear is missing from the status strip`)
+  // a full page outside the tabs carries no lights button
+  if (route.page) return
   // the lights button: bottom-left, on top of everything
   t.check(r.lamp && r.lampShown, `${tag}: the lights button is missing`)
   if (r.lamp) {
@@ -116,7 +122,7 @@ async function noteChecks(t, page, r, route) {
 export function routeTests() {
   const tests = []
   for (const route of ROUTES) {
-    for (const device of DEVICES) {
+    for (const device of ROUTE_DEVICES) {
       tests.push({
         name: `route:${route.path.replace(/^\/m\//, '')}:${device}`,
         group: 'routes',

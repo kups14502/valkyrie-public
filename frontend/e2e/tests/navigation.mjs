@@ -270,22 +270,71 @@ export function navigationTests() {
     },
   })
 
+  // every device but the headset opens v2: the phone, the iPad and the desktop, by profile or detected
   tests.push({
-    name: 'nav:iphone-profile',
+    name: 'nav:profiles',
     group: 'navigation',
     device: 'phone',
-    timeout: 45_000,
+    timeout: 90_000,
     async run(t) {
+      const lands = async (page, from, to) => {
+        await page.goto(from)
+        await page.waitPath(to, 8000)
+        await page.waitFor(() => document.documentElement.hasAttribute('data-v2') && document.querySelector('.vl-shell'), { timeout: 10_000, message: `${from}: v2 did not come up at ${to}` })
+      }
       await t.step('iPhone profile: /dashboard opens /m/dashboard', async () => {
         const page = await t.page({ storage: { 'valkyrie-device-mode': 'iphone' } })
-        await page.goto('/dashboard')
-        await page.waitPath('/m/dashboard', 8000)
-        await page.waitFor(() => document.documentElement.hasAttribute('data-v2'), { message: 'html[data-v2] is missing on /m/dashboard' })
+        quietThor(page)
+        await lands(page, '/dashboard', '/m/dashboard')
       })
       await t.step('auto profile on a phone: / opens /m/dashboard', async () => {
         const page = await t.page()
-        await page.goto('/')
-        await page.waitPath('/m/dashboard', 8000)
+        quietThor(page)
+        await lands(page, '/', '/m/dashboard')
+      })
+      await t.step('desktop (detected): /dashboard and / open /m/dashboard', async () => {
+        const page = await t.page({ device: 'desktop' })
+        quietThor(page)
+        await lands(page, '/dashboard', '/m/dashboard')
+        const p2 = await t.page({ device: 'desk1080' })
+        quietThor(p2)
+        await lands(p2, '/', '/m/dashboard')
+      })
+      await t.step('desktop profile chosen on a phone: /dashboard opens /m/dashboard', async () => {
+        const page = await t.page({ storage: { 'valkyrie-device-mode': 'desktop' } })
+        quietThor(page)
+        await lands(page, '/dashboard', '/m/dashboard')
+      })
+      await t.step('iPad (detected, upright and on its side): /pad opens /m/dashboard', async () => {
+        for (const device of ['ipad', 'ipadland']) {
+          const page = await t.page({ device })
+          quietThor(page)
+          await lands(page, '/pad', '/m/dashboard')
+        }
+      })
+      await t.step('desktop: the classic addresses land on their v2 screens', async () => {
+        const page = await t.page({ device: 'desktop' })
+        quietThor(page)
+        for (const [from, to] of [
+          ['/lights', '/m/lights'], ['/sessions', '/m/ai/sessions'], ['/projects', '/m/ai/projects'], ['/services', '/m/system/services'],
+          ['/trade', '/m/system/trades'], ['/plex', '/m/media/dashboard'], ['/settings', '/m/settings'], ['/calendar', '/m/calendar'], ['/meals', '/m/meals'],
+        ]) {
+          await t.step(`${from} -> ${to}`, async () => {
+            await page.goto(from)
+            await page.waitPath(to, 8000)
+            await page.waitFor(() => document.documentElement.hasAttribute('data-v2'), { message: `${from}: no html[data-v2] at ${to}` })
+          })
+        }
+      })
+      await t.step('desktop: a page v2 has no screen for stays classic', async () => {
+        const page = await t.page({ device: 'desktop' })
+        quietThor(page)
+        for (const path of ['/vault', '/activity']) {
+          await page.goto(path)
+          await page.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: `${path}: the classic shell did not render` })
+          const s = await page.eval(() => ({ path: location.pathname, v2: document.documentElement.hasAttribute('data-v2') }))
+          t.check(s.path === path && !s.v2, `${path} moved to ${s.path}${s.v2 ? ' with v2' : ''}`)
+        }
       })
     },
   })
@@ -294,67 +343,99 @@ export function navigationTests() {
     name: 'nav:classic-desktop',
     group: 'navigation',
     device: 'desktop',
-    timeout: 45_000,
+    timeout: 70_000,
     async run(t) {
       const page = await t.page()
-      await t.step('/dashboard stays the classic dashboard', async () => {
-        await page.goto('/dashboard')
+      quietThor(page)
+      const classicUp = async (path) => {
         await page.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: 'the classic shell did not render' })
-        await sleep(800)
-        const s = await page.eval(() => ({ path: location.pathname, v2: document.documentElement.hasAttribute('data-v2'), shell: !!document.querySelector('.vl-shell') }))
-        t.check(s.path === '/dashboard', `/dashboard moved to ${s.path}`)
-        t.check(!s.v2 && !s.shell, 'the classic dashboard has v2 on it')
+        await sleep(500)
+        const s = await page.eval(() => ({ path: location.pathname, v2: document.documentElement.hasAttribute('data-v2'), shell: !!document.querySelector('.vl-shell'), ui: sessionStorage.getItem('valkyrie-ui') }))
+        t.check(s.path === path, `the classic page moved to ${s.path}, want ${path}`)
+        t.check(!s.v2 && !s.shell, `the classic page at ${path} has v2 on it`)
+        return s
+      }
+      await t.step('Settings > Classic opens the classic dashboard', async () => {
+        await page.goto('/m/settings')
+        await shellUp(page)
+        await page.tap({ sel: '.vl-set .st-row-act', text: /^\s*Open\s*$/ })
+        await page.waitPath('/dashboard')
+        t.check((await page.path()) === '/dashboard?classic=1', `Settings > Classic went to ${await page.path()}, want /dashboard?classic=1`)
+        const s = await classicUp('/dashboard')
+        t.check(s.ui === 'classic', `the tab is marked ${s.ui}, want classic`)
       })
-      await t.step('after v2 in the same tab, the classic page has no data-v2', async () => {
-        await page.goto('/m/dashboard')
+      await t.step('a reload keeps the tab classic', async () => {
+        await page.goto('/dashboard')
+        await classicUp('/dashboard')
+      })
+      await t.step('the classic menu\'s New UI goes back to v2, and a reload stays there', async () => {
+        await page.tap('[data-shell] button[aria-label="Menu"]')
+        await page.tap('[data-shell] button[aria-label="New UI"]')
+        await page.waitPath('/m/dashboard')
+        await shellUp(page)
+        t.check((await page.eval(() => sessionStorage.getItem('valkyrie-ui'))) === 'v2', 'the tab is not marked v2 after New UI')
+        await page.goto('/dashboard')
+        await page.waitPath('/m/dashboard', 8000)
+      })
+      await t.step('a link from v2 to a classic page shows it classic, with no data-v2 left behind', async () => {
         await shellUp(page)
         await page.eval(() => {
-          history.pushState({}, '', '/dashboard')
+          history.pushState({}, '', '/vault')
           dispatchEvent(new PopStateEvent('popstate', { state: {} }))
         })
-        await page.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: 'the classic shell did not render after v2' })
-        await sleep(500)
-        const s = await page.eval(() => ({ v2: document.documentElement.hasAttribute('data-v2'), boot: document.documentElement.hasAttribute('data-boot'), shell: !!document.querySelector('.vl-shell') }))
-        t.check(!s.v2, 'html[data-v2] stayed on after leaving v2')
-        t.check(!s.boot, 'html[data-boot] stayed on after leaving v2')
-        t.check(!s.shell, 'the v2 shell is still in the page')
+        const s = await classicUp('/vault')
+        const left = await page.eval(() => ({ boot: document.documentElement.hasAttribute('data-boot'), win: document.documentElement.hasAttribute('data-v2win') }))
+        t.check(!left.boot && !left.win, 'html[data-boot] or [data-v2win] stayed on after leaving v2')
+        t.check(s.ui === 'classic', 'the classic page did not mark the tab classic')
+      })
+      await t.step('?classic=1 on a fresh tab keeps the classic page', async () => {
+        const p2 = await t.page()
+        quietThor(p2)
+        await p2.goto('/dashboard?classic=1')
+        await p2.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: 'the classic dashboard did not render' })
+        t.check(!(await p2.eval(() => document.documentElement.hasAttribute('data-v2'))), '/dashboard?classic=1 has html[data-v2]')
       })
     },
   })
 
-  tests.push({
-    name: 'nav:classic-phone',
-    group: 'navigation',
-    device: 'phone',
-    timeout: 45_000,
-    async run(t) {
-      const page = await t.page()
-      await t.step('Settings > Classic opens /phone without v2', async () => {
-        await page.goto('/m/settings')
-        await shellUp(page)
-        const open = await page.eval(() => {
-          const row = [...document.querySelectorAll('.vl-set *')].find((e) => e.textContent?.trim() === 'Classic')
-          return !!row
+  for (const [device, home] of [['phone', '/phone'], ['ipad', '/pad']]) {
+    tests.push({
+      name: `nav:classic-${device}`,
+      group: 'navigation',
+      device,
+      timeout: 45_000,
+      async run(t) {
+        const page = await t.page()
+        quietThor(page)
+        await t.step(`Settings > Classic opens ${home}?classic=1 without v2`, async () => {
+          await page.goto('/m/settings')
+          await shellUp(page)
+          const open = await page.eval(() => [...document.querySelectorAll('.vl-set *')].some((e) => e.textContent?.trim() === 'Classic'))
+          if (!open) throw new Error('no Classic row in Settings')
+          await page.tap({ sel: '.vl-set .st-row-act', text: /^\s*Open\s*$/ })
+          await page.waitPath(home)
+          t.check((await page.path()) === `${home}?classic=1`, `Settings > Classic went to ${await page.path()}`)
+          await page.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: `the classic ${home} page did not render` })
+          await sleep(500)
+          const s = await page.eval(() => ({ v2: document.documentElement.hasAttribute('data-v2'), shell: !!document.querySelector('.vl-shell') }))
+          t.check(!s.v2, 'html[data-v2] stayed on after Settings > Classic')
+          t.check(!s.shell, `the v2 shell is still in the page on ${home}`)
         })
-        if (!open) throw new Error('no Classic row in Settings')
-        await page.tap({ sel: '.vl-set .st-row-act', text: /^\s*Open\s*$/ })
-        await page.waitPath('/phone')
-        await page.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: 'the classic phone page did not render' })
-        await sleep(500)
-        const s = await page.eval(() => ({ v2: document.documentElement.hasAttribute('data-v2'), shell: !!document.querySelector('.vl-shell') }))
-        t.check(!s.v2, 'html[data-v2] stayed on after Settings > Classic')
-        t.check(!s.shell, 'the v2 shell is still in the page on /phone')
-      })
-      await t.step('/phone by address stays classic', async () => {
-        const p2 = await t.page()
-        await p2.goto('/phone')
-        await p2.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: 'the classic phone page did not render' })
-        const s = await p2.eval(() => ({ path: location.pathname, v2: document.documentElement.hasAttribute('data-v2') }))
-        t.check(s.path === '/phone', `/phone moved to ${s.path}`)
-        t.check(!s.v2, '/phone has html[data-v2]')
-      })
-    },
-  })
+        await t.step(`${home} by address opens v2, ${home}?classic=1 stays classic`, async () => {
+          const p2 = await t.page()
+          quietThor(p2)
+          await p2.goto(home)
+          await p2.waitPath('/m/dashboard', 8000)
+          const p3 = await t.page()
+          quietThor(p3)
+          await p3.goto(`${home}?classic=1`)
+          await p3.waitFor(() => document.querySelector('[data-shell]'), { timeout: 10_000, message: `the classic ${home} page did not render` })
+          const s = await p3.eval(() => ({ path: location.pathname, v2: document.documentElement.hasAttribute('data-v2') }))
+          t.check(s.path === home && !s.v2, `${home}?classic=1 moved to ${s.path}${s.v2 ? ' with v2' : ''}`)
+        })
+      },
+    })
+  }
 
   return tests
 }

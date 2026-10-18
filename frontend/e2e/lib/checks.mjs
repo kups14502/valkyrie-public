@@ -91,6 +91,8 @@ export function layoutReport() {
     areaCW: area ? area.clientWidth : 0,
     wide,
     crash: /render failed|VALKYRIE CRASH/i.test(document.body.innerText || ''),
+    // what is on screen when v2 is not (the sign-in gate, a blank reload)
+    body: (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 120),
     nav: box(document.querySelector('.vl-nav')),
     setbar: box(document.querySelector('.vl-setbar')),
     gear: box(document.querySelector('.vl-strip-gear')),

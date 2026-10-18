@@ -1,0 +1,227 @@
+/* AI > Usage: the account switcher's controls (Accounts.tsx). Same HUD language as the
+   usage panels above it (claude.css .vc-u-*): outlined panels, line icons leading
+   headers, the accent for what is on, the alert color for what needs a hand. */
+
+.va { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.va-quiet { display: flex; align-items: center; gap: 7px; padding: 8px 0 2px; font-size: 12px; line-height: 16px; color: var(--dim); }
+.va-quiet[data-failed] { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.va-sub { margin-left: auto; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.va-note { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+.va-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 12px; line-height: 16px; color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.va-warn .vl-icon { flex: none; margin-top: 1px; }
+.va-paused, .va-kill { align-items: center; }
+.va-paused > span, .va-kill > span { flex: 1; min-width: 0; }
+.va-resume, .va-unkill { flex: none; min-height: 32px; padding: 0 10px; }
+.va-unkill[data-armed] {
+  color: var(--plate-ink);
+  background: var(--acc2);
+  border-color: var(--acc2);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 45%, transparent);
+}
+
+/* ---------- auto-switch and the threshold ---------- */
+
+.va-auto-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 6px; }
+.va-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.va-toggle-state { min-width: 6.5em; font-weight: 500; color: var(--dim); }
+.va-toggle[data-on] .va-toggle-state { color: var(--fg); text-shadow: var(--text-glow); }
+.va-toggle-track {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, .6);
+}
+.va-toggle-track > i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  background: var(--dim);
+  transition: transform .16s var(--ease);
+}
+.va-toggle[data-on] .va-toggle-track { border-color: var(--fg); box-shadow: var(--glow); }
+.va-toggle[data-on] .va-toggle-track > i { transform: translateX(18px); background: var(--fg); }
+.va-toggle[data-pressed] .va-toggle-track { transform: scale(.96); }
+
+.va-host-auto { width: 100%; min-height: 40px; margin-top: 4px; font-size: 12px; font-weight: 500; }
+.va-host-auto .va-toggle-label { flex: 1; min-width: 0; text-align: left; }
+.va-host-auto .va-toggle-state { min-width: 0; text-align: right; }
+
+.va-thr { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.va-thr-label { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.va-thr-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--fg);
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, .55);
+}
+.va-thr-step[data-pressed] { transform: scale(.94); border-color: var(--fg); }
+.va-thr-value { min-width: 3.2em; text-align: center; font-size: 20px; line-height: 24px; font-weight: 600; color: var(--ink-hi); text-shadow: var(--num-glow); }
+.va-thr-value small { font-size: 12px; font-weight: 500; color: var(--dim); margin-left: 1px; text-shadow: none; }
+.va-thr-value[data-changed] { color: var(--hot); }
+.va-thr-save { margin-left: 4px; }
+
+/* ---------- one host ---------- */
+
+.va-now { display: flex; flex-direction: column; min-width: 0; margin-top: 6px; }
+.va-now > b { font-size: 20px; line-height: 26px; font-weight: 600; color: var(--fg); text-shadow: var(--text-glow); }
+.va-now > b[data-none] { color: var(--dim); text-shadow: none; }
+.va-now > em { font-style: normal; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+.va-next {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.va-next-label { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.va-next-what { display: flex; flex-direction: column; min-width: 0; line-height: 16px; }
+.va-next-what b { font-size: 13px; font-weight: 600; color: var(--text); }
+.va-next-what em { font-style: normal; font-size: 11px; line-height: 14px; color: var(--dim); }
+.va-switch { margin-top: 8px; width: 100%; min-height: 40px; }
+
+.va-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.va-confirm-q { font-size: 12px; color: var(--text); }
+.va-picks { display: flex; flex-direction: column; gap: 6px; }
+.va-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, .5);
+}
+.va-pick em { flex: none; font-style: normal; font-size: 11px; color: var(--dim); }
+.va-pick[data-on] { color: var(--fg); border-color: var(--fg); box-shadow: var(--glow); text-shadow: var(--text-glow); }
+.va-pick[data-pressed] { transform: scale(.98); }
+.va-confirm-act { display: flex; align-items: center; gap: 14px; }
+.va-go { flex: 1; min-width: 0; min-height: 44px; }
+.va-cancel { flex: none; min-height: 44px; padding: 0 6px; }
+
+/* ---------- sign-ins ---------- */
+
+.va-acct { border-top: 1px solid var(--line); }
+.va-signins > header + .va-acct { margin-top: 4px; }
+.va-acct-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'name btn' 'state btn';
+  align-items: center;
+  column-gap: 10px;
+  min-height: 50px;
+  padding: 5px 0;
+}
+.va-acct-name { grid-area: name; display: flex; flex-direction: column; min-width: 0; line-height: 16px; font-size: 12.5px; color: var(--text); }
+.va-acct-name em { font-style: normal; font-size: 10.5px; line-height: 13px; color: var(--dim); }
+.va-on { margin-left: 6px; font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); }
+.va-acct-state { grid-area: state; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; line-height: 15px; color: var(--dim); }
+.va-acct-state .vl-icon { flex: none; }
+.va-acct[data-bad] .va-acct-state { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.va-acct[data-bad] .va-acct-name > span { color: var(--acc2); }
+.va-acct[data-out] { opacity: .65; }
+.va-resign { grid-area: btn; min-width: 92px; }
+.va-resign[data-armed] {
+  color: var(--plate-ink);
+  background: var(--acc2);
+  border-color: var(--acc2);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 45%, transparent);
+}
+.va-acct-msg { padding: 0 0 6px; font-size: 11px; line-height: 15px; color: var(--dim); }
+
+.va-run { padding: 0 0 8px; }
+.va-run-line { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 16px; color: var(--text); }
+.va-run-line .vl-icon { flex: none; margin-top: 1px; }
+.va-run-line > span { flex: 1; min-width: 0; }
+.va-run-cancel { flex: none; min-height: 24px; margin: -4px 0 0 6px; }
+.va-run-line em { font-style: normal; color: var(--dim); }
+.va-run[data-state='failed'] .va-run-line,
+.va-run[data-state='needs-code'] .va-run-line { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.va-code { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.va-code input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  outline: 0;
+  background: rgba(0, 0, 0, .6);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* iOS zooms the page into any smaller input */
+  -webkit-appearance: none;
+  appearance: none;
+}
+.va-code input:focus { border-color: var(--fg); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 35%, transparent); }
+.va-code input::placeholder { color: var(--dim); }
+.va-code-send { flex: none; min-height: 40px; padding: 0 16px; }
+@media (pointer: fine) { .va-code input { font-size: 13.5px; } }
+
+/* ---------- the last switches ---------- */
+
+.va-hist-row {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.va-hist > header + .va-hist-row { margin-top: 4px; }
+.va-hist-when { font-size: 11px; line-height: 14px; color: var(--dim); white-space: nowrap; }
+.va-hist-what { display: flex; flex-direction: column; min-width: 0; line-height: 16px; color: var(--text); }
+.va-hist-what .vl-icon { vertical-align: -1px; margin-right: 4px; }
+.va-hist-what b { font-weight: 600; color: var(--fg); }
+.va-hist-what i { font-style: normal; color: var(--dim); }
+.va-hist-what em { font-style: normal; font-size: 10.5px; line-height: 13px; color: var(--dim); }
+.va-hist-row[data-failed] .va-hist-what em { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.va-hist-row[data-dry] .va-hist-what > span { opacity: .75; }
+
+/* ---------- wide layouts: the switcher spans the usage grid, hosts side by side ---------- */
+
+@media (min-width: 640px) {
+  .va, .va-one { grid-column: 1 / -1; }
+  .va {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 18px;
+    align-items: start;
+  }
+  .va-auto { grid-column: 1 / -1; }
+}
+@media (min-width: 640px) and (max-height: 480px) {
+  .va-now > b { font-size: 17px; line-height: 22px; }
+  .va-acct-row { min-height: 44px; padding: 2px 0; }
+}
+@media (min-width: 1200px) {
+  .va { gap: 14px 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .va-toggle-track > i { transition: none; }
+}

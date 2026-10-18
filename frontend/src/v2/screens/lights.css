@@ -27,11 +27,28 @@
   /* the control columns lean toward the room (f005), the room stays square-on */
   .lt-col-a, .lt-col-b { transform: perspective(1400px) rotateY(5deg); transform-origin: 0% 50%; }
 }
+/* a tablet in portrait (or a narrow window): the controls stack on the left, the room and Thor RGB on the right */
+@media (min-width: 640px) and (max-width: 1099px) and (min-height: 501px) {
+  .lt-layout {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'a c' 'b c';
+    column-gap: 14px;
+    row-gap: 6px;
+    padding-top: 12px;
+  }
+  .lt-col-a { grid-area: a; }
+  .lt-col-b { grid-area: b; }
+  .lt-col-c { grid-area: c; }
+  .lt-layout .lt-room { height: auto; aspect-ratio: 4 / 3; }
+  .lt-layout .lt-bulb-id { width: 150px; }
+}
+/* desktop: three columns centered in the page; the room column takes what is left, up to a compact cap */
 @media (min-width: 1100px) {
   .lt-layout {
-    grid-template-columns: minmax(0, 392px) minmax(0, 470px) minmax(0, 430px);
+    grid-template-columns: minmax(0, 400px) minmax(0, 500px) minmax(0, 540px);
+    justify-content: center;
     column-gap: 18px;
-    padding-left: 22px;
     padding-top: 18px;
   }
   .lt-col { gap: 8px; }
@@ -102,11 +119,11 @@
 }
 .lt-mpwr[data-on] .lt-mpwr-cap { color: var(--plate-ink); text-shadow: var(--plate-shadow); }
 
-/* ---------- presets: 4 x 2 glass plates, chip + name (+ sun / moon) ---------- */
+/* ---------- presets: 3 x 3 glass plates (the eight presets, then Custom), chip + name (+ sun / moon) ---------- */
 .lt-pres {
   container-type: inline-size;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
 .lt-pre {
@@ -321,7 +338,7 @@
 
 /* a lit bulb's own colors, under its row while it is selected */
 .lt-strip { position: relative; padding: 2px 0 8px; }
-.lt-sws { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.lt-sws { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; }
 .lt-sw {
   height: 34px;
   min-width: 0;
@@ -343,6 +360,48 @@
   box-shadow: 0 0 10px var(--sw), inset 0 1px 0 rgba(255, 255, 255, .35);
 }
 .lt-sw[data-pressed] { transform: scale(.92); filter: brightness(1.25); }
+/* ---------- custom color: the picker input sits over its plate, transparent ---------- */
+.lt-cin {
+  position: absolute;
+  left: -2px;
+  top: -3px;
+  z-index: 1;
+  width: calc(100% + 4px);
+  height: calc(100% + 6px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.lt-sw-custom .lt-cin { top: -5px; height: calc(100% + 10px); }
+.lt-pre-custom:has(.lt-cin:focus-visible),
+.lt-sw-custom:has(.lt-cin:focus-visible) { outline: 1px solid var(--line-strong); outline-offset: 2px; }
+/* the input is the press target, so the plate takes the press look from :active */
+.lt-pre-custom:active { transform: scale(.95); filter: brightness(1.25); }
+.lt-sw-custom:active { transform: scale(.92); filter: brightness(1.25); }
+/* the Custom plate's chip carries the hue strip until a color is picked, then that color */
+.lt-pre-custom .lt-chip { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35); }
+.lt-pre-custom[data-on] .lt-chip { box-shadow: 0 0 0 1px var(--plate-ink), 0 0 8px var(--sw); }
+/* a bulb's Custom swatch: a thin dim line box with the palette icon; the bulb's own color, lit, once
+   it is a color no preset matches; the picked color, unlit, while the picker moves */
+.lt-sw-custom { display: grid; place-items: center; }
+.lt-sw-custom:not([data-on]):not([data-pick]) {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
+}
+.lt-sw-custom[data-pick] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .26), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, .18)),
+    var(--sw);
+}
+.lt-sw-ic { position: relative; pointer-events: none; }
+.lt-sw-custom[data-on] .lt-sw-ic,
+.lt-sw-custom[data-pick] .lt-sw-ic { color: rgba(0, 0, 0, .62); }
+
 @keyframes lt-sw-in {
   from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.9); }
   to { opacity: 1; transform: none; }
@@ -397,8 +456,9 @@ html[data-motion='reduced'] .lt-sw { animation: vl-fade .12s linear both; }
 html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: none; }
 @media (prefers-reduced-motion: reduce) { .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: none; } }
 
-/* the narrow room column (landscape, tablet): Thor RGB stacks, the plates span it */
-@media (min-width: 640px) and (max-width: 1099px) {
+/* a narrow room column (landscape phone, small tablet): Thor RGB stacks, the plates span it */
+@media (min-width: 640px) { .lt-col-c { container: ltc / inline-size; } }
+@container ltc (max-width: 400px) {
   .lt-rgb { flex-direction: column; align-items: stretch; gap: 6px; }
   .lt-rgb-seg { width: 100%; height: 36px; }
   .lt-rgb-state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -414,7 +474,10 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
 @media (min-width: 1100px) {
   .lt-bulb-id { width: 150px; }
   .lt-pres, .lt-sws { gap: 6px; }
-  .lt-room { height: 292px; }
+  /* the room keeps its shape as its column grows: 300 px tall at 450 wide, 360 at 540. No
+     min-height: through the aspect ratio it set a minimum width, and a column under 390 px
+     (the iPad on its side, a narrow window at zoom 1.2) ran the room out of the screen */
+  .lt-room { height: auto; aspect-ratio: 3 / 2; }
 }
 
 /* landscape phone (the reference's own aspect): every control above the fold */

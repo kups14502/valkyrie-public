@@ -9,13 +9,14 @@ import { Icon, type IconName } from '../kit/icons'
 import { ago, useHosts, useLights, useThorRgb, useTick, type LightVM, type RgbVM } from '../kit/data'
 import { usePalette } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
-import { POSES, WireScene, parseColor, room, type CameraPose, type Light, type Model } from '../kit/three'
+import { POSES, WireScene, parseColor, room, type CameraPose, type Light, type Model, type RGB } from '../kit/three'
 import { setThorRgb, type LightUpdate } from '../../lib/api'
-import { PRESETS, brightnessFromPct, lightColor, pctFromBrightness, presetSwatchStyle, useLightsControl } from '../../lib/lights'
+import { PRESETS, brightnessFromPct, hexToRgb, lightColor, pctFromBrightness, presetSwatchStyle, rgbToHex, useLightsControl } from '../../lib/lights'
 import './lights.css'
 
 // Lights in the red HUD style: the all-lights master as a big power plate, the
-// real presets as glass plates, one icon-led row per bulb (its bulb icon glows
+// real presets as glass plates plus a Custom plate (the browser's color picker),
+// one icon-led row per bulb (a lit bulb's strip has the same Custom swatch) (its bulb icon glows
 // in the bulb's real color while it is on), Thor RGB, and the room model as a
 // compact panel that shows every bulb in its real color. Every bulb control
 // writes through src/lib/lights.ts useLightsControl: its desire overlay shows
@@ -52,6 +53,12 @@ const near = (a: string, b: [number, number, number]) => {
   return Math.max(Math.abs(c[0] - b[0]), Math.abs(c[1] - b[1]), Math.abs(c[2] - b[2])) <= 16
 }
 const presetOf = (color: string): string | null => SWATCHES.find((p) => near(color, p.rgb3))?.label ?? null
+/** any CSS color this screen draws ('rgb(...)' or '#rrggbb') as the '#rrggbb' a color input takes */
+const hexOf = (color: string) => rgbToHex(parseColor(color).map((n) => Math.round(n)) as RGB)
+/** the Custom plate's chip before anything was picked: a hue strip that says "any color" */
+const HUES = 'linear-gradient(90deg, #ff4b4b, #ffb340, #5dff7a, #4bd2ff, #6a6bff, #e85bff)'
+/** what the room picker opens on before the first pick (the classic control's default) */
+const CUSTOM_START = '#ffb87a'
 
 /** Why a write failed, short enough for a two-line toast: the backend's own word, else its status. */
 function why(e: unknown): string {
@@ -276,6 +283,8 @@ export default function Lights({ active }: ScreenProps) {
     : null
   const ordered = [...avail, ...all.filter((b) => b.unavailable)]
   const activePreset = anyOn && lit.every((b) => presetOf(b.color) === presetOf(lit[0].color)) ? presetOf(lit[0].color) : null
+  // every lit bulb shares one color that no preset matches: the Custom plate is the lit one
+  const roomCustom = anyOn && !activePreset && lit.every((b) => near(b.color, parseColor(lit[0].color))) ? lit[0].color : null
   const presetValue: ReactNode = !anyOn ? undefined : activePreset ?? (
     <span className="lt-dimval">{lit.length > 1 && lit.some((b) => !near(b.color, parseColor(lit[0].color))) ? 'Mixed' : 'Custom'}</span>
   )
@@ -326,6 +335,15 @@ export default function Lights({ active }: ScreenProps) {
     if (!lit.length) { toast('Turn a light on first'); return }
     send({ entity_id: lit.map((b) => b.id), state: 'on', ...colorOf(p) }, `Could not apply ${p.label}`, true)
   }
+  // a picked color is one deliberate commit (ColorPick sends once per pick), so it always goes,
+  // like a slider release. The room gets it as a preset does: no brightness, the backend pins each
+  // lit bulb to its own level. One bulb gets the level it is at, as a preset tap on its strip does.
+  const applyCustom = (rgb: RGB) => {
+    if (!lit.length) { toast('Turn a light on first'); return }
+    send({ entity_id: lit.map((b) => b.id), state: 'on', rgb_color: rgb }, 'Could not apply the custom color')
+  }
+  const customBulb = (b: Bulb, rgb: RGB) =>
+    send({ entity_id: b.id, state: 'on', ...(b.raw != null ? { brightness: b.raw } : {}), rgb_color: rgb }, `Could not set ${b.name} to a custom color`)
 
   // ---- selection: a row tap lights its diamond (and opens a lit bulb's colors), a diamond tap finds its row ----
   const rowEls = useRef<Record<string, HTMLDivElement | null>>({})
@@ -427,8 +445,15 @@ export default function Lights({ active }: ScreenProps) {
         </Panel>
 
         {/* PRESETS: the real list from src/lib/lights.ts */}
-        <Panel className="lt-p-presets" icon="color" lit={!!activePreset} label="Presets" value={presetValue} i={1}>
-          <PresetPlates active={activePreset} idle={!anyOn} busy={anyOn && litBusy} onPick={applyPreset} />
+        <Panel className="lt-p-presets" icon="color" lit={!!activePreset || !!roomCustom} label="Presets" value={presetValue} i={1}>
+          <PresetPlates
+            active={activePreset}
+            custom={roomCustom}
+            idle={!anyOn}
+            busy={anyOn && litBusy}
+            onPick={applyPreset}
+            onCustom={applyCustom}
+          />
         </Panel>
       </div>
 
@@ -460,6 +485,7 @@ export default function Lights({ active }: ScreenProps) {
                 onToggle={() => toggleBulb(b)}
                 onPct={(v) => setBulbPct(b, v)}
                 onColor={(p) => colorBulb(b, p)}
+                onCustom={(rgb) => customBulb(b, rgb)}
               />
             ))}
             {!lights.has && <div className="lt-empty">{lights.failed ? 'Lights unreachable' : 'Loading lights'}</div>}
@@ -539,14 +565,29 @@ export default function Lights({ active }: ScreenProps) {
 
 // ---------- presets: glass plates, each with its swatch ----------
 
-function PresetPlates({ active, idle, busy, onPick }: {
+function PresetPlates({ active, custom, idle, busy, onPick, onCustom }: {
   active: string | null
+  /** the one color every lit bulb shares when no preset matches it (lights the Custom plate) */
+  custom: string | null
   /** nothing to color yet: dimmed, a tap explains why */
   idle?: boolean
-  /** a command for the lit bulbs is in flight: no second one until it lands */
+  /** a command for the lit bulbs is in flight: no second preset until it lands */
   busy?: boolean
   onPick: (p: Swatch) => void
+  onCustom: (rgb: RGB) => void
 }) {
+  // the picker's value while it moves (the chip follows it), and the last color sent from here
+  const [pick, setPick] = useState<string | null>(null)
+  const [last, setLast] = useState(CUSTOM_START)
+  const customOn = !!custom
+  const sw = pick ?? custom ?? HUES
+  const inner = (
+    <>
+      <span className="lt-chip" aria-hidden />
+      <span className="lt-pre-name">Custom</span>
+      <Icon name="color" size={13} tone={customOn ? 'ink' : 'dim'} className="lt-pre-ic" />
+    </>
+  )
   return (
     <div className="lt-pres" role="radiogroup" aria-label="Presets" data-idle={idle || undefined} data-busy={busy || undefined} aria-busy={busy || undefined}>
       {SWATCHES.map((p) => {
@@ -569,18 +610,106 @@ function PresetPlates({ active, idle, busy, onPick }: {
           </Press>
         )
       })}
+      {/* Custom: nothing lit, a tap says why; otherwise the color picker sits over the plate */}
+      {idle ? (
+        <Press className="lt-pre lt-pre-custom" style={{ '--sw': sw } as Vars} onPress={() => toast('Turn a light on first')}>
+          {inner}
+        </Press>
+      ) : (
+        <label
+          className="vl-press lt-pre lt-pre-custom"
+          data-on={customOn || undefined}
+          data-pick={pick !== null || undefined}
+          style={{ '--sw': sw } as Vars}
+          title="Custom color"
+        >
+          {inner}
+          <ColorPick
+            value={pick ?? (custom ? hexOf(custom) : last)}
+            label="Custom color for the lit lights"
+            onPreview={setPick}
+            onCommit={(rgb, hex) => { setPick(null); setLast(hex); onCustom(rgb) }}
+          />
+        </label>
+      )}
     </div>
+  )
+}
+
+// ---------- custom color: the browser's own picker over a plate ----------
+
+/** a run of change events this close together is one pick (see ColorPick) */
+const PICK_SETTLE_MS = 450
+
+/**
+ * A color input laid over its plate (transparent, covering the hit area), so the tap lands on the
+ * input itself: iOS opens the picker from a direct tap. It previews while the picker moves and
+ * sends on the input's change event, not React's onChange (that is the input event, which fires
+ * for every step of a drag; a command per step is what the brightness bars learned not to send a
+ * cloud integration). A picker that fires change while it is still open gets one command for the
+ * whole run: the last value, once the changes stop for PICK_SETTLE_MS. A pick still waiting when
+ * the plate goes away (the strip closed) is sent at once. Blur drops a preview that never became a
+ * change (the picker closed on the color it opened with).
+ */
+function ColorPick({ value, label, onPreview, onCommit }: {
+  value: string
+  label: string
+  onPreview: (hex: string | null) => void
+  onCommit: (rgb: RGB, hex: string) => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  const cb = useRef({ onPreview, onCommit })
+  cb.current = { onPreview, onCommit }
+  const waiting = useRef(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let hex = ''
+    const send = () => {
+      timer = null
+      waiting.current = false
+      const rgb = hexToRgb(hex)
+      if (rgb) cb.current.onCommit(rgb, hex)
+    }
+    const change = () => {
+      hex = el.value.toLowerCase()
+      waiting.current = true
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(send, PICK_SETTLE_MS)
+    }
+    el.addEventListener('change', change)
+    return () => {
+      el.removeEventListener('change', change)
+      if (timer !== null) { clearTimeout(timer); send() }
+    }
+  }, [])
+  return (
+    <input
+      ref={ref}
+      type="color"
+      className="lt-cin"
+      value={value}
+      aria-label={label}
+      onChange={(e) => cb.current.onPreview(e.currentTarget.value.toLowerCase())}
+      onBlur={() => { if (!waiting.current) cb.current.onPreview(null) }}
+    />
   )
 }
 
 // ---------- a lit bulb's own colors (the swatch strip under its row) ----------
 
-function Swatches({ label, active, busy, onPick }: {
+function Swatches({ label, active, color, busy, onPick, onCustom }: {
   label: string
   active: string | null
+  /** the bulb's real color: what the Custom swatch shows when no preset matches, and where its picker opens */
+  color: string
   busy?: boolean
   onPick: (p: Swatch) => void
+  onCustom: (rgb: RGB) => void
 }) {
+  const [pick, setPick] = useState<string | null>(null)
+  const customOn = active === null
   return (
     <div className="lt-sws" role="radiogroup" aria-label={label} data-busy={busy || undefined} aria-busy={busy || undefined}>
       {SWATCHES.map((p, n) => (
@@ -597,13 +726,29 @@ function Swatches({ label, active, busy, onPick }: {
           onPress={() => onPick(p)}
         />
       ))}
+      {/* Custom: a thin line box until the bulb is a color no preset matches, then that color, lit */}
+      <label
+        className="vl-press lt-sw lt-sw-custom"
+        data-on={customOn || undefined}
+        data-pick={pick !== null || undefined}
+        style={{ '--sw': pick ?? color, '--n': SWATCHES.length } as Vars}
+        title="Custom color"
+      >
+        <Icon name="color" size={14} tone="dim" className="lt-sw-ic" />
+        <ColorPick
+          value={pick ?? hexOf(color)}
+          label={`${label}: custom`}
+          onPreview={setPick}
+          onCommit={(rgb) => { setPick(null); onCustom(rgb) }}
+        />
+      </label>
     </div>
   )
 }
 
 // ---------- one bulb ----------
 
-function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onColor }: {
+function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onColor, onCustom }: {
   b: Bulb
   i: number
   selected: boolean
@@ -614,6 +759,7 @@ function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onCo
   onToggle: () => void
   onPct: (v: number) => void
   onColor: (p: Swatch) => void
+  onCustom: (rgb: RGB) => void
 }) {
   const lit = b.on && !b.unavailable
   const open = selected && lit
@@ -676,7 +822,7 @@ function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onCo
       </div>
       {open && (
         <div className="lt-strip">
-          <Swatches label={`${b.name} color`} active={presetOf(b.color)} busy={busy} onPick={onColor} />
+          <Swatches label={`${b.name} color`} active={presetOf(b.color)} color={b.color} busy={busy} onPick={onColor} onCustom={onCustom} />
         </div>
       )}
     </div>

@@ -28,17 +28,23 @@ import { cx } from './ui'
 // airflow on the side where the content sits (the widest margin around the
 // anchor), so text never sits on bright dots.
 
-/** Settings > Hero choices (the Home hero). */
-export type HeroId = 'thor' | 'odin'
-export const HERO_IDS: readonly HeroId[] = ['thor', 'odin']
+/** Settings > Hero choices (the Home hero): the two machines, and the phone and tablet slabs. */
+export type HeroId = 'thor' | 'odin' | 'phone' | 'tablet'
+export const HERO_IDS: readonly HeroId[] = ['thor', 'odin', 'phone', 'tablet']
 
 /**
  * Every device the hero can draw. thor, odin, frame and mimir are API host ids
- * (frame is labeled Loki); phone and tablet are ready for when they report in.
+ * (frame is labeled Loki). phone and tablet do not report to /api/hosts yet:
+ * they show as models only (Settings > Hero, System > Hosts), with no stats.
  * logicserver has no model: its physical form is unknown.
  */
-export type HostModelId = HeroId | 'frame' | 'mimir' | 'phone' | 'tablet'
+export type HostModelId = HeroId | 'frame' | 'mimir'
 export const HOST_MODEL_IDS: readonly HostModelId[] = ['thor', 'odin', 'frame', 'mimir', 'phone', 'tablet']
+
+/** Devices with a model and no host on the API: System > Hosts lists them as model-only rows until they report in. */
+export const MODEL_ONLY_IDS = ['phone', 'tablet'] as const
+export type ModelOnlyId = (typeof MODEL_ONLY_IDS)[number]
+export const MODEL_ONLY_LABEL: Record<ModelOnlyId, string> = { phone: 'Phone', tablet: 'Tablet' }
 
 // odin is the real rig (laptop + RAID enclosure, models/odin.ts); the older odinServer box stays exported but unused here.
 // frame is built without the ergo kit's optional top strap (frameHeadset({ topStrap: true }) adds it).

@@ -30,10 +30,17 @@ export type Palette = {
   hot: string
   /** alert (Valkyrie's danger red; yellow when the accent is red or pink) */
   acc2: string
+  /**
+   * a loss (Trades: a down day, a down week): never yellow. The alert red where
+   * acc2 is red; on red and pink, where acc2 is the yellow, the pale text tone
+   * (the down arrow and the minus sign carry the direction)
+   */
+  loss: string
   /** "r, g, b" for rgba() */
   fgRgb: string
   hotRgb: string
   acc2Rgb: string
+  lossRgb: string
   /** ink on a solid lit plate: a near-black accent on bright schemes, a near-white tint on deep ones */
   plateInk: string
   /** relative luminance of the accent, 0..1 (WCAG); bright schemes are > ~0.5 */
@@ -107,6 +114,8 @@ export function paletteFor(mode: string): Palette {
   const text: [number, number, number] = [r * 0.18 + 192, g * 0.18 + 192, b * 0.18 + 192]
   const dim = atLeast([r * 0.45 + 90, g * 0.45 + 90, b * 0.45 + 90], text, 0.24)
   const faint = atLeast([r * 0.28 + 40, g * 0.28 + 40, b * 0.28 + 40], text, 0.1)
+  // Brendon does not want yellow on Trades: a loss there is never acc2's yellow
+  const loss = reddish ? toHex(...text) : acc2
   return {
     mode: id,
     fg: accent,
@@ -115,9 +124,11 @@ export function paletteFor(mode: string): Palette {
     faint: toHex(...faint),
     hot,
     acc2,
+    loss,
     fgRgb: `${r}, ${g}, ${b}`,
     hotRgb: rgbStr(hot),
     acc2Rgb: rgbStr(acc2),
+    lossRgb: rgbStr(loss),
     plateInk: look.plateInk,
     lum: look.lum,
   }
@@ -244,9 +255,11 @@ export function applyPalette(mode: Mode): void {
   s.setProperty('--faint', p.faint)
   s.setProperty('--hot', p.hot)
   s.setProperty('--acc2', p.acc2)
+  s.setProperty('--loss', p.loss)
   s.setProperty('--fg-rgb', p.fgRgb)
   s.setProperty('--hot-rgb', p.hotRgb)
   s.setProperty('--acc2-rgb', p.acc2Rgb)
+  s.setProperty('--loss-rgb', p.lossRgb)
   // the look, dosed by luminance (v2.css registers these so they morph too)
   s.setProperty('--plate', `${k.plate}%`)
   s.setProperty('--plate-ink', k.plateInk)

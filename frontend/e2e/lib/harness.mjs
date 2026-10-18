@@ -15,6 +15,12 @@ export class Ctx {
     this.pages = []
     /** console errors the test expects (the page's own error path), matched by RegExp */
     this.allowProblems = []
+    /**
+     * Terminal sockets the test expects the fence to refuse, matched by RegExp on the URL: a
+     * page that heads for a made-up pane (a fixture's vk-e2e... name) tries to attach to it.
+     * Still refused in the page; only not counted as a failure.
+     */
+    this.allowSockets = []
   }
 
   /** A page in a fresh browser context (its own storage, like a new device). */
@@ -45,7 +51,7 @@ export class Ctx {
 
   async shot(page, name) {
     if (!this.env.shots) return null
-    const file = `${this.env.shots}/${this.name.replace(/[^a-z0-9._-]+/gi, '_')}${name ? `-${name}` : ''}.png`
+    const file = `${this.env.shots}/${this.name.replace(/[^a-z0-9._-]+/gi, '_')}${name ? `-${name}` : ''}.jpg`
     try {
       await page.screenshot(file)
       this.shots.push(file)
@@ -63,8 +69,9 @@ export class Ctx {
       }
       for (const n of p.notes) this.notes.push(n)
       if (p.terminalLoads.length) this.fails.push(`the terminal page was requested: ${p.terminalLoads.join(', ')}`)
-      const ws = await p.eval(() => (window.__e2e ? window.__e2e.blockedWs : [])).catch(() => [])
-      if (ws?.length) this.fails.push(`a socket to ${ws.join(', ')} was opened (blocked in the page)`)
+      const ws = ((await p.eval(() => (window.__e2e ? window.__e2e.blockedWs : [])).catch(() => [])) ?? [])
+        .filter((u) => !this.allowSockets.some((re) => re.test(u)))
+      if (ws.length) this.fails.push(`a socket to ${ws.join(', ')} was opened (blocked in the page)`)
     }
     await Promise.all(this.pages.map((p) => p.close()))
   }

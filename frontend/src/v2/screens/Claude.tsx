@@ -1,8 +1,8 @@
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
-  type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode,
+  type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useIntent, useShell, type ScreenProps } from '../kit/shell'
@@ -14,13 +14,22 @@ import {
 } from '../kit/data'
 import { animateSpring, useReducedMotion } from '../kit/motion'
 import {
-  api, apiErrorText, fetchSessionHosts, fetchSessionList, fetchTermSessions, launchSessionOnHost, localHostname,
-  openNewSessionHere, openSessionHere, openTermSession, setSessionsDone, startSessionOnHost, stopSessionOnHost,
-  termPath, type LaunchTarget, type SessionHost, type TermSession,
+  api, apiErrorText, fetchSessionHosts, fetchSessionList, fetchTermSessions, killTermSession, launchSessionOnHost,
+  localHostname, openNewSessionHere, openSessionHere, openTermSession, setSessionsDone, startSessionOnHost,
+  stopSessionOnHost, termLabel, type LaunchTarget, type SessionHost, type TermSession,
 } from '../../lib/api'
-import { BASE_AREAS, fetchProjDoc, fetchProjList, projAreasQuery } from '../../lib/projectsApi'
+import {
+  BASE_AREAS, LIMITS, PROJ_KEYS, addProjReminder, addProjTab, cancelProjReminder, fetchProjDoc, fetchProjList,
+  projAreasQuery, projTabItem, unlinkProjSession, updateProj, type ChecklistItem, type Exposure, type ProjectSummary,
+} from '../../lib/projectsApi'
+import { v2TermPath } from '../../lib/term'
 import { shortName } from '../../lib/quickSessions'
 import { readOpenMode, seedTerminal } from '../../lib/sessionLaunch'
+import { UploadButton } from '../kit/upload'
+import {
+  LinkSessionPicker, NewProjectFlow, PIcon, ProjectNotes, ProjectSettings, SessionActions, type NoteTab, type ProjMeta,
+} from './ProjectPage'
+import { Accounts } from './Accounts'
 import './claude.css'
 
 // AI (Claude.tsx, the /m/ai tab): the session board, Valkyrie Projects and Usage
@@ -41,6 +50,23 @@ import './claude.css'
 // on odin running Claude on thor over SSH), thor's own screen (Windows Terminal
 // on thor's desk, so the session lives on thor and survives a dropped
 // connection), and odin (Claude on odin itself, the backup when thor is down).
+//
+// Sessions also carries the classic board's tools: every open tmux pane (Open
+// terminals: reattach by its own name, close with two taps), Stop all (two
+// taps, panes first, then sessions, one at a time), a long press to pick many
+// rows for Mark done or Undo, the done list folded under Recent with Undo per
+// row, search over title, project and folder, and a link to the classic page
+// for host health, snapshots, restore and closed history. A terminal is only
+// ever opened by an explicit pane name; nothing here picks "the latest one".
+// Projects: New project (a desk session sets it up, "Set up by hand" is the
+// fallback form; ProjectPage.tsx), Show archived, and a project's detail that
+// starts and opens its sessions, acts on them (move here, stop, done, unlink)
+// and links existing ones, ticks and adds checklist items, sets and cancels
+// reminders, reads the notes and links tabs, and edits every setting (name,
+// next action, summary, status and restore, area, folder, exposure, session
+// switches, archive). The classic project page keeps files, activity, agents
+// and note editing (Open full project). /m/ai/projects?p=<id> opens a
+// project's detail, /m/ai/projects?new=1 the New project sheet.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
@@ -118,6 +144,41 @@ const STATE_ICON: Record<SessionVM['activity'], { name: IconName; tone: IconTone
   closed: { name: 'claude', tone: 'faint', glow: false },
 }
 const isLive = (s: Pick<SessionVM, 'live' | 'activity'>) => s.live || s.activity !== 'closed'
+
+/** A board row: the view model and whether it is marked done. A running session marked done stays under Live until it closes (the classic board's rule). */
+type Row = SessionVM & { done: boolean }
+
+/** The conversation a pane runs: a new pane knows it from the start, a resume keeps it as its target. */
+const paneSid = (t: TermSession) => t.sessionId || (t.mode === 'resume' ? t.target : '')
+
+/** The v2 terminal for one pane, always by its own name. */
+const termTo = (name: string, back?: string) => v2TermPath(name, back)
+
+/** Two-tap actions (Stop all, Close, Cancel) disarm after this long. */
+const ARM_MS = 4000
+/** A press held this long picks the row (select mode). */
+const LONG_MS = 450
+
+/**
+ * Render an input now and focus it inside the tap, or iOS keeps the keyboard
+ * down. The tap's own click lands afterwards on whatever now sits under the
+ * finger and would blur it, so focus once more on that click (Media's way).
+ */
+function openAndFocus(open: () => void, ref: RefObject<HTMLInputElement | null>) {
+  flushSync(open)
+  const focus = () => ref.current?.focus({ preventScroll: true })
+  focus()
+  const done = () => {
+    window.removeEventListener('click', onClick, true)
+    window.clearTimeout(t)
+  }
+  const onClick = () => {
+    focus()
+    done()
+  }
+  window.addEventListener('click', onClick, true)
+  const t = window.setTimeout(done, 600)
+}
 
 /** Clipboard write with the execCommand fallback (plain http on the phone has no navigator.clipboard). */
 async function copyText(text: string): Promise<boolean> {
@@ -240,26 +301,56 @@ const phoneGrid = () => ({
 type ProjRow = ProjectVM & { sessionIds: string[]; nextReminderAt: number | null }
 const PROJ_KEY = 'claude.projects'
 
-function useProjectRows(): Live<ProjRow[]> {
-  return useLive<ProjRow[]>(PROJ_KEY, async () => (await fetchProjList()).map((p): ProjRow => {
-    const rem = p.nextReminderAt ? Date.parse(p.nextReminderAt) : NaN
-    return {
-      id: p.id,
-      name: p.name,
-      area: String(p.area),
-      status: String(p.status),
-      summary: p.summary,
-      nextAction: p.nextAction,
-      sessions: p.sessionIds.length,
-      updated: Date.parse(p.updatedAt),
-      sessionIds: p.sessionIds,
-      nextReminderAt: Number.isFinite(rem) ? rem : null,
-    }
-  }).sort((a, b) => b.updated - a.updated), 60_000)
+function toProjRow(p: ProjectSummary): ProjRow {
+  const rem = p.nextReminderAt ? Date.parse(p.nextReminderAt) : NaN
+  return {
+    id: p.id,
+    name: p.name,
+    area: String(p.area),
+    status: String(p.status),
+    summary: p.summary,
+    nextAction: p.nextAction,
+    sessions: p.sessionIds.length,
+    updated: Date.parse(p.updatedAt),
+    sessionIds: p.sessionIds,
+    nextReminderAt: Number.isFinite(rem) ? rem : null,
+  }
 }
 
-type Lookup = (id: string) => SessionVM | undefined
+function useProjectRows(): Live<ProjRow[]> {
+  return useLive<ProjRow[]>(PROJ_KEY, async () => (await fetchProjList()).map(toProjRow).sort((a, b) => b.updated - a.updated), 60_000)
+}
+
+/**
+ * Show archived: the list with archived projects included (the classic list's
+ * own cache entry, under the list key so every list invalidation reaches it),
+ * read only while the fold is open. Only the archived ones are kept.
+ */
+function useArchivedRows(on: boolean) {
+  const q = useQuery({
+    queryKey: [...PROJ_KEYS.list, 'archived'],
+    queryFn: () => fetchProjList(true),
+    enabled: on,
+    refetchInterval: on ? 60_000 : false,
+  })
+  const rows = useMemo(
+    () => (q.data ?? []).filter((p) => p.status === 'archived').map(toProjRow).sort((a, b) => b.updated - a.updated),
+    [q.data],
+  )
+  return { rows, loading: on && q.data === undefined && !q.isError, error: q.isError ? errText(q.error) : null }
+}
+
+/** any session by id, with whether it is marked done (the board's rows and the index both carry it) */
+type Lookup = (id: string) => Row | undefined
 type Counted = ProjRow & { live: number; asking: number }
+
+/** The board's writes, handed to a project's detail so its session rows act the board's way (optimistic, with the same rollback). */
+type SessActs = {
+  busy: ReadonlyMap<string, Busy>
+  stop: (s: Row) => void
+  done: (s: Row) => void
+  undo: (s: Row) => void
+}
 
 function countProject(p: ProjRow, lookup: Lookup): Counted {
   let live = 0
@@ -277,12 +368,48 @@ function countProject(p: ProjRow, lookup: Lookup): Counted {
 const urgency = (p: Counted) => (p.asking > 0 ? 2 : p.live > 0 ? 1 : 0)
 const byUrgency = (a: Counted, b: Counted) => urgency(b) - urgency(a) || b.updated - a.updated
 
+/**
+ * A callback ref that caps an element's height to its scrolling page, less the
+ * sticky top of its parent column and a bottom gap, and keeps it there as the
+ * page resizes. Measured, not 100vh: the app's zoom and the shell's header
+ * both sit between the viewport and the page.
+ */
+function useFitToScroller(gap = 18): (el: HTMLElement | null) => void {
+  const cleanup = useRef<(() => void) | null>(null)
+  return useCallback((el: HTMLElement | null) => {
+    cleanup.current?.()
+    cleanup.current = null
+    if (!el) return
+    let sc = el.parentElement
+    while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement
+    if (!sc) return
+    const page = sc
+    const fit = () => {
+      const top = el.parentElement ? parseFloat(getComputedStyle(el.parentElement).top) || 0 : 0
+      el.style.maxHeight = `${Math.max(320, page.clientHeight - top - gap)}px`
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(page)
+    cleanup.current = () => {
+      ro.disconnect()
+      el.style.maxHeight = ''
+    }
+  }, [gap])
+}
+
 // ---------- the screen ----------
 
-type UndoItem = { key: number; rows: SessionVM[]; title: string; pending: boolean }
+type UndoItem = { key: number; rows: Row[]; title: string; pending: boolean }
 type Tab = 'sessions' | 'projects' | 'usage'
 type Recover = { done: number; total: number }
 const RECENT_SHOWN = 8
+/** the done fold and search results grow by this many rows a press */
+const DONE_STEP = 30
+const RESULTS_STEP = 40
+
+/** What the session list shows, by group, for the picked area. */
+type Layout = { asking: Row[]; live: Row[]; recent: Row[]; recentShown: Row[]; done: Row[]; doneShown: Row[] }
 
 export default function Claude({ active, sub, setSub }: ScreenProps) {
   const sessions = useSessions()
@@ -294,10 +421,15 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const short = useMedia('(min-width: 640px) and (max-height: 480px)')
   const desk = useMedia('(min-width: 1200px)')
   const tab: Tab = sub === 'projects' || sub === 'usage' ? sub : 'sessions'
+  // the area filter is a column beside the list (wide, not a landscape phone)
+  const sideFilter = wide && !short
 
   const [area, setArea] = useState('all')
   const [picker, setPicker] = useState(false)
   const [projId, setProjId] = useState<string | null>(null)
+  // the New project sheet, and the archived projects fold under the list
+  const [newProj, setNewProj] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   // optimistic writes over the board until a fetch agrees: done (true) or open
   // again (false) by id, and stopped sessions with the time the stop landed
   const [dispo, setDispo] = useState<ReadonlyMap<string, boolean>>(() => new Map())
@@ -314,17 +446,47 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const [expRow, setExpRow] = useState<string | null>(null)
   const [recentAll, setRecentAll] = useState(false)
   const [undo, setUndo] = useState<UndoItem | null>(null)
+  // the done fold under Recent, and how many of its rows show
+  const [doneOpen, setDoneOpen] = useState(false)
+  const [doneMax, setDoneMax] = useState(DONE_STEP)
+  // select mode (a long press): the picked ids, null when not picking
+  const [picked, setPicked] = useState<ReadonlySet<string> | null>(null)
+  // Stop all: armed by the first tap for a few seconds, then the sweep's progress
+  const [stopArmed, setStopArmed] = useState(false)
+  const [sweep, setSweep] = useState<Recover | null>(null)
+  const sweeping = useRef(false)
+  // search: null = closed (the phone shows the area plates), '' = open and empty
+  const [query, setQuery] = useState<string | null>(null)
+  const [resultsMax, setResultsMax] = useState(RESULTS_STEP)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const searching = !!query && query.trim() !== ''
 
-  // sheets and open rows belong to the active tab only
+  // sheets, open rows and picks belong to the active tab only
   useEffect(() => {
     if (active) return
     setPicker(false)
+    setNewProj(false)
     setOpenRow(null)
+    setPicked(null)
+    setStopArmed(false)
   }, [active])
   useEffect(() => {
     setOpenRow(null)
     setExpRow(null)
+    setPicked(null)
   }, [tab, area])
+  useEffect(() => {
+    if (!stopArmed) return
+    const t = setTimeout(() => setStopArmed(false), ARM_MS)
+    return () => clearTimeout(t)
+  }, [stopArmed])
+  // Escape leaves select mode
+  useEffect(() => {
+    if (!picked) return
+    const f = (e: KeyboardEvent) => { if (e.key === 'Escape') setPicked(null) }
+    window.addEventListener('keydown', f)
+    return () => window.removeEventListener('keydown', f)
+  }, [picked])
 
   // New session from anywhere: the 'v2-new-session' window event (a Dashboard
   // quick action) flies to AI > Sessions and opens the picker; so does ?new=1.
@@ -346,11 +508,24 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     if (!active) return
     const q = new URLSearchParams(loc.search)
     if (q.get('new') !== '1') return
-    setPicker(true)
+    // on Projects, ?new=1 is a new project
+    if (tab === 'projects') setNewProj(true)
+    else setPicker(true)
     q.delete('new')
     const rest = q.toString()
     navigate({ pathname: loc.pathname, search: rest ? `?${rest}` : '' }, { replace: true })
-  }, [active, loc.search, loc.pathname, navigate])
+  }, [active, tab, loc.search, loc.pathname, navigate])
+  // /m/ai/projects?p=<id>: that project's detail (the param is removed once it opens)
+  useEffect(() => {
+    if (!active || tab !== 'projects') return
+    const q = new URLSearchParams(loc.search)
+    const id = q.get('p')
+    if (!id) return
+    setProjId(id)
+    q.delete('p')
+    const rest = q.toString()
+    navigate({ pathname: loc.pathname, search: rest ? `?${rest}` : '' }, { replace: true })
+  }, [active, tab, loc.search, loc.pathname, navigate])
 
   const hostLabel = useMemo(() => {
     const m = new Map((hosts.data ?? []).map((h) => [h.id, h.label]))
@@ -363,24 +538,34 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const paneOf = useMemo(() => {
     const m = new Map<string, string>()
     for (const t of panes.data ?? []) {
-      const id = t.sessionId || (t.mode === 'resume' ? t.target : '')
+      const id = paneSid(t)
       if (id && !t.dead) m.set(id, t.name)
     }
     return (id: string) => m.get(id) ?? null
   }, [panes.data])
 
-  // Every open session: the in-memory index of the whole board once this page
-  // load has fetched it (no 40-row cap), the persisted 40 newest until then.
-  // A done or undo still in flight (or not yet on the board) overrides it.
-  const source = useMemo<SessionVM[] | undefined>(() => {
-    if (index.ready) return [...index.byId.values()].filter((s) => !(dispo.get(s.id) ?? s.done)).sort((a, b) => b.last - a.last)
-    return sessions.data?.filter((s) => !dispo.get(s.id))
+  // Every session: the in-memory index of the whole board once this page load
+  // has fetched it (done ones too, no 40-row cap), the persisted 40 newest open
+  // ones until then. A done or undo still in flight overrides the board.
+  const source = useMemo<Row[] | undefined>(() => {
+    if (index.ready) {
+      const out: Row[] = []
+      for (const s of index.byId.values()) {
+        const d = dispo.get(s.id)
+        out.push(d === undefined || d === s.done ? s : { ...s, done: d })
+      }
+      return out.sort((a, b) => b.last - a.last)
+    }
+    return sessions.data?.map((s): Row => ({ ...s, done: dispo.get(s.id) ?? false }))
   }, [index.ready, index.byId, sessions.data, dispo])
   const hasBoard = source !== undefined
 
   // the board with stops that have not reached it yet
   const board = useMemo(() => (source ?? [])
-    .map((s): SessionVM => (stopped.has(s.id) ? { ...s, activity: 'closed', live: false } : s)), [source, stopped])
+    .map((s): Row => (stopped.has(s.id) ? { ...s, activity: 'closed', live: false } : s)), [source, stopped])
+  // on the list: everything not done, and anything still running
+  const openRows = useMemo(() => board.filter((s) => !s.done || isLive(s)), [board])
+  const doneRows = useMemo(() => board.filter((s) => s.done && !isLive(s)), [board])
 
   // drop an override once a fetch agrees with it (never while its write is in flight)
   useEffect(() => {
@@ -407,16 +592,24 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       return n ?? m
     })
   }, [source, now])
-  const live = board.filter(isLive).length
-  const asking = board.filter((s) => s.activity === 'asking').length
+  const live = openRows.filter(isLive).length
+  const asking = openRows.filter((s) => s.activity === 'asking').length
 
-  // any session by id: the index first (done ones too), then the open board
+  // any session by id: the board (done ones too once the index is in), then the index
   const lookup = useMemo<Lookup>(() => {
-    const open = new Map(board.map((s) => [s.id, s]))
-    return (id) => open.get(id) ?? (index.ready ? index.byId.get(id) : undefined)
+    const all = new Map(board.map((s) => [s.id, s]))
+    return (id) => all.get(id) ?? (index.ready ? index.byId.get(id) : undefined)
   }, [board, index.ready, index.byId])
+  // what the board calls each conversation, so a pane reads as its session rather than its launch target
+  const titles = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of board) if (s.title) m.set(s.id, s.title)
+    return m
+  }, [board])
 
   const projList = useMemo(() => (projects.data ?? []).map((p) => countProject(p, lookup)), [projects.data, lookup])
+  const archived = useArchivedRows(showArchived && tab === 'projects')
+  const archList = useMemo(() => (showArchived ? archived.rows.map((p) => countProject(p, lookup)) : []), [showArchived, archived.rows, lookup])
   const projAsking = useMemo(() => {
     const ids = new Set<string>()
     for (const p of projects.data ?? []) for (const id of p.sessionIds) if (lookup(id)?.activity === 'asking') ids.add(id)
@@ -430,14 +623,59 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
 
   const areaOrder = useQuery(projAreasQuery).data ?? BASE_AREAS
   const areas = useMemo(
-    () => areaItems(tab === 'sessions' ? board.map((s) => s.area) : projList.map((p) => p.area), areaOrder),
-    [tab, board, projList, areaOrder],
+    () => areaItems(tab === 'sessions' ? openRows.map((s) => s.area) : projList.map((p) => p.area), areaOrder),
+    [tab, openRows, projList, areaOrder],
   )
   // a filter that empties out (the last session of an area marked done) falls back to All
   const shownArea = areas.some((a) => a.id === area) ? area : 'all'
   const pickArea = (id: string) => setArea((cur) => (cur === id && id !== 'all' ? 'all' : id))
   // never show "All 0" before the first data
   const showFilter = tab === 'sessions' ? hasBoard : !!projects.data
+
+  const layout = useMemo<Layout>(() => {
+    const inArea = (s: Row) => shownArea === 'all' || s.area === shownArea
+    const liveRows = openRows.filter((s) => isLive(s) && inArea(s))
+      .sort((a, b) => ACTIVITY_RANK[a.activity] - ACTIVITY_RANK[b.activity] || b.last - a.last)
+    const recent = openRows.filter((s) => !isLive(s) && inArea(s)).sort((a, b) => b.last - a.last)
+    const done = doneRows.filter(inArea)
+    return {
+      asking: liveRows.filter((s) => s.activity === 'asking'),
+      live: liveRows.filter((s) => s.activity !== 'asking'),
+      recent,
+      recentShown: recentAll ? recent : recent.slice(0, RECENT_SHOWN),
+      done,
+      doneShown: doneOpen ? done.slice(0, doneMax) : [],
+    }
+  }, [openRows, doneRows, shownArea, recentAll, doneOpen, doneMax])
+
+  // Search: title, project and folder, across every session the board knows
+  // (done ones too) and every area. The folder (cwd) is only in the board's
+  // full list, read once a search starts and shared with the classic board's cache.
+  const folders = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, enabled: searching, staleTime: 60_000, refetchInterval: false })
+  const cwdOf = useMemo(() => {
+    const m = new Map<string, string>()
+    const d = folders.data
+    if (d?.installed) for (const s of d.sessions) if (s.cwd) m.set(s.sessionId, s.cwd)
+    return m
+  }, [folders.data])
+  const results = useMemo(() => {
+    if (!searching || !query) return []
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+    return board.filter((s) => {
+      const hay = `${s.title}\n${s.project}\n${cwdOf.get(s.id) ?? ''}`.toLowerCase()
+      return terms.every((t) => hay.includes(t))
+    })
+  }, [searching, query, board, cwdOf])
+  const resultsShown = useMemo(() => results.slice(0, resultsMax), [results, resultsMax])
+
+  // Every row drawn right now: what "All N" picks, and what a pick can act on.
+  const onScreen = useMemo(
+    () => (searching ? resultsShown : [...layout.asking, ...layout.live, ...layout.recentShown, ...layout.doneShown]),
+    [searching, resultsShown, layout],
+  )
+  const pickedRows = picked ? onScreen.filter((s) => picked.has(s.id)) : []
+  const pickedOpen = pickedRows.filter((s) => !s.done)
+  const pickedDone = pickedRows.filter((s) => s.done)
 
   // ---- FLIP: rows glide instead of jumping (done, stop, expand, show more) ----
   const rowEls = useRef(new Map<string, HTMLElement>())
@@ -483,13 +721,14 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
   const nameOf = (s: SessionVM) => `"${s.title || s.project || 'untitled'}"`
+  const titleFor = (rows: Row[]) => (rows.length === 1 ? nameOf(rows[0]) : `${rows.length} sessions`)
 
-  // Done hides the rows at once and offers Undo; a refusal brings them back.
-  const markDone = (rows: SessionVM[]) => {
-    const list = rows.filter((s) => !busyRef.current.has(s.id))
+  // Done moves the rows to the done list at once and offers Undo; a refusal brings them back.
+  const markDone = (rows: Row[]) => {
+    const list = rows.filter((s) => !busyRef.current.has(s.id) && !s.done)
     if (!list.length) return
     const ids = list.map((s) => s.id)
-    const title = list.length === 1 ? nameOf(list[0]) : `${list.length} sessions`
+    const title = titleFor(list)
     captureFlip()
     setOpenRow(null)
     setExpRow(null)
@@ -509,16 +748,19 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       refreshBoard()
     })
   }
-  const undoDone = () => {
-    if (!undo || undo.pending) return
-    const { rows, title } = undo
-    const ids = rows.map((s) => s.id)
-    if (ids.some((id) => busyRef.current.has(id))) return
+  // Undo, from the bar, a done row or a pick: back on the list at once; a refusal sends them back to done.
+  const putBack = (rows: Row[]) => {
+    const list = rows.filter((s) => !busyRef.current.has(s.id))
+    if (!list.length) return
+    const ids = list.map((s) => s.id)
+    const title = titleFor(list)
     captureFlip()
+    setOpenRow(null)
+    setExpRow(null)
     setDispoFor(ids, false)
     setRowBusy(ids, 'done')
-    setUndo(null)
-    void sendDone(rows, false).then(({ failed, error }) => {
+    setUndo((u) => (u && u.rows.some((r) => ids.includes(r.id)) ? null : u))
+    void sendDone(list, false).then(({ failed, error }) => {
       setRowBusy(ids, null)
       if (failed.length) {
         captureFlip()
@@ -528,10 +770,14 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       refreshBoard()
     })
   }
+  const undoDone = () => {
+    if (!undo || undo.pending) return
+    putBack(undo.rows)
+  }
 
   // Stop closes the row at once; a refusal brings it back. 404 means nothing
   // runs under that id any more: it exited before the board noticed.
-  const stop = (s: SessionVM) => {
+  const stop = (s: Row) => {
     if (busyRef.current.has(s.id)) return
     const title = nameOf(s)
     captureFlip()
@@ -565,17 +811,76 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       })
   }
 
+  // Stop all, the classic board's sweep: the in-page panes first (closing one
+  // ends its Claude, so the session sweep behind it meets a harmless 404),
+  // then the sessions, ONE AT A TIME: an elevated stop goes through thor's
+  // single kill-request file, so two in flight would drop one. A 404 is not a
+  // failure: the lists are polls, so something that already exited still shows.
+  const stopAll = async (rows: Row[], terms: TermSession[]) => {
+    const total = rows.length + terms.length
+    if (sweeping.current || !total) return
+    sweeping.current = true
+    setStopArmed(false)
+    setOpenRow(null)
+    setExpRow(null)
+    setSweep({ done: 0, total })
+    const step = () => setSweep((v) => v && { ...v, done: v.done + 1 })
+    let failed = 0
+    let error: unknown = null
+    const markStopped = (id: string) => {
+      captureFlip()
+      setStopped((m) => new Map(m).set(id, Date.now()))
+    }
+    for (const t of terms) {
+      try {
+        await killTermSession(t.name)
+      } catch (e) {
+        if (httpStatus(e) !== 404) {
+          failed += 1
+          error ??= e
+        }
+      }
+      step()
+    }
+    for (const s of rows) {
+      if (busyRef.current.has(s.id)) {
+        step()
+        continue
+      }
+      setRowBusy([s.id], 'stop')
+      try {
+        const r = await stopSessionOnHost(s.id, s.host)
+        if (r && r.ok === false) throw new Error(r.detail ?? `${s.host} refused`)
+        markStopped(s.id)
+      } catch (e) {
+        if (httpStatus(e) === 404) markStopped(s.id)
+        else {
+          failed += 1
+          error ??= e
+        }
+      }
+      setRowBusy([s.id], null)
+      step()
+    }
+    sweeping.current = false
+    setSweep(null)
+    refreshBoard()
+    void qc.invalidateQueries({ queryKey: TERMS_KEY })
+    if (failed) toast(`${failed} of ${total} did not stop: ${errText(error)}`, { ms: 5000 })
+    else toast(`Stopped ${total}`)
+  }
+
   // Open, the board's way: back into its pane if one runs it, never a second
   // Claude on a running session, otherwise resume on the machine that holds
   // the transcript (in the page, here over SSH, or on the host's screen).
-  const openSession = async (s: SessionVM) => {
+  const openSession = async (s: Row) => {
     if (busyRef.current.has(s.id)) return
     const title = nameOf(s)
     setRowBusy([s.id], 'open')
     try {
       const pane = paneFor(await freshPanes(qc), s.id)
       if (pane) {
-        navigate(termPath(pane))
+        navigate(termTo(pane))
         return
       }
       if (s.live) {
@@ -588,7 +893,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       } else if (where.inPage) {
         const r = await openTermSession({ mode: 'resume', sessionId: s.id, label: s.title })
         seedTerminal(qc, r)
-        navigate(termPath(r.name))
+        navigate(termTo(r.name))
       } else if (where.remote) {
         await openSessionHere(s.id, undefined, (await launchGroups(qc)).get(s.id) ?? null)
         toast(`Opened ${title} here`)
@@ -598,6 +903,28 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       }
     } catch (e) {
       toast(`Could not open ${title}: ${errText(e)}`, { ms: 5000 })
+    } finally {
+      setRowBusy([s.id], null)
+      refreshBoard()
+    }
+  }
+
+  // Resume on thor's own screen (Windows Terminal on its desk) from the page or
+  // another machine: the session then lives on thor and outlasts this connection.
+  const openOnScreen = async (s: Row) => {
+    if (busyRef.current.has(s.id)) return
+    const title = nameOf(s)
+    const home = hostLabel(HOME_HOST)
+    setRowBusy([s.id], 'open')
+    try {
+      if (paneFor(await freshPanes(qc), s.id)) {
+        toast(`${title} is open in a terminal here. Close it first.`, { ms: 4000 })
+        return
+      }
+      await launchOn(s.id, HOME_HOST)
+      toast(`Opened ${title} on ${home}'s screen`)
+    } catch (e) {
+      toast(`Could not open ${title} on ${home}'s screen: ${errText(e)}`, { ms: 5000 })
     } finally {
       setRowBusy([s.id], null)
       refreshBoard()
@@ -670,7 +997,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       const r = await openTermSession({ mode: 'new', target: t.key, label: t.label })
       seedTerminal(qc, r)
       setPicker(false)
-      navigate(termPath(r.name))
+      navigate(termTo(r.name))
       return
     }
     if (where.remote && h.host === HOME_HOST) {
@@ -702,7 +1029,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     const r = await openTermSession({ mode: 'new', host: 'odin', target: t.key, label: t.label, ...phoneGrid() })
     seedTerminal(qc, r)
     setPicker(false)
-    navigate(termPath(r.name))
+    navigate(termTo(r.name))
   })
   const toggleRow = useCallback((id: string) => {
     captureFlip()
@@ -713,6 +1040,38 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     captureFlip()
     setRecentAll((v) => !v)
   }
+  const toggleDone = () => {
+    captureFlip()
+    setDoneOpen((v) => !v)
+    setDoneMax(DONE_STEP)
+  }
+
+  // select mode: a long press starts it on that row, a tap toggles, the last unpick ends it
+  const pickStart = (id: string) => {
+    setOpenRow(null)
+    setExpRow(null)
+    setPicked(new Set([id]))
+  }
+  const pickToggle = (id: string) => setPicked((cur) => {
+    const n = new Set(cur ?? [])
+    if (n.has(id)) n.delete(id)
+    else n.add(id)
+    return n.size ? n : null
+  })
+
+  // search opens in the tap (the phone's keyboard comes up), and closes back to the plates
+  const openSearch = () => openAndFocus(() => {
+    setQuery((q) => q ?? '')
+    setPicked(null)
+  }, searchRef)
+  const setSearch = (v: string) => {
+    setQuery(v)
+    setResultsMax(RESULTS_STEP)
+  }
+  const closeSearch = () => {
+    setQuery(null)
+    setResultsMax(RESULTS_STEP)
+  }
 
   useEffect(() => {
     if (!undo) return
@@ -720,28 +1079,105 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     return () => clearTimeout(t)
   }, [undo])
 
+  // Stop all covers what the list shows for this area: its running rows, and
+  // the live panes (every one under All; under an area, the panes running one
+  // of that area's sessions). Closing a pane and its own row counts twice on
+  // purpose: they are two things on the screen, and the second is a no-op 404.
+  const livePanes = useMemo(() => (panes.data ?? []).filter((t) => !t.dead), [panes.data])
+  const stopRows = useMemo(() => [...layout.asking, ...layout.live], [layout])
+  const stopPanes = useMemo(
+    () => (shownArea === 'all' ? livePanes : livePanes.filter((t) => {
+      const id = paneSid(t)
+      return !!id && lookup(id)?.area === shownArea
+    })),
+    [livePanes, shownArea, lookup],
+  )
+  const stopAllVM: StopAllVM = {
+    n: stopRows.length + stopPanes.length,
+    armed: stopArmed,
+    sweep,
+    disabled: recover !== null,
+    onPress: () => (stopArmed ? void stopAll(stopRows, stopPanes) : setStopArmed(true)),
+  }
+
+  const rowCtx: RowCtx = {
+    now,
+    showArea: shownArea === 'all',
+    hostLabel,
+    openRow,
+    setOpenRow,
+    expRow,
+    onToggle: toggleRow,
+    rowEls: rowEls.current,
+    busy,
+    paneOf,
+    where,
+    picked,
+    onPick: pickToggle,
+    onPickStart: pickStart,
+    onOpen: (s) => void openSession(s),
+    onScreen: (s) => void openOnScreen(s),
+    onDone: (s) => markDone([s]),
+    onUndo: (s) => putBack([s]),
+    onStop: stop,
+  }
+
   // desktop shows a third column: a projects glance beside Sessions, the open
   // project beside Projects (the most urgent one until he picks another)
   const areaProjects = useMemo(
     () => (shownArea === 'all' ? projList : projList.filter((p) => p.area === shownArea)).slice().sort(byUrgency),
     [projList, shownArea],
   )
-  const picked = projId ? projList.find((p) => p.id === projId) ?? null : null
+  const pickedProj = projId ? projList.find((p) => p.id === projId) ?? archList.find((p) => p.id === projId) ?? null : null
   const inlineDetail = desk && tab === 'projects'
-  const detail = inlineDetail ? (picked && areaProjects.some((p) => p.id === picked.id) ? picked : areaProjects[0] ?? null) : null
+  const inArea = (p: ProjectVM) => shownArea === 'all' || p.area === shownArea
+  const detail = inlineDetail ? (pickedProj && inArea(pickedProj) ? pickedProj : areaProjects[0] ?? null) : null
   const openProject = (p: ProjectVM) => {
     setProjId(p.id)
     setSub('projects')
   }
+  // a project made by hand opens at once (the list refetch brings its row)
+  const projCreated = (id: string) => {
+    setNewProj(false)
+    void qc.invalidateQueries({ queryKey: ['v2', PROJ_KEY] })
+    void qc.invalidateQueries({ queryKey: PROJ_KEYS.list })
+    setProjId(id)
+  }
+  const sessActs: SessActs = { busy, stop, done: (s) => markDone([s]), undo: (s) => putBack([s]) }
+  const startNewProject = () => setNewProj(true)
+  // desktop: the open project's panel fits the page and scrolls inside, so the list stays put beside it
+  const fitDetail = useFitToScroller()
 
+  const areaFilter = <AreaFilter items={areas} value={shownArea} onChange={pickArea} vertical={sideFilter} />
+  const searchLine = (
+    <SearchLine
+      value={query ?? ''}
+      onChange={setSearch}
+      onClose={closeSearch}
+      closable={!sideFilter}
+      inputRef={searchRef}
+      note={searching && !index.ready ? 'newest 40 until the board loads' : null}
+    />
+  )
+  // Sessions on the phone: a search plate leads the area plates and opens the
+  // search line in their place. Wide: the search line sits over the list.
   const filter = showFilter && (
-    <AreaFilter items={areas} value={shownArea} onChange={pickArea} vertical={wide && !short} />
+    tab === 'sessions' && !sideFilter ? (
+      query !== null ? searchLine : (
+        <div className="vc-findrow">
+          <Press className="vc-fplate vc-find vl-build" style={iv(3)} aria-label="Search sessions" title="Search sessions" onPress={openSearch}>
+            <Icon name="search" size={15} tone="dim" />
+          </Press>
+          {areaFilter}
+        </div>
+      )
+    ) : areaFilter
   )
 
   return (
     <div className="vc-root">
       {tab === 'usage' ? <UsageView now={now} /> : (
-        <div className="vc" data-detail={desk || undefined} data-fab={!wide || undefined}>
+        <div className="vc" data-detail={desk || undefined} data-fab={!wide || undefined} data-proj={tab === 'projects' || undefined}>
           <aside className="vc-side">
             <Summary
               tab={tab}
@@ -754,7 +1190,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
               projAsking={projAsking}
               nextReminder={nextReminder}
               now={now}
-              onNew={wide ? () => setPicker(true) : undefined}
+              onNew={wide ? (tab === 'projects' ? startNewProject : () => setPicker(true)) : undefined}
               onUsage={() => setSub('usage')}
             />
             {!short && filter}
@@ -762,28 +1198,31 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
 
           <main className="vc-main">
             {short && filter && <div className="vc-filter-top">{filter}</div>}
+            {tab === 'sessions' && sideFilter && hasBoard && searchLine}
             {tab === 'sessions' ? (
               hasBoard ? (
                 <SessionBoard
-                  board={board}
+                  layout={layout}
+                  results={searching ? { all: results.length, shown: resultsShown, folders: folders.isFetching && !folders.data } : null}
+                  onMoreResults={() => setResultsMax((m) => m + RESULTS_STEP)}
                   area={shownArea}
-                  now={now}
-                  hostLabel={hostLabel}
-                  openRow={openRow}
-                  setOpenRow={setOpenRow}
-                  expRow={expRow}
-                  onToggle={toggleRow}
+                  ctx={rowCtx}
+                  terms={panes.data ?? []}
+                  titles={titles}
+                  stopAll={stopAllVM}
                   recentAll={recentAll}
                   onToggleRecent={toggleRecent}
-                  rowEls={rowEls.current}
-                  busy={busy}
-                  paneOf={paneOf}
-                  where={where}
+                  doneOpen={doneOpen}
+                  onToggleDone={toggleDone}
+                  onMoreDone={() => setDoneMax((m) => m + DONE_STEP)}
                   recover={recover}
+                  sweeping={sweep !== null}
                   onRecover={(rows) => void recoverDesk(rows)}
-                  onOpen={(s) => void openSession(s)}
-                  onDone={(s) => markDone([s])}
-                  onStop={stop}
+                  onReattach={(name) => navigate(termTo(name))}
+                  onTermClosed={() => {
+                    void qc.invalidateQueries({ queryKey: TERMS_KEY })
+                    refreshBoard()
+                  }}
                 />
               ) : (
                 <>
@@ -801,16 +1240,31 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                 </>
               )
             ) : (
-              <ProjectBoard
-                list={projList}
-                area={shownArea}
-                loading={!projects.data}
-                failed={projects.failed}
-                error={projects.error}
-                now={now}
-                selected={detail?.id ?? null}
-                onOpen={(p) => setProjId(p.id)}
-              />
+              <>
+                <ProjectBoard
+                  list={projList}
+                  area={shownArea}
+                  loading={!projects.data}
+                  failed={projects.failed}
+                  error={projects.error}
+                  now={now}
+                  selected={detail?.id ?? null}
+                  onOpen={(p) => setProjId(p.id)}
+                />
+                {projects.data && (
+                  <ArchivedFold
+                    on={showArchived}
+                    onToggle={() => setShowArchived((v) => !v)}
+                    list={archList}
+                    loading={archived.loading}
+                    error={archived.error}
+                    area={shownArea}
+                    now={now}
+                    selected={desk ? detail?.id ?? null : pickedProj?.id ?? null}
+                    onOpen={(p) => setProjId(p.id)}
+                  />
+                )}
+              </>
             )}
           </main>
 
@@ -819,12 +1273,21 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
               {tab === 'sessions' ? (
                 <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />
               ) : detail ? (
-                <div className="vc-detail-card vl-panel vl-build-on" key={detail.id}>
+                <div className="vc-detail-card vl-panel vl-build-on" key={detail.id} ref={fitDetail}>
                   <div className="vc-detail-head vl-build" style={iv(0)}>
                     <Icon name="projects" size={18} tone="fg" glow />
                     <span className="vc-detail-name">{detail.name}</span>
                   </div>
-                  <ProjectDetail p={detail} index={index} lookup={lookup} now={now} hostLabel={hostLabel} showArea />
+                  <ProjectDetail
+                    p={detail}
+                    index={index}
+                    lookup={lookup}
+                    now={now}
+                    hostLabel={hostLabel}
+                    acts={sessActs}
+                    onArchived={() => { if (!showArchived) setProjId(null) }}
+                    showArea
+                  />
                 </div>
               ) : null}
             </aside>
@@ -832,14 +1295,33 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
         </div>
       )}
 
-      {/* bottom of the page: the undo bar, or (phone) New session in thumb reach */}
+      {/* bottom of the page: the pick bar, the undo bar, or (phone) New session in thumb reach */}
       <div className="vc-undo-anchor" aria-live="polite">
-        {undo && active ? (
+        {picked && active && tab === 'sessions' ? (
+          <SelectBar
+            n={pickedRows.length}
+            open={pickedOpen.length}
+            done={pickedDone.length}
+            all={onScreen.length}
+            onAll={() => setPicked(new Set(onScreen.map((s) => s.id)))}
+            onMark={() => {
+              markDone(pickedOpen)
+              setPicked(null)
+            }}
+            onUndo={() => {
+              putBack(pickedDone)
+              setPicked(null)
+            }}
+            onCancel={() => setPicked(null)}
+          />
+        ) : undo && active ? (
           <div className="vc-undo" key={undo.key}>
             <Icon name="done" size={14} tone="dim" />
             <span className="vc-undo-text">Done: <b>{undo.title}</b></span>
             <Press className="vc-undo-btn" disabled={undo.pending} onPress={undoDone}><Icon name="undo" size={15} tone="hot" />Undo</Press>
           </div>
+        ) : !wide && tab === 'projects' ? (
+          <NewButton className="vc-fab" label="New project" onPress={startNewProject} />
         ) : !wide && tab !== 'usage' ? (
           <NewButton className="vc-fab" onPress={() => setPicker(true)} />
         ) : null}
@@ -859,14 +1341,93 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       </Sheet>
 
       <Sheet
-        open={!inlineDetail && !!picked && active}
+        open={!inlineDetail && !!pickedProj && active}
         onClose={() => setProjId(null)}
-        label={picked?.name ?? ''}
+        label={pickedProj?.name ?? ''}
         icon="projects"
-        value={picked ? areaName(picked.area) : ''}
+        value={pickedProj ? areaName(pickedProj.area) : ''}
       >
-        {picked && <ProjectDetail p={picked} index={index} lookup={lookup} now={now} hostLabel={hostLabel} />}
+        {pickedProj && (
+          <ProjectDetail
+            p={pickedProj}
+            index={index}
+            lookup={lookup}
+            now={now}
+            hostLabel={hostLabel}
+            acts={sessActs}
+            onArchived={() => { if (!showArchived) setProjId(null) }}
+          />
+        )}
       </Sheet>
+
+      <Sheet open={newProj && active} onClose={() => setNewProj(false)} label="New project" icon="projects">
+        <NewProjectFlow area={shownArea} onCreated={projCreated} onLeave={() => setNewProj(false)} />
+      </Sheet>
+    </div>
+  )
+}
+
+/** The pick bar (select mode): how many, Mark done for the open ones, Undo for the done ones, pick all, stop picking. */
+function SelectBar({ n, open, done, all, onAll, onMark, onUndo, onCancel }: {
+  n: number
+  open: number
+  done: number
+  all: number
+  onAll: () => void
+  onMark: () => void
+  onUndo: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="vc-selbar" role="toolbar" aria-label="Picked sessions" data-no-swipe>
+      <Press className="vc-selbar-x" aria-label="Stop picking" title="Stop picking" onPress={onCancel}>
+        <Icon name="stop" size={16} tone="dim" />
+      </Press>
+      {/* the word goes when both Undo and Mark need the room */}
+      <span className="vc-selbar-n"><b>{n}</b>{done > 0 && open > 0 ? '' : ' picked'}</span>
+      {all > n && <Press className="vc-selbar-btn" onPress={onAll}>All {all}</Press>}
+      {done > 0 && (
+        <Press className="vc-selbar-btn" onPress={onUndo}><Icon name="undo" size={14} tone="fg" />Undo {done}</Press>
+      )}
+      {open > 0 && (
+        <Press className="vc-selbar-btn" data-main onPress={onMark}><Icon name="done" size={14} tone="ink" />Mark {open} done</Press>
+      )}
+    </div>
+  )
+}
+
+/** The search line: title, project and folder. On the phone it closes back to the area plates. */
+function SearchLine({ value, onChange, onClose, closable, inputRef, note }: {
+  value: string
+  onChange: (v: string) => void
+  onClose: () => void
+  /** the phone: an X that closes the line even when empty */
+  closable: boolean
+  inputRef: RefObject<HTMLInputElement | null>
+  note: string | null
+}) {
+  return (
+    <div className="vc-search vl-build" style={iv(3)} data-no-swipe>
+      <Icon name="search" size={16} tone={value ? 'fg' : 'dim'} glow={!!value} className="vc-search-icon" />
+      <input
+        ref={inputRef}
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
+        placeholder="Search title, project, folder"
+        aria-label="Search sessions"
+        enterKeyHint="search"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      {note && <span className="vc-search-note">{note}</span>}
+      {(value || closable) && (
+        <Press className="vc-search-x" aria-label={closable ? 'Close search' : 'Clear search'} onPress={() => (closable ? onClose() : onChange(''))}>
+          <Icon name="stop" size={15} tone="dim" />
+        </Press>
+      )}
     </div>
   )
 }
@@ -897,12 +1458,12 @@ function Fresh({ q, label, now }: { q: Live<unknown>; label: string; now: number
   )
 }
 
-/** The primary action: a solid lit plate with the start icon. */
-function NewButton({ onPress, className }: { onPress: () => void; className?: string }) {
+/** The primary action: a solid lit plate with the start icon (New session, or New project on Projects). */
+function NewButton({ onPress, className, label = 'New session' }: { onPress: () => void; className?: string; label?: string }) {
   return (
     <Press className={cx('vl-btn vc-new', className)} onPress={onPress}>
-      <Icon name="start" size={16} tone="ink" />
-      New session
+      <Icon name={label === 'New session' ? 'start' : 'add'} size={16} tone="ink" />
+      {label}
     </Press>
   )
 }
@@ -922,7 +1483,8 @@ function StatPlate({ icon, value, label, state, tone = 'fg' }: {
   return (
     <div className="vc-stat vl-panel" data-s={state}>
       <Icon name={icon} size={18} tone={on ? tone : 'dim'} glow={on} />
-      <b>{value ?? '--'}</b>
+      {/* one dash, a digit's width: the plate does not grow or wrap while the count loads */}
+      <b>{value ?? '-'}</b>
       <span>{label}</span>
     </div>
   )
@@ -955,6 +1517,8 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
             <StatPlate icon="working" value={hasBoard ? live : null} label="live" state={hasBoard && live > 0 ? 'lit' : 'zero'} />
             <StatPlate icon="asking" tone="acc2" value={hasBoard ? asking : null} label="asking" state={hasBoard && asking > 0 ? 'alert' : 'zero'} />
             <Fresh q={board} label="board" now={now} />
+            {/* pictures to thor for a session: the Dashboard's upload queue (kit/upload.tsx), toasts here */}
+            <UploadButton />
           </>
         ) : (
           <>
@@ -970,7 +1534,7 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
           </>
         )}
       </div>
-      {onNew && <div className="vc-new-row vl-build" style={iv(1)}><NewButton onPress={onNew} /></div>}
+      {onNew && <div className="vc-new-row vl-build" style={iv(1)}><NewButton onPress={onNew} label={sess ? undefined : 'New project'} /></div>}
       {sess && <UsageLine now={now} onOpen={onUsage} />}
       {/* the terminal skin preview (Skin.tsx, /m/ai/skin): a recorded sample, nothing is sent */}
       {sess && (
@@ -1113,6 +1677,7 @@ function UsageView({ now }: { now: number }) {
           })}
         </section>
       )}
+      <Accounts now={now} />
     </div>
   )
 }
@@ -1250,40 +1815,91 @@ const GROUP_ICON: Record<string, { icon: IconName; tone: IconTone; glow: boolean
   recent: { icon: 'clock', tone: 'dim', glow: false },
 }
 
-function SessionBoard({
-  board, area, now, hostLabel, openRow, setOpenRow, expRow, onToggle, recentAll, onToggleRecent, rowEls,
-  busy, paneOf, where, recover, onRecover, onOpen, onDone, onStop,
-}: {
-  board: SessionVM[]
-  area: string
+/** What every session row needs from the screen. */
+type RowCtx = {
   now: number
+  /** the area filter is on All, so each row names its area */
+  showArea: boolean
   hostLabel: (id: string) => string
   openRow: string | null
   setOpenRow: (id: string | null) => void
   expRow: string | null
   onToggle: (id: string) => void
-  recentAll: boolean
-  onToggleRecent: () => void
   rowEls: Map<string, HTMLElement>
   busy: ReadonlyMap<string, Busy>
   paneOf: (id: string) => string | null
   where: Where
+  /** select mode: the picked ids; null when not picking */
+  picked: ReadonlySet<string> | null
+  onPick: (id: string) => void
+  onPickStart: (id: string) => void
+  onOpen: (s: Row) => void
+  onScreen: (s: Row) => void
+  onDone: (s: Row) => void
+  onUndo: (s: Row) => void
+  onStop: (s: Row) => void
+}
+
+/** Stop all on a group header: armed by the first tap, fired by the second. */
+type StopAllVM = { n: number; armed: boolean; sweep: Recover | null; disabled: boolean; onPress: () => void }
+
+function StopAllButton({ vm }: { vm: StopAllVM }) {
+  if (vm.n === 0 && !vm.sweep) return null
+  return (
+    <Press
+      className="vc-ghead-act"
+      data-tone="acc2"
+      data-armed={vm.armed || undefined}
+      data-busy={vm.sweep ? '' : undefined}
+      disabled={vm.sweep !== null || vm.disabled}
+      title={vm.armed
+        ? `Tap again to stop all ${vm.n}`
+        : 'Close every terminal open in the page, then stop every running session. Transcripts are kept, so each one reopens later.'}
+      onPress={vm.onPress}
+    >
+      <Icon name={vm.sweep ? 'refresh' : 'stop'} size={13} tone="acc2" className={vm.sweep ? 'vl-pulse' : undefined} />
+      {vm.sweep ? `Stopping ${vm.sweep.done}/${vm.sweep.total}` : vm.armed ? `Stop all ${vm.n}?` : `Stop all ${vm.n}`}
+    </Press>
+  )
+}
+
+function SessionBoard({
+  layout, results, onMoreResults, area, ctx, terms, titles, stopAll, recentAll, onToggleRecent,
+  doneOpen, onToggleDone, onMoreDone, recover, sweeping, onRecover, onReattach, onTermClosed,
+}: {
+  layout: Layout
+  /** a search is on: its matches replace the groups */
+  results: { all: number; shown: Row[]; folders: boolean } | null
+  onMoreResults: () => void
+  area: string
+  ctx: RowCtx
+  /** every tmux pane (the ['term','sessions'] list) */
+  terms: TermSession[]
+  titles: Map<string, string>
+  stopAll: StopAllVM
+  recentAll: boolean
+  onToggleRecent: () => void
+  doneOpen: boolean
+  onToggleDone: () => void
+  onMoreDone: () => void
   recover: Recover | null
+  sweeping: boolean
   onRecover: (rows: SessionVM[]) => void
-  onOpen: (s: SessionVM) => void
-  onDone: (s: SessionVM) => void
-  onStop: (s: SessionVM) => void
+  onReattach: (name: string) => void
+  onTermClosed: () => void
 }) {
-  const list = area === 'all' ? board : board.filter((s) => s.area === area)
-  const live = list.filter(isLive).sort((a, b) => ACTIVITY_RANK[a.activity] - ACTIVITY_RANK[b.activity] || b.last - a.last)
-  const recent = list.filter((s) => !isLive(s)).sort((a, b) => b.last - a.last)
+  const { openRow, setOpenRow, rowEls, busy, hostLabel, where } = ctx
+  const { asking, live, recent, recentShown, done, doneShown } = layout
   // recover my desk: open, not running, on thor, and no write of its own in flight
   const desk = recent.filter((s) => !s.live && s.host === HOME_HOST && !busy.has(s.id))
   const groups = [
-    { key: 'asking', label: 'Asking', rows: live.filter((s) => s.activity === 'asking'), total: 0 },
-    { key: 'live', label: 'Live', rows: live.filter((s) => s.activity !== 'asking'), total: 0 },
-    { key: 'recent', label: 'Recent', rows: recentAll ? recent : recent.slice(0, RECENT_SHOWN), total: recent.length },
+    { key: 'asking', label: 'Asking', rows: asking, total: asking.length },
+    { key: 'live', label: 'Live', rows: live, total: live.length },
+    { key: 'recent', label: 'Recent', rows: recentShown, total: recent.length },
   ].filter((g) => g.rows.length)
+  // Stop all sits on Live, else Asking, else on the open terminals
+  const stopOn = live.length ? 'live' : asking.length ? 'asking' : 'terms'
+  const navigate = useNavigate()
 
   // close a swiped-open row when a finger lands anywhere else
   useEffect(() => {
@@ -1297,66 +1913,210 @@ function SessionBoard({
     return () => window.removeEventListener('pointerdown', f, true)
   }, [openRow, rowEls, setOpenRow])
 
-  if (!groups.length) {
-    return <div className="vc-empty vl-build" style={iv(4)}><span>Nothing open{area === 'all' ? '' : ` in ${areaName(area)}`}</span></div>
+  let k = 4
+  const item = (s: Row) => <SessionItem key={s.id} s={s} i={Math.min(k++, 16)} ctx={ctx} />
+  const foot = (
+    <div className="vc-foot vl-build" style={iv(Math.min(k++, 16))}>
+      <Press className="vl-link" onPress={() => navigate('/sessions')}>
+        <Icon name="claude" size={13} tone="dim" />All sessions (classic)
+      </Press>
+      <span>host health, snapshots, restore, closed history</span>
+    </div>
+  )
+
+  if (results) {
+    return (
+      <>
+        <section className="vc-group vl-panel" data-g="results">
+          <GroupHead icon="search" tone="fg" glow={results.all > 0} label="Results" n={results.all} i={k++}>
+            {results.folders && <span className="vc-ghead-note"><Icon name="refresh" size={12} tone="dim" className="vl-pulse" />folders</span>}
+          </GroupHead>
+          {results.shown.length ? (
+            <div className="vc-rows">{results.shown.map(item)}</div>
+          ) : (
+            <p className="vc-pd-none">No session matches. Search covers every area and the done list.</p>
+          )}
+          {results.all > results.shown.length && (
+            <Press className="vc-showmore" onPress={onMoreResults}>
+              <Icon name="add" size={14} tone="dim" />Show {Math.min(RESULTS_STEP, results.all - results.shown.length)} more
+            </Press>
+          )}
+        </section>
+        {foot}
+      </>
+    )
   }
 
-  let k = 4
   return (
     <>
+      {terms.length > 0 && (
+        <OpenTerminals
+          list={terms}
+          titles={titles}
+          now={ctx.now}
+          hostLabel={hostLabel}
+          k0={k++}
+          stopAll={stopOn === 'terms' ? <StopAllButton vm={stopAll} /> : null}
+          onReattach={onReattach}
+          onClosed={onTermClosed}
+        />
+      )}
+      {!groups.length && (
+        <div className="vc-empty vl-build" style={iv(k++)}><span>Nothing open{area === 'all' ? '' : ` in ${areaName(area)}`}</span></div>
+      )}
       {groups.map((g) => {
         // the Live header is lit only while something in it is working
         const gi = g.key === 'live' && !g.rows.some((s) => s.activity === 'working')
           ? { icon: 'idle' as IconName, tone: 'dim' as IconTone, glow: false }
           : GROUP_ICON[g.key]
         return (
-        <section key={g.key} className="vc-group vl-panel" data-g={g.key}>
-          <GroupHead icon={gi.icon} tone={gi.tone} glow={gi.glow} label={g.label} n={g.key === 'recent' ? g.total : g.rows.length} i={k++}>
-            {g.key === 'recent' && (desk.length > 0 || recover) && (
-              <Press
-                className="vc-ghead-act"
-                data-busy={recover ? '' : undefined}
-                disabled={recover !== null}
-                title={`Reopen the ${desk.length} ${area === 'all' ? '' : `${areaName(area)} `}session${desk.length === 1 ? '' : 's'} still open and not running, ${where.remote ? 'here' : `on ${hostLabel(HOME_HOST)}`}`}
-                onPress={() => onRecover(desk)}
-              >
-                <Icon name={recover ? 'refresh' : hostIcon(HOME_HOST)} size={13} tone={recover ? 'fg' : 'dim'} className={recover ? 'vl-pulse' : undefined} />
-                {recover ? `Recovering ${recover.done}/${recover.total}` : `Recover desk (${desk.length})`}
+          <section key={g.key} className="vc-group vl-panel" data-g={g.key}>
+            <GroupHead icon={gi.icon} tone={gi.tone} glow={gi.glow} label={g.label} n={g.total} i={k++}>
+              {g.key === stopOn && <StopAllButton vm={stopAll} />}
+              {g.key === 'recent' && (desk.length > 0 || recover) && (
+                <Press
+                  className="vc-ghead-act"
+                  data-busy={recover ? '' : undefined}
+                  disabled={recover !== null || sweeping}
+                  title={`Reopen the ${desk.length} ${area === 'all' ? '' : `${areaName(area)} `}session${desk.length === 1 ? '' : 's'} still open and not running, ${where.remote ? 'here' : `on ${hostLabel(HOME_HOST)}`}`}
+                  onPress={() => onRecover(desk)}
+                >
+                  <Icon name={recover ? 'refresh' : hostIcon(HOME_HOST)} size={13} tone={recover ? 'fg' : 'dim'} className={recover ? 'vl-pulse' : undefined} />
+                  {recover ? `Recovering ${recover.done}/${recover.total}` : `Recover desk (${desk.length})`}
+                </Press>
+              )}
+            </GroupHead>
+            <div className="vc-rows">{g.rows.map(item)}</div>
+            {g.key === 'recent' && recent.length > RECENT_SHOWN && (
+              <Press className="vc-showmore" onPress={onToggleRecent}>
+                {!recentAll && <Icon name="add" size={14} tone="dim" />}
+                {recentAll ? 'Show fewer' : `Show ${recent.length - RECENT_SHOWN} more`}
               </Press>
             )}
-          </GroupHead>
-          <div className="vc-rows">
-            {g.rows.map((s) => (
-              <SessionItem
-                key={s.id}
-                s={s}
-                i={Math.min(k++, 16)}
-                now={now}
-                showArea={area === 'all'}
-                hostLabel={hostLabel}
-                open={openRow === s.id}
-                setOpen={(o) => setOpenRow(o ? s.id : null)}
-                expanded={expRow === s.id}
-                onToggle={() => onToggle(s.id)}
-                register={(el) => { if (el) rowEls.set(s.id, el); else rowEls.delete(s.id) }}
-                busy={busy.get(s.id)}
-                way={openState(s, paneOf(s.id), where, busy.get(s.id), hostLabel)}
-                onOpen={onOpen}
-                onDone={onDone}
-                onStop={onStop}
-              />
-            ))}
-          </div>
-          {g.key === 'recent' && recent.length > RECENT_SHOWN && (
-            <Press className="vc-showmore" onPress={onToggleRecent}>
-              {!recentAll && <Icon name="add" size={14} tone="dim" />}
-              {recentAll ? 'Show fewer' : `Show ${recent.length - RECENT_SHOWN} more`}
-            </Press>
-          )}
-        </section>
+          </section>
         )
       })}
+      {done.length > 0 && (
+        doneOpen ? (
+          <section className="vc-group vl-panel" data-g="done">
+            <GroupHead icon="done" label="Done" n={done.length} i={k++}>
+              <Press className="vc-ghead-act" onPress={onToggleDone}>Hide done</Press>
+            </GroupHead>
+            <div className="vc-rows">{doneShown.map(item)}</div>
+            {done.length > doneShown.length && (
+              <Press className="vc-showmore" onPress={onMoreDone}>
+                <Icon name="add" size={14} tone="dim" />Show {Math.min(DONE_STEP, done.length - doneShown.length)} more
+              </Press>
+            )}
+          </section>
+        ) : (
+          <Press className="vc-fold vl-build" style={iv(Math.min(k++, 16))} onPress={onToggleDone}>
+            <Icon name="done" size={14} tone="dim" />Show {done.length} done
+          </Press>
+        )
+      )}
+      {foot}
     </>
+  )
+}
+
+const TERMS_SHOWN = 4
+
+/**
+ * Every tmux pane on odin (Claude on thor, Claude on odin, shells, new
+ * sessions the board has not picked up yet), oldest first so a busy one never
+ * jumps under a finger. A tap reattaches by that pane's own name; the X closes
+ * it with two taps, which ends its Claude and leaves the conversation resumable.
+ */
+function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, onClosed }: {
+  list: TermSession[]
+  titles: Map<string, string>
+  now: number
+  hostLabel: (id: string) => string
+  k0: number
+  stopAll: ReactNode
+  onReattach: (name: string) => void
+  onClosed: () => void
+}) {
+  const [all, setAll] = useState(false)
+  const [armed, setArmed] = useState<string | null>(null)
+  const [closing, setClosing] = useState<string | null>(null)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(null), ARM_MS)
+    return () => clearTimeout(t)
+  }, [armed])
+  const sorted = [...list].sort((a, b) => a.createdAt - b.createdAt)
+  const shown = all ? sorted : sorted.slice(0, TERMS_SHOWN)
+  const close = async (t: TermSession, label: string) => {
+    setArmed(null)
+    setClosing(t.name)
+    try {
+      await killTermSession(t.name)
+      toast(`Closed "${label}"`)
+    } catch (e) {
+      if (httpStatus(e) !== 404) toast(`Could not close "${label}": ${errText(e)}`, { ms: 5000 })
+    } finally {
+      setClosing(null)
+      onClosed()
+    }
+  }
+  let k = k0
+  return (
+    <section className="vc-group vl-panel" data-g="terms">
+      <GroupHead icon="claude" label="Open terminals" n={list.length} i={k++}>{stopAll}</GroupHead>
+      <div className="vc-rows">
+        {shown.map((t) => {
+          const label = termLabel(t, titles)
+          const on = armed === t.name
+          const claude = t.mode !== 'shell'
+          return (
+            <div key={t.name} className="vc-term vl-build" style={iv(Math.min(k++, 16))} data-dead={t.dead || undefined}>
+              <Press
+                className="vc-term-main"
+                disabled={closing === t.name}
+                title={`Reattach to ${label} on ${hostLabel(t.host)}`}
+                onPress={() => onReattach(t.name)}
+              >
+                <span className="vc-sicon" aria-hidden>
+                  <Icon name={t.dead ? 'alert' : 'claude'} size={16} tone={t.dead ? 'acc2' : claude ? 'fg' : 'dim'} />
+                </span>
+                <span className="vc-row-main">
+                  <span className="vc-row-title" data-closed>{label}</span>
+                  <span className="vc-row-sub">
+                    <Icon name={hostIcon(t.host)} size={12} tone="dim" title={hostLabel(t.host)} />
+                    <span>{hostLabel(t.host)}{t.projectId ? ' · project' : ''}</span>
+                  </span>
+                </span>
+                <span className="vc-row-meta">
+                  <span className="vc-ago" data-a="closed">{t.activityAt > 0 ? ago(t.activityAt, now) : '--'}</span>
+                  <span className="vc-state" data-a={t.dead ? 'asking' : 'closed'}>
+                    {closing === t.name ? 'closing' : t.dead ? 'ended' : claude ? 'claude' : 'shell'}
+                  </span>
+                </span>
+              </Press>
+              <Press
+                className="vc-term-x"
+                data-armed={on || undefined}
+                disabled={closing !== null}
+                aria-label={on ? `Close ${label} now` : `Close ${label}`}
+                title={on ? 'Tap again to close it' : 'Close this terminal. Its Claude ends; the conversation stays resumable.'}
+                onPress={() => (on ? void close(t, label) : setArmed(t.name))}
+              >
+                <Icon name="stop" size={15} tone={on ? 'acc2' : 'dim'} />
+                {on && <span>Close?</span>}
+              </Press>
+            </div>
+          )
+        })}
+      </div>
+      {sorted.length > TERMS_SHOWN && (
+        <Press className="vc-showmore" onPress={() => setAll((v) => !v)}>
+          {!all && <Icon name="add" size={14} tone="dim" />}
+          {all ? 'Show fewer' : `Show ${sorted.length - TERMS_SHOWN} more`}
+        </Press>
+      )}
+    </section>
   )
 }
 
@@ -1375,72 +2135,103 @@ function openState(s: SessionVM, pane: string | null, where: Where, busy: Busy |
   return { label: `Open on ${home}`, hint: `Open a terminal on ${home}`, can: true, busy: false }
 }
 
-function SessionItem({ s, i, now, showArea, hostLabel, open, setOpen, expanded, onToggle, register, busy, way, onOpen, onDone, onStop }: {
-  s: SessionVM
-  i: number
-  now: number
-  showArea: boolean
-  hostLabel: (id: string) => string
-  /** the swipe actions are showing */
-  open: boolean
-  setOpen: (open: boolean) => void
-  expanded: boolean
-  onToggle: () => void
-  register: (el: HTMLElement | null) => void
-  busy: Busy | undefined
-  way: OpenState
-  onOpen: (s: SessionVM) => void
-  onDone: (s: SessionVM) => void
-  onStop: (s: SessionVM) => void
-}) {
-  const liveRow = isLive(s)
-  const locked = busy !== undefined
-  const actions: RowAction[] = liveRow
-    ? [{ id: 'stop', label: 'Stop', icon: 'stop', tone: 'acc2', run: () => onStop(s), disabled: locked }, { id: 'done', label: 'Done', icon: 'done', tone: 'fg', run: () => onDone(s), disabled: locked }]
-    : [{ id: 'done', label: 'Done', icon: 'done', tone: 'fg', run: () => onDone(s), disabled: locked }]
+/** Select mode's check box, in the state icon's place. */
+function PickBox({ on }: { on: boolean }) {
   return (
-    <div className="vc-item" ref={register} data-row={s.id} data-exp={expanded || undefined}>
+    <span className="vc-check" data-on={on || undefined} aria-hidden>
+      {on && <Icon name="done" size={13} tone="ink" />}
+    </span>
+  )
+}
+
+function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
+  const liveRow = isLive(s)
+  const busy = ctx.busy.get(s.id)
+  const locked = busy !== undefined
+  const selecting = ctx.picked !== null
+  const picked = ctx.picked?.has(s.id) ?? false
+  const expanded = !selecting && ctx.expRow === s.id
+  const pane = ctx.paneOf(s.id)
+  const finish: RowAction = s.done
+    ? { id: 'undo', label: 'Undo', icon: 'undo', tone: 'fg', run: () => ctx.onUndo(s), disabled: locked }
+    : { id: 'done', label: 'Done', icon: 'done', tone: 'fg', run: () => ctx.onDone(s), disabled: locked }
+  const actions: RowAction[] = liveRow
+    ? [{ id: 'stop', label: 'Stop', icon: 'stop', tone: 'acc2', run: () => ctx.onStop(s), disabled: locked }, finish]
+    : [finish]
+  // thor's own screen, beside Open: only where Open goes somewhere else (the page, or here
+  // over SSH), and only while nothing runs the session (a second Claude on one transcript)
+  const screen = s.host === HOME_HOST && !s.live && !pane && (ctx.where.inPage || ctx.where.remote)
+  return (
+    <div
+      className="vc-item"
+      ref={(el) => { if (el) ctx.rowEls.set(s.id, el); else ctx.rowEls.delete(s.id) }}
+      data-row={s.id}
+      data-exp={expanded || undefined}
+      data-done={s.done || undefined}
+      data-picked={picked || undefined}
+    >
       <SwipeRow
         i={i}
-        open={open}
-        setOpen={setOpen}
+        open={!selecting && ctx.openRow === s.id}
+        setOpen={(o) => ctx.setOpenRow(o ? s.id : null)}
         actions={actions}
-        onFull={() => onDone(s)}
-        onTap={onToggle}
+        onFull={() => ctx.onDone(s)}
+        onTap={() => (selecting ? ctx.onPick(s.id) : ctx.onToggle(s.id))}
+        onLong={() => (selecting ? ctx.onPick(s.id) : ctx.onPickStart(s.id))}
+        selecting={selecting}
+        picked={picked}
         expanded={expanded}
       >
-        <StateIcon a={s.activity} />
+        {selecting ? <PickBox on={picked} /> : <StateIcon a={s.activity} />}
         <span className="vc-row-main">
           <span className="vc-row-title" data-closed={!liveRow || undefined} data-a={s.activity}>{s.title || '(untitled)'}</span>
           <span className="vc-row-sub">
-            <Icon name={hostIcon(s.host)} size={12} tone={liveRow ? 'dim' : 'faint'} title={hostLabel(s.host)} />
-            <span>{s.project || 'no folder'}{s.host !== HOME_HOST ? ` · ${hostLabel(s.host)}` : ''}</span>
+            <Icon name={hostIcon(s.host)} size={12} tone={liveRow ? 'dim' : 'faint'} title={ctx.hostLabel(s.host)} />
+            <span>{s.project || 'no folder'}{s.host !== HOME_HOST ? ` · ${ctx.hostLabel(s.host)}` : ''}</span>
           </span>
         </span>
         <span className="vc-row-meta">
-          <span className="vc-ago" data-a={s.activity}>{s.last ? ago(s.last, now) : '--'}</span>
+          <span className="vc-ago" data-a={s.activity}>{s.last ? ago(s.last, ctx.now) : '--'}</span>
           {busy === 'stop' || busy === 'open' ? (
             <span className="vc-state" data-a="closed">{busy === 'stop' ? 'stopping' : 'opening'}</span>
           ) : liveRow ? (
-            <span className="vc-state" data-a={s.activity}>{STATE_WORD[s.activity]}</span>
-          ) : showArea && s.area ? (
+            <span className="vc-state" data-a={s.activity}>{STATE_WORD[s.activity]}{s.done ? ' · done' : ''}</span>
+          ) : s.done ? (
+            <span className="vc-area" data-done>done</span>
+          ) : ctx.showArea && s.area ? (
             <span className="vc-area">{areaName(s.area)}</span>
           ) : null}
         </span>
       </SwipeRow>
-      {expanded && <RowStrip s={s} live={liveRow} locked={locked} way={way} onOpen={() => onOpen(s)} onDone={() => onDone(s)} onStop={() => onStop(s)} />}
+      {expanded && (
+        <RowStrip
+          s={s}
+          live={liveRow}
+          locked={locked}
+          way={openState(s, pane, ctx.where, busy, ctx.hostLabel)}
+          screen={screen ? `On ${ctx.hostLabel(HOME_HOST)}'s screen` : null}
+          onOpen={() => ctx.onOpen(s)}
+          onScreen={() => ctx.onScreen(s)}
+          onDone={() => (s.done ? ctx.onUndo(s) : ctx.onDone(s))}
+          onStop={() => ctx.onStop(s)}
+        />
+      )}
     </div>
   )
 }
 
 /** Under a tapped row: getting back into the session is the point of the page, so Open leads. */
-function RowStrip({ s, live, locked, way, onOpen, onDone, onStop }: {
-  s: SessionVM
+function RowStrip({ s, live, locked, way, screen, onOpen, onScreen, onDone, onStop }: {
+  s: Row
   live: boolean
   /** a write for this row is in flight */
   locked: boolean
   way: OpenState
+  /** the "resume on thor's screen" label, when that is a second way in */
+  screen: string | null
   onOpen: () => void
+  onScreen: () => void
+  /** Done, or Undo on a done row */
   onDone: () => void
   onStop: () => void
 }) {
@@ -1466,6 +2257,14 @@ function RowStrip({ s, live, locked, way, onOpen, onDone, onStop }: {
           <Icon name={way.busy ? 'refresh' : 'claude'} size={15} tone="fg" glow={way.can} className={way.busy ? 'vl-pulse' : undefined} />
           <span>{way.label}</span>
         </Press>
+        {screen && (
+          <Press className="vc-sact" disabled={locked} title={`Resume it in a terminal window on ${screen.slice(3)}, so it lives there and outlasts this connection`} onPress={onScreen}>
+            <Icon name={hostIcon(HOME_HOST)} size={15} tone="dim" />
+            {/* the picker's word on the phone, the whole place where there is room */}
+            <span className="vc-iact-s">On screen</span>
+            <span className="vc-iact-l">{screen}</span>
+          </Press>
+        )}
         <Press
           className="vc-sact vc-iact"
           data-copied={copied === 'ok' || undefined}
@@ -1478,8 +2277,8 @@ function RowStrip({ s, live, locked, way, onOpen, onDone, onStop }: {
           <Icon name={copied === 'ok' ? 'done' : 'copy'} size={16} tone={copied === 'ok' ? 'hot' : 'dim'} glow={copied === 'ok'} />
           <span className="vc-iact-l">{copied === 'ok' ? 'Copied' : 'Copy resume'}</span>
         </Press>
-        <Press className="vc-sact vc-iact" aria-label="Done" title="Done" disabled={locked} onPress={onDone}>
-          <Icon name="done" size={16} tone="dim" /><span className="vc-iact-l">Done</span>
+        <Press className="vc-sact vc-iact" aria-label={s.done ? 'Undo done' : 'Done'} title={s.done ? 'Put it back on the list' : 'Done'} disabled={locked} onPress={onDone}>
+          <Icon name={s.done ? 'undo' : 'done'} size={16} tone="dim" /><span className="vc-iact-l">{s.done ? 'Undo' : 'Done'}</span>
         </Press>
         {live && (
           <Press className="vc-sact vc-iact" data-tone="acc2" aria-label="Stop" title="Stop" disabled={locked} onPress={onStop}>
@@ -1496,19 +2295,25 @@ function RowStrip({ s, live, locked, way, onOpen, onDone, onStop }: {
 // the right edge (the age column) or while already open, so a left swipe on
 // the title still pages to the next tab. Native listeners on the row see the
 // gesture before the pager does, keep their own drags, and let vertical
-// scrolls and rightward swipes (to the previous tab) through.
+// scrolls and rightward swipes (to the previous tab) through. A press held
+// still for LONG_MS (or a right click) picks the row instead; in select mode
+// nothing slides and a tap toggles the pick.
 
 type RowAction = { id: string; label: string; icon: IconName; tone: 'fg' | 'acc2'; run: () => void; disabled?: boolean }
 const ACT_W = 78
 const SWIPE_ZONE = 72
 
-function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children }: {
+function SwipeRow({ i, open, setOpen, actions, onFull, onTap, onLong, selecting, picked, expanded, children }: {
   i: number
   open: boolean
   setOpen: (open: boolean) => void
   actions: RowAction[]
   onFull: () => void
   onTap: () => void
+  /** a long press (or right click) */
+  onLong: () => void
+  selecting: boolean
+  picked: boolean
   expanded: boolean
   children: ReactNode
 }) {
@@ -1517,10 +2322,12 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
   const x = useRef(0)
   const anim = useRef<null | (() => void)>(null)
   const swiped = useRef(false)
+  // the press already did its job as a long press, so its release is not a tap
+  const longFired = useRef(false)
   // a full swipe commits Done, so it only arms while Done can run
   const canFull = actions.some((a) => a.id === 'done' && !a.disabled)
-  const latest = useRef({ open, setOpen, onFull, canFull, width: actions.length * ACT_W })
-  latest.current = { open, setOpen, onFull, canFull, width: actions.length * ACT_W }
+  const latest = useRef({ open, setOpen, onFull, onLong, selecting, canFull, width: actions.length * ACT_W })
+  latest.current = { open, setOpen, onFull, onLong, selecting, canFull, width: actions.length * ACT_W }
 
   const set = (v: number) => {
     x.current = v
@@ -1550,12 +2357,31 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
     if (!el) return
     type G = { id: number; x0: number; y0: number; axis: null | 'x' | 'pass'; base: number; lastX: number; lastT: number; vx: number; w: number }
     let g: G | null = null
+    let lp: { id: number; x0: number; y0: number; t: number } | null = null
+    const clearLp = () => {
+      if (!lp) return
+      window.clearTimeout(lp.t)
+      lp = null
+    }
+    const fireLong = () => {
+      longFired.current = true
+      try { navigator.vibrate?.(12) } catch { /* no vibration */ }
+      latest.current.onLong()
+    }
 
     const down = (e: PointerEvent) => {
       swiped.current = false
+      longFired.current = false
       g = null
+      clearLp()
       if (e.pointerType === 'mouse' && e.button !== 0) return
-      if ((e.target as Element).closest('.vc-act')) return
+      if ((e.target as Element).closest('.vc-act, .vc-hact')) return
+      // a still press anywhere on a closed row picks it after LONG_MS
+      if (x.current > -0.5) {
+        const id = e.pointerId
+        lp = { id, x0: e.clientX, y0: e.clientY, t: window.setTimeout(() => { lp = null; fireLong() }, LONG_MS) }
+      }
+      if (latest.current.selecting) return
       // closed rows slide only from the age column; the title area belongs to the pager
       const r = el.getBoundingClientRect()
       if (x.current > -0.5 && e.clientX < r.right - SWIPE_ZONE) return
@@ -1564,6 +2390,7 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
       g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, base: x.current, lastX: e.clientX, lastT: e.timeStamp, vx: 0, w: el.clientWidth }
     }
     const move = (e: PointerEvent) => {
+      if (lp && e.pointerId === lp.id && Math.hypot(e.clientX - lp.x0, e.clientY - lp.y0) > 8) clearLp()
       if (!g || e.pointerId !== g.id || g.axis === 'pass') return
       const dx = e.clientX - g.x0
       const dy = e.clientY - g.y0
@@ -1571,6 +2398,7 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
         if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return
         if (Math.abs(dx) > Math.abs(dy) && (dx < 0 || g.base < 0)) {
           g.axis = 'x'
+          clearLp()
           swiped.current = true
           try { el.setPointerCapture(e.pointerId) } catch { /* pointer gone */ }
           el.dataset.dragging = ''
@@ -1594,6 +2422,7 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
       el.toggleAttribute('data-full', latest.current.canFull && v < -Math.max(W + 70, g.w * 0.55))
     }
     const up = (e: PointerEvent) => {
+      if (lp && e.pointerId === lp.id) clearLp()
       if (!g || e.pointerId !== g.id) return
       const was = g
       g = null
@@ -1615,21 +2444,33 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
       latest.current.setOpen(o)
       springTo(o ? -W : 0, vx * 1000)
     }
+    // A long press on a phone can also raise the context menu, and a right
+    // click raises it on purpose: both pick the row, once, never the menu.
+    const menu = (e: MouseEvent) => {
+      if ((e.target as Element).closest('.vc-act, .vc-hact')) return
+      e.preventDefault()
+      clearLp()
+      if (longFired.current || x.current < -0.5) return
+      fireLong()
+    }
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerup', up)
     el.addEventListener('pointercancel', up)
+    el.addEventListener('contextmenu', menu)
     return () => {
+      clearLp()
       el.removeEventListener('pointerdown', down)
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', up)
+      el.removeEventListener('contextmenu', menu)
       anim.current?.()
     }
   }, [])
 
   return (
-    <div className="vc-swipe vl-build" style={iv(i)} data-open={open || undefined} ref={box}>
+    <div className="vc-swipe vl-build" style={iv(i)} data-open={open || undefined} data-selecting={selecting || undefined} ref={box}>
       <i className="vc-fill" aria-hidden />
       <div className="vc-acts" style={{ width: actions.length * ACT_W }} aria-hidden={!open}>
         {actions.map((a) => (
@@ -1642,9 +2483,11 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, expanded, children
       <Press
         ref={front}
         className="vc-front"
-        aria-expanded={expanded}
+        aria-expanded={selecting ? undefined : expanded}
+        role={selecting ? 'checkbox' : undefined}
+        aria-checked={selecting ? picked : undefined}
         onPress={() => {
-          if (swiped.current) return
+          if (swiped.current || longFired.current) return
           if (latest.current.open) latest.current.setOpen(false)
           else onTap()
         }}
@@ -1754,36 +2597,131 @@ function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpe
   )
 }
 
-type ProjDocVM = {
-  targetKey: string
-  tasks: string[]
-  openTasks: number
-  doneTasks: number
-  links: { id: string; host: string; note: string; at: number }[]
-  reminder: { at: number; message: string } | null
+/**
+ * Show archived, under the list: a quiet text toggle, and while it is on the
+ * archived projects of the picked area as one more group. A tap opens one
+ * (its detail offers Restore).
+ */
+function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected, onOpen }: {
+  on: boolean
+  onToggle: () => void
+  list: Counted[]
+  loading: boolean
+  error: string | null
+  area: string
+  now: number
+  selected: string | null
+  onOpen: (p: ProjectVM) => void
+}) {
+  const shown = area === 'all' ? list : list.filter((p) => p.area === area)
+  return (
+    <>
+      {on && (
+        loading ? (
+          <p className="vc-pd-none vc-arch-note"><Icon name="refresh" size={13} tone="dim" className="vl-pulse" />Reading archived projects</p>
+        ) : error ? (
+          <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />Archived projects did not answer: {error}</p>
+        ) : !shown.length ? (
+          <p className="vc-pd-none vc-arch-note">No archived projects{area === 'all' ? '' : ` in ${areaName(area)}`}</p>
+        ) : (
+          <section className="vc-group vl-panel vl-build-on" data-g="archived">
+            <header className="vc-ghead">
+              <span className="vc-ghead-l">
+                <PIcon name="archive" />
+                <span className="vc-ghead-t">Archived</span>
+                <span className="vc-ghead-n">{shown.length}</span>
+              </span>
+            </header>
+            <div className="vc-rows">
+              {shown.map((p, n) => (
+                <Press
+                  key={p.id}
+                  className="vc-prow vl-build"
+                  style={iv(Math.min(n + 1, 12))}
+                  data-on={selected === p.id || undefined}
+                  data-archived
+                  onPress={() => onOpen(p)}
+                >
+                  <ProjIcon p={p} on={selected === p.id} />
+                  <span className="vc-row-main">
+                    <span className="vc-row-title">{p.name}</span>
+                    <span className="vc-prow-next">{p.nextAction || p.summary || 'No next action set'}</span>
+                  </span>
+                  <span className="vc-row-meta">
+                    <span className="vc-ago" data-a="closed">{ago(p.updated, now)}</span>
+                    {area === 'all' && <span className="vc-area">{areaName(p.area)}</span>}
+                  </span>
+                </Press>
+              ))}
+            </div>
+          </section>
+        )
+      )}
+      <div className="vc-foot vc-arch-foot">
+        <Press className="vl-link" aria-pressed={on} title={on ? 'Hide the archived projects' : 'Archived projects: open one to restore it'} onPress={onToggle}>
+          <PIcon name="archive" size={13} />{on ? 'Hide archived' : 'Show archived'}
+        </Press>
+      </div>
+    </>
+  )
 }
 
+type ProjTask = { id: string; tabId: string; text: string; done: boolean }
+type ProjReminder = { id: string; at: number; message: string }
+type ProjLink = { id: string; host: string; note: string; at: number }
+
+type ProjDocVM = {
+  targetKey: string
+  /** what Edit needs beyond the list row: folder, exposure and the two session switches */
+  meta: ProjMeta
+  /** every item of every checklist tab, in stored order */
+  tasks: ProjTask[]
+  /** the first checklist tab, where a new item lands; null when the project has none yet */
+  listTab: string | null
+  /** every linked session, newest link first */
+  links: ProjLink[]
+  /** pending reminders, soonest first */
+  reminders: ProjReminder[]
+  /** the notes and links tabs by name (bodies are read only when one opens) */
+  notes: NoteTab[]
+}
+
+const projDocKey = (id: string) => `projdoc.${id}`
+const asExposure = (e: unknown): Exposure => (e === 'anywhere' ? 'anywhere' : 'tailnet')
+
 function useProjDoc(id: string): Live<ProjDocVM> {
-  return useLive<ProjDocVM>(`projdoc.${id}`, async () => {
+  return useLive<ProjDocVM>(projDocKey(id), async () => {
     const d = await fetchProjDoc(id)
-    const items = d.tabs.filter((t) => t.kind === 'checklist').flatMap((t) => t.items as { text: string; done: boolean }[])
+    const lists = d.tabs.filter((t) => t.kind === 'checklist')
+    const tasks = lists.flatMap((t) => (t.items as ChecklistItem[]).map((it): ProjTask => ({ id: it.id, tabId: t.id, text: it.text, done: it.done })))
     const seen = new Set<string>()
     const links = d.sessions
       .filter((l) => !seen.has(l.sessionId) && !!seen.add(l.sessionId))
-      .map((l) => ({ id: l.sessionId, host: l.host, note: l.statusNote, at: Date.parse(l.statusAt ?? l.linkedAt) }))
-    const rem = d.reminders.filter((r) => r.state === 'pending').sort((a, b) => Date.parse(a.at) - Date.parse(b.at))[0]
-    return {
+      .map((l): ProjLink => ({ id: l.sessionId, host: l.host, note: l.statusNote, at: Date.parse(l.statusAt ?? l.linkedAt) }))
+    const reminders = d.reminders
+      .filter((r) => r.state === 'pending')
+      .map((r): ProjReminder => ({ id: r.id, at: Date.parse(r.at), message: r.message }))
+      .sort((a, b) => a.at - b.at)
+    const notes = d.tabs
+      .filter((t) => t.kind === 'markdown' || t.kind === 'links')
+      .map((t): NoteTab => ({ id: t.id, kind: t.kind === 'links' ? 'links' : 'markdown', title: t.title, n: t.items.length }))
+    const meta: ProjMeta = {
       targetKey: d.project.targetKey,
-      tasks: items.filter((t) => !t.done).map((t) => t.text).slice(0, 8),
-      openTasks: items.filter((t) => !t.done).length,
-      doneTasks: items.filter((t) => t.done).length,
-      links: links.slice(0, 12),
-      reminder: rem ? { at: Date.parse(rem.at), message: rem.message } : null,
+      exposure: asExposure(d.project.exposure),
+      allowSnapshots: d.project.allowSnapshots === true,
+      sessionEdits: d.project.sessionEdits !== false,
     }
-  }, 60_000)
+    return { targetKey: d.project.targetKey, meta, tasks, listTab: lists[0]?.id ?? null, links, reminders, notes }
+  }, 60_000, {
+    // an older build cached a different shape under this key: paint nothing rather than misread it
+    revive: (c) => {
+      const v = c as Partial<ProjDocVM> | null
+      return v && Array.isArray(v.tasks) && Array.isArray(v.reminders) && Array.isArray(v.links) && Array.isArray(v.notes) && !!v.meta
+        ? (v as ProjDocVM)
+        : undefined
+    },
+  })
 }
-
-const TASKS_SHOWN = 5
 
 // A project's linked sessions are often done or old, so the open board does not
 // name them. The kit's session index (the same board fetch, every session by
@@ -1819,21 +2757,37 @@ function useSessionBriefs(ids: string[], index: SessionIndex): Record<string, Br
   return stored
 }
 
-function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
+/** a project's open sessions shown before "Show N more" */
+const PROJ_SESS_SHOWN = 8
+
+function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, showArea }: {
   p: ProjectVM
   index: SessionIndex
   lookup: Lookup
   now: number
   hostLabel: (id: string) => string
+  /** the board's stop, done and undo, so a session acts here as it does on Sessions */
+  acts: SessActs
+  /** the project left the list (archived while the archived fold is closed) */
+  onArchived: () => void
   /** the sheet already names the area in its header */
   showArea?: boolean
 }) {
   const doc = useProjDoc(p.id)
   const targets = useLaunchTargets()
   const [more, setMore] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // the session whose action strip is open, the link picker, and the folds
+  const [exp, setExp] = useState<string | null>(null)
+  const [linking, setLinking] = useState(false)
+  const linkRef = useRef<HTMLInputElement>(null)
+  const [doneOpen, setDoneOpen] = useState(false)
+  const [allOpen, setAllOpen] = useState(false)
+  // unlinked here, hidden until the doc stops listing them
+  const [unlinked, setUnlinked] = useState<ReadonlySet<string>>(() => new Set())
   const qc = useQueryClient()
   const navigate = useNavigate()
-  // 'start' or the linked session being opened; one at a time, so two taps never make two sessions
+  // 'start', 'restore' or the linked session being opened, moved, stopped or unlinked; one at a time
   const [busy, setBusy] = useState<string | null>(null)
   const inFlight = useRef(false)
   // the last refusal, inline as well: on the phone this sits in a sheet whose backdrop covers the toasts
@@ -1843,8 +2797,17 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
     toast(msg, { ms })
   }
   // A project always opens in the page (useProjectTerm): only that path hands
-  // the session the project's MCP server. The terminal's back leads to the project.
+  // the session the project's MCP server. The back param must be a project
+  // path (PROJECT_BACK_RE drops anything else); the v2 terminal turns it into
+  // AI > Projects, the classic one into the project's own page.
   const back = `/projects/${p.id}`
+  // every write here: this project's doc and the list (name, next action, next reminder), v2's and the classic page's
+  const changed = () => {
+    void qc.invalidateQueries({ queryKey: ['v2', projDocKey(p.id)] })
+    void qc.invalidateQueries({ queryKey: ['v2', PROJ_KEY] })
+    void qc.invalidateQueries({ queryKey: PROJ_KEYS.doc(p.id) })
+    void qc.invalidateQueries({ queryKey: PROJ_KEYS.list })
+  }
   const run = async (what: string, fail: string, fn: () => Promise<void>) => {
     if (inFlight.current) return
     inFlight.current = true
@@ -1862,21 +2825,31 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
   }
   const landed = (r: { name: string; session: TermSession | null }) => {
     seedTerminal(qc, r)
-    void qc.invalidateQueries({ queryKey: ['v2', `projdoc.${p.id}`] })
-    navigate(termPath(r.name, back))
+    void qc.invalidateQueries({ queryKey: ['v2', projDocKey(p.id)] })
+    navigate(termTo(r.name, back))
+  }
+  const refreshSessions = () => {
+    void qc.invalidateQueries({ queryKey: ['v2', 'sessions'] })
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
+    void qc.invalidateQueries({ queryKey: TERMS_KEY })
   }
   // no label: the backend names a project session after the project
   const start = () => run('start', `Could not start a session in ${p.name}`, async () => {
     landed(await openTermSession({ mode: 'new', project: p.id, ...phoneGrid() }))
   })
+  const restore = () => run('restore', `Could not restore ${p.name}`, async () => {
+    await updateProj(p.id, { status: 'active' })
+    changed()
+    toast(`Restored ${p.name}`)
+  })
   const resume = (id: string, title: string | undefined, host: string) => run(id, `Could not open "${title || 'the session'}"`, async () => {
     const pane = paneFor(await freshPanes(qc), id)
     if (pane) {
-      navigate(termPath(pane, back))
+      navigate(termTo(pane, back))
       return
     }
     if (lookup(id)?.live) {
-      say(`"${title || 'The session'}" is running on ${hostLabel(host)}. Stop it to open it here.`, 4000)
+      say(`"${title || 'The session'}" is running on ${hostLabel(host)}. Use Move here, or stop it, to open it here.`, 4000)
       return
     }
     // the in-page terminal reaches thor only; a transcript elsewhere opens on its own machine
@@ -1887,9 +2860,43 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
     }
     landed(await openTermSession({ mode: 'resume', sessionId: id, project: p.id, label: title, ...phoneGrid() }))
   })
+  // Running in a window on thor: stop it there, give the window's Claude a
+  // moment to finish writing the transcript, then pick it up here (the classic
+  // project page's move). A 404 means it had already exited.
+  const move = (id: string, title: string) => run(id, `Could not move "${title}"`, async () => {
+    try {
+      const r = await stopSessionOnHost(id, HOME_HOST)
+      if (r && r.ok === false) throw new Error(r.detail ?? `${HOME_HOST} refused`)
+    } catch (e) {
+      if (httpStatus(e) !== 404) throw e
+    }
+    await sleep(1500)
+    refreshSessions()
+    landed(await openTermSession({ mode: 'resume', sessionId: id, project: p.id, label: title, ...phoneGrid() }))
+  })
+  // a session in a pane here: closing the pane ends its Claude
+  const stopPane = (id: string, pane: string, title: string) => run(id, `Could not stop "${title}"`, async () => {
+    try {
+      await killTermSession(pane)
+    } catch (e) {
+      if (httpStatus(e) !== 404) throw e
+    }
+    setExp(null)
+    refreshSessions()
+    toast(`Stopped "${title}"`)
+  })
+  const unlink = (id: string, title: string) => run(id, `Could not unlink "${title}"`, async () => {
+    await unlinkProjSession(p.id, id)
+    setUnlinked((s) => new Set(s).add(id))
+    setExp(null)
+    changed()
+    toast(`Unlinked "${title}" from ${p.name}`)
+  })
+
   const d = doc.data
   const target = d ? targets.data?.find((t) => t.key === d.targetKey) : undefined
-  const links = d?.links ?? []
+  const links = (d?.links ?? []).filter((l) => !unlinked.has(l.id))
+  const linkedIds = useMemo(() => new Set((d?.links ?? []).map((l) => l.id)), [d?.links])
   const briefs = useSessionBriefs(links.map((l) => l.id), index)
   // the board and index give the real state; a stored brief only names it (its state is old)
   const info = (id: string): { title: string; project: string; host: string; last: number; activity: SessionVM['activity'] } | undefined => {
@@ -1900,12 +2907,98 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
   }
   const rank = (id: string) => ACTIVITY_RANK[info(id)?.activity ?? 'closed']
   const sortedLinks = [...links].sort((x, y) => rank(x.id) - rank(y.id) || (info(y.id)?.last || y.at) - (info(x.id)?.last || x.at))
+  // a running session marked done stays with the open ones until it closes (the board's rule)
+  const isDoneRow = (id: string) => {
+    const s = lookup(id)
+    return !!s && s.done && !isLive(s)
+  }
+  const openLinks = sortedLinks.filter((l) => !isDoneRow(l.id))
+  const doneLinks = sortedLinks.filter((l) => isDoneRow(l.id))
+  const openShown = allOpen ? openLinks : openLinks.slice(0, PROJ_SESS_SHOWN)
+  const archivedP = p.status === 'archived'
   const longSummary = p.summary.length > 220
+  const openTasks = d ? d.tasks.filter((t) => !t.done).length : 0
+  const nextRem = d?.reminders[0] ?? null
   const caps: string[] = []
   if (showArea) caps.push(areaName(p.area))
   if (p.status !== 'active') caps.push(p.status)
   caps.push(`updated ${ago(p.updated, now)} ago`)
-  if (d && d.openTasks > 0) caps.push(`${d.openTasks} open`)
+  if (openTasks > 0) caps.push(`${openTasks} open`)
+
+  const sessionRow = (l: ProjLink) => {
+    const s = info(l.id)
+    const row = lookup(l.id)
+    const a = s?.activity ?? 'closed'
+    const liveRow = a !== 'closed'
+    const host = s?.host ?? l.host
+    const title = s?.title || l.note || `Linked session · ${shortDate(l.at)}`
+    const pane = paneFor(qc.getQueryData<TermSession[]>(TERMS_KEY), l.id)
+    const actBusy = acts.busy.get(l.id)
+    const mine = busy === l.id
+    const open = exp === l.id
+    const done = !!row?.done
+    const word = mine ? 'working on it' : actBusy === 'stop' ? 'stopping' : actBusy === 'done' ? 'saving' : liveRow ? STATE_WORD[a] : done ? 'done' : ''
+    return (
+      <div key={l.id} className="vp-sitem" data-exp={open || undefined} data-done={(done && !liveRow) || undefined}>
+        <div className="vp-sline">
+          <Press
+            className="vc-pd-srow"
+            data-busy={mine || undefined}
+            disabled={busy !== null}
+            title={pane ? 'Go to the terminal already running this session' : host !== HOME_HOST ? `Open a terminal on ${hostLabel(host)}, where this session lives` : `Open it here, running on ${hostLabel(host)}`}
+            onPress={() => void resume(l.id, s?.title || undefined, host)}
+          >
+            <StateIcon a={a} size={16} />
+            <span className="vc-row-main">
+              <span className="vc-row-title" data-closed={!liveRow || undefined}>{title}</span>
+              <span className="vc-row-sub">
+                <Icon name={hostIcon(host)} size={12} tone={liveRow ? 'dim' : 'faint'} title={hostLabel(host)} />
+                <span>{[s?.project, host !== HOME_HOST ? hostLabel(host) : '', pane ? 'in a pane here' : row?.live ? 'in a window' : ''].filter(Boolean).join(' · ') || 'not on the open board'}</span>
+              </span>
+            </span>
+            <span className="vc-row-meta">
+              <span className="vc-ago" data-a={a}>{ago(s?.last || l.at, now)}</span>
+              {word && <span className="vc-state" data-a={liveRow && !mine && !actBusy ? a : 'closed'}>{word}</span>}
+            </span>
+          </Press>
+          <Press
+            className="vp-more"
+            aria-label={`Actions for ${title}`}
+            aria-expanded={open}
+            title="Stop, done, unlink"
+            onPress={() => setExp((e) => (e === l.id ? null : l.id))}
+          >
+            <PIcon name="more" size={16} tone={open ? 'fg' : 'dim'} />
+          </Press>
+        </div>
+        {open && (
+          <SessionActions
+            canMove={!!row?.live && !pane && host === HOME_HOST}
+            canStop={!!pane || (!!row && isLive(row))}
+            canDone={!!row}
+            done={done}
+            busy={busy !== null || actBusy !== undefined}
+            onMove={() => void move(l.id, title)}
+            onStop={() => {
+              if (pane) void stopPane(l.id, pane, title)
+              else if (row) {
+                setExp(null)
+                acts.stop(row)
+              }
+            }}
+            onDone={() => {
+              if (!row) return
+              setExp(null)
+              if (row.done) acts.undo(row)
+              else acts.done(row)
+            }}
+            onUnlink={() => void unlink(l.id, title)}
+          />
+        )}
+      </div>
+    )
+  }
+
   let k = 1
   return (
     <div className="vc-pd vl-build-on">
@@ -1913,34 +3006,80 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
         {caps.map((c, n) => <span key={c}>{n > 0 && <b>·</b>}{c}</span>)}
       </div>
 
-      <div className="vc-pd-next vl-build" style={iv(k++)}>
-        <span className="vc-pd-label">Next</span>
-        <p>{p.nextAction || 'No next action set'}</p>
-      </div>
-
-      <div className="vc-pd-actions vl-build" style={iv(k++)}>
-        <Press
-          className="vc-glass vc-pd-start"
-          data-busy={busy === 'start' || undefined}
-          disabled={busy !== null}
-          title={`Start an AI session in ${target?.label ?? p.name}, here in the page`}
-          onPress={() => void start()}
-        >
-          <Icon name={busy === 'start' ? 'refresh' : 'start'} size={16} tone="fg" className={busy === 'start' ? 'vl-pulse' : undefined} />
-          <span>{busy === 'start' ? 'Starting' : `Start session${target ? ` in ${target.label}` : ''}`}</span>
-        </Press>
-        {note && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{note}</p>}
-      </div>
-
-      {d?.reminder && (
-        <div className="vc-pd-rem vl-build" style={iv(k++)}>
-          <span className="vc-pd-label"><Icon name="timer" size={12} tone="hot" />Reminder</span>
-          <span className="vc-pd-rem-at">{dayClock(d.reminder.at, now)}</span>
-          <span className="vc-pd-rem-msg">{d.reminder.message}</span>
+      {editing && d ? (
+        <ProjectSettings
+          p={p}
+          meta={d.meta}
+          onClose={() => setEditing(false)}
+          onSaved={changed}
+          onArchived={() => {
+            setEditing(false)
+            onArchived()
+          }}
+        />
+      ) : (
+        <div className="vc-pd-next vl-build" style={iv(k++)}>
+          <span className="vc-pd-label">Next</span>
+          <p>{p.nextAction || 'No next action set'}</p>
         </div>
       )}
 
-      {p.summary && (
+      <div className="vc-pd-actions vl-build" style={iv(k++)}>
+        {archivedP ? (
+          <Press
+            className="vc-glass vc-pd-start"
+            data-busy={busy === 'restore' || undefined}
+            disabled={busy !== null}
+            title="Put it back on the project list"
+            onPress={() => void restore()}
+          >
+            {busy === 'restore' ? <Icon name="refresh" size={16} tone="fg" className="vl-pulse" /> : <PIcon name="restore" size={16} tone="fg" />}
+            <span>{busy === 'restore' ? 'Restoring' : 'Restore project'}</span>
+          </Press>
+        ) : (
+          <Press
+            className="vc-glass vc-pd-start"
+            data-busy={busy === 'start' || undefined}
+            disabled={busy !== null}
+            title={`Start an AI session in ${target?.label ?? p.name}, here in the page`}
+            onPress={() => void start()}
+          >
+            <Icon name={busy === 'start' ? 'refresh' : 'start'} size={16} tone="fg" className={busy === 'start' ? 'vl-pulse' : undefined} />
+            <span>{busy === 'start' ? 'Starting' : `Start session${target ? ` in ${target.label}` : ''}`}</span>
+          </Press>
+        )}
+        {note && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{note}</p>}
+        <div className="vc-pd-links">
+          {/* the classic page keeps files, activity and undo, agents and automations, and note editing */}
+          <Press
+            className="vl-link"
+            title="Files, activity, agents and note editing, on the classic project page"
+            onPress={() => navigate(`/projects/${encodeURIComponent(p.id)}`)}
+          >
+            <Icon name="enter" size={13} tone="dim" />Open full project
+          </Press>
+          {!editing && (
+            <Press
+              className="vl-link"
+              disabled={!d}
+              title={d ? 'Name, next action, summary, status, area, folder, exposure, archive' : 'Loading the project'}
+              onPress={() => setEditing(true)}
+            >
+              <Icon name="settings" size={13} tone="dim" />Edit
+            </Press>
+          )}
+        </div>
+      </div>
+
+      {nextRem && (
+        <div className="vc-pd-rem vl-build" style={iv(k++)}>
+          <span className="vc-pd-label"><Icon name="timer" size={12} tone="hot" />Reminder</span>
+          <span className="vc-pd-rem-at">{dayClock(nextRem.at, now)}</span>
+          <span className="vc-pd-rem-msg">{nextRem.message}</span>
+        </div>
+      )}
+
+      {p.summary && !editing && (
         <div className="vc-pd-sumwrap vl-build" style={iv(k++)}>
           <p className="vc-pd-summary" data-clamp={(longSummary && !more) || undefined}>{p.summary}</p>
           {longSummary && <Press className="vc-more" onPress={() => setMore((m) => !m)}>{more ? 'Less' : 'More'}</Press>}
@@ -1948,55 +3087,307 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, showArea }: {
       )}
 
       <section className="vc-pd-sec vl-build" style={iv(k++)}>
-        <GroupHead icon="claude" label="Sessions" n={p.sessions} />
+        <GroupHead icon="claude" label="Sessions" n={d ? links.length : p.sessions}>
+          {d && !linking && (
+            <Press
+              className="vc-ghead-act"
+              title="Add a session that started somewhere else"
+              onPress={() => openAndFocus(() => setLinking(true), linkRef)}
+            >
+              <PIcon name="link" size={13} />Link a session
+            </Press>
+          )}
+        </GroupHead>
+        {linking && d && (
+          <LinkSessionPicker
+            projectId={p.id}
+            area={p.area}
+            linked={linkedIds}
+            inputRef={linkRef}
+            onClose={() => setLinking(false)}
+            onLinked={changed}
+          />
+        )}
         {links.length ? (
           <div className="vc-rows">
-            {sortedLinks.map((l) => {
-              const s = info(l.id)
-              const a = s?.activity ?? 'closed'
-              const liveRow = a !== 'closed'
-              const host = s?.host ?? l.host
-              const pane = paneFor(qc.getQueryData<TermSession[]>(TERMS_KEY), l.id)
-              return (
-                <Press
-                  key={l.id}
-                  className="vc-pd-srow"
-                  data-busy={busy === l.id || undefined}
-                  disabled={busy !== null}
-                  title={pane ? 'Go to the terminal already running this session' : host !== HOME_HOST ? `Open a terminal on ${hostLabel(host)}, where this session lives` : `Open it here, running on ${hostLabel(host)}`}
-                  onPress={() => void resume(l.id, s?.title || undefined, host)}
-                >
-                  <StateIcon a={a} size={16} />
-                  <span className="vc-row-main">
-                    <span className="vc-row-title" data-closed={!liveRow || undefined}>{s?.title || l.note || `Linked session · ${shortDate(l.at)}`}</span>
-                    <span className="vc-row-sub">
-                      <Icon name={hostIcon(s?.host ?? l.host)} size={12} tone={liveRow ? 'dim' : 'faint'} title={hostLabel(s?.host ?? l.host)} />
-                      <span>{[s?.project, (s?.host ?? l.host) !== HOME_HOST ? hostLabel(s?.host ?? l.host) : ''].filter(Boolean).join(' · ') || 'not on the open board'}</span>
-                    </span>
-                  </span>
-                  <span className="vc-row-meta">
-                    <span className="vc-ago" data-a={a}>{ago(s?.last || l.at, now)}</span>
-                    {busy === l.id ? <span className="vc-state" data-a="closed">opening</span> : liveRow && <span className="vc-state" data-a={a}>{STATE_WORD[a]}</span>}
-                  </span>
-                </Press>
-              )
-            })}
+            {openShown.map(sessionRow)}
+            {openLinks.length > openShown.length && (
+              <Press className="vc-showmore" onPress={() => setAllOpen(true)}>
+                <Icon name="go" size={13} tone="dim" />Show {openLinks.length - openShown.length} more
+              </Press>
+            )}
+            {doneLinks.length > 0 && (
+              <Press className="vc-showmore" aria-expanded={doneOpen} onPress={() => setDoneOpen((v) => !v)}>
+                <Icon name="done" size={13} tone="dim" />{doneOpen ? 'Hide done' : `Show ${doneLinks.length} done`}
+              </Press>
+            )}
+            {doneOpen && doneLinks.map(sessionRow)}
           </div>
         ) : (
           <p className="vc-pd-none">{doc.failed && !d ? 'Project did not answer' : doc.isFetching && !d ? 'Loading' : 'No linked sessions'}</p>
         )}
       </section>
 
-      {d && d.openTasks > 0 && (
-        <section className="vc-pd-sec vl-build" style={iv(k++)}>
-          <GroupHead icon="done" label="Open tasks" n={`${d.openTasks}${d.doneTasks ? ` of ${d.openTasks + d.doneTasks}` : ''}`} />
-          <ul className="vc-pd-tasks">
-            {d.tasks.slice(0, TASKS_SHOWN).map((t, n) => <li key={n}><i />{t}</li>)}
-          </ul>
-          {d.openTasks > TASKS_SHOWN && <p className="vc-pd-none">{d.openTasks - TASKS_SHOWN} more in Valkyrie Projects</p>}
-        </section>
-      )}
+      {d && <ProjTasks key={`t.${p.id}`} projectId={p.id} tasks={d.tasks} listTab={d.listTab} k={k++} onChanged={changed} />}
+      {d && <ProjReminders key={`r.${p.id}`} projectId={p.id} list={d.reminders} now={now} k={k++} onChanged={changed} />}
+      {d && <ProjectNotes key={`n.${p.id}`} projectId={p.id} tabs={d.notes} />}
     </div>
+  )
+}
+
+/**
+ * The project's checklist: every open item, a tap ticks it (or unticks one
+ * ticked here, which stays in place until the detail closes so a mis-tap is
+ * one more tap), and a line that adds an item to the first checklist (or makes
+ * one, named Tasks, when the project has none). Same writes as the classic
+ * checklist tab.
+ */
+function ProjTasks({ projectId, tasks, listTab, k, onChanged }: {
+  projectId: string
+  tasks: ProjTask[]
+  listTab: string | null
+  k: number
+  onChanged: () => void
+}) {
+  // the state a tap set, over the doc's state at the time: once the doc moves (it agrees, or a
+  // session changed it) the doc wins again. The ids ticked here stay listed.
+  const [over, setOver] = useState<ReadonlyMap<string, { from: boolean; to: boolean }>>(() => new Map())
+  const [kept, setKept] = useState<ReadonlySet<string>>(() => new Set())
+  const [inflight, setInflight] = useState<ReadonlySet<string>>(() => new Set())
+  const [draft, setDraft] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const doneOf = (t: ProjTask) => {
+    const o = over.get(t.id)
+    return o && o.from === t.done ? o.to : t.done
+  }
+
+  const shown = tasks.filter((t) => !t.done || kept.has(t.id))
+  const open = tasks.filter((t) => !doneOf(t)).length
+  const full = !!listTab && tasks.filter((t) => t.tabId === listTab).length >= LIMITS.itemsPerTab
+
+  const toggle = (t: ProjTask) => {
+    if (inflight.has(t.id)) return
+    const next = !doneOf(t)
+    setErr(null)
+    setOver((m) => new Map(m).set(t.id, { from: t.done, to: next }))
+    setKept((s) => new Set(s).add(t.id))
+    setInflight((s) => new Set(s).add(t.id))
+    projTabItem(projectId, t.tabId, { op: 'set', itemId: t.id, done: next })
+      .then(() => onChanged())
+      .catch((e: unknown) => {
+        setOver((m) => {
+          const n = new Map(m)
+          n.delete(t.id)
+          return n
+        })
+        setErr(`Could not ${next ? 'tick' : 'reopen'} "${t.text}": ${errText(e)}`)
+      })
+      .finally(() => setInflight((s) => {
+        const n = new Set(s)
+        n.delete(t.id)
+        return n
+      }))
+  }
+  const add = () => {
+    const text = draft.trim()
+    if (!text || adding || full) return
+    setAdding(true)
+    setErr(null)
+    const write = listTab
+      ? projTabItem(projectId, listTab, { op: 'add', text })
+      : addProjTab(projectId, { kind: 'checklist', title: 'Tasks', items: [text] })
+    write
+      .then(() => {
+        setDraft('')
+        onChanged()
+      })
+      .catch((e: unknown) => setErr(`Could not add "${text}": ${errText(e)}`))
+      .finally(() => setAdding(false))
+  }
+
+  return (
+    <section className="vc-pd-sec vl-build" style={iv(k)}>
+      <GroupHead icon="done" label="Open tasks" n={tasks.length && open !== tasks.length ? `${open} of ${tasks.length}` : open} />
+      {shown.length > 0 && (
+        <ul className="vc-pd-tasks">
+          {shown.map((t) => {
+            const done = doneOf(t)
+            return (
+              <li key={t.id}>
+                <Press
+                  className="vc-task"
+                  role="checkbox"
+                  aria-checked={done}
+                  data-done={done || undefined}
+                  data-busy={inflight.has(t.id) || undefined}
+                  title={done ? 'Tap to reopen it' : 'Tap to tick it'}
+                  onPress={() => toggle(t)}
+                >
+                  <i className="vc-task-box">{done && <Icon name="done" size={11} tone="ink" />}</i>
+                  <span>{t.text}</span>
+                </Press>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+        <Icon name="add" size={14} tone={draft.trim() ? 'fg' : 'dim'} />
+        <input
+          className="vc-field"
+          value={draft}
+          maxLength={LIMITS.checklistText}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={full ? `Full at ${LIMITS.itemsPerTab} items` : 'Add item'}
+          aria-label="New task"
+          enterKeyHint="done"
+          autoComplete="off"
+          disabled={full}
+        />
+        {draft.trim() !== '' && (
+          <Press className="vc-sact" data-main data-busy={adding || undefined} disabled={adding || full} onPress={add}>
+            {adding ? 'Adding' : 'Add'}
+          </Press>
+        )}
+      </form>
+      {err && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{err}</p>}
+    </section>
+  )
+}
+
+/**
+ * Pending reminders, each with a two-tap Cancel, and a form for a new one:
+ * the text and a local date and time, sent as ISO with the Z the backend wants
+ * (the classic reminders tab's writes).
+ */
+function ProjReminders({ projectId, list, now, k, onChanged }: {
+  projectId: string
+  list: ProjReminder[]
+  now: number
+  k: number
+  onChanged: () => void
+}) {
+  const [form, setForm] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [at, setAt] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [armed, setArmed] = useState<string | null>(null)
+  const [canceling, setCanceling] = useState<string | null>(null)
+  // canceled here, hidden until the doc stops listing them
+  const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set())
+  const msgRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(null), ARM_MS)
+    return () => clearTimeout(t)
+  }, [armed])
+
+  const shown = list.filter((r) => !gone.has(r.id))
+  const full = shown.length >= LIMITS.pendingReminders
+  // datetime-local has no zone: Date reads it as this device's local time
+  const atMs = at ? new Date(at).getTime() : NaN
+  const ready = Number.isFinite(atMs) && msg.trim() !== '' && !full
+
+  const add = () => {
+    if (!ready || saving) return
+    if (atMs <= Date.now()) {
+      setErr('Pick a time in the future')
+      return
+    }
+    setSaving(true)
+    setErr(null)
+    addProjReminder(projectId, { at: new Date(atMs).toISOString(), message: msg.trim() })
+      .then(() => {
+        setMsg('')
+        setAt('')
+        setForm(false)
+        onChanged()
+        toast(`Reminder set for ${dayClock(atMs)}`)
+      })
+      .catch((e: unknown) => setErr(`Could not add the reminder: ${errText(e)}`))
+      .finally(() => setSaving(false))
+  }
+  const cancel = (r: ProjReminder) => {
+    setArmed(null)
+    setCanceling(r.id)
+    setErr(null)
+    cancelProjReminder(projectId, r.id)
+      .then(() => {
+        setGone((s) => new Set(s).add(r.id))
+        onChanged()
+      })
+      .catch((e: unknown) => setErr(`Could not cancel it: ${errText(e)}`))
+      .finally(() => setCanceling(null))
+  }
+
+  return (
+    <section className="vc-pd-sec vl-build" style={iv(k)}>
+      <GroupHead icon="timer" label="Reminders" n={shown.length}>
+        {!form && (
+          <Press className="vc-ghead-act" disabled={full} onPress={() => openAndFocus(() => { setForm(true); setErr(null) }, msgRef)}>
+            <Icon name="add" size={13} tone="dim" />Add reminder
+          </Press>
+        )}
+      </GroupHead>
+      {form && (
+        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+          <input
+            className="vc-field"
+            value={msg}
+            maxLength={LIMITS.reminderMessage}
+            onChange={(e) => setMsg(e.target.value)}
+            placeholder="What to remember"
+            ref={msgRef}
+            aria-label="Reminder text"
+            autoComplete="off"
+          />
+          <div className="vc-remform-row">
+            <input
+              className="vc-field vc-field-when"
+              type="datetime-local"
+              value={at}
+              onChange={(e) => setAt(e.target.value)}
+              aria-label="When"
+            />
+            <Press className="vc-sact" data-main data-busy={saving || undefined} disabled={!ready || saving} onPress={add}>
+              <Icon name={saving ? 'refresh' : 'timer'} size={14} tone="fg" className={saving ? 'vl-pulse' : undefined} />{saving ? 'Adding' : 'Add'}
+            </Press>
+            <Press className="vc-sact vc-iact" aria-label="Close the form" title="Close the form" onPress={() => { setForm(false); setErr(null) }}>
+              <Icon name="stop" size={15} tone="dim" />
+            </Press>
+          </div>
+        </form>
+      )}
+      {shown.length > 0 ? (
+        <div className="vc-rows">
+          {shown.map((r) => {
+            const on = armed === r.id
+            return (
+              <div key={r.id} className="vc-remrow" data-busy={canceling === r.id || undefined}>
+                <span className="vc-row-main">
+                  <span className="vc-remrow-when"><b>{dayClock(r.at, now)}</b><em>{until(r.at, now)}</em></span>
+                  <span className="vc-remrow-msg">{r.message}</span>
+                </span>
+                <Press
+                  className="vc-term-x"
+                  data-armed={on || undefined}
+                  disabled={canceling !== null}
+                  aria-label={on ? 'Cancel this reminder now' : 'Cancel this reminder'}
+                  title={on ? 'Tap again to cancel it' : 'Cancel this reminder'}
+                  onPress={() => (on ? cancel(r) : setArmed(r.id))}
+                >
+                  <Icon name="stop" size={15} tone={on ? 'acc2' : 'dim'} />
+                  {on && <span>Cancel?</span>}
+                </Press>
+              </div>
+            )
+          })}
+        </div>
+      ) : !form ? <p className="vc-pd-none">Nothing scheduled</p> : null}
+      {err && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{err}</p>}
+    </section>
   )
 }
 

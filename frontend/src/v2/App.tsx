@@ -1,18 +1,29 @@
-import { Suspense, lazy, useLayoutEffect } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Suspense, lazy, useEffect, useLayoutEffect } from 'react'
+import { Navigate, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
-import { V2Shell, type LegacyMap, type ScreenDef } from './kit/shell'
+import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef } from './kit/shell'
+import { Palette } from './kit/palette'
+import { toast } from './kit/ui'
+import { fetchSessionList, fetchTermSessions } from '../lib/api'
+import { v2TermPath } from '../lib/term'
 import Dashboard from './screens/Dashboard'
 import Claude from './screens/Claude'
 import Lights from './screens/Lights'
 import Media from './screens/Media'
 import System from './screens/System'
 import { SettingsScreen } from './screens/Settings'
+import { CalendarPage } from './screens/Calendar'
+import MealsPage from './screens/Meals'
 import './v2.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
 // recorded sample. Its own chunk, since it carries xterm.
 const Skin = lazy(() => import('./screens/Skin'))
+// AI > a session (/m/ai/term/<name>): the real tmux pane in that skin. Every
+// v2 entry point still asks for /sessions/terminal?s=<name>; src/App.tsx sends
+// a v2 user (or the iPhone profile) here. Its own chunk, like the preview.
+const Term = lazy(() => import('./screens/Term'))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside
 // the classic Shell (no classic header, menu or player bar). URLs are
@@ -61,6 +72,8 @@ function useV2Document() {
     root.dataset.v2 = ''
     // the first frames paint the stored scheme without a morph
     root.dataset.boot = ''
+    // the desktop app's frameless window: the strip is its title bar (v2.css html[data-v2win])
+    if (desktopWindow()) root.dataset.v2win = 'tauri'
     applyPalette(storedMode())
     applyFont(storedFont())
     try {
@@ -83,6 +96,7 @@ function useV2Document() {
       window.removeEventListener('load', onLoad)
       delete root.dataset.v2
       delete root.dataset.boot
+      delete root.dataset.v2win
     }
   }, [])
 }
@@ -91,13 +105,66 @@ function V2() {
   return <V2Shell screens={SCREENS} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} />
 }
 
+const BASE_AI = '/m/ai'
+
+/**
+ * /m/ai/open?label=<name>: a "Session waiting" or "Session complete" alert
+ * tapped on a v2 device (public/push-sw.js). The alert names the session the
+ * way the board does (its title), never its tmux pane, so find the pane: one
+ * labeled with that name, else one running a board session of that title.
+ * Found, its terminal opens; not found (it runs in a window on its host, or
+ * it ended), AI > Sessions opens with a line saying so. Black meanwhile.
+ */
+function OpenFromAlert() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const label = (params.get('label') ?? '').trim()
+  useEffect(() => {
+    let gone = false
+    const same = (a: string) => a.trim().replace(/\s+/g, ' ').toLowerCase() === label.replace(/\s+/g, ' ').toLowerCase()
+    void (async () => {
+      let to = `${BASE_AI}/sessions`
+      if (label) {
+        try {
+          const panes = (await qc.fetchQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, staleTime: 5_000 })).filter((t) => !t.dead)
+          let pane = panes.find((t) => same(t.label))
+          if (!pane) {
+            const board = await fetchSessionList()
+            const ids = new Set(board.installed ? board.sessions.filter((s) => same(s.title)).map((s) => s.sessionId) : [])
+            pane = panes.find((t) => ids.has(t.sessionId) || (t.mode === 'resume' && ids.has(t.target)))
+          }
+          if (pane) to = v2TermPath(pane.name)
+          else toast(`${label}: not open in a terminal`, { ms: 4000 })
+        } catch {
+          toast(`Could not look up ${label}`, { ms: 4000 })
+        }
+      }
+      if (!gone) navigate(to, { replace: true })
+    })()
+    return () => { gone = true }
+  }, [label, navigate, qc])
+  return <div className="fixed inset-0 bg-black" />
+}
+
+
 export default function V2App() {
   useV2Document()
   return (
-    <Routes>
-      <Route index element={<Navigate to="dashboard" replace />} />
-      <Route path="ai/skin" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Skin /></Suspense>} />
-      <Route path=":screen/:sub?" element={<V2 />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="ai/skin" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Skin /></Suspense>} />
+        <Route path="ai/term/:name" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Term /></Suspense>} />
+        {/* never a terminal without a name: no session is ever picked for you */}
+        <Route path="ai/term" element={<Navigate to="/m/ai/sessions" replace />} />
+        <Route path="ai/open" element={<OpenFromAlert />} />
+        <Route path="calendar" element={<CalendarPage />} />
+        <Route path="meals" element={<MealsPage />} />
+        <Route path=":screen/:sub?" element={<V2 />} />
+      </Routes>
+      {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}
+      <Palette screens={SCREENS} />
+    </>
   )
 }

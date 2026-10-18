@@ -40,6 +40,7 @@
   font-weight: 600;
   letter-spacing: -.02em;
   color: var(--ink-hi);
+  white-space: nowrap;
 }
 .vc-stat span { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--dim); }
 .vc-stat[data-s='lit'] b { text-shadow: var(--num-glow); }
@@ -253,6 +254,153 @@
 /* 44 px touch target around the small text */
 .vc-ghead-act::after { content: ''; position: absolute; inset: -14px -8px; }
 .vc-ghead-act[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
+/* Stop all: alert text at rest, an alert plate once armed (same box both ways, so nothing shifts) */
+.vc-ghead-act[data-tone='acc2'] {
+  margin-right: -4px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--acc2) 82%, var(--text));
+}
+.vc-ghead-act[data-tone='acc2']::after { inset: -10px -2px; }
+.vc-ghead-act[data-tone='acc2'][data-armed] {
+  color: var(--acc2);
+  border-color: var(--acc2);
+  background: color-mix(in srgb, var(--acc2) 14%, #000);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 35%, transparent);
+}
+.vc-ghead-act[data-tone='acc2'][data-pressed] { color: var(--acc2); text-shadow: 0 0 8px color-mix(in srgb, var(--acc2) 60%, transparent); }
+.vc-ghead-act + .vc-ghead-act { margin-left: 12px; }
+.vc-ghead-note { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--dim); }
+
+/* open terminals: reattach on the row, a two-tap close on its right edge (reminders reuse the close) */
+.vc-term { display: flex; align-items: stretch; }
+.vc-term-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 7px 2px;
+  text-align: left;
+  transition: background-color .15s;
+}
+.vc-term-main[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, #000); }
+.vc-term[data-dead] .vc-row-title { color: var(--dim); }
+.vc-term-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 44px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  border-left: 1px solid var(--line);
+  transition: background-color .15s;
+}
+.vc-term-x[data-armed] {
+  color: var(--acc2);
+  background: color-mix(in srgb, var(--acc2) 12%, #000);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc2) 60%, transparent);
+}
+.vc-term-x[data-pressed] { background: color-mix(in srgb, var(--acc2) 18%, #000); }
+@media (hover: hover) and (pointer: fine) {
+  .vc-term-main:hover { background: color-mix(in srgb, var(--fg) 6%, #000); }
+  .vc-term-x:hover { color: var(--acc2); }
+}
+
+/* select mode: the check box in the state icon's place, the picked row lit */
+.vc-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+}
+.vc-check::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+}
+.vc-check { position: relative; }
+.vc-check[data-on]::before { background: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
+.vc-check > svg { position: relative; }
+.vc-item { position: relative; }
+.vc-item[data-picked] { background: color-mix(in srgb, var(--fg) 9%, #000); }
+.vc-item[data-picked]::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--fg);
+  box-shadow: 0 0 6px var(--fg);
+}
+/* a held press picks the row: no text selection or callout on the way */
+.vc-front { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* the done list, and a done row anywhere: dimmed */
+.vc-item[data-done] .vc-row-title { color: var(--dim); }
+.vc-group[data-g='done'] .vc-sicon { opacity: .6; }
+.vc-area[data-done] { color: var(--dim); }
+
+/* "Show N done" under Recent, and the classic page link at the foot */
+.vc-fold {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, .55);
+}
+.vc-fold[data-pressed] { color: var(--fg); border-color: var(--line-strong); text-shadow: var(--text-glow); }
+.vc-foot { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; padding: 0 2px; font-size: 11px; line-height: 14px; color: var(--dim); }
+
+/* search: a plate leading the area plates on the phone, a hairline field once open */
+.vc-findrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vc-findrow > .vc-filter { flex: 1; min-width: 0; margin-left: 0; padding-left: 0; }
+.vc-find { width: 38px; justify-content: center; padding: 0; }
+.vc-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--dim);
+}
+.vc-search:focus-within { border-bottom-color: var(--fg); box-shadow: 0 1px 0 0 color-mix(in srgb, var(--fg) 35%, transparent); }
+.vc-search-icon { flex: none; }
+.vc-search input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* iOS zooms the page into any smaller input */
+  -webkit-appearance: none;
+  appearance: none;
+}
+.vc-search input::placeholder { color: var(--dim); }
+.vc-search input::-webkit-search-cancel-button { display: none; }
+@media (pointer: fine) { .vc-search input { font-size: 13.5px; } }
+.vc-search-note { flex: none; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.vc-search-x { flex: none; width: 40px; height: 40px; display: grid; place-items: center; margin-right: -8px; }
+.vc-search-x[data-pressed] .vl-icon { color: var(--fg); }
 
 .vc-rows > * + * { border-top: 1px solid var(--line); }
 
@@ -414,7 +562,8 @@
     transition: opacity .15s;
   }
   .vc-swipe:hover:not([data-open]):not([data-dragging]) .vc-hover-acts { opacity: 1; pointer-events: auto; }
-  .vc-item[data-exp] .vc-swipe .vc-hover-acts { display: none; }
+  .vc-item[data-exp] .vc-swipe .vc-hover-acts,
+  .vc-swipe[data-selecting] .vc-hover-acts { display: none; }
   .vc-hact {
     display: inline-flex;
     align-items: center;
@@ -478,6 +627,7 @@
 @media (min-width: 640px) {
   .vc-iact { padding: 0 12px 0 10px; }
   .vc-iact-l { display: inline; }
+  .vc-iact-s { display: none; }
 }
 .vc-strip-cmd {
   display: block;
@@ -544,6 +694,33 @@
   background: var(--fg);
   box-shadow: 0 0 6px var(--fg);
 }
+/* Show archived: a quiet text toggle under the list; the archived group is dimmed */
+.vc-arch-foot { padding: 0 4px; }
+.vc-arch-note { display: flex; align-items: center; gap: 7px; padding: 4px 4px 0; }
+.vc-group[data-g='archived'] { border-style: dashed; }
+.vc-prow[data-archived] .vc-row-title { color: var(--dim); }
+.vc-prow[data-archived][data-on] .vc-row-title { color: var(--text); }
+/* desktop: the open project's panel is capped to the page (Claude.tsx useFitToScroller); its
+   name stays at the top and the rest scrolls inside the frame, so the list beside it stays put */
+.vc[data-proj] .vc-detail-card { display: flex; flex-direction: column; min-height: 0; }
+.vc[data-proj] .vc-detail-head { flex: none; margin-bottom: 0; }
+.vc[data-proj] .vc-detail-card > .vc-pd {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-right: -12px;
+  padding: 8px 12px 6px 0;
+  /* rows fade out under the name instead of being cut at a hard edge */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 8px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 8px);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 30%, transparent) transparent;
+}
+/* a big monitor: the open project's column takes the room (settings, notes and session strips need it) */
+@media (min-width: 1680px) {
+  .vc[data-detail][data-proj] { grid-template-columns: 260px minmax(0, 640px) minmax(0, 560px); }
+}
 
 /* project detail (sheet body on phone, a column on desktop) */
 .vc-pd { display: flex; flex-direction: column; gap: 12px; padding: 2px 0 6px; }
@@ -597,16 +774,85 @@
 .vc-pd-rem-msg { grid-column: 1 / -1; color: var(--dim); margin-top: 2px; }
 .vc-pd-sec .vc-rows { margin-top: 0; }
 .vc-pd-tasks { list-style: none; margin: 0; padding: 0; }
-.vc-pd-tasks li {
+.vc-pd-tasks li { border-bottom: 1px solid var(--line); }
+/* a checklist item: the whole line ticks it */
+.vc-task {
   display: flex;
-  gap: 9px;
-  padding: 7px 0;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 2px;
+  text-align: left;
   font-size: 12.5px;
   line-height: 17px;
   color: var(--text);
-  border-bottom: 1px solid var(--line);
+  transition: background-color .15s;
 }
-.vc-pd-tasks li i { flex: none; width: 9px; height: 9px; margin-top: 4px; border: 1px solid var(--line-strong); }
+.vc-task > span { min-width: 0; overflow-wrap: anywhere; }
+.vc-task[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, #000); }
+.vc-task-box { flex: none; display: grid; place-items: center; width: 15px; height: 15px; margin-top: 1px; border: 1px solid var(--line-strong); }
+.vc-task[data-done] .vc-task-box { background: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
+.vc-task[data-done] > span { color: var(--dim); text-decoration: line-through; }
+.vc-task[data-busy] { opacity: .75; }
+@media (hover: hover) and (pointer: fine) { .vc-task:hover { background: color-mix(in srgb, var(--fg) 6%, #000); } }
+
+/* text inputs: an outlined dark field, 16px on touch so iOS never zooms */
+.vc-field {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--text);
+  background: rgba(0, 0, 0, .6);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  color-scheme: dark;
+}
+.vc-field:focus { border-color: var(--fg); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent); }
+.vc-field::placeholder { color: var(--dim); }
+.vc-field:disabled { opacity: .5; }
+textarea.vc-field { resize: vertical; }
+@media (pointer: fine) { .vc-field { font-size: 13px; } }
+
+/* "Add item" under the checklist: a hairline field, its Add button once there is text */
+.vc-addline { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+.vc-addline .vc-field { flex: 1; border-width: 0 0 1px; background: transparent; padding: 8px 2px; }
+.vc-addline .vc-field:focus { box-shadow: 0 1px 0 0 color-mix(in srgb, var(--fg) 35%, transparent); }
+
+/* reminders: the form, then one row per pending reminder with its two-tap Cancel */
+.vc-remform { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 6px; }
+.vc-remform-row { display: flex; align-items: center; gap: 6px; }
+.vc-field-when { flex: 1; }
+.vc-remrow { display: flex; align-items: stretch; gap: 8px; }
+.vc-remrow .vc-row-main { padding: 7px 0; gap: 2px; }
+.vc-remrow-when { display: flex; align-items: baseline; gap: 8px; font-size: 12px; line-height: 16px; }
+.vc-remrow-when b { font-weight: 600; color: var(--text); }
+.vc-remrow-when em { font-style: normal; font-size: 11px; color: color-mix(in srgb, var(--hot) 85%, transparent); }
+.vc-remrow-msg { font-size: 12px; line-height: 16px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+.vc-remrow[data-busy] { opacity: .5; }
+
+/* edit the project: name, next action, summary, status */
+.vc-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 10px 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, .6);
+}
+.vc-flabel { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vc-flabel > span { font-size: 10.5px; line-height: 13px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+.vc-edit-seg.vl-seg { height: 36px; }
+.vc-edit-acts { display: flex; align-items: center; gap: 8px; }
+.vc-edit-save { min-height: 40px; padding: 0 16px; gap: 7px; }
+.vc-pd-links { display: flex; flex-wrap: wrap; column-gap: 18px; margin-top: 4px; }
 .vc-pd-srow { min-height: 46px; }
 .vc-pd-none { margin: 0; padding: 10px 0; font-size: 12px; color: var(--dim); }
 .vc-pd-actions { padding-top: 2px; }
@@ -670,6 +916,53 @@
 @keyframes vc-undo-in {
   from { opacity: 0; transform: translate3d(-50%, 8px, 0); }
   to { opacity: 1; transform: translate3d(-50%, 0, 0); }
+}
+/* the pick bar (select mode): full width on the phone, centered where there is room */
+.vc-selbar {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 50px;
+  padding: 4px 5px 4px 2px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 12%, transparent), color-mix(in srgb, var(--fg) 4%, transparent)), #000;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--fg) 22%, transparent);
+  animation: vc-rise .22s var(--ease) both;
+  white-space: nowrap;
+}
+.vc-selbar-x { flex: none; width: 40px; height: 40px; display: grid; place-items: center; }
+.vc-selbar-x[data-pressed] .vl-icon { color: var(--fg); }
+.vc-selbar-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+.vc-selbar-n b { font-weight: 700; color: var(--fg); text-shadow: var(--num-glow); }
+.vc-selbar-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 10px;
+  font-weight: 600;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, .55);
+  transition: transform .12s var(--ease);
+}
+.vc-selbar-btn[data-main] {
+  color: var(--plate-ink);
+  text-shadow: var(--plate-shadow);
+  border-color: color-mix(in srgb, var(--fg) 94%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 10%), transparent), color-mix(in srgb, var(--fg) var(--plate), transparent)), #000;
+  box-shadow: var(--glow);
+}
+.vc-selbar-btn[data-pressed] { transform: scale(.97); border-color: var(--line-strong); }
+@media (min-width: 640px) {
+  .vc-selbar { left: 50%; right: auto; width: min(92%, 520px); animation: vc-undo-in .22s var(--ease) both; transform: translateX(-50%); }
 }
 
 /* ---------- bottom sheet ---------- */
@@ -815,12 +1108,13 @@ html[data-motion='reduced'] .vc-sheet { transition: opacity .12s linear; transfo
 html[data-motion='reduced'] .vc-sheet-root[data-shown] .vc-sheet { opacity: 1; }
 html[data-motion='reduced'] .vc-undo,
 html[data-motion='reduced'] .vc-fab,
+html[data-motion='reduced'] .vc-selbar,
 html[data-motion='reduced'] .vc-strip { animation: vl-fade .12s linear both; }
 html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
 @media (prefers-reduced-motion: reduce) {
   .vc-sheet { transition: opacity .12s linear; transform: translate3d(-50%, 0, 0); opacity: 0; }
   .vc-sheet-root[data-shown] .vc-sheet { opacity: 1; }
-  .vc-undo, .vc-fab, .vc-strip { animation: vl-fade .12s linear both; }
+  .vc-undo, .vc-fab, .vc-selbar, .vc-strip { animation: vl-fade .12s linear both; }
   .vc-sicon::before { animation: none; opacity: .7; }
 }
 
@@ -872,7 +1166,8 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
 @media (min-width: 640px) {
   .vc {
     display: grid;
-    grid-template-columns: 228px minmax(0, 1fr);
+    /* 252: "0 asking" keeps its word beside "1 live" and the upload button */
+    grid-template-columns: 252px minmax(0, 1fr);
     column-gap: 22px;
     align-items: start;
     padding: 12px 20px 18px 12px;

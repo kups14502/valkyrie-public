@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ComponentType, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LayoutDashboard, Menu, X, Search, Tablet, RefreshCw, Smartphone, Glasses } from 'lucide-react'
+import { LayoutDashboard, Menu, X, Search, Tablet, RefreshCw, Smartphone, Glasses, Sparkles } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 import { ThemePicker, applyAccent } from './components/ThemePicker'
 import { setupZoom } from './lib/zoom'
@@ -12,7 +12,8 @@ import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
 import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
-import { useProfile } from './lib/deviceMode'
+import { setTabUi, tabWantsV2, useProfile } from './lib/deviceMode'
+import { TERM_NAME_RE, v2TermPath } from './lib/term'
 import { navFor } from './lib/nav'
 import { isEmbedded } from './lib/embed'
 import PlayerBar from './components/PlayerBar'
@@ -174,6 +175,7 @@ const MENU_ICON = 'inline-flex h-10 min-w-10 items-center justify-center gap-2 b
 
 function MobileMenu({ onClose }: { onClose: () => void }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const items = navFor(useProfile().resolved)
   const { version, build } = useAppVersion()
   return (
@@ -215,6 +217,18 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
             <kbd className="ml-1 hidden border border-[var(--color-border)] px-1 py-0.5 text-[8px] tracking-[0.1em] text-[var(--color-text-faint)] sm:inline-block">ctrl k</kbd>
           </button>
           <ThemePicker />
+          {/* Back to v2 (/m/*), the UI every device but the headset opens in.
+              The classic pages mark the tab classic, so this is the way back. */}
+          <button
+            type="button"
+            onClick={() => { onClose(); navigate('/m/dashboard') }}
+            title="Open the new UI"
+            aria-label="New UI"
+            className={MENU_ICON}
+          >
+            <Sparkles size={14} />
+            <span className="hidden sm:inline">new ui</span>
+          </button>
           {/* Added to the home screen, iOS gives no address bar, and the shell
               sets html{overflow:hidden} so pull-to-refresh can't fire either —
               this is the only way to force the newest build in that mode. */}
@@ -252,6 +266,36 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   )
 }
 
+// /sessions/terminal?s=<name> for a v2 user is the v2 terminal at
+// /m/ai/term/<name>. A page load (reload, bookmark, alert) is rewritten before
+// the router starts (main.tsx); this catches an in-app link to it: v2 on screen
+// when the link was followed (html[data-v2] is still set while this first
+// renders), or a tab that wants v2 (lib/deviceMode tabWantsV2). The classic
+// pages mark the tab classic, so their own terminal links stay classic, and
+// ?classic=1 (the v2 terminal's More > Classic terminal) asks for it.
+// Decided once per visit: the classic page rewrites its own query string.
+// Only a named session ever goes to v2; the v2 page never picks one itself.
+function TerminalRoute() {
+  const location = useLocation()
+  const [to] = useState<string | null>(() => {
+    const p = new URLSearchParams(location.search)
+    if (p.get('classic') === '1') {
+      setTabUi('classic')
+      return null
+    }
+    const name = p.get('s') ?? ''
+    if (!TERM_NAME_RE.test(name)) return null
+    const v2 = document.documentElement.dataset.v2 !== undefined || tabWantsV2()
+    return v2 ? v2TermPath(name, p.get('back')) : null
+  })
+  // <Navigate> (a passive effect), never navigate() in a layout effect: on a
+  // fresh load this runs before the router has subscribed to history, and the
+  // URL would change under a page that never follows it. Black while the hop
+  // happens, the same as v2's own loading screen.
+  if (to) return <><div className="fixed inset-0 z-[100] bg-black" /><Navigate to={to} replace /></>
+  return <Terminal />
+}
+
 // One shared width for every page. Fluid below the cap so it scales with the
 // device, then centered on very wide screens so line lengths stay sane. Every
 // tabbed route uses this, so nothing is full-bleed while its neighbor sits in a
@@ -266,11 +310,12 @@ function Shell() {
   const location = useLocation()
   const { version, build } = useAppVersion()
 
-  // The device profile decides what "home" is: the pad screen on a phone or
-  // tablet, the full dashboard on a desktop. The header button hides while
-  // you're already there.
+  // The device profile decides what "home" is in the classic UI: the pad
+  // screen on a tablet, the phone screen on a phone, the full dashboard on a
+  // desktop. The header button hides while you're already there. (v2 is the
+  // device's real home now; the menu's "new ui" goes there.)
   const profile = useProfile()
-  const home = profile.home
+  const home = profile.classicHome
   const atHome = location.pathname === home
   const onHomeScreen = home !== '/dashboard'
 
@@ -284,6 +329,7 @@ function Shell() {
   // height and a scrolling main would let a laser-pointer drag shift them.
   const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr'
   useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
+  useEffect(() => { if (location.pathname !== '/sessions/terminal') setTabUi('classic') }, [location.pathname])
 
   return (
     <div data-shell className="flex h-full max-w-full flex-col overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -402,7 +448,7 @@ function Shell() {
             {/* Bare, like /pad and /phone: PageContainer's mx-auto max-w-[1800px]
                 exists for prose line length, and a non-positioned wrapper between
                 main and an absolute inset-0 page root is dead weight. */}
-            <Route path="/sessions/terminal" element={<Terminal />} />
+            <Route path="/sessions/terminal" element={<TerminalRoute />} />
             {/* The terminal had its own tab for a day. Bookmarks from then. */}
             <Route path="/terminal" element={<Navigate to="/sessions/terminal" replace />} />
             {/* The VR workspace: bare like the terminal, its panes fill main. */}
@@ -433,6 +479,7 @@ function Shell() {
 // classic header, menu, player bar and command palette. Black while its chunk
 // loads, so the phone never flashes the classic loading line.
 function V2Route() {
+  useLayoutEffect(() => { setTabUi('v2') }, [])
   return (
     <ErrorBoundary>
       <Suspense fallback={<div className="fixed inset-0 bg-black" />}>

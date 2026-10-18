@@ -14,6 +14,14 @@
 //     replaceState) is refused in the page, so the in-page terminal never
 //     mounts and never opens its socket.
 //   - a WebSocket to /api or to a terminal path is refused in the page.
+//
+// The one exception is a page opened with `term: <name>`, for the terminal
+// tests: <name> is a throwaway odin shell pane the test created itself
+// (lib/odin.mjs). That page may load /sessions/terminal?s=<name> and open
+// /ws/terminal?s=<name>, and nothing else: any other terminal name is still
+// refused, so even a page that picked a session on its own could never attach
+// to one of Brendon's. Its socket's traffic is recorded in window.__e2e
+// (wsOpened, wsSent, wsOut) for the test to read.
 
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -23,15 +31,37 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CDP = 'http://127.0.0.1:9333'
 
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1'
+// iPadOS Safari asks for desktop pages: it says Macintosh, and only touch tells it apart
+const IPAD_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15'
+
+/**
+ * The screens a test runs on. `zoom` is the app's own UI zoom (lib/zoom, stored
+ * as valkyrie-zoom): Brendon runs the desktop at 1.2, so the two monitor sizes
+ * carry it, and 1600x900 stays at 1.0.
+ */
 export const DEVICES = {
-  phone: { w: 390, h: 844, dpr: 3, mobile: true },
-  landscape: { w: 844, h: 390, dpr: 3, mobile: true },
+  phone: { w: 390, h: 844, dpr: 3, mobile: true, ua: IPHONE_UA, platform: 'iPhone' },
+  landscape: { w: 844, h: 390, dpr: 3, mobile: true, ua: IPHONE_UA, platform: 'iPhone' },
   desktop: { w: 1600, h: 900, dpr: 1, mobile: false },
+  desk1080: { w: 1920, h: 1080, dpr: 1, mobile: false, zoom: 1.2 },
+  desk1440: { w: 2560, h: 1440, dpr: 1, mobile: false, zoom: 1.2 },
+  ipad: { w: 820, h: 1180, dpr: 2, mobile: true, ua: IPAD_UA, platform: 'MacIntel' },
+  ipadland: { w: 1180, h: 820, dpr: 2, mobile: true, ua: IPAD_UA, platform: 'MacIntel' },
 }
 
-const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1'
+/** A device's own localStorage (its zoom), under whatever a test stores itself. */
+function deviceStorage(d, storage) {
+  return d.zoom && !('valkyrie-zoom' in storage) ? { 'valkyrie-zoom': String(d.zoom), ...storage } : storage
+}
+
+/** odin's API on its tailnet address: the desktop app probes it (lib/api resolveApiBase). Never reached from a test. */
+const isOdinDirect = (url) => url.port === '8420' || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(url.hostname) || url.hostname === 'odin'
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/** How long one CDP command may go unanswered (a page load or a long evaluate stays far below it). */
+const CMD_MS = 45_000
 
 async function cdpVersion() {
   try {
@@ -101,10 +131,25 @@ export class Browser {
     if (msg.method && msg.sessionId) this.sessions.get(msg.sessionId)?.(msg)
   }
 
+  /**
+   * One CDP command. A command the browser never answers (a hung or crashed
+   * renderer, a closed socket, which drops sends silently) fails after
+   * `CMD_MS`: otherwise every test waiting on it hangs, the timers run out, and
+   * Node leaves with exit code 0 and no table.
+   */
   send(method, params = {}, sessionId) {
     return new Promise((res, rej) => {
+      if (this.ws.readyState !== 1) {
+        rej(new Error(`${method}: the CDP socket is closed`))
+        return
+      }
       const id = ++this.seq
-      this.pending.set(id, { res, rej, method })
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return
+        this.pending.delete(id)
+        rej(new Error(`${method}: no answer from the browser in ${CMD_MS / 1000} s`))
+      }, CMD_MS)
+      this.pending.set(id, { res: (v) => { clearTimeout(timer); res(v) }, rej: (e) => { clearTimeout(timer); rej(e) }, method })
       this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
     })
   }
@@ -116,19 +161,26 @@ export class Browser {
 
 // ---------- the in-page fence (runs before any app script) ----------
 
-const GUARD = `(() => {
+/** The fence. `term` is the one throwaway pane name this page may attach to ('' for none). */
+const guardScript = (term = '') => `(() => {
   if (window.__e2e) return
-  const e2e = window.__e2e = { blockedNav: [], blockedWs: [], toasts: [], seen: new WeakSet() }
+  const TERM = ${JSON.stringify(term)}
+  const e2e = window.__e2e = { blockedNav: [], blockedWs: [], toasts: [], seen: new WeakSet(), wsOpened: [], wsSent: [], wsOut: '', wsRx: 0 }
   const termPath = (u) => {
     try {
       const p = new URL(String(u), location.href).pathname.replace(/\\/+$/, '')
       return p === '/sessions/terminal' || p.startsWith('/sessions/terminal/') || p === '/terminal'
     } catch { return false }
   }
+  // only the throwaway pane, by its exact name
+  const allowedTerm = (u) => {
+    if (!TERM) return false
+    try { return new URL(String(u), location.href).searchParams.get('s') === TERM } catch { return false }
+  }
   for (const k of ['pushState', 'replaceState']) {
     const orig = History.prototype[k]
     History.prototype[k] = function (state, title, url) {
-      if (url != null && termPath(url)) { e2e.blockedNav.push({ how: k, url: String(url), at: Date.now() }); return }
+      if (url != null && termPath(url) && !allowedTerm(url)) { e2e.blockedNav.push({ how: k, url: String(url), at: Date.now() }); return }
       return orig.call(this, state, title, url)
     }
   }
@@ -137,6 +189,23 @@ const GUARD = `(() => {
     construct(target, args) {
       let p = ''
       try { p = new URL(String(args[0]), location.href).pathname } catch { /* keep '' */ }
+      if (TERM && p === '/ws/terminal' && allowedTerm(args[0])) {
+        const ws = Reflect.construct(target, args)
+        e2e.wsOpened.push({ url: String(args[0]), at: Date.now() })
+        const send = ws.send.bind(ws)
+        ws.send = (d) => {
+          e2e.wsSent.push({ d: typeof d === 'string' ? d : '[binary]', at: Date.now() })
+          return send(d)
+        }
+        const dec = new TextDecoder()
+        ws.addEventListener('message', (ev) => {
+          if (typeof ev.data === 'string') return
+          e2e.wsRx += 1
+          e2e.wsOut += dec.decode(new Uint8Array(ev.data), { stream: true })
+          if (e2e.wsOut.length > 600000) e2e.wsOut = e2e.wsOut.slice(-300000)
+        })
+        return ws
+      }
       if (p.startsWith('/api') || /terminal/.test(p)) {
         e2e.blockedWs.push(String(args[0]))
         throw new DOMException('WebSocket blocked by the e2e suite', 'SecurityError')
@@ -177,12 +246,17 @@ export class Page {
     return p
   }
 
-  constructor(browser, { base, device = 'phone', storage = {}, name = '' }) {
+  constructor(browser, { base, device = 'phone', storage = {}, name = '', term = '', scripts = [] }) {
     this.b = browser
+    /** the throwaway pane this page may attach to ('' = none: every terminal is refused) */
+    this.term = term
     this.base = base.replace(/\/+$/, '')
     this.device = device
     this.dev = DEVICES[device]
-    this.storage = storage
+    if (!this.dev) throw new Error(`no device ${device}`)
+    this.storage = deviceStorage(this.dev, storage)
+    /** more scripts to run before any app script, after the fence (a Tauri stub) */
+    this.scripts = scripts
     this.name = name
     /** console errors, exceptions, same-origin load failures: each fails the test */
     this.problems = []
@@ -213,6 +287,7 @@ export class Page {
     this.b.sessions.set(sessionId, (m) => this.onEvent(m))
     const s = (m, p) => this.send(m, p)
     await s('Page.enable')
+    await s('Inspector.enable').catch(() => {})
     await s('Runtime.enable')
     await s('Log.enable')
     await s('Network.enable').catch(() => {})
@@ -222,19 +297,24 @@ export class Page {
     await s('Emulation.setDeviceMetricsOverride', { width: d.w, height: d.h, deviceScaleFactor: d.dpr, mobile: d.mobile })
     if (d.mobile) {
       await s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
-      await s('Emulation.setUserAgentOverride', { userAgent: IPHONE_UA, platform: 'iPhone' })
+      await s('Emulation.setUserAgentOverride', { userAgent: d.ua ?? IPHONE_UA, platform: d.platform ?? 'iPhone' })
     }
-    await s('Page.addScriptToEvaluateOnNewDocument', { source: GUARD })
+    await s('Page.addScriptToEvaluateOnNewDocument', { source: guardScript(this.term) })
     const keys = Object.entries(this.storage)
     if (keys.length) {
       const sets = keys.map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('')
       await s('Page.addScriptToEvaluateOnNewDocument', { source: `try{${sets}}catch(e){}` })
     }
+    for (const source of this.scripts) await s('Page.addScriptToEvaluateOnNewDocument', { source })
     await s('Fetch.enable', {
       patterns: [
         { urlPattern: '*/api/*', requestStage: 'Request' },
         { urlPattern: '*/sessions/terminal*', resourceType: 'Document', requestStage: 'Request' },
         { urlPattern: '*/terminal', resourceType: 'Document', requestStage: 'Request' },
+        // odin's API straight over the tailnet (the desktop app's healthz probe): answered here, never sent
+        { urlPattern: '*:8420/*', requestStage: 'Request' },
+        { urlPattern: 'http://odin/*', requestStage: 'Request' },
+        { urlPattern: 'http://100.*', requestStage: 'Request' },
       ],
     })
   }
@@ -280,6 +360,15 @@ export class Page {
         else if (p.type === 'warning') this.notes.push(`console.warn: ${text}`)
         break
       }
+      case 'Page.javascriptDialogOpening': {
+        // an alert, confirm or "leave site?" left open blocks the renderer, and every page sharing it
+        this.problems.push(`a ${p.type} dialog opened: ${String(p.message).slice(0, 200)}`)
+        void this.send('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
+        break
+      }
+      case 'Inspector.targetCrashed':
+        this.problems.push('the page crashed (renderer gone)')
+        break
       case 'Runtime.exceptionThrown': {
         const d = p.exceptionDetails
         this.problems.push(`exception: ${(d.exception?.description ?? d.text ?? '').slice(0, 700)}`)
@@ -327,7 +416,19 @@ export class Page {
       body: b64(typeof body === 'string' ? body : JSON.stringify(body ?? null)),
     }).catch(() => {})
     try {
+      if (isOdinDirect(url) && url.origin !== new URL(this.base).origin) {
+        // a read with no proxy and no read-only guard between it and odin: refused, so the app falls back to the probe
+        this.notes.push(`refused a direct request to odin: ${request.method} ${url.origin}${path}`)
+        this.direct = (this.direct ?? 0) + 1
+        await this.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }).catch(() => {})
+        return
+      }
       if (resourceType === 'Document' && !path.startsWith('/api/')) {
+        // the throwaway pane's own address, by its exact name, is the one terminal page that loads
+        if (this.term && url.searchParams.get('s') === this.term) {
+          await this.send('Fetch.continueRequest', { requestId }).catch(() => {})
+          return
+        }
         this.terminalLoads.push(request.url)
         await fulfill(200, '<!doctype html><title>blocked</title><p>The e2e suite never loads the terminal page.</p>', 'text/html')
         return
@@ -471,8 +572,10 @@ export class Page {
 
   /**
    * Tap (touch on a phone, click on the desktop) an element or a point. An
-   * element still building in (hidden, covered, disabled) is waited for, up to
-   * `wait` ms, then the tap fails with why.
+   * element still building in (hidden, covered, disabled, or still moving: v2's
+   * build-in slides rows in, and Press drops a release that lands more than
+   * 12 px from where the button now is) is waited for, up to `wait` ms, then
+   * the tap fails with why.
    */
   async tap(target, { allowCovered = false, wait = 4000 } = {}) {
     let x, y
@@ -481,12 +584,18 @@ export class Page {
     } else {
       const t0 = Date.now()
       let why = ''
+      let last = null
       for (;;) {
         await sleep(60)
         const at = await this.locate(target)
         why = at.error ?? (at.covered && !allowCovered ? `${JSON.stringify(target)} is covered by ${at.covered}` : at.disabled ? `${JSON.stringify(target)} is disabled` : '')
-        if (!why) {
+        // the same spot on two reads in a row: it has stopped moving
+        const still = !why && last && Math.abs(last.x - at.x) < 1 && Math.abs(last.y - at.y) < 1
+        if (!why && !still) why = `${JSON.stringify(target)} is still moving`
+        last = at.error ? null : at
+        if (still) {
           ;({ x, y } = at)
+          why = ''
           break
         }
         if (Date.now() - t0 > wait) throw new Error(why)
@@ -533,11 +642,36 @@ export class Page {
     await this.send('Input.insertText', { text })
   }
 
-  async key(key) {
-    const codes = { Escape: 27, Enter: 13, ArrowLeft: 37, ArrowRight: 39 }
-    const base = { key, code: key, windowsVirtualKeyCode: codes[key] ?? 0 }
+  /**
+   * One key press. `mods`: { ctrl, shift, alt, meta } for a chord (Ctrl+K, Ctrl+=);
+   * a chord never types its character.
+   */
+  async key(key, mods = {}) {
+    const named = {
+      Escape: ['Escape', 27], Enter: ['Enter', 13], Tab: ['Tab', 9], Backspace: ['Backspace', 8],
+      ArrowLeft: ['ArrowLeft', 37], ArrowUp: ['ArrowUp', 38], ArrowRight: ['ArrowRight', 39], ArrowDown: ['ArrowDown', 40],
+      PageUp: ['PageUp', 33], PageDown: ['PageDown', 34], '=': ['Equal', 187], '+': ['Equal', 187], '-': ['Minus', 189], '/': ['Slash', 191],
+    }
+    let code, vk
+    if (named[key]) [code, vk] = named[key]
+    else if (/^[a-z]$/i.test(key)) { code = `Key${key.toUpperCase()}`; vk = key.toUpperCase().charCodeAt(0) }
+    else if (/^\d$/.test(key)) { code = `Digit${key}`; vk = key.charCodeAt(0) }
+    else { code = key; vk = 0 }
+    const modifiers = (mods.alt ? 1 : 0) | (mods.ctrl ? 2 : 0) | (mods.meta ? 4 : 0) | (mods.shift ? 8 : 0)
+    const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers }
     await this.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+  }
+
+  /** A mouse press at a point: `count` 2 is the second press of a double-click (event.detail 2). */
+  async mouse(x, y, { count = 1, button = 'left' } = {}) {
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    for (let c = 1; c <= count; c++) {
+      await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: c })
+      await sleep(20)
+      await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: c })
+      await sleep(40)
+    }
   }
 
   // ---------- helpers for assertions ----------
@@ -572,8 +706,14 @@ export class Page {
     return (await this.eval(() => (window.__e2e ? window.__e2e.blockedNav : []))) ?? []
   }
 
+  /**
+   * A screenshot: JPEG for a .jpg file, else PNG. Keep big screens on JPEG: a PNG
+   * of a poster-heavy page at iPad size runs past 4 MB, and a CDP message that
+   * large closes the socket (Node's WebSocket), taking every test after it down.
+   */
   async screenshot(file, clip) {
-    const shot = await this.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) })
+    const jpeg = /\.jpe?g$/i.test(file)
+    const shot = await this.send('Page.captureScreenshot', { format: jpeg ? 'jpeg' : 'png', ...(jpeg ? { quality: 85 } : {}), ...(clip ? { clip: { ...clip, scale: 1 } } : {}) })
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, Buffer.from(shot.data, 'base64'))
     return file

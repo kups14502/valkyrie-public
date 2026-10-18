@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  MUSIC_PAGE, addMediaRequest, fetchAlbumTracks, fetchArtistAlbums, fetchArtistTracks, fetchImgToken, fetchMusicArtist, fetchMusicArtists,
-  fetchMusicRecent, fetchPlexLibrary, fetchPlexSections, fetchPlexServer, musicImg, onTailnet, openInApp, plexAppItemLink, plexImg,
-  plexWatchLink, plexWebItemLink, searchMediaRequests, sendMediaMessage, shouldDeferAppClick,
-  type MediaSearchResult, type MusicAlbum, type MusicArtist, type MusicTrack, type PlexItem, type PlexSection,
+  MUSIC_PAGE, addMediaRequest, fetchAlbumTracks, fetchArtistAlbums, fetchArtistTracks, fetchImgToken, fetchMusicAlbums, fetchMusicArtist,
+  fetchMusicArtists, fetchMusicRecent, fetchPlexLibrary, fetchPlexSections, fetchPlexServer, musicImg, onTailnet, openInApp, plexAppHomeLink,
+  plexAppItemLink, plexImg, plexWatchLink, plexWebHomeLink, plexWebItemLink, searchMediaRequests, searchMusic, sendMediaMessage,
+  shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
+  type MediaSearchResult, type MusicAlbum, type MusicArtist, type MusicSearchResults, type MusicTrack, type PlexItem, type PlexSection,
 } from '../../lib/api'
 import { playerActions, usePlayer, usePlayerNow, useShell, type PlayerNow, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Press, cx, toast } from '../kit/ui'
@@ -17,7 +18,7 @@ import {
 } from '../kit/data'
 import './media.css'
 
-// Media: Dashboard (the newest title as the hero, new shows and movies, music
+// Media: Dashboard (Open Plex and Spotify at the top, the newest title as the hero, new shows and movies, music
 // played and added lately, a glance at downloads), Movies and Shows (the whole
 // Plex library as an A to Z poster grid with an index strip; a title opens a
 // detail sheet with Open in Plex), Music (every artist A to Z in a windowed
@@ -332,8 +333,97 @@ const num = (n: number) => n.toLocaleString('en-US')
 
 /** The page scroller a view lives in (the shell gives every screen its own). */
 const pageOf = (el: Element | null | undefined) => el?.closest<HTMLElement>('.vl-page') ?? null
-/** Where `el` starts in its page's scroll content, in px. */
-const topIn = (el: Element, page: HTMLElement) => el.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop
+/**
+ * The UI zoom (lib/zoom puts a CSS `zoom` on <html>): client rects come back zoomed, scrollTop and
+ * offset sizes do not, so a rect distance is divided by this before it meets a scroll position.
+ */
+const zoomOf = (el: HTMLElement) => {
+  const h = el.offsetHeight
+  return h > 0 ? el.getBoundingClientRect().height / h : 1
+}
+/** Where `el` starts in its page's scroll content, in layout px. */
+const topIn = (el: Element, page: HTMLElement) =>
+  (el.getBoundingClientRect().top - page.getBoundingClientRect().top) / zoomOf(page) + page.scrollTop
+
+/** A small setting kept in localStorage (a sort, a list mode). */
+function useStored<T extends string>(key: string, initial: T, ok: (v: unknown) => v is T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const s = localStorage.getItem(key)
+      return ok(s) ? s : initial
+    } catch {
+      return initial
+    }
+  })
+  const set = useCallback((n: T) => {
+    setV(n)
+    try { localStorage.setItem(key, n) } catch { /* private mode */ }
+  }, [key])
+  return [v, set]
+}
+
+/** An element's width in layout px (media queries see the window, which the UI zoom makes wider than the layout). */
+function useWidth(ref: RefObject<HTMLElement | null>): number {
+  const [w, setW] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setW(el.offsetWidth)
+    const ro = new ResizeObserver((es) => {
+      const box = es[0]?.borderBoxSize?.[0]
+      setW(Math.round(box ? box.inlineSize : el.offsetWidth))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
+  return w
+}
+
+/** "/" focuses a view's search line (keyboard), unless something already takes the typing. */
+function useSlash(ref: RefObject<HTMLInputElement | null>, on: boolean) {
+  useEffect(() => {
+    if (!on) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const el = ref.current
+      if (!el) return
+      e.preventDefault()
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest' })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [ref, on])
+}
+
+/** Escape runs `fn` while `on`, unless a field has the focus (its own Escape clears it). */
+function useEscape(on: boolean, fn: () => void) {
+  const cb = useRef(fn)
+  cb.current = fn
+  useEffect(() => {
+    if (!on) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return
+      cb.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [on])
+}
+
+// local search: accents, case and punctuation ignored, every word of the query must be in the
+// name ("spider man" and "spiderman" both find Spider-Man; "lord rings" finds The Lord of the Rings)
+const MARKS = new RegExp('[\\u0300-\\u036f]', 'g')
+const fold = (s: string) => s.normalize('NFKD').replace(MARKS, '').toLowerCase()
+const squash = (s: string) => fold(s).replace(/[^\p{L}\p{N}]+/gu, '')
+const queryWords = (q: string) => fold(q).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+/** `squashed` is squash(name); a four-digit word also matches the year. */
+const hits = (words: readonly string[], squashed: string, year?: number | null) =>
+  words.every((w) => squashed.includes(w) || (year != null && w.length === 4 && String(year) === w))
 
 function useMq(query: string): boolean {
   const mq = useMemo(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query) : null), [query])
@@ -544,7 +634,12 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
   return (
     <>
       <Stale live={recent} what="Plex" now={now} />
-      <div className="vm-split">
+      <div className="vm-split vm-split-dash">
+        {/* the classic phone home's Watch on TV and Music tiles: hand off to the real apps */}
+        <header className="vm-dhead vl-build" style={iv(0)}>
+          <AppLink icon="watch" label="Open Plex" app={plexAppHomeLink} web={plexWebHomeLink} />
+          <AppLink icon="music" label="Spotify" app={spotifyAppLink} web={spotifyWebLink} />
+        </header>
         <div className="vm-side">
           {cur ? (
             <WatchHero item={cur} newest={cur.key === items[0]?.key} now={now} />
@@ -645,6 +740,29 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Open an app at its home, as the classic phone home does: try the app's scheme, then its web
+ * player if nothing took the page. The desktop app and a modified click keep the plain link.
+ */
+function AppLink({ icon, label, app, web }: { icon: IconName; label: string; app: () => string; web: () => string }) {
+  return (
+    <a
+      className="vl-btn-line vm-app"
+      href={web()}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => {
+        if (shouldDeferAppClick(e)) return
+        e.preventDefault()
+        openInApp(app(), web())
+      }}
+    >
+      <Icon name={icon} size={15} tone="dim" />
+      <span className="vm-app-label">{label}</span>
+    </a>
   )
 }
 
@@ -930,7 +1048,6 @@ const AZ = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
 const AZ_RANK = new Map(AZ.map((l, i) => [l, i]))
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 const ARTICLE = /^(the|a|an)\s+/i
-const MARKS = new RegExp('[\\u0300-\\u036f]', 'g')
 /** How a title files: accents and a leading article off, as Plex sorts ("The Beatles" under B). */
 const sortKey = (t: string) => {
   const k = t.normalize('NFKD').replace(MARKS, '').trim().replace(ARTICLE, '').replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase()
@@ -1031,9 +1148,11 @@ function AZStrip({ has, current, onJump, label }: {
   }, [])
 
   const at = (clientY: number) => {
-    const r = ref.current!.getBoundingClientRect()
+    const el = ref.current!
+    const r = el.getBoundingClientRect()
     const y = Math.min(r.height, Math.max(0, clientY - r.top))
-    return { i: Math.min(AZ.length - 1, Math.floor((y / Math.max(1, r.height)) * AZ.length)), y }
+    // y is in client px; the bubble is placed in layout px (they differ under the UI zoom)
+    return { i: Math.min(AZ.length - 1, Math.floor((y / Math.max(1, r.height)) * AZ.length)), y: y / zoomOf(el) }
   }
   const nearest = (i: number) => {
     for (let d = 0; d < AZ.length; d++) {
@@ -1172,25 +1291,100 @@ function countLabel(n: number, total: number, filling: boolean, one: string) {
 
 // ---------- Movies and Shows ----------
 
+type SortBy = 'title' | 'year' | 'added' | 'rating'
+const SORTS: readonly { id: SortBy; label: string; aria: string }[] = [
+  { id: 'title', label: 'Title', aria: 'Sort by title, A to Z' },
+  { id: 'year', label: 'Year', aria: 'Sort by year, newest first' },
+  { id: 'added', label: 'Added', aria: 'Sort by recently added' },
+  { id: 'rating', label: 'Rating', aria: 'Sort by rating, highest first' },
+]
+const isSort = (s: unknown): s is SortBy => SORTS.some((x) => x.id === s)
+// ties keep the A to Z order (the list arrives sorted by title and Array sort is stable)
+const SORT_FN: Record<Exclude<SortBy, 'title'>, (a: TitleRow, b: TitleRow) => number> = {
+  year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
+  added: (a, b) => b.added - a.added,
+  rating: (a, b) => (b.rating ?? -1) - (a.rating ?? -1),
+}
+
+/** The tile's second line says what the list is sorted by. */
+const tileSub = (r: TitleRow, label: string, sort: SortBy, now: number) =>
+  sort === 'added' && r.added ? `${longAgo(r.added, now)} ago`
+    : sort === 'rating' && r.rating != null ? `${r.rating.toFixed(1)} · ${label}`
+      : label
+
+/** Small underlined text toggles: how a list is sorted. */
+function SortToggles({ value, onChange }: { value: SortBy; onChange: (s: SortBy) => void }) {
+  return (
+    <div className="vm-sorts" role="group" aria-label="Sort">
+      <span className="vm-sorts-cap" aria-hidden>Sort</span>
+      <span className="vm-toggles">
+        {SORTS.map((s) => (
+          <Press
+            key={s.id}
+            className="vm-toggle"
+            data-on={value === s.id || undefined}
+            aria-pressed={value === s.id}
+            aria-label={s.aria}
+            onPress={() => onChange(s.id)}
+          >
+            {s.label}
+          </Press>
+        ))}
+      </span>
+    </div>
+  )
+}
+
+/** Library width (layout px) from which a picked title opens beside the grid instead of in a sheet. */
+const BESIDE_MIN = 900
+
 function Library({ kind, visible }: { kind: 'movie' | 'show'; visible: boolean }) {
   const idx = useTitleIndex(kind)
   const imgOk = useImgReady()
   const qc = useQueryClient()
+  const now = useTick(60_000)
   const [sel, setSel] = useState<WatchItem | null>(null)
+  const [sort, setSort] = useStored<SortBy>(`v2.media.sort.${kind}`, 'title', isSort)
+  const [text, setText] = useState('')
+  const q = useDeferredValue(text.trim())
+  const rootRef = useRef<HTMLDivElement>(null)
   const mainRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const beside = useWidth(rootRef) >= BESIDE_MIN
+  useSlash(searchRef, visible)
 
   useEffect(() => {
     if (!visible) setSel(null)
   }, [visible])
 
-  // one continuous grid; the first title of each letter carries the letter as a tag
-  const tiles = useMemo(
-    () => idx.list.map((r, i) => ({ item: fromTitle(r), letter: idx.first.get(r.letter) === i ? r.letter : null })),
+  // the search narrows the whole list; title order keeps the A to Z strip, the other orders drop it
+  const view = useMemo(() => {
+    const words = queryWords(q)
+    const base = words.length ? idx.list.filter((r) => hits(words, squash(r.title), r.year)) : idx.list
+    const list = sort === 'title' ? base : [...base].sort(SORT_FN[sort])
+    const first = new Map<string, number>()
+    if (sort === 'title') list.forEach((r, i) => { if (!first.has(r.letter)) first.set(r.letter, i) })
+    return { list, first, searching: words.length > 0 }
+  }, [idx.list, q, sort])
+
+  // one continuous grid; the first title of each letter (by year: of each decade) carries it as a tag
+  const tiles = useMemo(() => {
+    let decade = ''
+    return view.list.map((r, i) => {
+      const letter = view.first.get(r.letter) === i ? r.letter : null
+      let tag = letter
+      if (sort === 'year' && r.year) {
+        const d = `${Math.floor(r.year / 10) * 10}s`
+        tag = d !== decade ? d : null
+        decade = d
+      }
+      return { row: r, item: fromTitle(r), letter, tag }
+    })
     // imgOk: the poster URLs pick up the image token once it is in
-    [idx.list, idx.first, imgOk],
-  )
-  const has = useMemo(() => new Set(idx.first.keys()), [idx.first])
-  const top = useTopLetter(mainRef, visible, tiles, idx.list[0]?.letter ?? null)
+  }, [view, sort, imgOk])
+  const has = useMemo(() => new Set(view.first.keys()), [view.first])
+  const strip = sort === 'title'
+  const top = useTopLetter(mainRef, visible && strip, tiles, view.list[0]?.letter ?? null)
   const [pin, pinTo] = usePin(mainRef)
 
   const jump = (l: string) => {
@@ -1201,47 +1395,94 @@ function Library({ kind, visible }: { kind: 'movie' | 'show'; visible: boolean }
     pinTo(l)
   }
 
+  // wide: the pick opens a pane beside the grid, which takes columns away; the tile that was
+  // clicked keeps its height on screen through that reflow (and through the close)
+  const tileOf = (key: string) => mainRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`) ?? null
+  const anchor = useRef<{ key: string; y: number } | null>(null)
+  const pick = (m: WatchItem | null) => {
+    const key = m?.key ?? sel?.key
+    const page = pageOf(mainRef.current)
+    const el = key ? tileOf(key) : null
+    anchor.current = beside && key && page && el ? { key, y: el.getBoundingClientRect().top - page.getBoundingClientRect().top } : null
+    setSel(m)
+  }
+  useLayoutEffect(() => {
+    const a = anchor.current
+    anchor.current = null
+    const page = pageOf(mainRef.current)
+    const el = a ? tileOf(a.key) : null
+    if (!a || !page || !el) return
+    page.scrollTop += (el.getBoundingClientRect().top - page.getBoundingClientRect().top - a.y) / zoomOf(page)
+  }, [sel])
+  const paneOpen = beside && !!sel
+  useEscape(paneOpen, () => pick(null))
+
   const word = kind === 'movie' ? 'Movies' : 'Shows'
   const n = idx.list.length
+  const shown = view.list.length
   const failed = idx.live.failed || !!idx.live.error
   return (
-    <div className="vm-lib">
-      <div className="vm-lib-main" ref={mainRef}>
-        <Head icon={kind === 'movie' ? 'movie' : 'watch'} lit={idx.filling && idx.started} label={word} value={idx.started ? countLabel(n, idx.total, idx.filling, 'title') : undefined}>
-          {failed && (
-            <Press className="vm-hact" onPress={() => void qc.refetchQueries({ queryKey: ['v2', `mediaIndex.${kind}`] })}>
-              <Icon name="refresh" size={13} tone="dim" />
-              Retry
-            </Press>
-          )}
-        </Head>
-        {failed && <p className="vm-quiet-line vm-err">{n ? `Plex did not answer. Showing ${num(n)} ${word.toLowerCase()}.` : 'Plex did not answer.'}</p>}
-        {!n && !failed && <p className="vm-quiet-line">{idx.started ? `No ${word.toLowerCase()} in Plex.` : `Loading ${word.toLowerCase()}`}</p>}
-        {n > 0 && (
-          <div className="vm-grid">
-            {tiles.map(({ item: m, letter }) => (
-              <Press
-                key={m.key}
-                className="vm-tile vm-gtile"
-                data-letter={letter ?? undefined}
-                data-on={sel?.key === m.key || undefined}
-                aria-label={`${m.title}, ${m.label}`}
-                onPress={() => setSel(m)}
-              >
-                <Art src={imgOk ? m.img : undefined} ratio="2/3">
-                  {letter && <b className="vm-ltag" aria-hidden>{letter}</b>}
-                </Art>
-                <span className="vm-tile-t">{m.title}</span>
-                <span className="vm-tile-s">{m.label}</span>
+    <div ref={rootRef} className={cx('vm-lwrap', paneOpen && 'vm-lsplit')}>
+      <div className="vm-lib" data-noaz={!strip || undefined}>
+        <div className="vm-lib-main" ref={mainRef}>
+          <Head
+            icon={kind === 'movie' ? 'movie' : 'watch'}
+            lit={idx.filling && idx.started}
+            label={word}
+            value={!idx.started ? undefined : view.searching ? `${num(shown)} of ${num(n)}` : countLabel(n, idx.total, idx.filling, 'title')}
+          >
+            {failed && (
+              <Press className="vm-hact" onPress={() => void qc.refetchQueries({ queryKey: ['v2', `mediaIndex.${kind}`] })}>
+                <Icon name="refresh" size={13} tone="dim" />
+                Retry
               </Press>
-            ))}
+            )}
+          </Head>
+          {n > 0 && (
+            <div className="vm-ltools">
+              <SearchLine label={`Search ${word.toLowerCase()}`} value={text} onChange={setText} placeholder={`Search ${word.toLowerCase()}`} inputRef={searchRef} />
+              <SortToggles value={sort} onChange={setSort} />
+            </div>
+          )}
+          {failed && <p className="vm-quiet-line vm-err">{n ? `Plex did not answer. Showing ${num(n)} ${word.toLowerCase()}.` : 'Plex did not answer.'}</p>}
+          {!n && !failed && <p className="vm-quiet-line">{idx.started ? `No ${word.toLowerCase()} in Plex.` : `Loading ${word.toLowerCase()}`}</p>}
+          {n > 0 && !shown && <p className="vm-quiet-line">Nothing in {word} matches "{q}".</p>}
+          {shown > 0 && (
+            <div className="vm-grid">
+              {tiles.map(({ row, item: m, letter, tag }) => (
+                <Press
+                  key={m.key}
+                  data-key={m.key}
+                  className="vm-tile vm-gtile"
+                  data-letter={letter ?? undefined}
+                  data-on={sel?.key === m.key || undefined}
+                  aria-pressed={paneOpen ? sel?.key === m.key : undefined}
+                  aria-label={`${m.title}, ${m.label}`}
+                  onPress={() => pick(paneOpen && sel?.key === m.key ? null : m)}
+                >
+                  <Art src={imgOk ? m.img : undefined} ratio="2/3">
+                    {tag && <b className="vm-ltag" aria-hidden>{tag}</b>}
+                  </Art>
+                  <span className="vm-tile-t">{m.title}</span>
+                  <span className="vm-tile-s">{tileSub(row, m.label, sort, now)}</span>
+                </Press>
+              ))}
+            </div>
+          )}
+        </div>
+        {strip && (
+          <div className="vm-az-col">
+            <AZStrip has={has} current={pin ?? top} onJump={jump} label={`${word} A to Z`} />
           </div>
         )}
       </div>
-      <div className="vm-az-col">
-        <AZStrip has={has} current={pin ?? top} onJump={jump} label={`${word} A to Z`} />
-      </div>
-      <TitleSheet item={sel} onClose={() => setSel(null)} />
+      {paneOpen && sel && (
+        <aside className="vm-ldetail" aria-label={sel.title}>
+          <Press className="vm-ldetail-x" aria-label="Close" onPress={() => pick(null)}><Glyph name="close" size={11} /></Press>
+          <TitleDetail key={sel.key} item={sel} now={now} />
+        </aside>
+      )}
+      {!beside && <TitleSheet item={sel} onClose={() => setSel(null)} />}
     </div>
   )
 }
@@ -1380,7 +1621,7 @@ function MusicTile({ m, sub, cur, playing, wait, onPress }: { m: MusicItem; sub:
   )
 }
 
-// ---------- the artist index ----------
+// ---------- the artist and album indexes ----------
 
 type ArtistRow = { key: string; title: string; thumb: string | null; albums: number | null; genre: string }
 /** One artist as the index caches it: [key, name, thumb path, album count, first genre], small enough to persist 1,700 of. */
@@ -1388,7 +1629,7 @@ type ArtistTuple = [string, string, string | null, number | null, string?]
 
 const artistPart = partStore<ArtistRow>()
 const toArtist = (a: MusicArtist): ArtistRow => ({ key: a.ratingKey, title: noDash(a.title), thumb: a.thumb, albums: a.albumCount, genre: a.genres[0] ?? '' })
-const ARTISTS_KEEP_MS = 24 * 3600_000
+const INDEX_KEEP_MS = 24 * 3600_000
 
 /**
  * The whole artist list, 60 at a time. A cached index younger than a day is kept when the server's
@@ -1397,7 +1638,7 @@ const ARTISTS_KEEP_MS = 24 * 3600_000
 const loadArtists = memoLoad(async (cached?: IndexData<ArtistTuple>): Promise<IndexData<ArtistTuple>> => {
   const fetchPage = (o: number) => fetchMusicArtists(o, { sort: 'title' })
   let head: Awaited<ReturnType<typeof fetchPage>> | undefined
-  if (cached?.at && Date.now() - cached.at < ARTISTS_KEEP_MS) {
+  if (cached?.at && Date.now() - cached.at < INDEX_KEEP_MS) {
     head = await fetchPage(0)
     if (head.total === cached.total) return cached
   }
@@ -1405,8 +1646,10 @@ const loadArtists = memoLoad(async (cached?: IndexData<ArtistTuple>): Promise<In
   return { v: 1, at: Date.now(), total: out.total, rows: out.rows.map((r): ArtistTuple => [r.key, r.title, r.thumb, r.albums, r.genre]) }
 })
 
+type ListIndex<T> = Indexed<T> & { live: Live<unknown>; total: number; filling: boolean; started: boolean }
+
 /** Every artist A to Z: the cached index paints at once, a first load shows what has arrived and keeps going. */
-function useArtistIndex() {
+function useArtistIndex(): ListIndex<ArtistRow> {
   // the loader sees what is on screen (the cached index), to keep it when nothing changed
   const shown = useRef<IndexData<ArtistTuple> | undefined>(undefined)
   const live = useLive('musicArtists', () => loadArtists(shown.current), 30 * 60_000, { revive: reviveIndex<ArtistTuple> })
@@ -1420,6 +1663,49 @@ function useArtistIndex() {
   return { ...idx, live, total: live.data?.total ?? part?.total ?? 0, filling: !live.data, started: rows !== undefined }
 }
 
+type AlbumRow = { key: string; title: string; artist: string; artistKey: string | null; year: number | null; thumb: string | null }
+/** One album as the index caches it: [key, title, artist, artist key, year, thumb]. */
+type AlbumTuple = [string, string, string, string | null, number | null, string | null]
+
+const albumPart = partStore<AlbumRow>()
+const toAlbumRow = (a: MusicAlbum): AlbumRow => ({
+  key: a.ratingKey, title: noDash(a.title), artist: noDash(a.artist), artistKey: a.artistKey, year: a.year, thumb: a.thumb,
+})
+// an album's thumb is nearly always /library/metadata/<key>/thumb/<stamp>: the cache keeps "~<stamp>" (4,900 albums persist)
+const thumbIn = (key: string, t: string | null) => {
+  const pre = `/library/metadata/${key}/thumb/`
+  return t && t.startsWith(pre) ? `~${t.slice(pre.length)}` : t
+}
+const thumbOut = (key: string, t: string | null) => (t && t.startsWith('~') ? `/library/metadata/${key}/thumb/${t.slice(1)}` : t)
+
+/** The whole album list, 60 at a time, kept for a day while the album count holds (as the artists). */
+const loadAlbums = memoLoad(async (cached?: IndexData<AlbumTuple>): Promise<IndexData<AlbumTuple>> => {
+  const fetchPage = (o: number) => fetchMusicAlbums(o, { sort: 'title' })
+  let head: Awaited<ReturnType<typeof fetchPage>> | undefined
+  if (cached?.at && Date.now() - cached.at < INDEX_KEEP_MS) {
+    head = await fetchPage(0)
+    if (head.total === cached.total) return cached
+  }
+  const out = await pageAll(fetchPage, MUSIC_PAGE, toAlbumRow, (rows, total) => albumPart.set({ rows, total }), head)
+  return { v: 1, at: Date.now(), total: out.total, rows: out.rows.map((r): AlbumTuple => [r.key, r.title, r.artist, r.artistKey, r.year, thumbIn(r.key, r.thumb)]) }
+})
+
+/** Every album A to Z; it loads the first time the Albums list opens. */
+function useAlbumIndex(): ListIndex<AlbumRow> {
+  const shown = useRef<IndexData<AlbumTuple> | undefined>(undefined)
+  const live = useLive('musicAlbums', () => loadAlbums(shown.current), 30 * 60_000, { revive: reviveIndex<AlbumTuple> })
+  shown.current = live.data
+  const part = useSyncExternalStore(albumPart.sub, albumPart.get, albumPart.get)
+  const rows = useMemo(
+    () => (live.data
+      ? live.data.rows.map(([key, title, artist, artistKey, year, thumb]): AlbumRow => ({ key, title, artist, artistKey, year, thumb: thumbOut(key, thumb) }))
+      : part?.rows),
+    [live.data, part],
+  )
+  const idx = useMemo(() => indexRows(rows ?? []), [rows])
+  return { ...idx, live, total: live.data?.total ?? part?.total ?? 0, filling: !live.data, started: rows !== undefined }
+}
+
 const artistItem = (r: ArtistRow): MusicItem => ({
   key: r.key, kind: 'artist', title: r.title, sub: r.genre, thumb: r.thumb, img: r.thumb ? musicImg(r.thumb, 300) : null, at: 0, artistKey: r.key, year: null,
 })
@@ -1427,6 +1713,17 @@ const albumItem = (a: MusicAlbum): MusicItem => ({
   key: a.ratingKey, kind: 'album', title: a.title, sub: a.artist, thumb: a.thumb, img: a.thumb ? musicImg(a.thumb, 300) : null,
   at: ts(a.addedAt), artistKey: a.artistKey, year: a.year,
 })
+const albumRowItem = (r: AlbumRow): MusicItem => ({
+  key: r.key, kind: 'album', title: r.title, sub: r.artist, thumb: r.thumb, img: r.thumb ? musicImg(r.thumb, 300) : null, at: 0, artistKey: r.artistKey, year: r.year,
+})
+/** An album's artist as the album knows it (name and key); the artist page fetches the rest. */
+const artistOf = (key: string, name: string): MusicItem => ({
+  key, kind: 'artist', title: name, sub: '', thumb: null, img: null, at: 0, artistKey: key, year: null,
+})
+const trackAlbum = (t: MusicTrack): MusicItem | null => (t.albumKey ? {
+  key: t.albumKey, kind: 'album', title: noDash(t.album), sub: noDash(t.artist), thumb: t.thumb, img: t.thumb ? musicImg(t.thumb, 300) : null,
+  at: 0, artistKey: t.artistKey, year: t.year,
+} : null)
 
 const OVERSCAN = 12
 const CHUNK = 8
@@ -1447,8 +1744,8 @@ function useWindow(ref: RefObject<HTMLElement | null>, count: number, rowH: numb
     let raf = 0
     const calc = () => {
       raf = 0
-      // how far the list's top is above the page's top edge
-      const y = page.getBoundingClientRect().top - el.getBoundingClientRect().top
+      // how far the list's top is above the page's top edge, in layout px like rowH
+      const y = (page.getBoundingClientRect().top - el.getBoundingClientRect().top) / zoomOf(page)
       const a = Math.max(0, Math.floor(y / rowH) - OVERSCAN)
       const b = Math.min(count, Math.ceil((y + page.clientHeight) / rowH) + OVERSCAN)
       const f = Math.min(count, Math.floor(a / CHUNK) * CHUNK)
@@ -1482,31 +1779,110 @@ function Back({ to }: { to: BackTo }) {
   )
 }
 
-// ---------- Music library ----------
+// ---------- Music rows ----------
 
-type OpenMusic = { artist: MusicItem; album: MusicItem | null }
+/** One artist: art, name, album count (or genre). The A to Z list and the search results share it. */
+function ArtistLine({ r, on, eq, playing, imgOk, onPress }: {
+  r: ArtistRow
+  on: boolean
+  /** the playing track is this artist's */
+  eq: boolean
+  playing: boolean
+  imgOk: boolean
+  onPress: () => void
+}) {
+  return (
+    <Press
+      className="vm-arow"
+      data-on={on || undefined}
+      aria-label={r.albums ? `${r.title}, ${plural(r.albums, 'album')}` : r.genre ? `${r.title}, ${r.genre}` : r.title}
+      onPress={onPress}
+    >
+      <Art src={imgOk ? (r.thumb ? musicImg(r.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <span className="vm-arow-t">{r.title}</span>
+      {eq && <Eq on={playing} />}
+      {/* the artist list carries no album count from Plex today; the genre stands in */}
+      <span className="vm-arow-n">{r.albums ? plural(r.albums, 'album') : r.genre}</span>
+    </Press>
+  )
+}
 
-function MusicLib({ visible }: { visible: boolean }) {
-  const wide = useMq('(min-width: 640px)')
-  const idx = useArtistIndex()
-  const recent = useMusic()
-  const p = usePlayerNow()
-  const starter = useStarter()
-  const imgOk = useImgReady()
-  const qc = useQueryClient()
-  const [open, setOpen] = useState<OpenMusic | null>(null)
-  const [lastKey, setLastKey] = useState<string | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
+/** One album: art, title over artist and year. */
+function AlbumLine({ r, on, eq, playing, imgOk, onPress }: {
+  r: AlbumRow
+  on: boolean
+  eq: boolean
+  playing: boolean
+  imgOk: boolean
+  onPress: () => void
+}) {
+  const sub = [r.artist, r.year].filter(Boolean).join(' · ')
+  return (
+    <Press className="vm-arow vm-arow2" data-on={on || undefined} aria-label={sub ? `${r.title}, ${sub}` : r.title} onPress={onPress}>
+      <Art src={imgOk ? (r.thumb ? musicImg(r.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <span className="vm-arow-text">
+        <span className="vm-arow-t">{r.title}</span>
+        {sub && <span className="vm-arow-s">{sub}</span>}
+      </span>
+      {eq && <Eq on={playing} />}
+    </Press>
+  )
+}
+
+/** One track in the search results: art, title over artist and album, the length; a tap plays it. */
+function TrackLine({ t, cur, playing, wait, imgOk, onPress }: {
+  t: MusicTrack
+  cur: boolean
+  playing: boolean
+  wait: boolean
+  imgOk: boolean
+  onPress: () => void
+}) {
+  const sub = [t.trackArtist ?? t.artist, t.album].filter(Boolean).map((s) => noDash(s)).join(' · ')
+  return (
+    <Press
+      className="vm-arow vm-arow2"
+      data-on={cur || undefined}
+      data-wait={wait || undefined}
+      disabled={!t.streamKey}
+      aria-label={cur ? `${playing ? 'Pause' : 'Resume'} ${t.title}` : `Play ${t.title}`}
+      onPress={onPress}
+    >
+      <Art src={imgOk ? (t.thumb ? musicImg(t.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <span className="vm-arow-text">
+        <span className="vm-arow-t">{noDash(t.title)}</span>
+        {sub && <span className="vm-arow-s">{sub}</span>}
+      </span>
+      {cur && <Eq on={playing} />}
+      <span className="vm-arow-n">{!t.streamKey ? 'No file' : t.duration ? clock(t.duration) : ''}</span>
+    </Press>
+  )
+}
+
+// ---------- the A to Z lists (Artists, Albums) ----------
+
+type ListMode = 'artists' | 'albums'
+const isListMode = (s: unknown): s is ListMode => s === 'artists' || s === 'albums'
+
+/**
+ * A windowed list of fixed-height rows with the A to Z strip beside it: only the rows on screen
+ * are rendered, so 4,900 albums cost what 40 do. `children` is the header over the rows.
+ */
+function IndexList<T extends { key: string }>({ idx, rowH, visible, stripLabel, row, children }: {
+  idx: Indexed<T>
+  rowH: number
+  visible: boolean
+  stripLabel: string
+  row: (r: Lettered<T>) => ReactNode
+  children: ReactNode
+}) {
   const listRef = useRef<HTMLDivElement>(null)
-  const saved = useRef(0)
-  const rowH = wide ? 44 : 48
   const n = idx.list.length
-
   const [cur, setCur] = useState<string | null>(null)
   const listNow = useRef(idx.list)
   listNow.current = idx.list
   const onTop = useCallback((i: number) => setCur(listNow.current[i]?.letter ?? null), [])
-  const [a, b] = useWindow(listRef, n, rowH, visible && (wide || !open), onTop)
+  const [a, b] = useWindow(listRef, n, rowH, visible, onTop)
   const has = useMemo(() => new Set(idx.first.keys()), [idx.first])
   const [pin, pinTo] = usePin(listRef)
 
@@ -1519,14 +1895,232 @@ function MusicLib({ visible }: { visible: boolean }) {
     pinTo(l)
   }
 
+  return (
+    <div className="vm-lib">
+      <div className="vm-lib-main">
+        {children}
+        <div ref={listRef} className="vm-alist" style={{ height: n * rowH, '--row': `${rowH}px` } as Vars}>
+          <ol className="vm-alist-win" style={{ transform: `translate3d(0, ${a * rowH}px, 0)` }}>
+            {idx.list.slice(a, b).map((r) => <li key={r.key}>{row(r)}</li>)}
+          </ol>
+        </div>
+      </div>
+      <div className="vm-az-col">
+        <AZStrip has={has} current={pin ?? cur} onJump={jump} label={stripLabel} />
+      </div>
+    </div>
+  )
+}
+
+/** Artists | Albums as text tabs in the list header, its count, and what the server said. */
+function ListHead({ mode, setMode, idx, retryKey }: {
+  mode: ListMode
+  setMode: (m: ListMode) => void
+  idx: ListIndex<unknown>
+  retryKey: string
+}) {
+  const qc = useQueryClient()
+  const failed = idx.live.failed || !!idx.live.error
+  const n = idx.list.length
+  const one = mode === 'albums' ? 'album' : 'artist'
+  return (
+    <>
+      <Head
+        icon="music"
+        lit={idx.filling && idx.started}
+        label={(
+          <span className="vm-htabs" role="group" aria-label="List">
+            {(['artists', 'albums'] as const).map((m) => (
+              <Press key={m} className="vm-htab" data-on={mode === m || undefined} aria-pressed={mode === m} onPress={() => setMode(m)}>
+                {m === 'artists' ? 'Artists' : 'Albums'}
+              </Press>
+            ))}
+          </span>
+        )}
+        value={idx.started ? countLabel(n, idx.total, idx.filling, one) : undefined}
+      >
+        {failed && (
+          <Press className="vm-hact" onPress={() => void qc.refetchQueries({ queryKey: ['v2', retryKey] })}>
+            <Icon name="refresh" size={13} tone="dim" />
+            Retry
+          </Press>
+        )}
+      </Head>
+      {failed && <p className="vm-quiet-line vm-err">{n ? `The music server did not answer. Showing ${num(n)} ${one}s.` : 'The music server did not answer.'}</p>}
+      {!n && !failed && <p className="vm-quiet-line">{idx.started ? `No ${one}s on the music server.` : `Loading ${one}s`}</p>}
+    </>
+  )
+}
+
+/** The Albums list: its own component, so the 4,900-album index loads only once it is opened. */
+function AlbumList({ mode, setMode, rowH, visible, imgOk, hilite, playingAlbum, playing, onAlbum }: {
+  mode: ListMode
+  setMode: (m: ListMode) => void
+  rowH: number
+  visible: boolean
+  imgOk: boolean
+  hilite: string | null
+  playingAlbum: string | null
+  playing: boolean
+  onAlbum: (al: MusicItem) => void
+}) {
+  const idx = useAlbumIndex()
+  return (
+    <IndexList
+      idx={idx}
+      rowH={rowH}
+      visible={visible}
+      stripLabel="Albums A to Z"
+      row={(r) => (
+        <AlbumLine r={r} on={hilite === r.key} eq={playingAlbum === r.key} playing={playing} imgOk={imgOk} onPress={() => onAlbum(albumRowItem(r))} />
+      )}
+    >
+      <ListHead mode={mode} setMode={setMode} idx={idx} retryKey="musicAlbums" />
+    </IndexList>
+  )
+}
+
+// ---------- Music search ----------
+
+/** /plex/music/search answers at most this many of each kind. */
+const SEARCH_CAP = 12
+const ARTIST_CAP = 8
+
+/**
+ * Artists, albums and tracks matching the search. Artists come from the loaded A to Z index (every
+ * match, at once) plus any the server found that it lacks; albums and tracks from the server.
+ */
+function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, imgOk, p, hiArtist, hiAlbum, pendingTrack, onArtist, onAlbum, onTrack }: {
+  typed: string
+  q: string
+  found: MusicSearchResults | undefined
+  busy: boolean
+  failed: boolean
+  artists: readonly ArtistRow[]
+  artistH: number
+  rowH: number
+  imgOk: boolean
+  p: PlayerNow
+  hiArtist: string | null
+  hiAlbum: string | null
+  pendingTrack: string | null
+  onArtist: (a: MusicItem) => void
+  onAlbum: (al: MusicItem) => void
+  onTrack: (t: MusicTrack) => void
+}) {
+  const [all, setAll] = useState(false)
+  useEffect(() => setAll(false), [q])
+  const keys = useMemo(() => artists.map((r) => squash(r.title)), [artists])
+  const local = useDeferredValue(typed)
+  const artistList = useMemo(() => {
+    const words = queryWords(local)
+    const mine = words.length ? artists.filter((_, i) => hits(words, keys[i])) : []
+    const seen = new Set(mine.map((r) => r.key))
+    return [...mine, ...(found?.artists ?? []).map(toArtist).filter((r) => !seen.has(r.key))]
+  }, [local, artists, keys, found])
+  const albums = useMemo(() => (found?.albums ?? []).map(toAlbumRow), [found])
+  const tracks = found?.tracks ?? []
+  const now = p.item ? p.tracks[p.index] ?? null : null
+  const capped = (n: number) => (n >= SEARCH_CAP ? `First ${SEARCH_CAP}` : num(n))
+  const rows = (h: number) => ({ '--row': `${h}px` } as Vars)
+
+  return (
+    <div className="vm-mres">
+      {artistList.length > 0 && (
+        <section className="vm-rsec">
+          <Head icon="music" label="Artists" value={num(artistList.length)} />
+          <ol className="vm-alist-win vm-rlist" style={rows(artistH)}>
+            {(all ? artistList : artistList.slice(0, ARTIST_CAP)).map((r) => (
+              <li key={r.key}>
+                <ArtistLine r={r} on={hiArtist === r.key} eq={now?.artistKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => onArtist(artistItem(r))} />
+              </li>
+            ))}
+          </ol>
+          {artistList.length > ARTIST_CAP && (
+            <Press className="vm-more" onPress={() => setAll((v) => !v)}>{all ? 'Show fewer' : `Show all ${num(artistList.length)}`}</Press>
+          )}
+        </section>
+      )}
+      {albums.length > 0 && (
+        <section className="vm-rsec">
+          <Head icon="tracks" label="Albums" value={capped(albums.length)} />
+          <ol className="vm-alist-win vm-rlist" style={rows(rowH)}>
+            {albums.map((r) => (
+              <li key={r.key}>
+                <AlbumLine r={r} on={hiAlbum === r.key} eq={now?.albumKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => onAlbum(albumRowItem(r))} />
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {tracks.length > 0 && (
+        <section className="vm-rsec">
+          <Head icon="play" lit={p.playing && tracks.some((t) => p.item?.key === tKey(t))} label="Tracks" value={capped(tracks.length)} />
+          <ol className="vm-alist-win vm-rlist" style={rows(rowH)}>
+            {tracks.map((t) => (
+              <li key={t.ratingKey}>
+                <TrackLine t={t} cur={p.item?.key === tKey(t)} playing={p.playing} wait={pendingTrack === t.ratingKey} imgOk={imgOk} onPress={() => onTrack(t)} />
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {!artistList.length && !albums.length && !tracks.length && (
+        <p className="vm-quiet-line">
+          {failed ? 'The music server did not answer the search.' : busy || q !== typed ? 'Searching music' : `Nothing on the music server matches "${typed}".`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ---------- Music library ----------
+
+/** What the detail shows: an artist, an album, or an album with its artist (`from`: where the album was opened). */
+type OpenMusic = { artist: MusicItem | null; album: MusicItem | null; from: 'list' | 'artist' }
+
+function MusicLib({ visible }: { visible: boolean }) {
+  const wide = useMq('(min-width: 640px)')
+  const artists = useArtistIndex()
+  const recent = useMusic()
+  const p = usePlayerNow()
+  const starter = useStarter()
+  const imgOk = useImgReady()
+  const qc = useQueryClient()
+  const [mode, setMode] = useStored<ListMode>('v2.media.musicList', 'artists', isListMode)
+  const [text, setText] = useState('')
+  const typed = text.trim()
+  const q = useDebounced(typed, 300)
+  const searching = typed.length >= 2
+  const [open, setOpen] = useState<OpenMusic | null>(null)
+  const [last, setLast] = useState<{ artist: string | null; album: string | null }>({ artist: null, album: null })
+  const rootRef = useRef<HTMLDivElement>(null)
+  const colRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const saved = useRef(0)
+  const artistH = wide ? 44 : 48
+  const rowH = wide ? 48 : 52
+  const listOn = visible && (wide || !open)
+  useSlash(searchRef, listOn)
+
+  const found = useQuery({
+    queryKey: ['v2-x', 'musicSearch', q.toLowerCase()],
+    queryFn: () => searchMusic(q),
+    enabled: q.length >= 2,
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
+    placeholderData: keepPreviousData,
+    retry: 0,
+  })
+
   // phone: an open artist (or album) takes the list's place, and the list's scroll comes back with it
   const openTo = (next: OpenMusic | null) => {
     const page = pageOf(rootRef.current)
     if (!wide && page && !open && next) saved.current = page.scrollTop
-    if (next) setLastKey(next.artist.key)
+    if (next) setLast({ artist: next.artist?.key ?? null, album: next.album?.key ?? null })
     setOpen(next)
   }
-  const openKey = open ? `${open.artist.key}/${open.album?.key ?? ''}` : ''
+  const openKey = open ? `${open.artist?.key ?? ''}/${open.album?.key ?? ''}` : ''
   const firstRun = useRef(true)
   useLayoutEffect(() => {
     if (firstRun.current) {
@@ -1544,74 +2138,155 @@ function MusicLib({ visible }: { visible: boolean }) {
     page.scrollTop = openKey ? Math.max(0, topIn(root, page) - 8) : saved.current
   }, [openKey, wide])
 
+  // another list (Artists, Albums, results) starts at its top when the page was scrolled into the last one
+  const listKey = searching ? 'search' : mode
+  const firstList = useRef(true)
+  useLayoutEffect(() => {
+    if (firstList.current) {
+      firstList.current = false
+      return
+    }
+    const box = colRef.current?.querySelector<HTMLElement>('.vm-msearch')
+    const page = pageOf(box)
+    if (!box || !page) return
+    const t = Math.max(0, topIn(box, page) - 8)
+    if (page.scrollTop > t) page.scrollTop = t
+  }, [listKey])
+
   // wide screens always show an artist beside the list: the one picked, else the last played
   const fallback = recent.data?.played[0] ?? null
-  const shown: OpenMusic | null = open ?? (wide && fallback ? { artist: fallback, album: null } : null)
-  const playingArtist = p.item ? p.tracks[p.index]?.artistKey ?? null : null
-  const hilite = shown?.artist.key ?? lastKey
-  const failed = idx.live.failed || !!idx.live.error
+  const shown: OpenMusic | null = open ?? (wide && fallback ? { artist: fallback, album: null, from: 'list' } : null)
+  const nowTrack = p.item ? p.tracks[p.index] ?? null : null
+  const hiArtist = shown?.artist?.key ?? last.artist
+  const hiAlbum = shown ? shown.album?.key ?? null : last.album
 
-  const detail = !shown ? null : shown.album ? (
-    <AlbumPane
-      key={`al${shown.album.key}`}
-      album={shown.album}
-      p={p}
-      starter={starter}
-      imgOk={imgOk}
-      visible={visible}
-      back={{ label: shown.artist.title, go: () => openTo({ artist: shown.artist, album: null }) }}
-    />
-  ) : (
-    <ArtistPane
-      key={`ar${shown.artist.key}`}
-      artist={shown.artist}
-      p={p}
-      starter={starter}
-      imgOk={imgOk}
-      back={wide ? null : { label: 'All artists', go: () => openTo(null) }}
-      onAlbum={(al) => openTo({ artist: shown.artist, album: albumItem(al) })}
-    />
-  )
+  const toList: BackTo = { label: searching ? 'Results' : mode === 'albums' ? 'All albums' : 'All artists', go: () => openTo(null) }
+  const openArtist = (a: MusicItem) => openTo({ artist: a, album: null, from: 'list' })
+  const openAlbum = (al: MusicItem) => openTo({ artist: al.artistKey ? artistOf(al.artistKey, al.sub) : null, album: al, from: 'list' })
+
+  // a found track plays its album from that track (the album's tracks are fetched once, then cached)
+  const [pendingTrack, setPendingTrack] = useState<string | null>(null)
+  const trackSeq = useRef(0)
+  const playTrack = (t: MusicTrack) => {
+    if (p.item?.key === tKey(t)) {
+      playerActions.toggle()
+      return
+    }
+    const token = ++trackSeq.current
+    const al = trackAlbum(t)
+    if (!al) {
+      setPendingTrack(null)
+      playList([t], 0, tKey(t), t.title)
+      return
+    }
+    if (wide) openAlbum(al)
+    const run = (list: MusicTrack[]) => {
+      const i = list.findIndex((x) => x.ratingKey === t.ratingKey)
+      if (i >= 0) playList(list, i, al.key, al.title)
+      else playList([t], 0, tKey(t), t.title)
+    }
+    const cached = qc.getQueryData<MusicTrack[]>(tracksQuery(al).queryKey)
+    if (cached) {
+      setPendingTrack(null)
+      run(cached)
+      return
+    }
+    setPendingTrack(t.ratingKey)
+    qc.fetchQuery(tracksQuery(al))
+      .then((list) => { if (token === trackSeq.current) run(list) })
+      .catch(() => { if (token === trackSeq.current) playList([t], 0, tKey(t), t.title) })
+      .finally(() => { if (token === trackSeq.current) setPendingTrack(null) })
+  }
+
+  let detail: ReactNode = null
+  if (shown?.album) {
+    const { album, artist, from } = shown
+    const toArtistPage = artist ? () => openTo({ artist, album: null, from: 'list' }) : null
+    detail = (
+      <AlbumPane
+        key={`al${album.key}`}
+        album={album}
+        p={p}
+        starter={starter}
+        imgOk={imgOk}
+        visible={visible}
+        back={from === 'artist' && artist && toArtistPage ? { label: artist.title, go: toArtistPage } : wide ? null : toList}
+        onArtist={from === 'list' && toArtistPage ? toArtistPage : undefined}
+      />
+    )
+  } else if (shown?.artist) {
+    const { artist } = shown
+    detail = (
+      <ArtistPane
+        key={`ar${artist.key}`}
+        artist={artist}
+        p={p}
+        starter={starter}
+        imgOk={imgOk}
+        back={wide ? null : toList}
+        onAlbum={(al) => openTo({ artist, album: albumItem(al), from: 'artist' })}
+      />
+    )
+  }
 
   return (
     <div ref={rootRef} className={cx('vm-music', wide && 'vm-msplit')}>
-      <div className="vm-lib" hidden={!wide && !!open}>
-        <div className="vm-lib-main">
-          <NowPlaying i={0} />
-          <Head icon="music" lit={idx.filling && idx.started} label="Artists" value={idx.started ? countLabel(n, idx.total, idx.filling, 'artist') : undefined}>
-            {failed && (
-              <Press className="vm-hact" onPress={() => void qc.refetchQueries({ queryKey: ['v2', 'musicArtists'] })}>
-                <Icon name="refresh" size={13} tone="dim" />
-                Retry
-              </Press>
+      <div ref={colRef} className="vm-mcol" hidden={!wide && !!open}>
+        <NowPlaying i={0} />
+        <div className="vm-msearch">
+          <SearchLine
+            label="Search music"
+            value={text}
+            onChange={setText}
+            placeholder="Search artists, albums, tracks"
+            busy={searching && (found.isFetching || q !== typed)}
+            inputRef={searchRef}
+          />
+        </div>
+        {searching ? (
+          <MusicResults
+            typed={typed}
+            q={q}
+            found={q.length >= 2 ? found.data : undefined}
+            busy={found.isFetching}
+            failed={found.isError}
+            artists={artists.list}
+            artistH={artistH}
+            rowH={rowH}
+            imgOk={imgOk}
+            p={p}
+            hiArtist={hiArtist}
+            hiAlbum={hiAlbum}
+            pendingTrack={pendingTrack}
+            onArtist={openArtist}
+            onAlbum={openAlbum}
+            onTrack={playTrack}
+          />
+        ) : mode === 'albums' ? (
+          <AlbumList
+            mode={mode}
+            setMode={setMode}
+            rowH={rowH}
+            visible={listOn}
+            imgOk={imgOk}
+            hilite={hiAlbum}
+            playingAlbum={nowTrack?.albumKey ?? null}
+            playing={p.playing}
+            onAlbum={openAlbum}
+          />
+        ) : (
+          <IndexList
+            idx={artists}
+            rowH={artistH}
+            visible={listOn}
+            stripLabel="Artists A to Z"
+            row={(r) => (
+              <ArtistLine r={r} on={hiArtist === r.key} eq={nowTrack?.artistKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => openArtist(artistItem(r))} />
             )}
-          </Head>
-          {failed && <p className="vm-quiet-line vm-err">{n ? `The music server did not answer. Showing ${num(n)} artists.` : 'The music server did not answer.'}</p>}
-          {!n && !failed && <p className="vm-quiet-line">{idx.started ? 'No artists on the music server.' : 'Loading artists'}</p>}
-          <div ref={listRef} className="vm-alist" style={{ height: n * rowH, '--row': `${rowH}px` } as Vars}>
-            <ol className="vm-alist-win" style={{ transform: `translate3d(0, ${a * rowH}px, 0)` }}>
-              {idx.list.slice(a, b).map((r) => (
-                <li key={r.key}>
-                  <Press
-                    className="vm-arow"
-                    data-on={hilite === r.key || undefined}
-                    aria-label={r.albums ? `${r.title}, ${plural(r.albums, 'album')}` : r.genre ? `${r.title}, ${r.genre}` : r.title}
-                    onPress={() => openTo({ artist: artistItem(r), album: null })}
-                  >
-                    <Art src={imgOk ? (r.thumb ? musicImg(r.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
-                    <span className="vm-arow-t">{r.title}</span>
-                    {playingArtist === r.key && <Eq on={p.playing} />}
-                    {/* the artist list carries no album count from Plex today; the genre stands in */}
-                    <span className="vm-arow-n">{r.albums ? plural(r.albums, 'album') : r.genre}</span>
-                  </Press>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-        <div className="vm-az-col">
-          <AZStrip has={has} current={pin ?? cur} onJump={jump} label="Artists A to Z" />
-        </div>
+          >
+            <ListHead mode={mode} setMode={setMode} idx={artists} retryKey="musicArtists" />
+          </IndexList>
+        )}
       </div>
       {(wide || open) && (
         <div className="vm-mdetail">
@@ -1732,13 +2407,15 @@ function ArtistPane({ artist, p, starter, imgOk, back, onAlbum }: {
 }
 
 /** An album: Play / Shuffle, then every track; a track plays the album from there. */
-function AlbumPane({ album, p, starter, imgOk, visible, back }: {
+function AlbumPane({ album, p, starter, imgOk, visible, back, onArtist }: {
   album: MusicItem
   p: PlayerNow
   starter: Starter
   imgOk: boolean
   visible: boolean
   back: BackTo | null
+  /** opened from a list (not its artist's page): "More by <artist>" goes there */
+  onArtist?: () => void
 }) {
   const tracks = useQuery(tracksQuery(album))
   const list = tracks.data ?? []
@@ -1762,7 +2439,20 @@ function AlbumPane({ album, p, starter, imgOk, visible, back }: {
         onPlay={() => (isCur ? playerActions.toggle() : starter.start(album))}
         onShuffle={() => starter.start(album, true)}
       />
-      <Sec className="vm-tracks" icon="tracks" lit={liveHere} label="Tracks" value={list.length ? `${plural(list.length, 'track')}${totalMs ? ` · ${runtime(totalMs)}` : ''}` : undefined} i={3}>
+      <Sec
+        className="vm-tracks"
+        icon="tracks"
+        lit={liveHere}
+        label="Tracks"
+        value={list.length ? `${plural(list.length, 'track')}${totalMs ? ` · ${runtime(totalMs)}` : ''}` : undefined}
+        extra={onArtist && album.sub ? (
+          <Press className="vm-hact" onPress={onArtist}>
+            <span className="vl-ellipsis">More by {album.sub}</span>
+            <Glyph name="right" size={10} />
+          </Press>
+        ) : undefined}
+        i={3}
+      >
         {!list.length ? (
           <p className="vm-quiet-line">{tracks.isError ? 'The music server did not answer.' : tracks.isFetching ? 'Loading tracks' : 'No tracks.'}</p>
         ) : (

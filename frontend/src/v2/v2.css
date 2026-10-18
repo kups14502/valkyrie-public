@@ -305,7 +305,12 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
     padding: 0;
     outline: none;
   }
-  .vl-press:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 2px; }
+  /* keyboard focus: a lit hairline with a soft halo, on every Press-built control */
+  .vl-press:focus-visible {
+    outline: 1px solid var(--fg);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 16%, transparent);
+  }
   .vl-press:disabled { cursor: default; opacity: .4; }
   /* grows the touch target to >= 44 px without moving anything */
   .vl-hit::after {
@@ -871,6 +876,24 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   .vl-hscroll::-webkit-scrollbar { display: none; }
   .vl-hscroll > * { scroll-snap-align: start; flex: none; }
 
+  /* ---------------------------------------------------------------------------
+     Hover: a mouse (desktop, iPad with a trackpad) gets the lit state a press
+     shows, one step quieter. Touch never sees it, so a tapped control never
+     stays lit. Screen CSS (unlayered) still overrides any of these.
+     ------------------------------------------------------------------------- */
+  @media (hover: hover) and (pointer: fine) {
+    .vl-link:not(:disabled):hover { color: var(--fg); }
+    .vl-link:not(:disabled):hover .vl-icon { color: var(--fg); }
+    .vl-btn:not(:disabled):hover { filter: brightness(1.12); }
+    .vl-btn-line:not(:disabled):hover { color: var(--fg); border-color: var(--line-strong); }
+    .vl-iconbtn:not(:disabled):hover .vl-icon { color: var(--fg); }
+    .vl-opt:not([data-on]):not(:disabled):hover { color: var(--text); border-color: var(--line); }
+    .vl-seg-cell:not([data-on]):not(:disabled):hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+    .vl-preset:not([data-on]):hover { border-top-color: var(--fg); }
+    .vl-toast-btn:hover { color: var(--hot); }
+    .vl-diamond:hover .vl-diamond-mark { transform: rotate(45deg) scale(1.2); }
+  }
+
   /* screen content padding inside a page */
   .vl-screen { padding: 10px 14px 18px; min-height: 100%; }
   html[data-density='comfortable'] .vl-screen { padding: 16px 20px 26px; }
@@ -1043,6 +1066,75 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 .vl-strip-gear .vl-icon { vertical-align: 0; transition: color .2s, filter .2s, transform .3s var(--ease); }
 .vl-strip-gear[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); transform: rotate(30deg); }
 .vl-strip-gear[data-on] .vl-icon { transform: rotate(60deg); }
+/* the search button (the command palette, Ctrl+K): a mouse habit, so wide screens only */
+.vl-strip-search {
+  flex: none;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: var(--strip-h);
+  margin: 0 0 0 10px;
+  color: var(--dim);
+}
+.vl-strip-search::after { content: ''; position: absolute; inset: -10px -6px; }
+.vl-strip-search .vl-icon { vertical-align: 0; transition: color .2s, filter .2s; }
+.vl-strip-search[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+@media (min-width: 640px) { .vl-strip-search { display: grid; } }
+
+/* the app's update prompt (src/components/UpdateAlarm): its chip at strip
+   size, in v2's colors; empty (and taking no room) until an update is staged */
+.vl-strip-upd { display: inline-flex; align-items: center; }
+.vl-strip-upd:not(:empty) { margin-right: 10px; }
+/* unlayered, so these beat its Tailwind utilities; its glow is an inline style */
+.vl-strip-upd > * {
+  height: 18px;
+  padding: 0 7px;
+  gap: 5px;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--fg) 70%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent) !important;
+  text-shadow: none;
+  white-space: nowrap;
+}
+.vl-strip-upd svg { width: 11px; height: 11px; flex: none; }
+/* the phone: the icon alone, still pulsing */
+@media (max-width: 639px) { .vl-strip-upd > * { font-size: 0; padding: 0 4px; } }
+
+/* ---- the desktop app's frameless window: the strip is the title bar ----
+   html[data-v2win] is set by src/v2/App.tsx in the Tauri desktop app; the
+   strip carries data-tauri-drag-region="deep" (kit/shell.tsx StatusStrip), so
+   any empty part of it drags the window and a double-click maximizes. The
+   window buttons (src/components/TauriTitleBar WindowControls, 3 x 44 px) sit
+   at its right end, and the strip keeps that width free. */
+html[data-v2win] { --strip-h: 32px; }
+.vl-strip[data-win] { padding-right: calc(132px + 10px); cursor: default; }
+.vl-winctl { position: absolute; top: 0; right: 0; bottom: 0; width: 132px; z-index: 3; }
+.vl-winctl button { color: var(--dim); text-shadow: none; transition: color .15s, background-color .15s; }
+.vl-winctl button:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.vl-winctl button[aria-label='Close']:hover { color: #fff; background: var(--acc2); }
+.vl-winctl button:focus-visible { outline: 1px solid var(--fg); outline-offset: -3px; }
+
+/* ---- an installed PWA with the window controls overlay (manifest
+   display_override): the OS draws its buttons over the top of the page. The
+   strip grows to the overlay's height, keeps clear of the buttons on both
+   sides, and is the window's drag area (its buttons stay clickable). Viewport
+   units and env() are in unzoomed px, so both are divided by the UI zoom. */
+@media (display-mode: window-controls-overlay) {
+  html[data-v2] .vl-strip {
+    height: max(var(--strip-h), calc(env(titlebar-area-height, 0px) / var(--ui-zoom, 1)));
+    padding-left: calc(env(titlebar-area-x, 0px) / var(--ui-zoom, 1) + 14px);
+    padding-right: calc((100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) / var(--ui-zoom, 1) + 14px);
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+  html[data-v2] .vl-strip :is(button, a, input, select, textarea, [role='button']) {
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+  }
+}
+
 @media (min-width: 640px) {
   .vl-strip { font-size: 10px; }
   .vl-host b { display: inline; }
@@ -1275,7 +1367,15 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 .vl-tab-sub::after { content: ''; position: absolute; inset: 0 0 -8px; }
 @media (hover: hover) and (pointer: fine) {
   .vl-tab:not([data-on]):hover { color: var(--text); }
+  .vl-strip-gear:hover .vl-icon, .vl-strip-search:hover .vl-icon { color: var(--fg); }
+  .vl-setbar-back:hover { color: var(--text); }
+  .vl-rail-btn:not([data-off]):hover { color: var(--fg); }
+  .vl-rail-icon:hover .vl-icon { transform: scale(1.08); }
+  .vl-lamp:hover { border-color: color-mix(in srgb, var(--fg) 70%, transparent); }
+  .vl-mini-btn:hover { color: var(--fg); }
 }
+/* keyboard focus on the tabs: the label lights, the ring hugs the text */
+.vl-tab:focus-visible { color: var(--fg); outline-offset: -2px; }
 
 /* ---- Settings: its header row in place of the tabs, and the full screen over the pager ---- */
 .vl-setbar {
@@ -1477,6 +1577,103 @@ html[data-motion='reduced'] .vl-mini[data-leaving], html[data-motion='reduced'] 
 @media (prefers-reduced-motion: reduce) {
   .vl-mini, .vl-foot-bg { animation: vl-fade .12s linear both; }
   .vl-mini[data-leaving], .vl-foot[data-leaving] .vl-foot-bg { animation: none; opacity: 0; }
+}
+
+/* ===========================================================================
+   Command palette (kit/palette.tsx, Ctrl+K): portaled to body, over every
+   screen and sheet. Sized in % of the window, never vw/vh, so the UI zoom
+   scales it like everything else.
+   ========================================================================= */
+.vl-pal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, .62);
+  animation: vl-fade .12s linear both;
+  font-family: var(--font);
+  color: var(--text);
+}
+.vl-pal-box {
+  position: absolute;
+  left: 50%;
+  top: 12%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: min(580px, calc(100% - 24px));
+  max-height: 72%;
+  border: 1px solid var(--panel-line);
+  background: var(--panel-fill);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .8), 0 0 18px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 18%), transparent);
+  text-shadow: 0 0 3px #000;
+}
+.vl-pal-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 46px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.vl-pal-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  caret-color: var(--fg);
+}
+.vl-pal-field input::placeholder { color: var(--faint); }
+.vl-pal-field kbd {
+  flex: none;
+  padding: 1px 5px;
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--line);
+}
+.vl-pal-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 0 8px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 40%, transparent) transparent; }
+.vl-pal-head {
+  padding: 10px 14px 4px;
+  font-size: 9.5px;
+  line-height: 12px;
+  font-weight: 700;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.vl-pal-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px 0 14px;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.vl-pal-row[data-on] { background: color-mix(in srgb, var(--fg) 11%, transparent); }
+.vl-pal-row[data-on]::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px; background: var(--fg); box-shadow: 0 0 6px var(--fg); }
+.vl-pal-row[data-on] .vl-pal-label { color: var(--fg); }
+.vl-pal-label { flex: 1 1 auto; min-width: 0; }
+.vl-pal-hint { flex: 0 1 auto; max-width: 40%; font-size: 10.5px; letter-spacing: .06em; color: var(--dim); }
+.vl-pal-enter { flex: none; }
+.vl-pal-note, .vl-pal-empty { padding: 4px 14px 6px; font-size: 12px; color: var(--faint); }
+.vl-pal-empty { padding-top: 14px; }
+html[data-motion='reduced'] .vl-pal { animation: none; }
+@media (max-width: 639px) {
+  .vl-pal-box { top: calc(8px + env(safe-area-inset-top)); max-height: 80%; }
+  .vl-pal-row { min-height: 42px; }
+  .vl-pal-field input { font-size: 16px; }
 }
 
 /* ---------------------------------------------------------------------------

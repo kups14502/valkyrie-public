@@ -5,7 +5,7 @@ import {
   House, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListMusic, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plus, Power, RefreshCw, Rocket, Search, Server, Settings, ShieldCheck,
   Smartphone, Sparkles, SquareTerminal, Sun, Tablet, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
-  createLucideIcon, type LucideIcon,
+  UtensilsCrossed, createLucideIcon, type LucideIcon,
 } from 'lucide-react'
 
 // Thor RGB: three overlapping light circles (the additive RGB mark), drawn in lucide's 24 px line style.
@@ -34,6 +34,7 @@ export const ICONS = {
   system: Activity,
   settings: Settings,
   calendar: CalendarDays,
+  meals: UtensilsCrossed,
   projects: FolderKanban,
   // hosts and devices (by host id)
   thor: Monitor,

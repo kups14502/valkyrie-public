@@ -14,6 +14,8 @@ import {
 
 const REFUSED = 'e2e refused this write'
 const TERM_NAME = 'vk-e2e0000a01'
+/** the fixture pane's socket, which a v2 terminal opened on it tries (and the fence refuses) */
+const NEW_PANE_WS = /\/ws\/terminal\?s=vk-e2e0000a01&/
 
 /** The fake backend: GET mocks over one mutable state. */
 function fakeBackend(page, st) {
@@ -73,6 +75,7 @@ function writeTest(def) {
       timeout: def.timeout ?? 50_000,
       async run(t) {
         const st = freshState(def.state?.() ?? {})
+        if (def.allowSockets) t.allowSockets.push(...def.allowSockets)
         const page = await t.page({ storage: def.storage ?? {} })
         fakeBackend(page, st)
         let n = 0
@@ -296,10 +299,11 @@ export function writeTests() {
         t.check(b.mode === 'new' && b.target === 'alpha' && (b.host === undefined || b.host === 'thor'), `thor in page sent ${w.body}`)
       },
       respond: (w) => ({ status: 201, body: termOpened(w.json) }),
+      // the v2 terminal for the new pane: it tries that pane's socket, which the fence refuses
+      allowSockets: [NEW_PANE_WS],
       okThen: async (t, page) => {
-        await page.waitFor(() => window.__e2e.blockedNav.length > 0, { message: 'the app did not head for the terminal' })
-        const nav = await page.blockedNav()
-        t.check(nav.some((x) => x.url.includes(`/sessions/terminal?s=${TERM_NAME}`)), `it headed for ${nav.map((x) => x.url).join(', ')}`)
+        await page.waitPath(`/m/ai/term/${TERM_NAME}`, 8000)
+        t.check(!(await page.blockedNav()).length, `it headed for the classic terminal: ${(await page.blockedNav()).map((x) => x.url).join(', ')}`)
         await page.waitFor(() => !document.querySelector('.vc-sheet-root[data-shown]'), { message: 'the picker stayed open' })
       },
       failThen: async (t, page, st, since) => {
@@ -307,6 +311,7 @@ export function writeTests() {
         const err = await page.eval(() => document.querySelector('.vc-sheet .vc-act-err')?.textContent ?? '')
         t.check(/e2e refused/i.test(err), `the picker does not show the refusal ("${err}")`)
         t.check(!(await page.blockedNav()).length, 'a refused start still headed for the terminal')
+        t.check((await page.path()) === '/m/ai/sessions', `a refused start left AI > Sessions for ${await page.path()}`)
       },
     }),
     ...writeTest({
@@ -347,15 +352,15 @@ export function writeTests() {
         t.check(b.project === undefined && b.sessionId === undefined, `odin carried a project or a resume: ${w.body}`)
       },
       respond: (w) => ({ status: 201, body: termOpened(w.json) }),
+      allowSockets: [NEW_PANE_WS],
       okThen: async (t, page) => {
-        await page.waitFor(() => window.__e2e.blockedNav.length > 0, { message: 'the app did not head for the terminal' })
-        const nav = await page.blockedNav()
-        t.check(nav.some((x) => x.url.includes(`/sessions/terminal?s=${TERM_NAME}`)), `it headed for ${nav.map((x) => x.url).join(', ')}`)
-        t.check((await page.path()) === '/m/ai/sessions', 'the page left AI > Sessions')
+        await page.waitPath(`/m/ai/term/${TERM_NAME}`, 8000)
+        t.check(!(await page.blockedNav()).length, `it headed for the classic terminal: ${(await page.blockedNav()).map((x) => x.url).join(', ')}`)
       },
       failThen: async (t, page, st, since) => {
         await page.waitToast(/Could not start Odin home on .+: e2e refused/i, { since })
         t.check(!(await page.blockedNav()).length, 'a refused start still headed for the terminal')
+        t.check((await page.path()) === '/m/ai/sessions', `a refused start left AI > Sessions for ${await page.path()}`)
       },
     }),
 

@@ -1,0 +1,127 @@
+/* Uploads to thor (kit/upload.tsx): the rows and the toolbar button. Mode variables only, so a scheme change repaints it. */
+
+.up-list { display: flex; flex-direction: column; min-width: 0; }
+.up-rows { display: block; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.up-row { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 48px; }
+.up-row + .up-row { border-top: 1px solid var(--line); }
+
+.up-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 0 6px 1px;
+  text-align: left;
+}
+.up-main[data-pressed] .up-name { color: var(--fg); text-shadow: var(--text-glow); }
+
+/* the picture as a small framed square; an icon when there is none */
+.up-thumb {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 6%, #000);
+}
+.up-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.up-thumb::after { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 26%, transparent); pointer-events: none; }
+/* a video's frame carries a small play mark */
+.up-thumb-play {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid #fff;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  filter: drop-shadow(0 0 2px #000);
+}
+.up-row[data-state='err'] .up-thumb, .up-row[data-state='queued'] .up-thumb { opacity: .55; }
+
+.up-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.up-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.up-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.up-row[data-state='queued'] .up-name { color: var(--dim); }
+.up-pct { flex: none; font-size: 13px; line-height: 16px; font-weight: 700; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+.up-pct small { margin-left: 1px; font-size: 9.5px; font-weight: 500; color: var(--dim); }
+.up-meta {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.up-meta[data-copied] { color: var(--fg); text-shadow: var(--text-glow); }
+.up-row[data-state='err'] .up-meta { color: var(--acc2); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.up-bar { margin-top: 1px; }
+
+/* the row's own buttons: copy, dismiss (a 44 px target), and Retry as a thin outlined plate */
+.up-act {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 44px;
+  transition: transform .12s var(--ease);
+}
+.up-act[data-pressed] { transform: scale(.9); }
+.up-act[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+.up-retry {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  transition: transform .12s var(--ease);
+}
+.up-retry::after { content: ''; position: absolute; inset: -8px -2px; }
+.up-retry[data-pressed] { transform: scale(.95); box-shadow: var(--glow), inset 0 0 0 1px var(--fg); }
+
+.up-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
+.up-link {
+  min-height: 30px;
+  padding: 0 1px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+.up-link::after { content: ''; position: absolute; inset: -7px -4px; }
+.up-link-dim { color: var(--dim); }
+.up-link[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
+
+/* the toolbar button (AI > Sessions) */
+.up-btn[data-lit] .vl-iconbtn-badge { color: var(--fg); }
+
+@media (min-width: 1200px) {
+  .up-name { font-size: 13.5px; line-height: 17px; }
+  .up-meta { font-size: 11.5px; line-height: 15px; }
+}
+html[data-density='comfortable'] .up-row, html[data-density='comfortable'] .up-main { min-height: 54px; }

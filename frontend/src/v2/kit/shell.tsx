@@ -8,11 +8,15 @@ import {
   animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, useSwipePager, type MotionSetting,
 } from './motion'
 import { useHosts, useLights, useTick, type HostVM, type MediaVM } from './data'
-import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, toast, type DotFloorHandle, type ToastOptions } from './ui'
+import { Search } from 'lucide-react'
+import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, openPalette, paletteOpen, toast, type DotFloorHandle, type ToastOptions } from './ui'
 import { Icon, hostIcon, isIconName, type IconName } from './icons'
 import { musicImg, type MusicTrack } from '../../lib/api'
+import { isTauri, isTauriMobile } from '../../lib/auth'
 import { useLightsControl } from '../../lib/lights'
 import * as libPlayer from '../../lib/player'
+import { WindowControls } from '../../components/TauriTitleBar'
+import { UpdateAlarm } from '../../components/UpdateAlarm'
 
 // The Valkyrie shell. The header: a tiny status strip (host icons, the AI 5h
 // window, clock, the Settings gear), the primary text tabs under it, a
@@ -253,6 +257,20 @@ const hostState = (h: HostVM): 'on' | 'off' | 'stale' => (h.stale ? 'stale' : h.
 const STATE_WORD = { on: 'online', off: 'offline', stale: 'stale' } as const
 const titleCase = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 
+/** The frameless desktop app's window (Tauri on Windows, Linux, macOS); the Android app has none. */
+export const desktopWindow = (): boolean => isTauri() && !isTauriMobile()
+
+/**
+ * The status strip, on every v2 screen (the shell, AI > a session, the terminal
+ * preview). In the desktop app it is also the frameless window's title bar:
+ * a press on any empty part drags the window and a double-click maximizes
+ * (Tauri's drag script, `data-tauri-drag-region="deep"`: buttons in it stay
+ * buttons), and the minimize, maximize and close buttons sit at its right end.
+ * In an installed PWA with the window controls overlay, v2.css keeps it clear
+ * of the OS buttons and makes it the drag area. The app's update prompt
+ * (UpdateAlarm: the desktop updater, a waiting service worker, a new deploy)
+ * shows here too, so v2 never hides an update.
+ */
 export function StatusStrip({ center, onSettings, settingsOpen = false }: {
   center?: string | null
   /** shows the gear at the right end; a press opens (or, while open, closes) Settings */
@@ -266,8 +284,9 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
   const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
   const date = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`
   const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const win = desktopWindow()
   return (
-    <div className="vl-strip" data-center={center ? '' : undefined}>
+    <div className="vl-strip" data-center={center ? '' : undefined} data-win={win || undefined} data-tauri-drag-region={win ? 'deep' : undefined}>
       <div className="vl-strip-left">
         {/* Valkyrie's wordmark (src/App.tsx header): accent with its glow, the slashes dim, a blinking cursor */}
         <span className="vl-strip-name" role="img" aria-label="Valkyrie">
@@ -290,9 +309,15 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
       </div>
       {center && <div className="vl-strip-center" key={center.split(' ')[0]}>{center}</div>}
       <div className="vl-strip-right">
+        <span className="vl-strip-upd"><UpdateAlarm /></span>
         <span className="vl-strip-date"><span className="vl-strip-wd">{weekday} </span>{date}</span>
         <b>·</b>
         <span className="vl-strip-time">{time}</span>
+        {onSettings && (
+          <Press className="vl-strip-search" aria-label="Search" title="Search: jump anywhere (Ctrl+K)" aria-haspopup="dialog" onPress={openPalette}>
+            <Search size={13} strokeWidth={1.7} className="vl-icon vl-icon-dim" aria-hidden />
+          </Press>
+        )}
         {onSettings && (
           <Press
             className="vl-strip-gear"
@@ -306,6 +331,8 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
           </Press>
         )}
       </div>
+      {/* src/components/TauriTitleBar: absolute at the strip's right end; the strip reserves its width (v2.css) */}
+      {win && <div className="vl-winctl"><WindowControls /></div>}
     </div>
   )
 }
@@ -517,6 +544,8 @@ function LightsButton() {
     })
   }
   const label = anyOn ? `Lights: ${lit} of ${bulbs.length} on, turn all off` : 'Lights: all off, turn all on'
+  // the palette's "All lights on/off" is this button
+  useIntent('lights:toggle', press)
   return (
     <Press className="vl-lamp" data-lit={anyOn || undefined} aria-pressed={anyOn} aria-label={label} title={label} onPress={press}>
       <Icon name={anyOn ? 'bulb' : 'bulbOff'} size={20} tone={anyOn ? 'fg' : 'dim'} glow={anyOn} />
@@ -578,20 +607,27 @@ function Nav({ screens, activeId, sub, go }: {
     const box = boxRef.current
     const group = groupRef.current
     if (!nav || !prims || !line || !notch || !box || !group) return
+    // Everything here is in the nav's own CSS px. Under the UI zoom (lib/zoom:
+    // CSS zoom on <html>) a client rect is in zoomed px while offsetWidth,
+    // scrollWidth and the transforms written below are not, so rects are
+    // divided by the zoom. Mixing the two put the caret and the sub-tabs about
+    // 100 px right of the active tab at his zoom of 1.2.
     const nr = nav.getBoundingClientRect()
-    const pr = prims.getBoundingClientRect()
+    const k = nav.offsetWidth > 0 && nr.width > 0 ? nr.width / nav.offsetWidth : 1
+    const left = (r: DOMRect) => (r.left - nr.left) / k
     const lr = line.getBoundingClientRect()
     const br = box.getBoundingClientRect()
     const prim = primEls.current[activeId]
-    const primCenter = prim ? pr.left - nr.left + prim.offsetLeft + prim.offsetWidth / 2 : nr.width / 2
+    const primCenter = prim ? left(prim.getBoundingClientRect()) + prim.offsetWidth / 2 : nav.offsetWidth / 2
     // the caret sits on the hairline under the active tab
-    const nx = Math.max(lr.left - nr.left + 8, Math.min(lr.right - nr.left - 8, primCenter))
-    notch.style.transform = `translate3d(${nx.toFixed(1)}px, ${(lr.top - nr.top - 6).toFixed(1)}px, 0)`
+    const lineLeft = left(lr)
+    const nx = Math.max(lineLeft + 8, Math.min(lineLeft + line.offsetWidth - 8, primCenter))
+    notch.style.transform = `translate3d(${nx.toFixed(1)}px, ${((lr.top - nr.top) / k - 6).toFixed(1)}px, 0)`
     // the sub-tabs sit centered under their tab, clamped inside their row; a row too wide scrolls
     const gw = group.scrollWidth
     const bw = box.clientWidth
     const scroll = gw > bw + 1
-    const gx = scroll ? 0 : Math.max(0, Math.min(bw - gw, primCenter - (br.left - nr.left) - gw / 2))
+    const gx = scroll ? 0 : Math.max(0, Math.min(bw - gw, primCenter - left(br) - gw / 2))
     group.style.transform = `translate3d(${gx.toFixed(1)}px, 0, 0)`
     box.toggleAttribute('data-scroll', scroll)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -620,7 +656,7 @@ function Nav({ screens, activeId, sub, go }: {
   }, [layout])
 
   return (
-    <nav className="vl-nav" ref={navRef} data-ready={ready || undefined} data-no-swipe aria-label="Sections">
+    <nav className="vl-nav" ref={navRef} data-ready={ready || undefined} data-no-swipe aria-label="Sections" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
       <div className="vl-nav-prims" ref={primsRef}>
         {screens.map((s) => (
           <Press
@@ -661,7 +697,7 @@ function Nav({ screens, activeId, sub, go }: {
 /** Settings' header row in place of the tabs: back to the tab it came from, the title lit with the caret under it. */
 function SettingsBar({ back, onBack }: { back: string; onBack: () => void }) {
   return (
-    <div className="vl-setbar" data-no-swipe>
+    <div className="vl-setbar" data-no-swipe data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
       <Press className="vl-setbar-back" aria-label={`Back to ${back}`} onPress={onBack}>
         <Glyph name="left" size={11} />
         <span>{back}</span>
@@ -819,6 +855,8 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
       if (e.key !== 'Escape' || e.defaultPrevented) return
       const t = e.target as HTMLElement | null
       if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return
+      // a sheet or dialog over Settings closes first
+      if (paletteOpen() || document.querySelector('[aria-modal="true"]')) return
       e.preventDefault()
       closeSettings()
     }
@@ -958,6 +996,8 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
       if (settingsRef.current) return
       const t = e.target as HTMLElement | null
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      // a sheet, dialog or the palette has the keys; the tabs behind it stay put
+      if (paletteOpen() || document.querySelector('[aria-modal="true"]')) return
       const list = screensRef.current
       const i = list.findIndex((s) => s.id === activeRef.current) + (e.key === 'ArrowRight' ? 1 : -1)
       if (i < 0 || i >= list.length) return

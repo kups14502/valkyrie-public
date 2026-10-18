@@ -26,26 +26,29 @@
 }
 .hm-col { display: contents; }
 
-/* from 640 px: the ticker across the top, then two columns (three on desktop) */
-@media (min-width: 640px) {
-  .hm-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 14px;
-    row-gap: 12px;
-    align-items: start;
-  }
-  .hm-tk { grid-column: 1 / -1; }
-  .hm-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* two or three columns (Dashboard.tsx counts them from its own width, so the
+   desktop app's UI zoom is honored): the ticker across the top, then the columns */
+.hm-layout[data-cols='2'], .hm-layout[data-cols='3'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 12px;
+  align-items: start;
 }
-@media (min-width: 1200px) {
-  .hm-layout { column-gap: 22px; padding-left: 22px; }
-  .hm-layout[data-cols='3'] { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 1560px; }
+.hm-layout[data-cols='2'] .hm-tk, .hm-layout[data-cols='3'] .hm-tk { grid-column: 1 / -1; }
+.hm-layout[data-cols='2'] > .hm-col, .hm-layout[data-cols='3'] > .hm-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* desktop: three equal columns, centered in the page; a 2560 px monitor gets wider ones, never edge to edge */
+.hm-layout[data-cols='3'] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 22px;
+  max-width: 1560px;
+  margin-inline: auto;
 }
+.hm-layout[data-cols='3'][data-xl] { max-width: 1880px; column-gap: 28px; }
 /* landscape phone: tighter rhythm, the page is ~300 px tall */
 @media (min-width: 640px) and (max-height: 480px) {
-  .hm-layout { row-gap: 9px; }
-  .hm-col { gap: 9px; }
+  .hm-layout[data-cols] { row-gap: 9px; }
+  .hm-layout[data-cols] > .hm-col { gap: 9px; }
 }
 
 /* ---------- trade ticker: a slim line, label left, three cells (session, bot, 7 days), never scrolls ---------- */
@@ -90,7 +93,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   overflow: hidden;
   white-space: nowrap;
   font-size: 12px;
@@ -99,10 +102,17 @@
 }
 .hm-tk-cell { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
 .hm-tk-cell > .vl-icon { align-self: center; }
+/* the 7-day arrow sits tight between its key and its figure: a big day and a big week still fit a phone */
+.hm-tk-cell > .hm-tk-wkic { margin: 0 -2px 0 -1px; }
 .hm-tk-v { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
-/* up: the accent, lit; down: the alert color; flat or not live: quiet */
+/* up: the accent, lit; down: the loss tone (kit/theme.ts: the alert red, or on Red and Pink,
+   where the alert is Valkyrie's yellow, the pale text tone; the arrow and the minus carry it);
+   flat or not live: quiet. The ticker's own alerts (bot offline) take the loss tone too, so the
+   trade line never shows yellow on any scheme. */
+.hm-tk { --acc2: var(--loss, #ff1744); }
 .hm-tk-cell[data-dir='up'] .hm-tk-v { color: var(--fg); text-shadow: var(--text-glow); }
-.hm-tk-cell[data-dir='down'] .hm-tk-v { color: var(--acc2); }
+.hm-tk-cell[data-dir='down'] .hm-tk-v { color: var(--loss, var(--acc2)); }
+.hm-tk .vl-icon.hm-loss { color: var(--loss, var(--acc2)); }
 .hm-tk-cell[data-flat] .hm-tk-v { color: var(--dim); font-weight: 600; }
 /* the key of a cell: small caps, tracked */
 .hm-tk-k { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
@@ -119,6 +129,8 @@
 .hm-tk.hm-old .hm-tk-v { color: var(--dim); text-shadow: none; }
 /* narrow phones (under ~375 px): the label keeps its icon, the word goes */
 @container hm-tk (max-width: 349px) { .hm-tk-name { display: none; } }
+/* the narrowest: the 7-day arrow goes too (the minus still carries a loss) */
+@container hm-tk (max-width: 299px) { .hm-tk-wkic { display: none; } }
 /* room to spare (landscape, tablets, desktop): the 7-day percent too */
 @container hm-tk (min-width: 520px) {
   .hm-tk-pct { display: inline; }
@@ -164,10 +176,49 @@
 .hm-streak { font-size: 15px; font-weight: 700; color: var(--text); margin-right: 2px; }
 .hm-streak-on { color: var(--hot); text-shadow: var(--hot-glow); }
 
-/* Yesterday / Today, late at night: a compact glass pair in the head row */
-.hm-daypick { height: 30px; flex: 0 1 168px; min-width: 132px; margin: -4px 0; }
-.hm-daypick .vl-seg-cell { font-size: 11.5px; padding: 0 6px; }
-.hm-daypick .vl-seg-cell::after { inset: -7px 0; }
+/* the tracker's day: chevrons both ways around the day's name, in the head row */
+.hm-tracker { container: hm-tr / inline-size; }
+.hm-step { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 3px; min-width: 0; margin: -6px 0; }
+.hm-step-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 11%, transparent), color-mix(in srgb, var(--fg) 3%, transparent)), rgba(0, 0, 0, .9);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent);
+  transition: transform .12s var(--ease);
+}
+/* a 44 px target around the 28 px plate */
+.hm-step-btn::after { content: ''; position: absolute; inset: -8px -3px; }
+.hm-step-btn .hm-chev { color: var(--dim); }
+.hm-step-btn[data-pressed] { transform: scale(.92); box-shadow: inset 0 0 0 1px var(--plate-edge), var(--glow); }
+.hm-step-btn[data-pressed] .hm-chev { color: var(--fg); }
+.hm-step-day {
+  min-width: 78px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hm-step-day[data-today] { color: var(--fg); text-shadow: var(--text-glow); }
+/* phones: "Tracker" alone, so label, stepper and streak share one row */
+@container hm-tr (max-width: 440px) { .hm-tr-daily { display: none; } }
+@container hm-tr (max-width: 350px) {
+  .hm-streak-w { display: none; }
+  .hm-step-day { min-width: 70px; letter-spacing: .04em; }
+}
+
+/* away from today: the day shown, and the way back */
+.hm-tr-away { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; margin-top: -1px; }
+.hm-tr-away-k { min-width: 0; font-size: 11px; line-height: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-tr-back { flex: none; min-height: 24px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); }
 
 /* ---------- daily tracker: three plates, icon leading, lit when ticked (f005 "Custom") ---------- */
 
@@ -183,9 +234,10 @@
   align-items: flex-start;
   justify-content: center;
   gap: 1px;
-  min-height: 58px;
+  min-height: 46px;
   padding: 5px 6px 5px 9px;
   text-align: left;
+  -webkit-touch-callout: none;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--fg) 18%, transparent), color-mix(in srgb, var(--fg) 7%, transparent)),
     rgba(0, 0, 0, .96);
@@ -221,11 +273,9 @@
   text-overflow: ellipsis;
   transition: color .2s;
 }
-.hm-tick-state, .hm-tick-other {
+.hm-tick-state {
   max-width: 100%;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   transition: color .2s;
 }
 /* the state may take two lines: mono is wide, and "Shoulders · not yet" must not lose its end */
@@ -236,35 +286,100 @@
   -webkit-box-orient: vertical;
 }
 .hm-tick-state { font-size: 11px; line-height: 13px; color: var(--dim); }
-.hm-tick-other { font-size: 10px; line-height: 12px; color: var(--faint); }
-.hm-tick-other[data-open] { color: var(--dim); }
 .hm-tick-rest { color: var(--faint); }
 .hm-tick[data-on] { text-shadow: var(--plate-shadow); }
 .hm-tick[data-on] .hm-tick-name { color: var(--plate-ink); }
 .hm-tick[data-on] .hm-tick-state, .hm-tick[data-on] .hm-tick-rest { color: color-mix(in srgb, var(--plate-ink) 82%, transparent); }
-.hm-tick[data-on] .hm-tick-other { color: color-mix(in srgb, var(--plate-ink) 62%, transparent); }
 .hm-tick:disabled { opacity: .6; }
+
+/* the plate and its other-day line read as one column */
+.hm-tickw { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* a plate whose state wraps (Exercise's workout) makes the row taller: every plate fills it, so the day lines stay level */
+.hm-tickw > .hm-tick { flex: 1 0 auto; }
+/* Exercise held: a line fills along the plate's foot until the skip fires */
+.hm-tick[data-holding]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--fg);
+  box-shadow: 0 0 6px var(--fg);
+  transform-origin: 0 50%;
+  animation: hm-hold .52s linear both;
+  pointer-events: none;
+}
+@keyframes hm-hold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* the other day (yesterday, or today when another day is shown): a box and its state, a tap ticks it */
+.hm-tick-alt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px 0 9px;
+  font-size: 10.5px;
+  line-height: 12px;
+  text-align: left;
+  color: var(--faint);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), color-mix(in srgb, var(--fg) 2%, transparent)),
+    rgba(0, 0, 0, .96);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent);
+  transition: color .2s, background-color .12s;
+}
+/* a taller target below the line, never over the plate above it */
+.hm-tick-alt::after { content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: -7px; }
+.hm-tick-alt[data-open], .hm-tick-alt[data-on] { color: var(--dim); }
+.hm-tick-alt[data-pressed] { color: var(--fg); background-color: color-mix(in srgb, var(--fg) 10%, transparent); }
+.hm-tick-alt:disabled { opacity: .6; }
+.hm-tick-alt[data-busy]:disabled { opacity: 1; }
+.hm-tick-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 11px;
+  height: 11px;
+  color: var(--plate-ink);
+  border: 1px solid color-mix(in srgb, var(--fg) 45%, transparent);
+  transition: background-color .2s, border-color .2s;
+}
+.hm-tick-alt[data-on] .hm-tick-box {
+  background: color-mix(in srgb, var(--fg) var(--plate), transparent);
+  border-color: var(--plate-edge);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--fg) 50%, transparent);
+}
+.hm-tick-alt[data-busy] .hm-tick-box { animation: hm-busy .9s ease-in-out infinite alternate; }
 /* a write on its way to the server: full strength, a lit plate breathing until it lands */
 .hm-tick[data-busy]:disabled, .hm-plate[data-busy]:disabled, .hm-start[data-busy]:disabled { opacity: 1; }
 .hm-tick[data-on][data-busy]::before, .hm-plate[data-on][data-busy]::before { animation: hm-busy .9s ease-in-out infinite alternate; }
 @keyframes hm-busy { to { opacity: .55; } }
-html[data-motion='reduced'] .hm-tick[data-busy]::before, html[data-motion='reduced'] .hm-plate[data-busy]::before { animation: none; }
-@media (prefers-reduced-motion: reduce) { .hm-tick[data-busy]::before, .hm-plate[data-busy]::before { animation: none; } }
+html[data-motion='reduced'] .hm-tick[data-busy]::before, html[data-motion='reduced'] .hm-plate[data-busy]::before,
+html[data-motion='reduced'] .hm-tick-alt[data-busy] .hm-tick-box { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hm-tick[data-busy]::before, .hm-plate[data-busy]::before, .hm-tick-alt[data-busy] .hm-tick-box { animation: none; } }
 
-/* ---------- calendar: today first ---------- */
+/* ---------- calendar: today first; the head, each event and each day open the calendar sheet ---------- */
 
 .hm-quiet { display: block; margin: 0; font-size: 12.5px; line-height: 17px; color: var(--dim); }
-.hm-cal-note { margin: 0 0 3px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+.hm-cal-body { padding: 0 10px 9px; }
+.hm-cal-note { display: block; width: 100%; min-height: 28px; margin: 0 0 3px; font-size: 11.5px; line-height: 15px; text-align: left; color: var(--dim); }
+.hm-cal-note[data-pressed] { color: var(--fg); }
 .hm-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
 .hm-tag {
   max-width: 100%;
+  min-height: 24px;
   padding: 2px 7px;
   font-size: 11px;
   line-height: 14px;
   color: var(--text);
   border: 1px solid var(--line-strong);
 }
-.hm-next { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.hm-tag[data-pressed] { color: var(--fg); border-color: var(--fg); }
+.hm-next { display: flex; align-items: flex-start; gap: 12px; width: 100%; min-width: 0; min-height: 44px; padding: 2px 0; text-align: left; }
+.hm-next[data-pressed] .hm-next-title { color: var(--fg); text-shadow: var(--text-glow); }
 .hm-next-title {
   font-size: 18px;
   line-height: 22px;
@@ -279,7 +394,7 @@ html[data-motion='reduced'] .hm-tick[data-busy]::before, html[data-motion='reduc
 /* mono runs wide: one step smaller so a normal title fits on one line (long ones take two) */
 html:not([data-font='sans']) .hm-next-title { font-size: 16px; line-height: 20px; }
 html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px; }
-.hm-next-meta { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--dim); }
+.hm-next-meta { display: block; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--dim); }
 .hm-next-when {
   flex: none;
   display: flex;
@@ -295,7 +410,8 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 }
 .hm-next-when small { font-size: 11px; line-height: 14px; font-weight: 500; letter-spacing: 0; color: var(--dim); text-shadow: none; }
 .hm-evrows { display: block; margin-top: 8px; border-top: 1px solid var(--line); }
-.hm-evrow { min-height: 32px; font-size: 12.5px; }
+.hm-evrow { width: 100%; min-height: 32px; font-size: 12.5px; text-align: left; }
+.hm-evrow[data-pressed] { color: var(--fg); background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
 .hm-evrow[data-past] { opacity: .42; }
 .hm-evtime { flex: none; width: 62px; font-size: 11.5px; color: var(--dim); }
 .hm-evloc { font-size: 11px; line-height: 13px; color: var(--dim); }
@@ -310,7 +426,8 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   border: 1px solid color-mix(in srgb, var(--hot) 70%, transparent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--hot) 35%, transparent);
 }
-.hm-earlier { display: block; margin-top: 6px; font-size: 11px; color: var(--faint); }
+.hm-earlier { display: block; min-height: 24px; margin-top: 2px; font-size: 11px; text-align: left; color: var(--faint); }
+.hm-earlier[data-pressed] { color: var(--fg); }
 
 /* the next six days: day tag on a day's first row, time with the calendar's color as a 2 px edge, title */
 .hm-ahead { margin-top: 10px; border-top: 1px solid var(--line-strong); }
@@ -331,11 +448,15 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   min-width: 0;
-  min-height: 28px;
+  min-height: 30px;
   font-size: 12.5px;
   line-height: 16px;
+  text-align: left;
 }
+.hm-arow[data-pressed] { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
+.hm-arow[data-pressed] .hm-atitle { color: var(--fg); }
 .hm-aday { flex: none; width: 50px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .hm-atime {
   flex: none;
@@ -389,6 +510,19 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-start[data-ghost] { opacity: .55; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent); }
 .hm-starts[data-down] .hm-start:not([data-pressed]) { opacity: .5; }
 .hm-starts-empty { display: flex; align-items: center; min-height: 44px; }
+
+/* ---------- upload: Quick Start's plates, then the rows (kit/upload.css) ---------- */
+
+.hm-up-n { font-size: 15px; font-weight: 700; color: var(--ink-hi); margin-right: 1px; }
+.hm-up .up-list { margin-top: 1px; }
+/* desktop: a file dragged over the block lights the plate */
+.hm-up[data-drop] .hm-start {
+  color: var(--plate-ink);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) calc(var(--plate) + 8%), transparent), color-mix(in srgb, var(--fg) var(--plate), transparent));
+  box-shadow: var(--glow), inset 0 0 0 1px var(--plate-edge);
+}
+.hm-up[data-drop] .hm-start .vl-icon { color: var(--plate-ink); }
+.hm-up .hm-start[data-pressed] .vl-icon { color: var(--plate-ink); filter: var(--icon-glow); }
 
 /* ---------- glance blocks (lights, AI, media, systems): dense panels, their rows carry the padding ---------- */
 
@@ -605,8 +739,9 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   .hm-head-value, .hm-g-value, .hm-meter-head { font-size: 12.5px; }
   .hm-tick-name { font-size: 14px; line-height: 18px; }
   .hm-tick-state { font-size: 12px; line-height: 15px; }
-  .hm-tick-other { font-size: 11px; line-height: 13px; }
-  .hm-tick { min-height: 62px; padding-left: 11px; }
+  .hm-tick-alt { font-size: 11px; line-height: 13px; padding-left: 11px; min-height: 28px; }
+  .hm-tick { min-height: 50px; padding-left: 11px; }
+  .hm-step-day { font-size: 12px; min-width: 88px; }
   .hm-start, .hm-srow, .hm-evrow, .hm-quiet { font-size: 13.5px; }
   .hm-srow-meta, .hm-evtime, .hm-meter-note, .hm-g-foot, .hm-cal-note, .hm-g-acct { font-size: 11.5px; }
   .hm-next-meta, .hm-hrow-name, .hm-media-cap { font-size: 12.5px; }
@@ -627,8 +762,8 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-head[data-mid] .hm-head-value { flex: none; }
 @media (max-width: 379px) {
   .hm-head { gap: 8px; }
-  .hm-daypick { min-width: 116px; }
   .hm-tick { padding: 5px 4px 5px 7px; }
+  .hm-tick-alt { padding: 0 4px 0 7px; gap: 5px; }
   .hm-tick-top { gap: 4px; }
   .hm-tick-ic { width: 14px; height: 14px; }
   .hm-tick-name { font-size: 12px; }

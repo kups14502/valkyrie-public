@@ -39,9 +39,39 @@ self.addEventListener('push', function (event) {
   event.waitUntil(self.registration.showNotification(title, options))
 })
 
+// The v2 screen (/m/*) an alert belongs on. The server names classic pages
+// (backend/src/alerts.ts, routes/push.ts, routes/mcp.ts) and the tag says what
+// the alert is about; a worker cannot see which UI the device uses, so the tap
+// carries both: the classic URL, plus ?v2=<this>. The page decides before its
+// router starts (src/main.tsx): a device in v2 opens the v2 screen, a device in
+// the classic UI drops the hint. null: the app's own mapping of the classic URL
+// is right (lib/deviceMode classicToV2), or v2 has no screen for it (the Vault).
+function v2Target(url, tag, body) {
+  var path = ''
+  try { path = new URL(url, self.location.origin).pathname } catch (e) { return null }
+  // "Session waiting" / "Session complete": the body is the session's name on
+  // the board, never its tmux pane, so v2 looks the pane up (/m/ai/open)
+  if (/^session-/.test(tag) && body) return '/m/ai/open?label=' + encodeURIComponent(body)
+  // the AI quota and a dead or restored sign-in: AI > Usage holds every account
+  if (tag === 'claude-quota' || /^claude-signin-/.test(tag)) return '/m/ai/usage'
+  // odin's disk: System > Hosts shows each machine's disk
+  if (tag === 'disk') return '/m/system/hosts'
+  // a project alert: AI > Projects opens that project's detail
+  var proj = /^\/projects\/([a-z0-9][a-z0-9-]{0,31})$/.exec(path)
+  if (proj) return '/m/ai/projects?p=' + proj[1]
+  return null
+}
+
+function withV2(url, v2) {
+  if (!v2) return url
+  return url + (url.indexOf('?') === -1 ? '?' : '&') + 'v2=' + encodeURIComponent(v2)
+}
+
 self.addEventListener('notificationclick', function (event) {
   event.notification.close()
-  var target = (event.notification.data && event.notification.data.url) || '/sessions'
+  var data = event.notification.data || {}
+  var url = data.url || '/sessions'
+  var target = withV2(url, v2Target(url, event.notification.tag || '', event.notification.body || ''))
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clients) {

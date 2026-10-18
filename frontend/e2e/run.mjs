@@ -24,6 +24,13 @@ import { navigationTests } from './tests/navigation.mjs'
 import { writeTests } from './tests/writes.mjs'
 import { freshnessTests } from './tests/freshness.mjs'
 import { schemeTests } from './tests/schemes.mjs'
+import { uploadTests } from './tests/upload.mjs'
+import { terminalTests } from './tests/terminal.mjs'
+import { gapTests } from './tests/gaps.mjs'
+import { accountTests } from './tests/accounts.mjs'
+import { desktopTests } from './tests/desktop.mjs'
+import { parityTests } from './tests/parity.mjs'
+import { killLeftovers } from './lib/odin.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -45,7 +52,7 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- the tests ----------
 
-const all = [...freshnessTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...schemeTests()]
+const all = [...freshnessTests(), ...terminalTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests()]
 const wanted = opt.only ? opt.only.split(',').map((s) => s.trim()).filter(Boolean) : []
 const tests = wanted.length ? all.filter((t) => wanted.some((w) => t.name.includes(w) || t.group === w)) : all
 
@@ -136,6 +143,8 @@ async function main() {
     },
   })
   browser.close()
+  // a terminal test that timed out may still hold its throwaway pane
+  await killLeftovers((m) => console.log(m))
 
   // ---------- the table and the report ----------
   const failed = results.filter((r) => r.status === 'fail')
@@ -166,7 +175,14 @@ async function main() {
   process.exit(failed.length ? 1 : 0)
 }
 
-main().catch((e) => {
+// Ctrl+C: no throwaway odin pane outlives the run
+process.on('SIGINT', () => {
+  console.log('interrupted: killing any throwaway test pane first')
+  void killLeftovers((m) => console.log(m)).finally(() => process.exit(130))
+})
+
+main().catch(async (e) => {
   console.error('the suite itself failed:', e.stack ?? e.message)
+  await killLeftovers((m) => console.log(m))
   process.exit(3)
 })

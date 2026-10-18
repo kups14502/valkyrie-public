@@ -6,7 +6,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
-import { resolveProfile } from './lib/deviceMode'
+import { classicToV2, getTabUi, resolveProfile, safeV2Path, tabWantsV2 } from './lib/deviceMode'
 import { isEmbedded } from './lib/embed'
 
 if (isTauri()) {
@@ -42,18 +42,44 @@ if (isTauri()) {
   })
 }
 
-// The device profile decides the landing screen, so rewrite the URL
-// URL before the router reads it. Done here, not in a React effect, so it
-// happens exactly once per page load and can't refire when the gate remounts.
+// The device profile decides the landing screen and the UI, so rewrite the URL
+// before the router reads it. Done here, not in a React effect, so it happens
+// exactly once per page load and can't refire when the gate remounts. A page
+// load is the only entry: a link v2 follows to a classic page (Settings > Slop,
+// "All sessions (classic)") is an in-app navigation and is never rewritten.
+//
+// A tab that wants v2 (it was in v2, or it is fresh on a desktop, phone or iPad
+// profile) lands on the v2 screen for the classic URL it loaded: the start URL,
+// a bookmark, an alert tap. An alert tap names its v2 screen itself (?v2=, see
+// public/push-sw.js). ?classic=1, or a tab already in the classic UI, keeps the
+// classic page; a classic URL v2 has no screen for stays classic too.
 //
 // Not when the URL names its page with ?go= (the VR workspace loads "/?go=/x"
 // into an iframe and RootRedirect in App.tsx routes from there), and never
 // inside an iframe at all: the embedder chose the page, and a vr profile would
 // otherwise send the embedded copy to /vr, nesting the workspace in itself.
-const startHome = resolveProfile().home
-const goAsked = new URLSearchParams(location.search).has('go')
-if (!isEmbedded && !goAsked && startHome !== '/dashboard' && (location.pathname === '/' || location.pathname === '/dashboard')) {
-  try { history.replaceState(null, '', startHome) } catch { /* ignore */ }
+if (!isEmbedded) {
+  const params = new URLSearchParams(location.search)
+  const handedV2 = safeV2Path(params.get('v2'))
+  const classicAsked = params.get('classic') === '1' || getTabUi() === 'classic'
+  const onV2 = location.pathname === '/m' || location.pathname.startsWith('/m/')
+  let to: string | null = null
+  if (!params.has('go') && !classicAsked && !onV2) {
+    if (tabWantsV2()) to = handedV2 ?? classicToV2(location.pathname, location.search)
+    else if (location.pathname === '/' || location.pathname === '/dashboard') {
+      const home = resolveProfile().home
+      if (home !== '/dashboard' && !home.startsWith('/m/')) to = home
+    }
+  }
+  // ?v2= means nothing to a classic page: drop it so the classic URL stays clean
+  if (!to && params.has('v2')) {
+    params.delete('v2')
+    const rest = params.toString()
+    to = `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`
+  }
+  if (to) {
+    try { history.replaceState(null, '', to) } catch { /* ignore */ }
+  }
 }
 
 // Settle the API base before the first request. In the desktop app this probes

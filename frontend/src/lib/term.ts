@@ -1,5 +1,5 @@
 import type { Terminal as XTerm } from '@xterm/xterm'
-import { api } from './api'
+import { PROJECT_BACK_RE, api } from './api'
 import { getToken } from './auth'
 import { copyText } from './clipboard'
 
@@ -13,6 +13,13 @@ export const TERM_FONT_FAMILY =
 
 // Mirrors SESSION_NAME_RE in backend/src/terminal/tmux.ts.
 export const TERM_NAME_RE = /^vk-[0-9a-f]{10}$/
+
+// The v2 terminal (v2/screens/Term.tsx) for one session. A project's path
+// rides along as ?back=, as it does on the classic page.
+export function v2TermPath(name: string, back?: string | null): string {
+  const p = `/m/ai/term/${encodeURIComponent(name)}`
+  return back && PROJECT_BACK_RE.test(back) ? `${p}?back=${encodeURIComponent(back)}` : p
+}
 
 // THE UI ZOOM AND XTERM DISAGREE ABOUT WHAT A PIXEL IS.
 //
