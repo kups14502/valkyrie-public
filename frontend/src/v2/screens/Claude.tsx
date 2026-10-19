@@ -11,7 +11,7 @@ import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
 import { Icon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
 import { canDetach, openDetached } from '../kit/windows'
 import {
-  ago, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useTick, useUsage,
+  ago, onAccount, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
   type Live, type ProjectVM, type SessionIndex, type SessionVM, type TargetVM,
 } from '../kit/data'
 import { animateSpring, useReducedMotion } from '../kit/motion'
@@ -1683,27 +1683,30 @@ const usageHigh = (v: number | null | undefined) => v != null && v >= 85
  */
 function UsageLine({ now, onOpen }: { now: number; onOpen: () => void }) {
   const usage = useUsage()
+  const sw = useSwitchStatus()
   const u = usage.data
+  // the account thor runs on now, not the hottest; hottest is the fallback
+  const on = onAccount(u, sw.data, 'thor')
   const dead = (u?.accounts ?? []).filter((a) => a.dead)
-  const high = usageHigh(u?.five) || usageHigh(u?.week)
-  const fiveAt = resetAt(u?.fiveResetsAt ?? null, now)
-  const weekAt = resetAt(u?.weekResetsAt ?? null, now)
+  const high = usageHigh(on.five) || usageHigh(on.week)
+  const fiveAt = resetAt(on.fiveResetsAt, now)
+  const weekAt = resetAt(on.weekResetsAt, now)
   return (
     <Press
       className="vc-week vl-panel vl-build"
       style={iv(2)}
       onPress={onOpen}
-      aria-label={`AI usage${u ? `, ${u.label ?? 'no account'}: 5 hours ${u.five ?? 'unknown'}%, week ${u.week ?? 'unknown'}%` : ''}. Open Usage`}
+      aria-label={`AI usage${u ? `, ${on.label ?? 'no account'}: 5 hours ${on.five ?? 'unknown'}%, week ${on.week ?? 'unknown'}%` : ''}. Open Usage`}
     >
       <span className="vc-week-head">
         <Icon name="gauge" size={14} tone={high ? 'acc2' : 'dim'} glow={high} />
         <span className="vc-week-label">Usage</span>
-        <span className="vc-acct">{u?.label ?? '--'}</span>
+        <span className="vc-acct">{on.label ?? '--'}{on.source === 'hottest' && on.label ? <i className="vc-acct-hot"> busiest</i> : null}</span>
         <Icon name="go" size={12} tone="dim" className="vc-week-go" />
       </span>
       <span className="vc-mini">
-        <MiniMeter label="5h" value={u?.five ?? null} ticks={5} />
-        <MiniMeter label="Week" value={u?.week ?? null} ticks={7} />
+        <MiniMeter label="5h" value={on.five} ticks={5} />
+        <MiniMeter label="Week" value={on.week} ticks={7} />
       </span>
       <span className="vc-meter-sub">
         {fiveAt && <span>5h resets {fiveAt}</span>}
@@ -1735,28 +1738,35 @@ function MiniMeter({ label, value, ticks }: { label: string; value: number | nul
 // ---------- usage: every account's 5h and week windows ----------
 
 /**
- * AI > Usage: the hottest account's 5-hour and week windows as two big
- * meters with their resets, then every account, hottest first, signed-out
- * ones flagged, each with its own windows and resets. Reads only.
+ * AI > Usage: the account thor is on now (from the switcher), its 5-hour and
+ * week windows as two big meters with their resets, then every account, hottest
+ * first, signed-out ones flagged, each with its own windows, resets and sign-in
+ * address (with a copy button). The headline falls back to the hottest account
+ * when the switcher is not installed or has not taken thor over. Reads only.
  */
 function UsageView({ now }: { now: number }) {
   const usage = useUsage()
+  const sw = useSwitchStatus()
   const u = usage.data
+  // the headline is the account thor runs on now; the hottest account is the fallback
+  const on = onAccount(u, sw.data, 'thor')
+  // the account the headline numbers belong to, so its row reads as the active one
+  const onId = on.source === 'host' ? sw.data?.hosts.thor?.active?.id ?? null : u?.accounts.find((a) => !a.dead)?.id ?? null
   const live = u?.accounts.filter((a) => !a.dead).length ?? 0
   const dead = (u?.accounts.length ?? 0) - live
   return (
     <div className="vc-usage">
-      <section className="vc-u-top vl-panel vl-build" style={iv(0)} aria-label="Hottest account">
+      <section className="vc-u-top vl-panel vl-build" style={iv(0)} aria-label={on.source === 'host' ? 'Account thor is on' : 'Busiest account'}>
         <header className="vc-u-head">
-          <Icon name="gauge" size={15} tone={usageHigh(u?.five) || usageHigh(u?.week) ? 'acc2' : 'fg'} glow={!!u} />
-          <span className="vc-u-label">Usage</span>
-          <span className="vc-acct">{u ? u.label ?? 'no live account' : ''}</span>
+          <Icon name="gauge" size={15} tone={usageHigh(on.five) || usageHigh(on.week) ? 'acc2' : 'fg'} glow={!!u} />
+          <span className="vc-u-label">{on.source === 'host' ? 'thor is on' : 'Usage'}</span>
+          <span className="vc-acct">{u ? on.label ?? 'no live account' : ''}{on.source === 'hottest' && on.label ? <i className="vc-acct-hot"> busiest{on.note ? `, ${on.note}` : ''}</i> : null}</span>
           <Fresh q={usage} label="usage" now={now} />
         </header>
         {u ? (
           <div className="vc-u-big">
-            <BigMeter label="5 hours" value={u.five} ticks={5} reset={resetAt(u.fiveResetsAt, now)} />
-            <BigMeter label="Week" value={u.week} ticks={7} reset={resetAt(u.weekResetsAt, now)} />
+            <BigMeter label="5 hours" value={on.five} ticks={5} reset={resetAt(on.fiveResetsAt, now)} />
+            <BigMeter label="Week" value={on.week} ticks={7} reset={resetAt(on.weekResetsAt, now)} />
           </div>
         ) : (
           <div className="vc-u-empty" data-failed={usage.failed || undefined}>
@@ -1781,9 +1791,10 @@ function UsageView({ now }: { now: number }) {
             const f = resetAt(a.fiveResetsAt, now)
             const w = resetAt(a.weekResetsAt, now)
             return (
-              <div key={a.id} className="vc-u-row vl-build" style={iv(2 + k)} data-dead={a.dead || undefined} data-top={(!a.dead && k === 0) || undefined}>
+              <div key={a.id} className="vc-u-row vl-build" style={iv(2 + k)} data-dead={a.dead || undefined} data-top={(!a.dead && a.id === onId) || undefined}>
                 <span className="vc-u-name">
                   <span className="vl-ellipsis">{a.label}</span>
+                  {a.email ? <AcctEmail email={a.email} /> : null}
                   {a.dead ? <em>Sign-in expired</em> : (f || w) ? <em className="vl-ellipsis">{[f && `5h ${f}`, w && `week ${w}`].filter(Boolean).join(' · ')}</em> : null}
                 </span>
                 {a.dead ? (
@@ -1822,6 +1833,22 @@ function UsageCell({ value, ticks }: { value: number | null; ticks: number }) {
     <span className="vc-u-cell">
       <b data-high={high || undefined}>{value ?? '--'}%</b>
       <Bar value={value} ticks={ticks} tone={high ? 'acc2' : 'fg'} />
+    </span>
+  )
+}
+
+/** An account's sign-in address with a copy button. Copies with the clipboard API and the
+ *  execCommand fallback (plain http on the phone and WebView2 have no secure clipboard). */
+function AcctEmail({ email }: { email: string }) {
+  const copy = () => {
+    void copyText(email).then((ok) => toast(ok ? `Copied ${email}` : `Copy failed. ${email}`))
+  }
+  return (
+    <span className="vc-u-email">
+      <span className="vl-ellipsis">{email}</span>
+      <Press className="vc-u-copy vl-hit" onPress={copy} aria-label={`Copy ${email}`} title="Copy email">
+        <Icon name="copy" size={12} tone="dim" />
+      </Press>
     </span>
   )
 }

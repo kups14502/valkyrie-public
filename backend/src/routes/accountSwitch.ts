@@ -1,6 +1,6 @@
 import { Router, type Response } from 'express'
 import {
-  getStatus, pauseHostByHand, readConfig, readLog, reportLimit, resumeHost, setKill, switchNow, updateConfig,
+  continueCheck, getStatus, pauseHostByHand, readConfig, readLog, reportContinued, reportLimit, resumeHost, setKill, switchNow, updateConfig,
 } from '../lib/accountSwitch.js'
 import { ACCOUNT_ID_RE, HOSTS, type HostName } from '../lib/accountSwitchCore.js'
 
@@ -23,6 +23,11 @@ import { ACCOUNT_ID_RE, HOSTS, type HostName } from '../lib/accountSwitchCore.js
 //   POST /api/account-switch/limit-event[?host=thor|odin]
 //                                          the StopFailure hook payload (host may also
 //                                          be in the body) -> { accepted, limit, why }
+//   GET  /api/account-switch/continue-check?host=thor|odin
+//                                          thor's continue runner: may a session stopped
+//                                          on a limit be continued now -> { ok, why, active, text }
+//   POST /api/account-switch/continued?host=thor|odin  { count: 1-50 }
+//                                          the runner continued that many sessions -> { ok }
 //
 // Status:
 //   { enabled, dryRun, killed, config: SwitchConfig,
@@ -136,6 +141,30 @@ router.post('/account-switch/limit-event', (req, res) => {
   const sessionId = typeof b.session_id === 'string' ? b.session_id : undefined
   const error = typeof b.error === 'string' ? b.error : undefined
   res.json(reportLimit(host, { message, sessionId, error }))
+})
+
+router.get('/account-switch/continue-check', (req, res) => {
+  const host = asHost(req.query.host)
+  if (!host) return res.status(400).json({ error: 'host must be thor or odin' })
+  try {
+    res.json(continueCheck(host))
+  } catch (err) {
+    fail(res, err)
+  }
+})
+
+router.post('/account-switch/continued', (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const host = asHost(req.query.host) ?? asHost(b.host)
+  if (!host) return res.status(400).json({ error: 'host must be thor or odin' })
+  const count = b.count
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ error: 'count must be a whole number from 1 to 50' })
+  try {
+    reportContinued(host, count)
+    res.json({ ok: true })
+  } catch (err) {
+    fail(res, err)
+  }
 })
 
 export default router

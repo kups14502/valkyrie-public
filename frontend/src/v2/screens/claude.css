@@ -1237,6 +1237,14 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
 .vc-u-cols > span + span { text-align: right; }
 .vc-u-name { display: flex; flex-direction: column; min-width: 0; line-height: 16px; color: var(--text); }
 .vc-u-name em { font-style: normal; font-size: 10.5px; line-height: 13px; color: var(--dim); }
+/* the sign-in address under an account, with a copy button; kept on one compact line */
+.vc-u-email { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 10.5px; line-height: 14px; color: var(--dim); }
+.vc-u-email > span { min-width: 0; }
+.vc-u-copy { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin: -3px 0; border-radius: 5px; color: var(--dim); }
+.vc-u-copy[data-pressed] { background: color-mix(in srgb, var(--fg) 14%, transparent); }
+.vc-u-copy:hover .vl-icon { color: var(--fg); }
+/* "busiest" tag when the headline falls back to the hottest account */
+.vc-acct-hot { font-style: normal; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
 /* the account the big meters show: its name in the accent */
 .vc-u-row[data-top] .vc-u-name > span { color: var(--fg); text-shadow: var(--text-glow); }
 .vc-u-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

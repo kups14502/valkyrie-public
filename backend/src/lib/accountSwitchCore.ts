@@ -302,7 +302,7 @@ export type HostView = {
   switchesToday: number
 }
 
-export type LimitKind = 'session' | 'weekly' | 'opus' | 'sonnet' | 'generic'
+export type LimitKind = 'session' | 'weekly' | 'opus' | 'sonnet' | 'fable' | 'generic'
 export type LimitEvent = { at: number; limit: LimitKind }
 
 export type Decision =
@@ -378,18 +378,21 @@ export function decide(i: DecideInput): Decision {
 
 // ---------------------------------------------------------- limit text ----
 
-// Claude Code's own line, `You've hit your ${name}` (2.1.280/2.1.283), where
+// Claude Code's own line, `You've hit your ${name}` (2.1.280 to 2.1.303), where
 // name is "session limit" (five_hour), "weekly limit" (seven_day), "Opus
-// limit", "Sonnet limit", or plain "limit" in headless runs. Another account
-// fixes every one of those. "usage credit limit", "fast limit" and "team's
-// shared budget" are not account limits, so they never match.
-const LIMIT_RE = /You[’']ve hit your (?:(session|weekly|Opus|Sonnet) )?limit\b/
+// limit", "Sonnet limit", "Fable limit" (seven_day_overage_included), or plain
+// "limit" in headless runs; some paths say "You've reached your" instead.
+// Another account fixes every one of those. "usage credit limit", "fast limit"
+// and "team's shared budget" are not account limits, so they never match.
+// Continue-Stopped.ps1 on thor carries a copy of this and the pane patterns
+// below; scripts/fixtures/pane-screens.json keeps the two in step.
+const LIMIT_RE = /You[’']ve (?:hit|reached) your (?:(session|weekly|Opus|Sonnet|Fable) )?limit\b/
 
 export function classifyLimitText(text: string | null | undefined): LimitKind | null {
   const m = LIMIT_RE.exec(String(text ?? ''))
   if (!m) return null
   const k = (m[1] ?? '').toLowerCase()
-  return k === 'session' || k === 'weekly' || k === 'opus' || k === 'sonnet' ? k : 'generic'
+  return k === 'session' || k === 'weekly' || k === 'opus' || k === 'sonnet' || k === 'fable' ? k : 'generic'
 }
 
 // --------------------------------------------------------------- panes ----
@@ -406,7 +409,12 @@ export type PaneVerdict = {
 const RULE_RE = /^\s*─{8,}\s*$/
 const PROMPT_RE = /^\s*[❯>](?:\s(.*))?$/
 const BOX_PROMPT_RE = /^\s*│\s*>(?:\s(.*?))?\s*│\s*$/
-const ARMED_RE = /Usage limit reached · continuing automatically/
+// The armed banner under the input box: one line on 2.1.283 ("Usage limit
+// reached · continuing automatically at 7:49pm"), two on 2.1.303 ("Usage limit
+// reached · limit resets 2:30pm", then "Continuing automatically at 2:30pm").
+// "when it resets" and "continuing shortly" are the other endings. The first
+// 2.1.303 line alone does not say the wait is armed, so it does not count.
+const ARMED_RE = /Usage limit reached · continuing (?:automatically|shortly)|^\s*Continuing (?:automatically|shortly)\b/
 // Lines that can sit between the limit message and the prompt: the wrapped
 // rest of the message, the spinner's summary, the armed banner, and the
 // right-aligned hints Claude Code prints over the input box ("Ctrl+Y to paste
@@ -632,7 +640,13 @@ export function switchMessage(n: SwitchNote, now: number): string {
   const from = n.from ? ` from ${n.from.label} (${quotaBit(n.from.quota, now)})` : ''
   const parts = [`${head}${from} to ${n.to.label} (${quotaBit(n.to.quota, now)}). Reason: ${n.reason}.`]
   if (!n.dryRun && n.nudged > 0) parts.push(`Continued ${n.nudged} stopped pane${n.nudged === 1 ? '' : 's'}.`)
-  if (!n.dryRun && n.outside > 0) parts.push(`${n.outside} session${n.outside === 1 ? '' : 's'} outside Valkyrie hit the limit and need a manual continue.`)
+  // thor's own terminals are continued on thor (Continue-Stopped.ps1, started by the limit hook)
+  if (!n.dryRun && n.outside > 0) {
+    const s = n.outside === 1 ? '' : 's'
+    parts.push(n.host === 'thor'
+      ? `${n.outside} session${s} outside Valkyrie hit the limit; thor continues ${n.outside === 1 ? 'it' : 'each one'} once its prompt is empty.`
+      : `${n.outside} session${s} outside Valkyrie hit the limit and need${n.outside === 1 ? 's' : ''} a manual continue.`)
+  }
   return parts.join(' ')
 }
 

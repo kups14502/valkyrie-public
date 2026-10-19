@@ -6,8 +6,11 @@
  *
  * Pane screens below are real captures from Claude Code 2.1.283 in a throwaway
  * tmux pane against a loopback fake API (dummy tokens), trailing blanks cut.
+ * scripts/fixtures/pane-screens.json adds 2.1.303 captures from the same rig
+ * and the Windows console layouts thor's Continue-Stopped.ps1 reads.
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   DEFAULT_CONFIG, activeTrigger, buildLiveCredentials, classifyLimitText, countRecent, decide, effectiveSession,
   eligibility, exhaustedMessage, fmtET, normalizeConfig, ownerOf, paneLimitState, parsePoolToken,
@@ -249,6 +252,18 @@ test('limit text: account limits match, other limits do not', () => {
   assert.equal(classifyLimitText('Context limit reached'), null)
   assert.equal(classifyLimitText(undefined), null)
 })
+test('limit text: the Fable limit and the "reached" wording of 2.1.280 to 2.1.303', () => {
+  assert.equal(classifyLimitText("You've hit your Fable limit · resets Wed 9am"), 'fable')
+  assert.equal(classifyLimitText("You've reached your Fable limit."), 'fable')
+  assert.equal(classifyLimitText("You've reached your session limit"), 'session')
+  assert.equal(classifyLimitText("You've reached your usage limit"), null)
+  assert.equal(classifyLimitText("You've reached your monthly spend limit"), null)
+})
+test('decide: a Fable limit is model-wide like Opus, so a reading with room does not cancel it', () => {
+  const accounts = [acct('a', q(30), {}, NOW - 1000), acct('b', q(5))]
+  const d = decide({ cfg: cfg(), killed: false, host: host({ lastSwitchAt: NOW - H }), accounts, now: NOW, event: { at: NOW - 5000, limit: 'fable' } })
+  assert.equal(d.action, 'switch')
+})
 
 // ---------------------------------------------------------------- panes ----
 
@@ -362,6 +377,31 @@ test('pane: non-account limits and empty screens are left alone', () => {
 })
 test('pane: CRLF screens read the same', () => assert.equal(paneLimitState(ARMED.replace(/\n/g, '\r\n')).nudge, true))
 
+// The shared screens: recorded 2.1.303 captures, Windows console layouts, and the ones above. thor's
+// Continue-Stopped.ps1 is held to the same file by Test-ContinueStopped.ps1.
+const SHARED = JSON.parse(readFileSync(new URL('./fixtures/pane-screens.json', import.meta.url), 'utf8')) as {
+  screens: Array<{ name: string; screen: string; expect: { nudge: boolean; limit: string | null; armed: boolean; promptFound: boolean; promptEmpty: boolean } }>
+}
+test('pane: the shared fixture file has the recorded 2.1.303 and console screens', () => {
+  assert.ok(SHARED.screens.length >= 20)
+  assert.ok(SHARED.screens.some((s) => s.name === 'rec-2.1.303-fullscreen-armed'))
+  assert.ok(SHARED.screens.some((s) => s.name.startsWith('win-console-')))
+})
+for (const s of SHARED.screens) {
+  test(`pane (shared): ${s.name}`, () => {
+    const v = paneLimitState(s.screen)
+    assert.deepEqual({ nudge: v.nudge, limit: v.limit, armed: v.armed, promptFound: v.promptFound, promptEmpty: v.promptEmpty }, s.expect, v.why)
+  })
+}
+test('pane: the 2.1.303 two-line banner under the prompt reads as armed', () => {
+  const armed = SHARED.screens.find((s) => s.name === 'rec-2.1.303-fullscreen-armed')!.screen
+  // the limit line scrolled off: only the banner under the input box is left to go on
+  const cut = armed.split('\n').filter((l) => !/hit your session limit/.test(l)).join('\n')
+  const v = paneLimitState(cut)
+  assert.equal(v.armed, true)
+  assert.equal(v.nudge, true)
+})
+
 // ------------------------------------------------------------- headers ----
 
 const hdr = (o: Record<string, string>) => (n: string) => o[n] ?? null
@@ -452,7 +492,9 @@ test('messages: plain, ET times, no em dash', () => {
   }, NOW)
   assert.match(sw, /^Switched thor from Seat One \(work\) \(session 98%, weekly 20%, resets 6:00 PM ET\) to Seat Two \(session 4%, weekly 31%/)
   assert.match(sw, /Continued 2 stopped panes\./)
-  assert.match(sw, /1 session outside Valkyrie hit the limit/)
+  assert.match(sw, /1 session outside Valkyrie hit the limit; thor continues it once its prompt is empty\./)
+  const odinOut = switchMessage({ host: 'odin', from: null, to: { label: 'B', quota: null }, reason: 'x', dryRun: false, nudged: 0, outside: 2 }, NOW)
+  assert.match(odinOut, /2 sessions outside Valkyrie hit the limit and need a manual continue\./)
   const dry = switchMessage({ host: 'odin', from: null, to: { label: 'B', quota: null }, reason: 'x', dryRun: true, nudged: 3, outside: 2 }, NOW)
   assert.match(dry, /^Dry run: would switch odin to B \(no reading\)/)
   assert.doesNotMatch(dry, /Continued/)

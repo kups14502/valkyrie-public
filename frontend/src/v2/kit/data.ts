@@ -204,7 +204,7 @@ export type UsageVM = {
   weekCost: number
   burnPerHour: number | null
   /** every account, hottest first (dead sign-ins last) */
-  accounts: { id: string; label: string; five: number | null; week: number | null; dead: boolean; fiveResetsAt: string | null; weekResetsAt: string | null }[]
+  accounts: { id: string; label: string; email: string | null; five: number | null; week: number | null; dead: boolean; fiveResetsAt: string | null; weekResetsAt: string | null }[]
 }
 
 export function useUsage(): Live<UsageVM> {
@@ -230,6 +230,7 @@ export function useUsage(): Live<UsageVM> {
       accounts: (u.aiClients ?? []).map((c) => ({
         id: c.id,
         label: c.label,
+        email: c.email || null,
         five: c.quota ? Math.round(c.quota.sessionPct) : null,
         week: c.quota ? Math.round(c.quota.weeklyPct) : null,
         dead: !!c.authError,
@@ -238,6 +239,72 @@ export function useUsage(): Live<UsageVM> {
       })).sort((a, b) => Number(a.dead) - Number(b.dead) || Math.max(b.five ?? -1, b.week ?? -1) - Math.max(a.five ?? -1, a.week ?? -1)),
     }
   }, 30_000)
+}
+
+// ---------- which account each host is on (the account switcher) ----------
+
+// GET /api/account-switch, cut to what the headline needs: the account each
+// host's terminals actually use now. The dashboard and the usage headline name
+// THIS, not the hottest account, so "the account thor is on" is never a guess.
+// 404 (the switcher is not deployed on odin) reads as "not installed".
+export type SwitchStatusVM = {
+  installed: boolean
+  hosts: Record<'thor' | 'odin', { active: { id: string; label: string } | null; adopted: boolean } | null>
+}
+
+const NO_SWITCH: SwitchStatusVM = { installed: false, hosts: { thor: null, odin: null } }
+
+export function useSwitchStatus(): Live<SwitchStatusVM> {
+  return useLive<SwitchStatusVM>('switch-status', async () => {
+    try {
+      const d = (await api.get('/account-switch')).data as { hosts?: Array<{ host?: string; active?: { id?: string; label?: string } | null; adopted?: boolean }> }
+      if (!Array.isArray(d?.hosts)) return NO_SWITCH
+      const pick = (h: 'thor' | 'odin') => {
+        const row = d.hosts!.find((x) => x.host === h)
+        if (!row) return null
+        const id = row.active?.id
+        return { active: id ? { id, label: row.active?.label ?? id } : null, adopted: row.adopted === true }
+      }
+      return { installed: true, hosts: { thor: pick('thor'), odin: pick('odin') } }
+    } catch (e) {
+      if ((e as { response?: { status?: number } } | null)?.response?.status === 404) return NO_SWITCH
+      throw e
+    }
+  }, 15_000, { revive: (c) => (c && typeof c === 'object' && 'hosts' in (c as object) ? (c as SwitchStatusVM) : undefined) })
+}
+
+/** The account a host's terminals use now, with its windows. Falls back to the hottest account (the
+ *  one being burned) when the switcher is not installed or has not taken the host over, and says so. */
+export type OnAccount = {
+  label: string | null
+  five: number | null
+  week: number | null
+  fiveResetsAt: string | null
+  weekResetsAt: string | null
+  /** 'host' = the account this host is on; 'hottest' = the fallback */
+  source: 'host' | 'hottest'
+  /** why the fallback is showing, null when source is 'host' */
+  note: string | null
+}
+
+export function onAccount(u: UsageVM | undefined, sw: SwitchStatusVM | undefined, host: 'thor' | 'odin' = 'thor'): OnAccount {
+  const hottest: OnAccount = {
+    label: u?.label ?? null, five: u?.five ?? null, week: u?.week ?? null,
+    fiveResetsAt: u?.fiveResetsAt ?? null, weekResetsAt: u?.weekResetsAt ?? null, source: 'hottest', note: null,
+  }
+  if (!sw?.installed) return hottest
+  const h = sw.hosts[host]
+  if (!h || !h.active) return { ...hottest, note: `${host} not on the switcher` }
+  const acct = u?.accounts.find((a) => a.id === h.active!.id)
+  return {
+    label: h.active.label,
+    five: acct?.five ?? null,
+    week: acct?.week ?? null,
+    fiveResetsAt: acct?.fiveResetsAt ?? null,
+    weekResetsAt: acct?.weekResetsAt ?? null,
+    source: 'host',
+    note: null,
+  }
 }
 
 // ---------- Claude sessions ----------

@@ -22,8 +22,12 @@ const exec = promisify(execFile)
 // The Claude account switcher. When the account a host's terminals use gets
 // near its 5-hour limit (or a session hits it), it writes another account's
 // pool token into that host's one live credential file, then types a
-// continue into the Valkyrie panes that stopped on the limit. The rules are
-// in accountSwitchCore.ts; this file is the I/O around them.
+// continue into the Valkyrie panes that stopped on the limit. Sessions in
+// thor's own Windows Terminal tabs are not Valkyrie panes (no tmux here can
+// see them): thor's StopFailure hook queues each one, and thor's
+// Continue-Stopped.ps1 types the continue there once continueCheck() says the
+// active account has room. The rules are in accountSwitchCore.ts; this file
+// is the I/O around them.
 //
 // Everything lives in ~/.config/claude-switch (dir 700, files 600, outside
 // every repo):
@@ -786,6 +790,27 @@ async function tickLocked(force: boolean): Promise<void> {
 
 const lastSweep = new Map<HostName, number>()
 
+type Gate = { ok: boolean; why: string }
+
+// Whether a stopped session on host h may be typed into now: the switcher
+// holds the host's sign-in, nothing is off, paused or in dry run, and the
+// decision for the host found its active account with room (or the limit
+// event older than the last switch). The Valkyrie pane sweep below and thor's
+// own continue runner (GET /continue-check) both go through this, so the two
+// can never disagree about when a continue is safe.
+function continueGate(s: State, h: HostName, d: Decision, cfg: SwitchConfig, isKilled: boolean): Gate {
+  const hs = s.hosts[h]
+  if (isKilled) return { ok: false, why: 'kill switch is on' }
+  if (!cfg.enabled) return { ok: false, why: 'auto-switch is off' }
+  if (cfg.dryRun) return { ok: false, why: 'dry run' }
+  if (!cfg.nudge) return { ok: false, why: 'continue is off in config' }
+  if (!cfg.hosts[h]) return { ok: false, why: `${h} is off` }
+  if (hs.paused) return { ok: false, why: `paused: ${hs.pausedReason ?? 'by hand'}` }
+  if (!hs.adopted || hs.owner !== 'pool' || !hs.active) return { ok: false, why: 'the switcher does not hold this host' }
+  if (d.action !== 'none' || !/has room|predates the last switch/.test(d.reason)) return { ok: false, why: d.reason }
+  return { ok: true, why: d.reason }
+}
+
 // A pane can stop on the limit after its host already moved: a request that
 // left on the old token a moment before the switch comes back refused after
 // the nudge pass ran. While the active account has room, any Valkyrie pane
@@ -793,8 +818,8 @@ const lastSweep = new Map<HostName, number>()
 // reported one, otherwise once a minute. Never in dry run.
 async function sweep(s: State, h: HostName, d: Decision, cfg: SwitchConfig, hadEvent: boolean): Promise<void> {
   const hs = s.hosts[h]
-  if (cfg.dryRun || !cfg.nudge || !cfg.hosts[h] || hs.paused || !hs.adopted || hs.owner !== 'pool') return
-  if (d.action !== 'none' || !/has room|predates the last switch/.test(d.reason)) return
+  // tickLocked only runs this with auto-switch on and the kill switch off (or forced)
+  if (!continueGate(s, h, d, { ...cfg, enabled: true }, false).ok) return
   if (!hadEvent && Date.now() - (lastSweep.get(h) ?? 0) < SWEEP_MS) return
   lastSweep.set(h, Date.now())
   // The hook fires as the turn ends, a moment before the input box and the
@@ -883,6 +908,30 @@ export function reportLimit(host: HostName, payload: { sessionId?: string; messa
   pendingEventHosts.add(host)
   void tick()
   return { accepted: true, limit, why: 'checking now' }
+}
+
+// thor's continue runner (C:\Thor\tools\account-switch\Continue-Stopped.ps1) asks this before it
+// types into a Windows Terminal session that stopped on a limit: the same gate the Valkyrie pane
+// sweep uses, on the decision a tick would make now with no limit event. Reads only, no lock (the
+// state file is replaced whole), so the runner's polls never wait on a tick.
+export function continueCheck(host: HostName): { ok: boolean; why: string; active: string | null; text: string } {
+  const cfg = readConfig()
+  const isKilled = killed()
+  const s = loadState()
+  const pool = loadPool()
+  const d = decide({ cfg, killed: isKilled, host: hostView(s, host, cfg, Date.now()), accounts: views(s, pool, host), now: Date.now(), event: null })
+  const g = continueGate(s, host, d, cfg, isKilled)
+  return { ok: g.ok, why: g.why, active: s.hosts[host].active, text: cfg.nudgeText }
+}
+
+// The runner's report: it typed the continue into `count` sessions on `host`. One log line, so
+// AI > Usage's history shows the sessions outside Valkyrie that were continued.
+export function reportContinued(host: HostName, count: number): void {
+  const s = loadState()
+  writeLog({
+    kind: 'continue', host, from: null, to: s.hosts[host].active,
+    reason: `continued ${count} terminal${count === 1 ? '' : 's'} outside Valkyrie stopped on a limit`, ok: true, nudged: count,
+  })
 }
 
 // The pool token's own probe and the account's usage card (its /login grant) read the same

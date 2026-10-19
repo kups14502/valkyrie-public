@@ -832,8 +832,109 @@ function copyTest(kind) {
   }
 }
 
+// ---------- AI > Usage headline and the ACCOUNTS list (emails + copy) ----------
+
+/** GET /api/ai-usage: five accounts, the hottest is Account A, so "thor is on" must beat it. */
+function aiUsage() {
+  const now = Date.now()
+  const q = (s, w) => ({ sessionPct: s, weeklyPct: w, sessionResetsAt: iso(now + 50 * MIN), weeklyResetsAt: iso(now + 3 * DAY), status: 'allowed' })
+  const client = (id, letter, s, w, dead = false) => ({
+    id, kind: 'claude', label: `Account ${letter}`, email: `${letter.toLowerCase()}@example.invalid`, subscription: 'team',
+    byModel: {}, session: null, today: { tokens: 0, costUSD: 0, messages: 0 }, last7d: { tokens: 0, costUSD: 0, messages: 0 }, last30d: { tokens: 0, costUSD: 0, messages: 0 },
+    quota: dead ? null : q(s, w), authError: dead ? 'stored sign-in is dead' : null,
+  })
+  const clients = [client('acct-a', 'A', 96, 41), client('acct-b', 'B', 12, 40), client('acct-c', 'C', 30, 60), client('acct-d', 'D', 0, 0, true)]
+  return { claude: { byModel: {}, session: null, quota: clients[0].quota, today: { tokens: 0, costUSD: 0, messages: 0 }, last7d: { tokens: 0, costUSD: 0, messages: 0 }, last30d: { tokens: 0, costUSD: 0, messages: 0 } }, aiClients: clients, updatedAt: iso(now) }
+}
+
+const stubClipboard = `(() => { window.__copied = []; try { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { window.__copied.push(t); }, readText: async () => '' } }); } catch (e) {} })()`
+
+/** The usage headline names the account thor is on (not the hottest), and every account row carries
+ *  its email with a working copy button. */
+function onAccountTest() {
+  return {
+    name: 'accounts:on-account',
+    group: 'accounts',
+    device: 'desktop',
+    timeout: 45_000,
+    async run(t) {
+      const page = await t.page()
+      // thor is on Account B (adopted); the hottest account is A
+      const st = switchState()
+      const thor = findHost(st, 'thor')
+      thor.active = { id: 'acct-b', label: 'Account B' }
+      thor.adopted = true
+      page.mock('/api/ai-usage', () => ok(aiUsage()))
+      page.mock('/api/account-switch', () => ok(st))
+      page.mock('/api/account-switch/signin', () => ok({ requests: [], vault: [] }))
+      await page.goto(ROUTE)
+      await shellUp(page)
+      await page.waitFor(() => document.querySelector('.vc-u-top .vc-acct')?.textContent, { timeout: 12_000, message: 'the usage headline never showed an account' })
+      await page.eval(stubClipboard)
+      const r = await page.eval(() => {
+        const tx = (s) => (document.querySelector(s)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+        const rows = [...document.querySelectorAll('.vc-u-accts .vc-u-row:not(.vc-u-cols)')].map((row) => ({
+          name: (row.querySelector('.vc-u-name > .vl-ellipsis')?.textContent ?? '').trim(),
+          email: (row.querySelector('.vc-u-email > span')?.textContent ?? '').trim(),
+          hasCopy: !!row.querySelector('.vc-u-copy'),
+          top: row.hasAttribute('data-top'),
+        }))
+        return { headLabel: tx('.vc-u-top .vc-acct'), headRole: tx('.vc-u-top .vc-u-label'), big: [...document.querySelectorAll('.vc-u-top .vc-u-meter > b')].map((b) => b.textContent.replace(/\s+/g, '')), rows }
+      })
+      t.check(/Account B/.test(r.headLabel) && !/busiest/i.test(r.headLabel), `the headline reads "${r.headLabel}", want Account B (thor's account, not the hottest A)`)
+      t.check(/thor is on/i.test(r.headRole), `the headline label reads "${r.headRole}", want "thor is on"`)
+      t.check(r.big[0] === '12%' && r.big[1] === '40%', `the headline meters read ${JSON.stringify(r.big)}, want Account B's 12% and 40%`)
+      const top = r.rows.find((x) => x.top)
+      t.check(top?.name === 'Account B', `the active row is "${top?.name}", want Account B marked data-top`)
+      t.check(r.rows.length === 4, `${r.rows.length} account rows, want 4`)
+      t.check(r.rows.every((x) => x.email && x.hasCopy), `an account row is missing its email or copy button: ${JSON.stringify(r.rows)}`)
+      t.check(r.rows.find((x) => x.name === 'Account A')?.email === 'a@example.invalid', `Account A's email reads "${r.rows.find((x) => x.name === 'Account A')?.email}"`)
+      // copy the first account's email
+      const since = Date.now()
+      await page.tap({ sel: '.vc-u-accts .vc-u-copy', index: 0 })
+      await page.waitFor(() => (window.__copied ?? []).length > 0, { message: 'the copy button copied nothing' })
+      const copied = await page.eval(() => window.__copied[0])
+      t.check(/@example\.invalid$/.test(copied), `the copy button copied "${copied}", want an email`)
+      await page.waitToast(new RegExp(`Copied ${copied.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), { since })
+      await sleep(300)
+      t.check(page.writes.length === 0, `the usage view sent ${page.writes.length} write(s)`)
+      await t.shot(page)
+    },
+  }
+}
+
+/** When the switcher is not deployed (404), the headline falls back to the hottest account and says so. */
+function hottestFallbackTest() {
+  return {
+    name: 'accounts:on-account:fallback',
+    group: 'accounts',
+    device: 'desktop',
+    timeout: 45_000,
+    async run(t) {
+      const page = await t.page()
+      page.mock('/api/ai-usage', () => ok(aiUsage()))
+      page.mock('/api/account-switch', () => ({ status: 404, body: { error: 'Not found' } }))
+      page.mock('/api/account-switch/signin', () => ({ status: 404, body: { error: 'Not found' } }))
+      await page.goto(ROUTE)
+      await shellUp(page)
+      await page.waitFor(() => document.querySelector('.vc-u-top .vc-acct')?.textContent, { timeout: 12_000, message: 'the usage headline never showed an account' })
+      const r = await page.eval(() => {
+        const tx = (s) => (document.querySelector(s)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+        return { headLabel: tx('.vc-u-top .vc-acct'), headRole: tx('.vc-u-top .vc-u-label'), big: [...document.querySelectorAll('.vc-u-top .vc-u-meter > b')].map((b) => b.textContent.replace(/\s+/g, '')) }
+      })
+      t.check(/Account A/.test(r.headLabel) && /busiest/i.test(r.headLabel), `the fallback headline reads "${r.headLabel}", want Account A with "busiest"`)
+      t.check(r.headRole === 'Usage', `the fallback headline label reads "${r.headRole}", want "Usage"`)
+      t.check(r.big[0] === '96%' && r.big[1] === '41%', `the fallback meters read ${JSON.stringify(r.big)}, want the hottest account A's 96% and 41%`)
+      await sleep(200)
+      t.check(page.writes.length === 0, `the fallback view sent ${page.writes.length} write(s)`)
+    },
+  }
+}
+
 export function accountTests() {
   return [
+    onAccountTest(),
+    hottestFallbackTest(),
     setupRunTest(),
     setupDoneTest(),
     copyTest('ok'),

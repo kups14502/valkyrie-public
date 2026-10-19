@@ -55,8 +55,8 @@ const THRESHOLD_MAX = 100
 const EXPIRING_MS = 14 * 86_400_000
 /** a finished sign-in (and a finished setup) stays on screen this long */
 const RUN_SHOW_MS = 15 * 60_000
-/** log kinds that are switches (or a switch that could not happen) */
-const SWITCH_KINDS = new Set(['switch', 'manual', 'dry-run', 'error', 'exhausted', 'paused'])
+/** log kinds the history shows: switches (or a switch that could not happen) and continues */
+const SWITCH_KINDS = new Set(['switch', 'manual', 'dry-run', 'error', 'exhausted', 'paused', 'continue'])
 const NBSP = String.fromCharCode(160)
 const NOT_ADOPTED = /^not adopted/i
 
@@ -1234,7 +1234,7 @@ function History({ s, now }: { s: SwitchVM; now: number }) {
             <span className="vl-ellipsis">
               <Icon name={hostIcon(e.host)} size={12} tone="dim" />
               <b>{e.host}</b>{' '}
-              {e.to ? <>{label(s, e.from)} <i aria-label="to">→</i> {label(s, e.to)}</> : e.kind === 'paused' ? 'paused' : 'no switch'}
+              {e.kind === 'continue' ? 'continued' : e.to ? <>{label(s, e.from)} <i aria-label="to">→</i> {label(s, e.to)}</> : e.kind === 'paused' ? 'paused' : 'no switch'}
             </span>
             <em className="vl-ellipsis">
               {[

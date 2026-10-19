@@ -1,0 +1,305 @@
+{
+ "about": "Claude Code screens as the account switcher reads them, each with the verdict it must give. backend/src/lib/accountSwitchCore.ts paneLimitState (scripts/accountSwitchSmoke.mts, scripts/accountContinueSmoke.mts) and the copy in thor's Continue-Stopped.ps1 (Test-ContinueStopped.ps1) are both held to it. \"recorded\" screens are tmux captures of Claude Code 2.1.303 on the switcher rig (fake API, dummy tokens); \"win-console\" screens are laid out the way a Windows console buffer reads back (fixed width, rows padded).",
+ "screens": [
+  {
+   "name": "rec-2.1.303-fullscreen-armed",
+   "source": "recorded",
+   "screen": "\n ▐▛███▛█   Claude Code v2.1.303\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n❯ say hi                                                                                                                                              \n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)\n\n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel\n\n✻ Crunched for 0s · done 11:30 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                                    \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯                                                                                                                                                   \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm\n    Continuing automatically at 2:30pm · esc to cancel                                                                                                \n  ⏸ manual mode on · ? for shortcuts                 \n",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "rec-2.1.303-fullscreen-typed",
+   "source": "recorded",
+   "screen": "\n ▐▛███▛█   Claude Code v2.1.303\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n❯ say hi                                                                                                                                              \n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)\n\n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel\n\n✻ Crunched for 0s · done 11:30 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                                    \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ half typed                                                                                                                                        \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm\n    Continuing automatically at 2:30pm · esc to cancel                                                                                                \n  ⏸ manual mode on                                   \n",
+   "expect": {
+    "nudge": false,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "rec-2.1.303-fullscreen-cancelled",
+   "source": "recorded",
+   "screen": "\n ▐▛███▛█   Claude Code v2.1.303\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n❯ say hi                                                                                                                                              \n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)\n     Your admin can enable extra usage at https://claude.ai/admin-settings/usage.\n\n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel\n\n✻ Crunched for 0s · done 11:30 AM\n\n● Automatic continue cancelled · /rate-limit-options to re-arm\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                                    \n\n                                                                                        Automatic continue cancelled · /rate-limit-options to re-arm\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯                                            \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts                 \n",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "rec-2.1.303-inline-armed",
+   "source": "recorded",
+   "screen": " ▐▛███▛█   Claude Code v2.1.303\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n❯ say hi                                                                                                                                              \n  ⎿  You've hit your session limit · resets 2:31pm (America/New_York)\n\n● Usage limit reached · continuing automatically at 2:31pm · esc to cancel                                                                          \n\n✻ Brewed for 0s · done 11:31 AM\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯                                                                                                                                                   \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:31pm\n    Continuing automatically at 2:31pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n                                                tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "win-console-2.1.303-armed",
+   "source": "recorded, laid out as a 120x30 console",
+   "screen": "                                                                                                                        \r\n ▐▛███▛█   Claude Code v2.1.303                                                                                         \r\n▝▜██████▀  Haiku 4.5 · Claude Team                                                                                      \r\n ▝▝   ▝▝   /tmp/ccsw-svc/work                                                                                           \r\n                                                                                                                        \r\n❯ say hi                                                                                                                \r\n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)                                                   \r\n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel                                              \r\n✻ Crunched for 0s · done 11:30 AM                                                                                       \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n                                                                                                                        \r\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\r\n❯                                                                                                                       \r\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\r\n  ⚠ Usage limit reached · limit resets 2:30pm                                                                           \r\n    Continuing automatically at 2:30pm · esc to cancel                                                                  \r\n  ⏸ manual mode on · ? for shortcuts                                                                                    ",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "win-console-gt-prompt",
+   "source": "built",
+   "screen": "                                                                                                                        \n ▐▛███▛█   Claude Code v2.1.303                                                                                         \n▝▜██████▀  Haiku 4.5 · Claude Team                                                                                      \n ▝▝   ▝▝   /tmp/ccsw-svc/work                                                                                           \n                                                                                                                        \n> say hi                                                                                                                \n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)                                                   \n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel                                              \n✻ Crunched for 0s · done 11:30 AM                                                                                       \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n>                                                                                                                       \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm                                                                           \n    Continuing automatically at 2:30pm · esc to cancel                                                                  \n  ⏸ manual mode on · ? for shortcuts                                                                                    ",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "win-console-typed-nbsp",
+   "source": "built",
+   "screen": "                                                                                                                        \n ▐▛███▛█   Claude Code v2.1.303                                                                                         \n▝▜██████▀  Haiku 4.5 · Claude Team                                                                                      \n ▝▝   ▝▝   /tmp/ccsw-svc/work                                                                                           \n                                                                                                                        \n❯ say hi                                                                                                                \n  ⎿  You've hit your session limit · resets 2:30pm (America/New_York)                                                   \n● Usage limit reached · continuing automatically at 2:30pm · esc to cancel                                              \n✻ Crunched for 0s · done 11:30 AM                                                                                       \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ half typed                                                                                                            \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm                                                                           \n    Continuing automatically at 2:30pm · esc to cancel                                                                  \n  ⏸ manual mode on · ? for shortcuts                                                                                    ",
+   "expect": {
+    "nudge": false,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "win-console-footer-only",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm\n  ⏸ manual mode on · ? for shortcuts",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-fullscreen-armed",
+   "source": "captured 2.1.283",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-typed",
+   "source": "captured 2.1.283",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ half typed\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "v283-cancelled",
+   "source": "captured 2.1.283",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Your admin can enable extra usage at claude.ai/admin-settings/usage.\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n● Automatic continue cancelled · /rate-limit-options to re-arm\n\n                                                                                        Automatic continue cancelled · /rate-limit-options to re-arm\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-inline-armed",
+   "source": "captured 2.1.283",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:17pm (America/New_York)\n     Continuing automatically at 7:17pm · esc to cancel\n● Usage limit reached · continuing automatically at 7:17pm · esc or type to cancel\n✻ Baked for 0s · done 4:17 PM\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯                                                                                                                                                       \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-hint-over-prompt",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n                                                                                                                        Ctrl+Y to paste deleted text\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-idle",
+   "source": "captured 2.1.283",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n\n                                                   tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-moved-on",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n❯ continue\n\n● REPLY-FROM-ACCOUNT-B\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-not-armed",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your limit · resets 7:25pm (America/New_York)\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "generic",
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-dialog",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n╭────────────────────────────────────────────────────────────╮\n│ Bash command                                               │\n│   rm -rf build                                             │\n│ Do you want to proceed?                                    │\n│ ❯ 1. Yes                                                   │\n│   2. No                                                    │\n╰────────────────────────────────────────────────────────────╯",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": false,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "v283-multiline-draft",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n  second line of a draft\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "v283-boxed-prompt",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your session limit · resets 7:49pm (America/New_York)\n     Continuing automatically at 7:49pm · esc to cancel\n\n● Usage limit reached · continuing automatically at 7:49pm · esc or type to cancel\n\n✻ Crunched for 0s · done 4:49 PM\n\n╭────────────────────────────────────────────────────────────╮\n│ >                                                          │\n╰────────────────────────────────────────────────────────────╯\n  ⚠ Usage limit reached · continuing automatically at 7:49pm · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "session",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "v283-usage-credits",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your usage credit limit\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "fable-limit",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've hit your Fable limit · resets Wed 9am (America/New_York)\n\n● Usage limit reached · continuing automatically when it resets · esc to cancel\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · continuing automatically when it resets · esc to cancel\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "fable",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "reached-wording",
+   "source": "built",
+   "screen": " ▐▛███▛█   Claude Code v2.1.283\n▝▜██████▀  Haiku 4.5 · Claude Team\n ▝▝   ▝▝   /tmp/ccsw-svc/work\n\n❯ say hi\n  ⎿  You've reached your weekly limit · resets Mon 9am (America/New_York)\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ← for agents",
+   "expect": {
+    "nudge": true,
+    "limit": "weekly",
+    "armed": false,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "shortly-banner-limit-scrolled-off",
+   "source": "built",
+   "screen": "\n● REPLY-STILL-IN-VIEW\n\n✻ Crunched for 0s · done 4:49 PM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⚠ Usage limit reached · limit resets 2:30pm\n    Continuing shortly · esc to cancel\n  ⏸ manual mode on",
+   "expect": {
+    "nudge": true,
+    "limit": "generic",
+    "armed": true,
+    "promptFound": true,
+    "promptEmpty": true
+   }
+  },
+  {
+   "name": "empty",
+   "source": "built",
+   "screen": "",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": false,
+    "promptEmpty": false
+   }
+  },
+  {
+   "name": "plain-shell",
+   "source": "built",
+   "screen": "$ ls\nfile\n$ ",
+   "expect": {
+    "nudge": false,
+    "limit": null,
+    "armed": false,
+    "promptFound": false,
+    "promptEmpty": false
+   }
+  }
+ ]
+}
