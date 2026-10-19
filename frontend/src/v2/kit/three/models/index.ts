@@ -13,7 +13,8 @@ export { phone, tablet, PHONE_FX, TABLET_FX } from './slate'
 /**
  * Camera poses, degrees. All models are built to a ~4 unit radius, so the
  * same poses work for each. yaw 0 = straight at the front, +yaw swings toward
- * the glass side (+x), 180 = rear.
+ * +x, 180 = rear. They were drawn for a glass side at +x; thor's real case has
+ * its glass at -x, so kit/hero mirrors the yaw for thor.
  */
 export const POSES: Record<string, CameraPose> = {
   /** front 3/4, slightly above (f018) */

@@ -16,10 +16,10 @@ import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
 import './system.css'
 
-// System: Hosts (one icon-led row per host; the selected one as gauge plates
-// with its x-ray model as a small accent and its last hour as an honest
-// chart; the phone and tablet, which do not report yet, as model-only rows
-// with no stats), Services (odin's containers and units, Down first, then
+// System: Hosts (one icon-led row per host; the selected one as its x-ray
+// model, large, over its gauge plates, and its last hour as an honest chart
+// under the list; on a desktop the page fills the window; the phone and
+// tablet, which do not report yet, as model-only rows with no stats), Services (odin's containers and units, Down first, then
 // timers, web apps, listening ports and compose files, one search across all
 // of them) and Trades (the trade bot's equity, portfolio, positions, fills,
 // decision feed against the confidence gate, arms, experiment and caps).
@@ -525,7 +525,7 @@ export default function System({ active, sub }: ScreenProps) {
 
   return (
     <div className="vl-screen sys">
-      <div hidden={view !== 'hosts'}>
+      <div className="sys-view" data-view="hosts" hidden={view !== 'hosts'}>
         <HostsView on={active && view === 'hosts'} selected={device ? null : selected} device={device} onPick={setPicked} />
       </div>
       <div hidden={view !== 'services'}>
@@ -671,9 +671,10 @@ function DeviceDetail({ id, on, i, ref }: { id: ModelOnlyId; on: boolean; i: num
 type Metric = { id: string; icon: IconName; label: string; value: number | null; tone: Tone; sizes: string | null }
 
 /**
- * The selected host: one gauge plate per reading (the lit plate is the part
- * the model highlights), its x-ray model as a small accent beside them, and its
- * last hour as an honest chart.
+ * The selected host: its x-ray model, large, over one gauge plate per reading
+ * (the lit plate is the part the model highlights), and its last hour as an
+ * honest chart in a panel of its own (under the host list on a wide screen,
+ * under this panel on the phone).
  */
 function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean; epoch: number; t1: number; i: number; ref: RefObject<HTMLElement | null> }) {
   // the chart draws in when the tab opens and again for each host picked, then holds still
@@ -731,74 +732,76 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
   const chart = host.online && hist.length > 1
 
   return (
-    <section ref={ref} className="vl-panel sys-block sys-detail" style={iv(i)} data-nomodel={!model || undefined} data-state={state}>
-      <header className="vl-panel-head sys-head sys-detail-head vl-build" style={iv(i)}>
-        <span className="sys-detail-id vl-caps">
-          <Icon name={hostIcon(host.id)} size={15} tone={state === 'off' ? 'faint' : state === 'stale' ? 'hot' : 'fg'} glow={host.online} />
-          <span>{host.label}</span>
-          <span className="sys-detail-state" data-state={state}>{state === 'on' ? 'Online' : state === 'stale' ? 'Stale' : 'Offline'}</span>
-        </span>
-        {host.online && up && <span className="sys-detail-up"><Ico name="uptime" size={12} />up {up}</span>}
-      </header>
-      <div className="sys-detail-body">
-        {host.online && !metrics.length ? (
-          <div className="sys-detail-off vl-build" style={iv(i + 1)}>
-            <b><Icon name="battery" size={16} tone="dim" />No battery report yet</b>
-            <span>Open the Home Assistant app on this device (odin:8123)</span>
-          </div>
-        ) : host.online ? (
-          <div className="sys-gauges">
-            {metrics.map((m, k) => (
-              <Press
-                key={m.id}
-                className="sys-gauge vl-build"
-                style={iv(i + 1 + k)}
-                data-lit={m.id === lit || undefined}
-                aria-pressed={m.id === lit}
-                aria-label={`${m.label} ${m.value ?? 'unknown'}%: highlight on the model`}
-                onPress={() => setFocus(m.id === home ? null : m.id === focus ? null : m.id)}
-              >
-                <span className="sys-gauge-head">
-                  <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
-                  <span className="sys-gauge-label">{m.label}</span>
-                  {m.sizes && <em className="vl-ellipsis">{m.sizes}</em>}
-                  <b data-tone={m.tone}>{m.value ?? '--'}<small>%</small></b>
-                </span>
-                <Bar value={m.value} tone={m.tone} ticks={4} />
-              </Press>
-            ))}
-          </div>
-        ) : (
-          <div className="sys-detail-off vl-build" style={iv(i + 1)}>
-            <b><Icon name="offline" size={16} tone="dim" />Offline</b>
-            <span>{host.mobile && host.seen ? `Last seen ${when(host.seen, t1)} ET` : 'No stats published'}</span>
-          </div>
-        )}
-        {model && (
-          <div className="sys-detail-model">
-            <Hero
-              active={on}
-              pose={poseFor(model)}
-              host={model}
-              fill={0.9}
-              layoutKey={`${host.id}:${metrics.length}`}
-              className="absolute inset-0"
-              activeHotspot={focus}
-              onHotspot={onHotspot}
-            />
-          </div>
-        )}
-      </div>
+    <>
+      <section ref={ref} className="vl-panel sys-block sys-detail" style={iv(i)} data-nomodel={!model || undefined} data-state={state}>
+        <header className="vl-panel-head sys-head sys-detail-head vl-build" style={iv(i)}>
+          <span className="sys-detail-id vl-caps">
+            <Icon name={hostIcon(host.id)} size={15} tone={state === 'off' ? 'faint' : state === 'stale' ? 'hot' : 'fg'} glow={host.online} />
+            <span>{host.label}</span>
+            <span className="sys-detail-state" data-state={state}>{state === 'on' ? 'Online' : state === 'stale' ? 'Stale' : 'Offline'}</span>
+          </span>
+          {host.online && up && <span className="sys-detail-up"><Ico name="uptime" size={12} />up {up}</span>}
+        </header>
+        <div className="sys-detail-body">
+          {model && (
+            <div className="sys-detail-model">
+              <Hero
+                active={on}
+                pose={poseFor(model)}
+                host={model}
+                fill={0.9}
+                layoutKey={`${host.id}:${metrics.length}`}
+                className="absolute inset-0"
+                activeHotspot={focus}
+                onHotspot={onHotspot}
+              />
+            </div>
+          )}
+          {host.online && !metrics.length ? (
+            <div className="sys-detail-off vl-build" style={iv(i + 1)}>
+              <b><Icon name="battery" size={16} tone="dim" />No battery report yet</b>
+              <span>Open the Home Assistant app on this device (odin:8123)</span>
+            </div>
+          ) : host.online ? (
+            <div className="sys-gauges" data-n={metrics.length}>
+              {metrics.map((m, k) => (
+                <Press
+                  key={m.id}
+                  className="sys-gauge vl-build"
+                  style={iv(i + 1 + k)}
+                  data-lit={m.id === lit || undefined}
+                  aria-pressed={m.id === lit}
+                  aria-label={`${m.label} ${m.value ?? 'unknown'}%: highlight on the model`}
+                  onPress={() => setFocus(m.id === home ? null : m.id === focus ? null : m.id)}
+                >
+                  <span className="sys-gauge-head">
+                    <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
+                    <span className="sys-gauge-label">{m.label}</span>
+                    {m.sizes && <em className="vl-ellipsis">{m.sizes}</em>}
+                    <b data-tone={m.tone}>{m.value ?? '--'}<small>%</small></b>
+                  </span>
+                  <Bar value={m.value} tone={m.tone} ticks={4} />
+                </Press>
+              ))}
+            </div>
+          ) : (
+            <div className="sys-detail-off vl-build" style={iv(i + 1)}>
+              <b><Icon name="offline" size={16} tone="dim" />Offline</b>
+              <span>{host.mobile && host.seen ? `Last seen ${when(host.seen, t1)} ET` : 'No stats published'}</span>
+            </div>
+          )}
+        </div>
+      </section>
       {chart && (
-        <div className="sys-detail-chart">
-          <div className="sys-chart-cap vl-build" style={iv(i + 6)}>
-            <span><Ico name="clock" size={12} />Last hour</span>
-            <span>
+        <section className="vl-panel sys-block sys-chart" style={iv(i + 6)}>
+          <header className="vl-panel-head sys-head sys-chart-head vl-build" style={iv(i + 6)}>
+            <span className="sys-head-label"><Ico name="clock" size={13} /><span className="vl-panel-label">{host.label} · last hour</span></span>
+            <span className="sys-chart-cap">
               <i className="sys-key" data-c="cpu" />CPU
               {hasMem && <><i className="sys-key" data-c="mem" />Memory</>}
               <span className="sys-chart-peak">peak {Math.round(peak)}%</span>
             </span>
-          </div>
+          </header>
           <div className="sys-detail-ribbon">
             <TrackRibbon
               key={`${host.id}:${epoch}`}
@@ -814,9 +817,9 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
               style={{ height: '100%' }}
             />
           </div>
-        </div>
+        </section>
       )}
-    </section>
+    </>
   )
 }
 

@@ -52,28 +52,46 @@
 
 /* ---------- Hosts layout ---------- */
 
-/* phone: hosts, then the selected host (AI usage lives on AI > Usage) */
+/* phone: hosts, then the selected host, then its last hour (AI usage lives on AI > Usage) */
 .sys-hosts { display: flex; flex-direction: column; gap: 8px; }
 .sys-hosts-panel { order: 0; }
 .sys-detail { order: 1; }
+.sys-chart { order: 2; }
 
+/* iPad, landscape phone: the list with the last hour under it, the selected host beside them */
 @media (min-width: 640px) {
   .sys-hosts {
     display: grid;
     grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
     grid-template-rows: auto 1fr;
+    grid-template-areas: 'list detail' 'chart detail';
     gap: 10px 12px;
     align-items: start;
   }
-  .sys-hosts-panel { grid-column: 1; grid-row: 1; }
-  .sys-detail { grid-column: 2; grid-row: 1 / span 2; }
+  .sys-hosts-panel { grid-area: list; }
+  .sys-detail { grid-area: detail; }
+  .sys-chart { grid-area: chart; }
 }
+/* desktop: the page fills the window (the screen grows to the page's height, the grid to the
+   screen's); the selected host's model takes its whole column, the last hour the rest of the list's */
 @media (min-width: 1100px) {
   /* desktop (DPR 1): section labels one step up, as on Home */
   .sys .vl-panel-label, .sys-detail-id { font-size: 12px; }
-  .sys-hosts { grid-template-columns: minmax(0, 1fr) minmax(500px, 580px); gap: 14px 20px; max-width: 1500px; margin-inline: auto; }
-  /* tall screens: the selected host stays in view while the list scrolls */
-  .sys-detail { position: sticky; top: 0; }
+  .sys { display: flex; flex-direction: column; }
+  .sys > .sys-view[data-view='hosts']:not([hidden]) { flex: 1 0 auto; display: flex; flex-direction: column; }
+  .sys-hosts {
+    flex: 1 0 auto;
+    width: 100%;
+    max-width: 1860px;
+    margin-inline: auto;
+    grid-template-columns: minmax(540px, 1fr) minmax(0, 1.15fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 14px 20px;
+    align-items: stretch;
+  }
+  .sys-hosts-panel { align-self: start; }
+  .sys-detail { display: flex; flex-direction: column; min-height: 0; }
+  .sys-chart { display: flex; flex-direction: column; min-height: 0; }
 }
 
 /* ---------- host rows: one icon-led line per host ---------- */
@@ -183,21 +201,25 @@
 
 /* the picked model-only device: its model large, and why there are no stats */
 .sys-device-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.sys-device-model { position: relative; height: 230px; overflow: hidden; }
+.sys-device-model { position: relative; height: 300px; overflow: hidden; }
 .sys-device-note { display: flex; flex-direction: column; gap: 3px; padding: 6px 2px 2px; border-top: 1px solid var(--line); }
 .sys-device-note b { display: flex; align-items: center; gap: 7px; font-size: 14px; line-height: 18px; font-weight: 600; color: var(--text); }
 .sys-device-note span { font-size: 11.5px; line-height: 15px; color: var(--dim); }
-@media (min-width: 640px) and (max-height: 480px) { .sys-device-model { height: 180px; } }
-@media (min-width: 1100px) { .sys-device-model { height: 340px; } }
+@media (min-width: 640px) { .sys-device-model { height: 380px; } }
+@media (min-width: 640px) and (max-height: 480px) { .sys-device-model { height: 230px; } }
+@media (min-width: 1100px) {
+  .sys-device-body { flex: 1 1 auto; min-height: 0; }
+  .sys-device-model { flex: 1 1 0; height: auto; min-height: 300px; }
+}
 .sys-detail-up { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--dim); white-space: nowrap; }
 
+/* the model on top, as wide as the panel; the plates (or why there are none) under it */
 .sys-detail-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(104px, 36%);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: 8px;
 }
-.sys-detail[data-nomodel] .sys-detail-body { grid-template-columns: minmax(0, 1fr); }
 
 /* gauge plates: one per reading, the lit one is what the model highlights */
 .sys-gauges { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -215,6 +237,9 @@
   transition: transform .12s var(--ease), border-color .2s, background-color .2s;
 }
 .sys-gauge[data-pressed] { transform: scale(.985); border-color: color-mix(in srgb, var(--fg) 70%, transparent); }
+/* a narrow plate (a row of them on an iPad in landscape) drops the sizes beside its label rather than cut them off */
+.sys-gauge { container-type: inline-size; }
+@container (max-width: 215px) { .sys-gauge-head em { display: none; } }
 .sys-gauge-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 20px; color: var(--text); }
 .sys-gauge-label { flex: none; font-weight: 500; }
 .sys-gauge-head em { flex: 1 1 auto; min-width: 0; font-style: normal; font-size: 10.5px; color: var(--dim); }
@@ -229,46 +254,61 @@
 .sys-detail-off b { display: flex; align-items: center; gap: 8px; font-size: 22px; line-height: 26px; font-weight: 600; color: var(--dim); }
 .sys-detail-off span { font-size: 11.5px; color: var(--faint); }
 
-/* the model: a small accent beside the numbers */
-.sys-detail-model { position: relative; min-height: 120px; overflow: hidden; }
+/* the model: the largest thing on the page, as wide as its panel (the floor runs to the edges) */
+.sys-detail-model { position: relative; height: 280px; overflow: hidden; margin: 0 -4px; }
 /* the lit plate already names the part: no hotspot label clipped at the box edge */
 .sys-detail-model [data-hotspot] > span:nth-child(3) { display: none; }
 
-.sys-detail-chart { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
-.sys-detail-ribbon { position: relative; height: 108px; margin: 0 -4px; }
+/* the selected host's last hour: a panel of its own */
+.sys-chart-head { align-items: center; }
+.sys-detail-ribbon { position: relative; height: 150px; margin: 4px -4px 0; }
 
 .sys-chart-cap {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10.5px;
   line-height: 14px;
   color: var(--dim);
   white-space: nowrap;
 }
-.sys-chart-cap > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
-.sys-chart-cap > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .sys-chart-peak { margin-left: 8px; color: var(--fg); font-weight: 600; }
 
+/* iPad: the model takes a fixed share of the detail column; the chart runs down to the detail's bottom */
+@media (min-width: 640px) {
+  .sys-detail-model { height: 340px; }
+  .sys-chart { align-self: stretch; display: flex; flex-direction: column; }
+  .sys-detail-ribbon { flex: 1 1 auto; height: auto; min-height: 170px; }
+}
+@media (min-width: 640px) and (min-height: 900px) {
+  .sys-detail-model { height: 460px; }
+}
 /* landscape phone: a short page, so tighter plates and chart */
 @media (min-width: 640px) and (max-height: 480px) {
-  .sys-detail-body { margin-top: 6px; grid-template-columns: minmax(0, 1fr) minmax(96px, 34%); }
+  .sys-detail-body { margin-top: 6px; }
+  .sys-detail-model { height: 230px; }
   .sys-gauges { gap: 4px; }
   .sys-gauge { min-height: 40px; padding-top: 3px; padding-bottom: 4px; }
   .sys-gauge-head b { font-size: 15px; }
-  .sys-detail-ribbon { height: 84px; }
+  .sys-detail-ribbon { min-height: 110px; }
 }
+/* desktop: the model fills the column over a row of plates; the chart fills the space under the list */
 @media (min-width: 1100px) {
   .sys-detail { padding: 10px 12px 12px; }
-  .sys-detail-body { grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; margin-top: 10px; }
-  .sys-gauges { gap: 6px; }
-  .sys-gauge { min-height: 52px; padding: 6px 10px 7px; }
+  .sys-detail-body { flex: 1 1 auto; min-height: 0; gap: 10px; margin-top: 10px; }
+  .sys-detail-model { flex: 1 1 0; height: auto; min-height: 300px; margin: 0 -6px; }
+  .sys-gauges { flex-direction: row; gap: 8px; }
+  .sys-gauge { flex: 1 1 0; min-width: 0; min-height: 56px; padding: 6px 10px 7px; }
+  /* four readings (Loki): two by two, so the sizes beside each label still fit */
+  .sys-gauges[data-n='4'] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sys-detail[data-nomodel] .sys-gauges { display: flex; flex-direction: column; }
   .sys-gauge-head { font-size: 13px; }
   .sys-gauge-head em { font-size: 11px; }
   .sys-gauge-head b { font-size: 20px; line-height: 22px; }
   .sys-gauge .vl-bar { height: 9px; }
-  .sys-detail-ribbon { height: 200px; }
+  .sys-detail-off { min-height: 72px; }
+  .sys-chart { padding: 10px 12px 12px; }
+  .sys-detail-ribbon { flex: 1 1 0; height: auto; min-height: 150px; margin-top: 6px; }
   .sys-chart-cap { font-size: 11px; }
 }
 

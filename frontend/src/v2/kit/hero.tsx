@@ -71,6 +71,21 @@ export function hostModel(hostId: string): HostModelId | null {
  */
 export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'device', frame: 'device', mimir: 'device', phone: 'device', tablet: 'device' }
 
+/**
+ * POSES swing toward +x (the glass side they were written for). thor's real
+ * case has its glass on the left as seen from the front (-x, models/tower.ts),
+ * so thor takes every pose with its yaw mirrored: each screen (System > Hosts,
+ * Dashboard > This device, Settings) still looks at the glass from the same
+ * angle, with the case the right way around.
+ */
+const MIRROR_YAW: Partial<Record<HostModelId, true>> = { thor: true }
+
+/** The POSES entry `name` as model `id` takes it. */
+function modelPose(id: HostModelId, name: string): CameraPose {
+  const p = POSES[name] ?? POSES.home
+  return MIRROR_YAW[id] ? { ...p, yaw: -p.yaw } : p
+}
+
 /** Settings > Hero ('v2.hero'). */
 export function useHeroId(): [HeroId, (v: HeroId) => void] {
   return useSetting<HeroId>('hero', 'thor', HERO_IDS)
@@ -245,7 +260,7 @@ export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, onHots
 
   // Active: hold our pose. Hidden: follow the shell's pose bus (snaps while paused).
   const name = active ? pose : POSES[shell.pose] ? shell.pose : pose
-  const scenePose = useMemo<CameraPose | null>(() => (geo ? fitPose(model, POSES[name] ?? POSES.home, geo, fill) : null), [model, name, geo, fill])
+  const scenePose = useMemo<CameraPose | null>(() => (geo ? fitPose(model, modelPose(id, name), geo, fill) : null), [model, id, name, geo, fill])
   const scrimCss = useMemo(() => (geo && anchor ? scrimStyle(geo, scrim) : null), [geo, anchor, scrim])
 
 

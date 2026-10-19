@@ -267,10 +267,9 @@ export function apartment(lights: { id: string; name: string }[]): Model {
   monitor([6.33, 1.12, 0.3], [0, 1], 0.64, 0.37)
   monitor([6.8, 1.2, 0.3], [0, 1], 0.32, 0.58)
   b.rect([6.3, 0.765, 0.58], X, Z, 0.46, 0.14, SHd, 0.01)
-  // thor: black tower, three intake fans behind the front glass, the LEGO skyline on top
+  // thor: black tower, three intake fans behind the front glass
   b.chamferBox([7.1, 1.01, 0.44], [0.12, 0.25, 0.23], 0.02, (axis, s) => (axis === 2 && s === 1 ? SH : SHd), SHd)
   for (let k = 0; k < 3; k++) b.circle([7.1, 0.84 + k * 0.15, 0.672], X, Y, 0.06, 12, hot('fans', 0.9))
-  b.path([7.1, 1.265, 0.44], Z, Y, [[-0.16, 0], [-0.16, 0.05], [-0.08, 0.05], [-0.08, 0.1], [-0.03, 0.1], [-0.03, 0.17], [0.02, 0.17], [0.02, 0.07], [0.09, 0.07], [0.09, 0.03], [0.16, 0.03], [0.16, 0]], false, SHd)
   // the Office lamp: black arm lamp behind thor, its head aimed at the wall
   b.circle([7.28, 0.765, 0.16], X, Z, 0.06, 10, SHd)
   b.poly([[7.28, 0.77, 0.16], [7.3, 1.2, 0.26], [7.15, 1.45, 0.17]], false, SH)

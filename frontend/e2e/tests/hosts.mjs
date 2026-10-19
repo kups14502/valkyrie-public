@@ -13,7 +13,15 @@
 //             5% of the model's radius of a drawn line, and inside the group it
 //             names where the model has one (thor's 'gpu' lines). The Lights
 //             room's bulb diamonds too (live bulbs, read only).
-//   devices   the phone and tablet as reporting hosts (backend routes/devices.ts):
+//   thor      (round 9) the case the right way around (board on the right,
+//             PSU at the rear, so the glass is on the left as seen from the
+//             front), the camera on the glass side, nothing standing on its top
+//             (the LEGO skyline is gone); on the three desktops the model is at
+//             least half the layout's height, the page does not scroll, the
+//             grid reaches the page's bottom pad, and the last hour sits under
+//             the list and ends with the detail; the memory diamond lights the
+//             Memory plate and a second tap gives the lead back to the CPU
+//   devices  the phone and tablet as reporting hosts (backend routes/devices.ts):
 //             a host row with the battery, the detail's battery and storage
 //             gauges, no "Model only"
 //
@@ -84,7 +92,11 @@ async function hostsDoc(base, devices = true) {
  */
 function hotspotReport(sel = '.vl-page[data-active] .sys-detail-model [data-wire-scene], .vl-page[data-active] .sys-device-model [data-wire-scene]') {
   const scene = document.querySelector(sel)
-  if (!scene) return { error: `no model scene at ${sel}` }
+  if (!scene) {
+    const act = [...document.querySelectorAll('.vl-page[data-active]')].map((p) => p.getAttribute('data-screen') || p.id || p.className).join('+') || 'none'
+    const heroes = [...document.querySelectorAll('.vl-page[data-active] [data-hero]')].map((h) => `${h.getAttribute('data-hero')}${h.querySelector('[data-wire-scene]') ? '' : ' (no scene)'}`).join(', ') || 'none'
+    return { error: `no model scene at ${sel} (on ${location.pathname}, active page ${act}, heroes ${heroes})` }
+  }
   const e = scene.__wire
   if (!e) return { error: 'the scene has no engine handle (__wire): not a dev build?' }
   const rect = scene.getBoundingClientRect()
@@ -158,6 +170,105 @@ function hotspotReport(sel = '.vl-page[data-active] .sys-detail-model [data-wire
   }
 }
 
+/**
+ * thor's case as the Hosts camera sees it: where its board and PSU sit in the
+ * model (the real case has the glass on the left as seen from the front, so
+ * the board is on the right, +x, and the PSU at the rear, -z), which side the
+ * camera looks from, and the model's top (nothing stands on the case: the
+ * LEGO skyline is gone).
+ */
+function thorReport(sel = '.vl-page[data-active] .sys-detail-model [data-hero="thor"] [data-wire-scene]') {
+  const scene = document.querySelector(sel)
+  const e = scene?.__wire
+  const c = e?.r?.model
+  if (!c) return { error: `no thor scene at ${sel}` }
+  const box = (g) => {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < c.n; i++) {
+      if (c.styles[c.style[i]].group !== g) continue
+      for (const k of [0, 3]) for (let a = 0; a < 3; a++) { const v = c.pos[i * 6 + k + a]; lo[a] = Math.min(lo[a], v); hi[a] = Math.max(hi[a], v) }
+    }
+    return lo.map((v, a) => (v + hi[a]) / 2)
+  }
+  let top = -Infinity, topShell = -Infinity
+  for (let i = 0; i < c.n; i++) {
+    const y = Math.max(c.pos[i * 6 + 1], c.pos[i * 6 + 4])
+    top = Math.max(top, y)
+    if (c.styles[c.style[i]].layer === 'shell') topShell = Math.max(topShell, y)
+  }
+  // the top panel's bright rim (the 'fg' rectangle at the case's top)
+  let rim = -Infinity
+  for (let i = 0; i < c.n; i++) if (c.styles[c.style[i]].layer === 'fg' && c.pos[i * 6 + 1] === c.pos[i * 6 + 4]) rim = Math.max(rim, c.pos[i * 6 + 1])
+  return { board: box('board'), psu: box('psu'), center: c.center, cam: [e.cam.px, e.cam.py, e.cam.pz], top, topShell, rim }
+}
+
+/** The desktop page: the model's box against the layout, the page's scroll, and how far the grid reaches down. */
+function fillReport() {
+  const page = document.querySelector('.vl-page[data-active]')
+  const grid = page?.querySelector('.sys-hosts')
+  const model = page?.querySelector('.sys-detail-model')
+  const detail = page?.querySelector('.sys-detail')
+  const chart = page?.querySelector('.sys-chart')
+  const list = page?.querySelector('.sys-hosts-panel')
+  if (!page || !grid || !model || !detail) return { error: 'no hosts grid, detail or model on the page' }
+  const zoom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1
+  const r = (el) => el?.getBoundingClientRect() ?? null
+  const pr = r(page), gr = r(grid), dr = r(detail), cr = r(chart), lr = r(list)
+  return {
+    zoom,
+    layout: [Math.round(innerWidth / zoom), Math.round(innerHeight / zoom)],
+    model: [model.clientWidth, model.clientHeight],
+    scroll: [page.scrollHeight, page.clientHeight],
+    // screen px below the grid, against the page's own bottom pad (the lights button's room) plus the screen's padding
+    below: Math.round(pr.bottom - gr.bottom),
+    allowed: Math.round((parseFloat(getComputedStyle(page).paddingBottom) + 40) * zoom),
+    detailBottom: Math.round(dr.bottom),
+    chartBottom: cr ? Math.round(cr.bottom) : null,
+    chartUnderList: cr && lr ? cr.top >= lr.bottom - 1 : null,
+  }
+}
+
+/**
+ * thor (round 9): the case the right way around and seen through its glass, no
+ * skyline on top; on a desktop the model is the page's largest thing and the
+ * page fills the window without scrolling; a diamond tap lights its plate.
+ */
+async function thorChecks(t, page, device) {
+  const o = await page.eval(thorReport)
+  if (o.error) throw new Error(o.error)
+  const f2 = (v) => v.toFixed(2)
+  t.check(o.board[0] > 0.2, `thor is mirrored: its board sits at x ${f2(o.board[0])}, want the right side (+x), the glass on the left as seen from the front`)
+  t.check(o.psu[2] < -0.5, `thor's PSU sits at z ${f2(o.psu[2])}, want the rear (-z)`)
+  t.check(o.cam[0] < o.center[0] - 1, `the Hosts camera looks at thor from x ${f2(o.cam[0])}, the solid side; want the glass side (-x)`)
+  t.check(o.top - o.rim < 0.05 && o.topShell - o.rim < 0.05, `something stands ${f2(Math.max(o.top, o.topShell) - o.rim)} units above thor's top panel (the LEGO skyline is gone)`)
+
+  if (device !== 'phone') {
+    const f = await page.eval(fillReport)
+    if (f.error) throw new Error(f.error)
+    t.note(`thor @${device}: model ${f.model.join('x')} in a ${f.layout.join('x')} layout, ${f.below} px under the grid (up to ${f.allowed})`)
+    t.check(f.model[1] >= f.layout[1] * 0.5 && f.model[0] >= f.layout[0] * 0.38, `thor's model is ${f.model.join('x')} px in a ${f.layout.join('x')} layout: want at least half the height and 38% of the width`)
+    t.check(f.scroll[0] <= f.scroll[1] + 1, `System > Hosts scrolls on a desktop (${f.scroll[0]} px of content in ${f.scroll[1]})`)
+    t.check(f.below <= f.allowed, `the hosts grid stops ${f.below} screen px above the page's bottom (up to ${f.allowed}): the window is not filled`)
+    if (f.chartBottom == null) t.note('thor has no last-hour chart in this data: the chart checks are skipped')
+    else {
+      t.check(f.chartUnderList, 'the last-hour chart is not under the host list')
+      t.check(Math.abs(f.chartBottom - f.detailBottom) <= 2, `the last-hour chart ends at ${f.chartBottom}, the detail at ${f.detailBottom}: the columns do not line up`)
+    }
+  }
+
+  // a diamond lights its plate, a second tap gives the lead back to the CPU
+  const lit = () => document.querySelector('.vl-page[data-active] .sys-detail .sys-gauge[data-lit]')?.getAttribute('aria-label') ?? null
+  const dia = { sel: '.vl-page[data-active] .sys-detail-model [data-hotspot="mem"]' }
+  await page.tap(dia)
+  await sleep(300)
+  const a = await page.eval(lit)
+  t.check(/^Memory /.test(a ?? ''), `the memory diamond lit "${a}", want the Memory plate`)
+  await page.tap(dia)
+  await sleep(300)
+  const b = await page.eval(lit)
+  t.check(/^CPU /.test(b ?? ''), `a second tap on the memory diamond left "${b}" lit, want the CPU plate back`)
+}
+
 async function pick(page, label) {
   await page.tap({ sel: '.vl-page[data-active] .sys-host', text: new RegExp(`^\\s*${label}\\b|${label}:`) })
 }
@@ -193,7 +304,8 @@ function hotspotTests() {
             if (r.model !== m.id) throw new Error(`the detail draws ${r.model}, want ${m.id}`)
             const drawn = r.rows.filter((x) => x.vis)
             const worst = (k) => Math.max(0, ...drawn.map((x) => (Number.isFinite(x[k]) ? x[k] : 999)))
-            t.note(`${m.label} @zoom ${r.zoom}: ${drawn.length}/${r.rows.length} diamonds in view, worst ${worst('off').toFixed(1)} px off, wireframe within ${worst('ink').toFixed(1)} px`)
+            const bareId = drawn.reduce((m0, x) => ((x.ink ?? 999) > (m0?.ink ?? -1) ? x : m0), null)?.id ?? '-'
+            t.note(`${m.label} @zoom ${r.zoom}: ${drawn.length}/${r.rows.length} diamonds in view, worst ${worst('off').toFixed(1)} px off, wireframe within ${worst('ink').toFixed(1)} px (${bareId})`)
             t.check(drawn.length >= Math.min(2, r.rows.length), `${m.label}: only ${drawn.length} of ${r.rows.length} hotspots project inside the scene (size ${JSON.stringify(r.size)})`)
             if (m.spots) {
               const ids = r.rows.map((x) => x.id)
@@ -215,6 +327,7 @@ function hotspotTests() {
             const bare = drawn.filter((x) => x.ink == null || x.ink > 18)
             t.check(!bare.length, `${m.label} @zoom ${r.zoom}: no wireframe under these diamonds: ${bare.map((x) => `${x.id} (${x.ink == null ? 'none within 24 px' : `${x.ink.toFixed(0)} px away`})`).join(', ')}`)
             t.check(Math.abs(r.size.r[0] - r.size.client[0]) <= 1 && Math.abs(r.size.r[1] - r.size.client[1]) <= 1, `${m.label}: the renderer is ${r.size.r} for a ${r.size.client} box (zoomed px?)`)
+            if (m.id === 'thor') await thorChecks(t, page, device)
           })
         }
         await t.shot(page)
