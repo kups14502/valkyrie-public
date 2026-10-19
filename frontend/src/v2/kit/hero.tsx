@@ -80,8 +80,22 @@ export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'de
  */
 const MIRROR_YAW: Partial<Record<HostModelId, true>> = { thor: true }
 
+/**
+ * Poses a model takes in place of the shared one. thor on System > Hosts and
+ * Dashboard > This device: straight through the glass, a little toward the
+ * front fans (Brendon's pick, 2026-10-19), not the rear 3/4 the shared pose gives.
+ */
+const POSE_OVERRIDE: Partial<Record<HostModelId, Record<string, CameraPose>>> = {
+  thor: {
+    hosts: { yaw: -76, pitch: 12, dist: 14, fov: 38 },
+    track: { yaw: -76, pitch: 12, dist: 14, fov: 38 },
+  },
+}
+
 /** The POSES entry `name` as model `id` takes it. */
 function modelPose(id: HostModelId, name: string): CameraPose {
+  const own = POSE_OVERRIDE[id]?.[name]
+  if (own) return own
   const p = POSES[name] ?? POSES.home
   return MIRROR_YAW[id] ? { ...p, yaw: -p.yaw } : p
 }
