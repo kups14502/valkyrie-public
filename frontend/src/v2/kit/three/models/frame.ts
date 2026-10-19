@@ -1,20 +1,24 @@
-// frame (labeled Loki) in x-ray: Valve's Steam Frame. A slim core module
-// behind a glossy black wraparound visor (ski-goggle outline, wrapping back at
-// the sides, a nose cutout below), a soft fabric face cushion, two pancake
-// lens barrels, rigid arms that carry the speakers, soft adjustable side
-// straps to a cushioned rear battery pad with a VALVE plate, and a loose cable
-// from the visor to that pad. The visor faces +z and floats at head height
-// over the floor. Labels stay generic: no claims about exact parts.
+// frame (labeled Loki) in x-ray: Valve's Steam Frame, worn with the ergo kit
+// the way his photos (2026-10-18) show it. A slim core module behind a glossy
+// black wraparound visor (ski-goggle outline, wrapping back at the sides, a
+// nose cutout below), a soft fabric face cushion, two pancake lens barrels,
+// rigid arms that carry the speakers, soft adjustable side straps to the rear
+// cradle (a padded cushion against the head, a smooth hard shell outside, the
+// battery inside), the top strap over the crown from a mount on the visor top
+// to the cradle, and the cable from the visor top down the strap on the
+// wearer's right (the viewer's left, seen from the front) into the cradle.
+// The visor faces +z and floats at head height over the floor. Labels stay
+// generic: no claims about exact parts.
 //
-// The ergo kit's top strap is an optional part, OFF by default (Brendon has
-// the kit but is not sold on the look): frameHeadset({ topStrap: true }).
-// The kit's controller straps are not modeled.
+// The top strap is on by default; frameHeadset({ topStrap: false }) drops it.
+// The two controllers are not modeled: beside the headset they would shrink
+// it in the small hero boxes.
 //
 // Groups: cpu (SoC, heat pipe, fins), mem (memory), disk (storage), battery
 // (the two cells in the rear pad, charge board, cable), fans (blower),
 // display (the two panels), cams (tracking cameras, eye tracking), board.
 
-import { add, bezier, cross, norm, scale, sub, type Model, type Vec3 } from '../engine'
+import { add, bezier, cross, norm, scale, type Model, type Vec3 } from '../engine'
 import type { Beam, Flow } from '../render'
 import { AX, Builder, type Style } from './build'
 
@@ -116,7 +120,7 @@ function rr2(cx: number, cy: number, w: number, h: number, r: number, n = 4): [n
 /** center of the pad's curvature (inside the head), its radius at the head-side face, pad height */
 const PAD_CZ = -1.05, PAD_R = 2.1, PAD_Y = YC - 0.82
 /** pad outline half sizes along the arc and up, and its superellipse power */
-const PAD_W = 1.3, PAD_H = 0.88, PAD_P = 2.7
+const PAD_W = 1.3, PAD_H = 0.95, PAD_P = 2.7
 /** radial depth of the pad from the head-side face to the outer fabric */
 const PAD_T = 0.72
 /** A point on the pad: s along the arc (at the head-side face), t up, r from the curvature axis. */
@@ -126,11 +130,12 @@ const padPt = (s: number, t: number, r: number): Vec3 => {
 }
 
 export type FrameOptions = {
-  /** the ergo kit's top strap over the crown, off by default */
+  /** the ergo kit's top strap over the crown, on by default (he wears it) */
   topStrap?: boolean
 }
 
 export function frameHeadset(opts: FrameOptions = {}): Model {
+  const topStrap = opts.topStrap ?? true
   const b = new Builder()
   const O = visorOutline()
   const ring = (k: number, z: (x: number, y: number) => number): Vec3[] => O.map(([x, y]) => [x * k, YC + y * k, z(x * k, y * k)])
@@ -316,6 +321,9 @@ export function frameHeadset(opts: FrameOptions = {}): Model {
   // ---------- rigid arms (speakers inside) and soft side straps ----------
   const padSide = (s: number): Vec3 => padPt(s * (PAD_W + 0.04), 0.04, PAD_R + 0.42)
   const STEPS = 30
+  /** strap index of the adjuster buckle; each side strap's offset point and outward normal, for the cable */
+  const ib = Math.round(STEPS * 0.74)
+  const straps = new Map<number, { off: (i: number, o: number, dy: number) => Vec3; outN: Vec3[] }>()
   for (const s of [-1, 1]) {
     const p0: Vec3 = [s * (HW + 0.1), YC - 0.02, 1.8]
     const p1: Vec3 = [s * 2.48, YC - 0.06, 0.35]
@@ -328,6 +336,7 @@ export function frameHeadset(opts: FrameOptions = {}): Model {
       return scale(norm(cross(t, Y)), s)
     })
     const off = (i: number, o: number, dy: number): Vec3 => add(cl[i], [outN[i][0] * o, dy, outN[i][2] * o])
+    straps.set(s, { off, outN })
 
     // the arm: a rounded slab from the hinge back past the ear
     const IA = 9, TA = 0.12, HA = 0.34
@@ -354,7 +363,6 @@ export function frameHeadset(opts: FrameOptions = {}): Model {
     b.poly(strap.map((i) => off(i, 0, -HB)), false, SHd)
     for (const i of strap) if (i % 2 === 0) b.line(off(i, TH, HB), off(i, TH, -HB), MESH)
     // the adjuster buckle, and the strap doubling back through it
-    const ib = Math.round(STEPS * 0.74)
     for (const [i, st] of [[ib, FG], [ib + 1, SHd]] as const) {
       b.rect(off(i, TH / 2, 0), outN[i], Y, TH + 0.12, 2 * HB + 0.14, st, 0.03)
     }
@@ -362,41 +370,23 @@ export function frameHeadset(opts: FrameOptions = {}): Model {
     b.poly(strap.filter((i) => i >= ib - 5 && i <= ib).map((i) => off(i, TH + 0.05, -HB + 0.03)), false, MESHd)
   }
 
-  // ---------- rear battery pad ----------
+  // ---------- rear cradle: padded cushion on the head side, smooth hard shell outside, the battery inside ----------
   const PO = superLoop(PAD_W, PAD_H, PAD_P, 48)
   const padRing = (k: number, r: number): Vec3[] => PO.map(([s, t]) => padPt(s * k, t * k, r))
   const stations: [number, number, Style][] = [
-    [0.9, PAD_R, SH],
-    [1.0, PAD_R + 0.2, { layer: 'shell', w: 0.8 }],
-    [1.0, PAD_R + 0.5, FG],
-    [0.88, PAD_R + PAD_T, FG],
+    [0.74, PAD_R - 0.16, MESH],
+    [0.93, PAD_R - 0.07, SHd],
+    [1.0, PAD_R + 0.05, SH],
+    [1.02, PAD_R + 0.14, FG],
+    [1.0, PAD_R + 0.36, { layer: 'shell', w: 0.8 }],
+    [0.9, PAD_R + 0.58, SHd],
+    [0.68, PAD_R + PAD_T, FGd],
   ]
   const rings = stations.map(([k, r, st]) => { const pts = padRing(k, r); b.poly(pts, true, st); return pts })
-  for (let i = 0; i < PO.length; i++) {
-    const strong = i % 6 === 0
-    if (!strong && i % 2 !== 0) continue
+  for (let i = 0; i < PO.length; i += 4) {
+    const strong = i % 12 === 0
     for (let q = 0; q < rings.length - 1; q++) b.line(rings[q][i], rings[q + 1][i], strong ? SH : MESHd)
   }
-  // fabric weave on the outer face
-  {
-    const k = 0.86, rr = PAD_R + PAD_T + 0.004
-    const inPad = (s: number, t: number) => Math.abs(s / (PAD_W * k)) ** PAD_P + Math.abs(t / (PAD_H * k)) ** PAD_P < 1
-    const plate = (s: number, t: number) => Math.abs(s) < 0.5 && Math.abs(t - 0.02) < 0.25
-    for (const dir of [1, -1]) for (let c = -2.4; c <= 2.4; c += 0.13) {
-      let run: Vec3[] = []
-      const flush = () => { if (run.length > 1) b.poly(run, false, { layer: 'mesh', w: 0.42 }); run = [] }
-      for (let j = 0; j <= 40; j++) {
-        const s = -PAD_W + (2 * PAD_W * j) / 40
-        const t = dir * s * 0.7 + c
-        if (inPad(s, t) && !plate(s, t)) run.push(padPt(s, t, rr))
-        else flush()
-      }
-      flush()
-    }
-  }
-  // the VALVE plate
-  b.poly(rr2(0, 0.02, 0.96, 0.46, 0.08).map(([s, t]) => padPt(s, t, PAD_R + PAD_T + 0.012)), true, FG)
-  b.poly(rr2(0, 0.02, 0.5, 0.06, 0.02).map(([s, t]) => padPt(s, t, PAD_R + PAD_T + 0.014)), true, SHd)
   // the two cells inside, and the charge board above them
   for (const s0 of [-0.53, 0.53]) {
     const cell = rr2(s0, -0.04, 0.9, 1.04, 0.07)
@@ -407,34 +397,44 @@ export function frameHeadset(opts: FrameOptions = {}): Model {
     b.line(padPt(s0 - 0.3, -0.04, PAD_R + 0.566), padPt(s0 + 0.3, -0.04, PAD_R + 0.566), hot('battery', 0.3))
   }
   b.poly(rr2(0, 0.62, 1.9, 0.12, 0.03).map(([s, t]) => padPt(s, t, PAD_R + 0.44)), true, hot('battery', 0.5))
-  // charge light
-  b.poly(rr2(0.62, 0.62, 0.16, 0.03, 0.01).map(([s, t]) => padPt(s, t, PAD_R + PAD_T - 0.01)), true, ACC)
+  // charge light on the shell
+  b.poly(rr2(0.45, 0.42, 0.16, 0.03, 0.01).map(([s, t]) => padPt(s, t, PAD_R + PAD_T + 0.004)), true, ACC)
 
-  // ---------- the cable from the visor to the pad, looping free on the wearer's right ----------
+  // ---------- the cable: out of the visor top on the wearer's right, over the arm, down the strap into the cradle ----------
   {
-    const q0: Vec3 = [-(HW + 0.06), YC - 0.3, 1.64]
-    const q3 = padPt(-PAD_W - 0.02, 0.32, PAD_R + 0.44)
-    b.tube(q0, [-2.8, YC + 0.3, 0.1], [-2.5, YC + 0.12, -2.4], q3, 0.02, Y, 22, SHd)
-    b.box(add(q0, [-0.1, -0.05, -0.08]), add(q0, [0.0, 0.05, 0.06]), SH)
+    const st = straps.get(-1)!
+    const q0 = topPt(-1.6, 0.9)
+    const ic = ib - 2
+    const c = st.off(ic, 0.11, -0.24)
+    const q3 = padPt(-PAD_W, -0.5, PAD_R + 0.36)
+    b.tube(q0, [-2.05, YC + 1.25, 1.75], [-2.75, YC + 0.7, 0.6], c, 0.025, [1, 1, 0], 20, SH)
+    b.tube(c, st.off(ic + 4, 0.11, -0.28), [-2.25, YC - 1.25, -2.2], q3, 0.025, [1, 1, 0], 14, SH)
+    b.box(add(q0, [-0.06, -0.01, -0.06]), add(q0, [0.06, 0.12, 0.06]), SH)
+    b.rect(c, st.outN[ic], Y, 0.15, 0.16, SH, 0.03)
   }
 
-  // ---------- ergo kit top strap (optional) ----------
-  if (opts.topStrap) {
-    const t0 = topPt(0, 0.82)
-    const t3 = padPt(0, PAD_H * 0.92, PAD_R + 0.36)
-    const STEPS2 = 26
+  // ---------- ergo kit top strap: from the mount on the visor top, over the crown, to the cradle ----------
+  if (topStrap) {
+    const t0 = topPt(0, 0.88)
+    const t3 = padPt(0, PAD_H * 0.98, PAD_R + 0.3)
+    const STEPS2 = 30
     const cl: Vec3[] = []
-    for (let i = 0; i <= STEPS2; i++) cl.push(bezier(t0, [0, YC + 2.35, 1.45], [0, YC + 2.65, -2.1], t3, i / STEPS2))
+    for (let i = 0; i <= STEPS2; i++) cl.push(bezier(t0, [0, YC + 2.9, 1.75], [0, YC + 3.35, -2.9], t3, i / STEPS2))
     const up = cl.map((_, i) => {
       const t = norm([0, cl[Math.min(STEPS2, i + 1)][1] - cl[Math.max(0, i - 1)][1], cl[Math.min(STEPS2, i + 1)][2] - cl[Math.max(0, i - 1)][2]])
       return norm(cross(X, t))
     })
     const off = (i: number, o: number, dx: number): Vec3 => add(cl[i], [dx, up[i][1] * o, up[i][2] * o])
-    const HS = 0.27, TS = 0.05
+    const HS = 0.3, TS = 0.05
     for (const [o, dx, st] of [[TS, HS, SH], [TS, -HS, SH], [0, HS, SHd], [0, -HS, SHd]] as const) b.poly(cl.map((_, i) => off(i, o, dx)), false, st)
     for (let i = 0; i <= STEPS2; i += 2) b.line(off(i, TS, HS), off(i, TS, -HS), MESH)
-    const ib = Math.round(STEPS2 * 0.42)
-    b.rect(off(ib, TS / 2, 0), X, norm(cross(norm(sub(cl[ib + 1], cl[ib - 1])), X)), 2 * HS + 0.12, TS + 0.12, FG, 0.03)
+    // the mount it loops through on the visor, and its bracket on the cradle
+    b.box(add(t0, [-HS - 0.06, -0.01, -0.07]), add(t0, [HS + 0.06, 0.1, 0.07]), SH)
+    b.box(add(t3, [-HS - 0.06, -0.08, -0.1]), add(t3, [HS + 0.06, 0.06, 0.12]), SH)
+    // the adjuster on the back of the head, and the strap doubling back through it
+    const ia = Math.round(STEPS2 * 0.78)
+    for (const [i, st] of [[ia, FGd], [ia + 1, SHd]] as const) b.rect(off(i, TS / 2, 0), X, up[i], 2 * HS + 0.12, TS + 0.12, st, 0.03)
+    for (const dx of [HS - 0.03, -HS + 0.03]) b.poly(cl.slice(ia - 6, ia + 1).map((_, k) => off(ia - 6 + k, TS + 0.05, dx)), false, MESHd)
   }
 
   // ---------- hotspots ----------

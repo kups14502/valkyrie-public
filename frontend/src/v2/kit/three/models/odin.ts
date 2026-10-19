@@ -1,21 +1,24 @@
 // odin in x-ray: the real rig. An HP Spectre x360 15 (15-ch0xx) convertible
-// laptop, open, with the media RAID beside it: a TerraMaster four-bay USB
-// enclosure holding four 2.5in SATA SSDs in 3.5in trays, its rear fan, the
-// USB cable from the enclosure to the laptop, and a USB gigabit ethernet
-// dongle. The laptop faces +z and sits right of center; the enclosure stands
-// on its left, a little further back. Floor at y = 0.
+// laptop, open, on a silver laptop stand (a tilted plate on one wide riser
+// and a flat base with a cutout, BESIGN style), with the media RAID beside
+// it: a TerraMaster four-bay USB enclosure holding four 2.5in SATA SSDs in
+// 3.5in trays, its rear fan, and the router lying flat on its top (slatted
+// body, a raised glossy panel, four antennas on its back edge). Plus the USB
+// cable from the enclosure to the laptop and a USB gigabit ethernet dongle.
+// The laptop faces +z and sits right of center; the enclosure stands on its
+// left, a little further back. Floor at y = 0.
 //
 // Laptop: thin, gem-cut (the rear corners of the base and the lid are cut at
 // 45 degrees, the top edges carry a polished bevel), a 360-degree hinge
 // between the cut corners, a speaker grille over the keyboard, a wide
-// trackpad. Labels stay generic: no claims about exact parts.
+// trackpad. It is built flat in its own frame (floor at y = 0) and then set
+// on the stand by onStand(). Labels stay generic: no claims about exact parts.
 //
-// TO REFINE when Brendon sends photos of odin: which side each port and cable
-// is on (the dongle is drawn on the right, the enclosure cable on the left),
-// the lid angle and whether it stands as a laptop or a tent, the keyboard
-// layout (no numpad drawn), the enclosure's real proportions, tray handles,
-// front LEDs and rear port layout, where the ethernet cable runs, and the
-// real gap and stagger between the laptop and the enclosure.
+// From his photos (2026-10-18): the stand, and the router on the enclosure.
+// Still drawn differently from the desk: the enclosure's bays face the
+// viewer (on the desk they face the laptop and the embossed logo side faces
+// front), the USB hub beside the stand is not drawn, and the keyboard has no
+// numpad.
 //
 // Groups: cpu (die, package, cold plate), mem (memory), disk (the NVMe SSD;
 // the enclosure's SSDs and backplane are disk.das, so they follow disk until
@@ -23,7 +26,7 @@
 // fans.das for the enclosure fan), battery (cells), display (backlight),
 // board.
 
-import type { Model, Vec3 } from '../engine'
+import { norm, sub, type Model, type Vec3 } from '../engine'
 import type { Beam, Flow } from '../render'
 import { AX, Builder, type Style } from './build'
 
@@ -46,7 +49,8 @@ const Z0 = -1.55, Z1 = Z0 + D
 const B0 = 0.04, B1 = 0.19
 /** gem cut on the rear corners, round on the front corners */
 const CUT = 0.26, RND = 0.12
-const LID_ANGLE = (18 * Math.PI) / 180
+/** lid lean back from square to the deck; the stand's tilt adds to it (about 18 degrees from vertical on the desk) */
+const LID_ANGLE = (4 * Math.PI) / 180
 const L: Vec3 = [0, Math.cos(LID_ANGLE), -Math.sin(LID_ANGLE)]
 const NL: Vec3 = [0, Math.sin(LID_ANGLE), Math.cos(LID_ANGLE)]
 const HINGE: Vec3 = [LX, B1 - 0.01, Z0 + 0.12]
@@ -56,6 +60,75 @@ const LID_T = 0.1
 const P = (x: number, z: number, y: number): Vec3 => [LX + x, y, z]
 /** A point on the lid: x across, t up the lid from the hinge, n out of the screen. */
 const lid = (x: number, t: number, n = 0): Vec3 => [LX + x, HINGE[1] + L[1] * t + NL[1] * n, HINGE[2] + L[2] * t + NL[2] * n]
+
+// ---------- the stand ----------
+
+/** plate tilt (rear up), height of the plate's top at the laptop's front edge */
+const TILT = (14 * Math.PI) / 180
+const cT = Math.cos(TILT), sT = Math.sin(TILT)
+const STAND_Y = 1.0
+/** plate width, length back from the front edge, thickness; the hinge under it, back from the front edge */
+const PLATE_W = 3.6, PLATE_L = 3.0, PLATE_T = 0.06
+const HINGE_BACK = 1.65
+
+/** The laptop's own frame (floor at y = 0) onto the stand: tilted rear-up about its front bottom edge, lifted onto the plate. */
+const onStand = (p: Vec3): Vec3 => {
+  const dy = p[1], dz = p[2] - Z1
+  return [p[0], STAND_Y + dy * cT - dz * sT, Z1 + dy * sT + dz * cT]
+}
+const onStandDir = (d: Vec3): Vec3 => [d[0], d[1] * cT - d[2] * sT, d[1] * sT + d[2] * cT]
+
+/** A round bar along x: end circles and four lines. */
+function barX(b: Builder, c: Vec3, len: number, r: number, s: Style) {
+  for (const sx of [-1, 1]) b.circle([c[0] + (sx * len) / 2, c[1], c[2]], Z, Y, r, 12, s)
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4
+    b.line([c[0] - len / 2, c[1] + Math.sin(a) * r, c[2] + Math.cos(a) * r], [c[0] + len / 2, c[1] + Math.sin(a) * r, c[2] + Math.cos(a) * r], SHd)
+  }
+}
+
+/** The plate, its two front hooks and the hinge under it, in the laptop's frame (moved with the laptop). */
+function standPlate(b: Builder) {
+  const z1 = Z1 + 0.06
+  b.roundSlab([LX, -PLATE_T / 2, z1 - PLATE_L / 2], X, Z, PLATE_W, PLATE_L, PLATE_T, 0.16, SH, SHd, SHd, 4)
+  for (const sx of [-1, 1]) {
+    const x = LX + sx * 1.25
+    b.box([x - 0.17, -PLATE_T, Z1 + 0.02], [x + 0.17, 0.15, z1 + 0.02], SH)
+  }
+  const hz = Z1 - HINGE_BACK
+  b.box([LX - 0.7, -PLATE_T - 0.07, hz - 0.2], [LX + 0.7, -PLATE_T, hz + 0.2], SHd)
+  barX(b, [LX, -PLATE_T - 0.12, hz], 1.5, 0.08, SH)
+}
+
+/** The riser and the base, in world space (after the laptop is on the plate). */
+function standBase(b: Builder) {
+  const by = 0.07
+  const top = onStand([LX, -PLATE_T - 0.12, Z1 - HINGE_BACK])
+  const foot: Vec3 = [LX, by + 0.08, top[2] - 0.22]
+  // riser: a wide flat bar leaning slightly forward from the base joint to the hinge
+  const d = norm(sub(top, foot))
+  const n: Vec3 = [0, -d[2], d[1]]
+  const hw = 0.72, ht = 0.05
+  const at = (p: Vec3, sx: number, sn: number): Vec3 => [p[0] + sx * hw, p[1] + n[1] * sn * ht, p[2] + n[2] * sn * ht]
+  const face = (sn: number): Vec3[] => [at(foot, -1, sn), at(foot, 1, sn), at(top, 1, sn), at(top, -1, sn)]
+  const rf = face(1), rb = face(-1)
+  b.poly(rf, true, SH)
+  b.poly(rb, true, SHd)
+  for (let i = 0; i < 4; i++) b.line(rf[i], rb[i], SHd)
+  b.face(rf, 'fg', 0.4)
+  barX(b, foot, 1.5, 0.08, SH)
+  b.box([LX - 0.8, by, foot[2] - 0.17], [LX + 0.8, by + 0.05, foot[2] + 0.17], SHd)
+  // base: a flat plate with a wide cutout, reaching a little past the laptop's front edge
+  const z0 = foot[2] - 0.3, z1 = Z1 + 0.2
+  const bw = 3.3, bd = z1 - z0, bz = (z0 + z1) / 2
+  b.roundSlab([LX, by / 2, bz], X, Z, bw, bd, by, 0.2, SHd, SH, SHd, 4)
+  const cz0 = z0 + 0.62, cz1 = z1 - 0.45
+  const cut = (y: number) => b.roundRectPts([LX, y, (cz0 + cz1) / 2], X, Z, bw - 0.9, cz1 - cz0, 0.12, 3)
+  const ct = cut(by + 0.002), cb = cut(0.002)
+  b.poly(ct, true, SHd)
+  b.poly(cb, true, SHd)
+  for (let q = 0; q < 4; q++) b.line(ct[q * 4 + 1], cb[q * 4 + 1], SHd)
+}
 
 /**
  * The gem-cut outline in 2D: u across (-w/2..w/2), v from the cut edge (0) to
@@ -343,30 +416,119 @@ function enclosure(b: Builder) {
   b.circle([DX + 0.62, DY0 + 0.25, rz - 0.004], X, Y, 0.05, 10, FG)
 }
 
+// ---------- the router, lying flat on the enclosure (~72 mm per unit) ----------
+
+/** center over the enclosure, length along z, width along x, body height */
+const RX = DX, RZ = DZ - 0.15
+const RL = 3.6, RW = 1.86, RH = 0.5
+const SLAT: Style = { layer: 'shell', w: 0.55 }
+
+/** Clip the segment a-b (2D) to the convex region where every [nu, nv, c] holds nu * u + nv * v <= c. */
+function clip2(a: [number, number], b2: [number, number], planes: [number, number, number][]): [[number, number], [number, number]] | null {
+  let t0 = 0, t1 = 1
+  const du = b2[0] - a[0], dv = b2[1] - a[1]
+  for (const [nu, nv, c] of planes) {
+    const den = nu * du + nv * dv, num = c - nu * a[0] - nv * a[1]
+    if (Math.abs(den) < 1e-9) { if (num < 0) return null; continue }
+    const t = num / den
+    if (den > 0) t1 = Math.min(t1, t)
+    else t0 = Math.max(t0, t)
+    if (t0 >= t1) return null
+  }
+  return [[a[0] + du * t0, a[1] + dv * t0], [a[0] + du * t1, a[1] + dv * t1]]
+}
+
+function router(b: Builder) {
+  const y0 = DY0 + DH
+  const yb = y0 + 0.05, yl = y0 + RH - 0.1, yt = y0 + RH
+  // u runs along the router's length (z), v across it (x; +v is the front with the lights, -v the antenna edge)
+  const at = (u: number, v: number, y: number): Vec3 => [RX + v, y, RZ + u]
+  // body: flat top, a short vertical lip, sides tapering in a little to the bottom, four feet
+  const top = b.roundRectPts([RX, yt, RZ], Z, X, RL, RW, 0.12, 3)
+  const lip = b.roundRectPts([RX, yl, RZ], Z, X, RL, RW, 0.12, 3)
+  const bot = b.roundRectPts([RX, yb, RZ], Z, X, RL - 0.08, RW - 0.08, 0.1, 3)
+  b.poly(top, true, FGd)
+  b.poly(lip, true, SHd)
+  b.poly(bot, true, SHd)
+  for (let q = 0; q < 4; q++) for (const i of [0, 3]) { b.line(top[q * 4 + i], lip[q * 4 + i], SH); b.line(lip[q * 4 + i], bot[q * 4 + i], SHd) }
+  for (const su of [-1, 1]) for (const sv of [-1, 1]) b.circle(at(su * (RL / 2 - 0.35), sv * (RW / 2 - 0.3), y0 + 0.004), X, Z, 0.07, 8, SHd)
+
+  // the raised glossy panel over one end, its inner edge on a diagonal
+  const pu = (v: number) => 0.8 + 0.45 * v
+  const m = 0.1, vb = -RW / 2 + m, vf = RW / 2 - m, ue = RL / 2 - m
+  const panel = (y: number): Vec3[] => [at(pu(vb), vb, y), at(ue, vb, y), at(ue, vf, y), at(pu(vf), vf, y)]
+  const pt = panel(yt + 0.05), pb = panel(yt + 0.004)
+  b.poly(pt, true, FGd)
+  b.poly(pb, true, SHd)
+  for (let i = 0; i < 4; i++) b.line(pt[i], pb[i], SHd)
+  b.face(panel(yt + 0.05), 'fg', 0.7)
+  // diagonal slats over the rest of the top
+  const planes: [number, number, number][] = [[1, 0, RL / 2 - m], [-1, 0, RL / 2 - m], [0, 1, vf], [0, -1, vf], [1, -0.45, 0.8 - 0.06]]
+  const span = RL / 2 + RW / 2
+  for (let c = -span; c <= span; c += 0.1) {
+    const s = clip2([c - RW, -RW], [c + RW, RW], planes)
+    if (s) b.lineN(at(s[0][0], s[0][1], yt + 0.004), at(s[1][0], s[1][1], yt + 0.004), 2, SLAT)
+  }
+  // status lights along the front edge, beside the panel
+  for (let k = 0; k < 5; k++) b.circle(at(0.5 + k * 0.13, RW / 2 + 0.004, yt - 0.05), Z, Y, 0.018, 6, FG)
+
+  // four antennas hinged on the back edge, standing up, leaning back and fanning out
+  const ALEN = 2.1
+  for (const zz of [-1.35, -0.45, 0.45, 1.35]) {
+    const h = at(zz, -RW / 2 - 0.05, yt - 0.12)
+    const dir = norm([-0.17, 1, zz * 0.09])
+    const w = norm([0, -dir[2], dir[1]])
+    const t: Vec3 = [1, 0, 0]
+    const P2 = (along: number, sw: number, st: number, half: number): Vec3 =>
+      [h[0] + dir[0] * along + t[0] * st * 0.035, h[1] + dir[1] * along + w[1] * sw * half, h[2] + dir[2] * along + w[2] * sw * half]
+    const base = (st: number) => [P2(0.06, -1, st, 0.11), P2(0.06, 1, st, 0.11), P2(ALEN, 1, st, 0.085), P2(ALEN, -1, st, 0.085)]
+    const f = base(-1), k = base(1)
+    b.poly(f, true, SH)
+    b.poly(k, true, SHd)
+    for (let i = 0; i < 4; i++) b.line(f[i], k[i], SHd)
+    b.circle(h, X, Y, 0.06, 8, SH)
+    b.line([h[0], h[1], h[2] - 0.11], [h[0], h[1], h[2] + 0.11], SHd)
+  }
+}
+
 export function odinRig(): Model {
   const b = new Builder()
+
+  // ---------- in the laptop's own frame: the laptop, the stand's plate, what plugs into it ----------
   spectre(b)
-  enclosure(b)
-
-  // USB cable: out of the enclosure's rear, around its corner on the floor, into the laptop's left side
-  b.tube([DX + 0.62, DY0 + 0.45, DZ - DD / 2 - 0.02], [DX + 0.62, 0.03, DZ - DD / 2 - 0.6], [-1.75, 0.03, -1.6], P(-W / 2 - 0.004, -0.95, 0.115), 0.025, Y, 22, SH)
+  standPlate(b)
+  // the enclosure cable's plug in the left side
   b.box(P(-W / 2 - 0.2, -0.99, 0.09), P(-W / 2 - 0.004, -0.91, 0.14), FG)
-
-  // USB gigabit ethernet dongle in the right side, its cable trailing back
-  {
-    const x0 = W / 2 + 0.004, z = -0.35, y = 0.115
-    b.box(P(x0, z - 0.06, y - 0.025), P(x0 + 0.16, z + 0.06, y + 0.025), SH)
-    b.box(P(x0 + 0.16, z - 0.15, y - 0.06), P(x0 + 0.82, z + 0.15, y + 0.06), FG)
-    b.rect(P(x0 + 0.822, z, y), Z, Y, 0.18, 0.09, SH, 0.01)
-    b.rect(P(x0 + 0.5, z, y + 0.062), X, Z, 0.2, 0.03, ACC)
-    b.tube(P(x0 + 0.84, z, y), P(x0 + 1.35, z, 0.05), P(x0 + 1.25, Z0 - 0.2, 0.03), P(x0 + 0.9, Z0 - 1.4, 0.03), 0.02, Y, 16, SHd)
-  }
-
-  // ---------- hotspots ----------
+  // USB gigabit ethernet dongle in the right side
+  const dx0 = W / 2 + 0.004, dz = -0.35, dy = 0.115
+  b.box(P(dx0, dz - 0.06, dy - 0.025), P(dx0 + 0.16, dz + 0.06, dy + 0.025), SH)
+  b.box(P(dx0 + 0.16, dz - 0.15, dy - 0.06), P(dx0 + 0.82, dz + 0.15, dy + 0.06), FG)
+  b.rect(P(dx0 + 0.822, dz, dy), Z, Y, 0.18, 0.09, SH, 0.01)
+  b.rect(P(dx0 + 0.5, dz, dy + 0.062), X, Z, 0.2, 0.03, ACC)
   b.hotspot('cpu', P(0.15, -0.67, 0.18), 'Processor')
   b.hotspot('mem', P(0.86, -0.48, 0.13), 'Memory')
   b.hotspot('disk', P(-1.25, 0, 0.12), 'NVMe')
-  b.hotspot('raid', [DX, DY0 + DH + 0.02, DZ + 0.4], 'RAID array')
+  b.transform(onStand, onStandDir)
+
+  // ---------- world: the stand's riser and base, the enclosure and the router on it, the cables ----------
+  standBase(b)
+  enclosure(b)
+  router(b)
+
+  // USB cable: from the plug it drops behind the stand to the floor, then runs to the enclosure's rear port
+  {
+    const e = onStand(P(-W / 2 - 0.2, -0.95, 0.115))
+    const f: Vec3 = [-1.62, 0.03, -2.15]
+    b.tube(e, [e[0] - 0.5, e[1] - 0.05, e[2]], [e[0] - 0.4, 0.6, e[2] - 0.5], f, 0.025, [1, 0, -1], 16, SH)
+    b.tube(f, [-1.9, 0.03, -2.55], [DX + 0.62, 0.03, -2.55], [DX + 0.62, DY0 + 0.45, DZ - DD / 2 - 0.02], 0.025, Y, 16, SH)
+  }
+  // the dongle's ethernet cable drops off the right and trails back on the floor
+  {
+    const e = onStand(P(dx0 + 0.84, dz, dy))
+    b.tube(e, [e[0] + 0.45, e[1], e[2]], [e[0] + 0.55, 0.3, e[2] - 0.4], [e[0] + 0.2, 0.03, Z0 - 1.4], 0.02, [0, 1, 1], 18, SHd)
+  }
+
+  b.hotspot('raid', [DX - 0.2, DY0 + DH - 0.2, DFZ + 0.01], 'RAID array')
 
   return b.model()
 }

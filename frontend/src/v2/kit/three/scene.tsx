@@ -150,6 +150,30 @@ export function WireScene(props: WireSceneProps) {
     }
   }
 
+  /**
+   * The diamond a press at (clientX, clientY) means: of the shown diamonds
+   * whose 44 px target holds the point, the one whose point is nearest. Two
+   * targets overlap where two bulbs line up in depth (the apartment's TV strip
+   * and bedroom lamp on the phone); the one painted last used to take every
+   * press, so the other could not be picked. A keyboard press (no point) keeps
+   * its own diamond.
+   */
+  const spotAt = (own: number, clientX: number, clientY: number, keyboard: boolean): number => {
+    const e = eng.current, wrap = wrapRef.current
+    if (keyboard || !e || !wrap) return own
+    const r = wrap.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return own
+    const x = ((clientX - r.left) * e.r.w) / r.width
+    const y = ((clientY - r.top) * e.r.h) / r.height
+    let best = own, bd = Infinity
+    e.hs.forEach((p, j) => {
+      if (!p?.ok || p.o <= 0 || Math.abs(p.x - x) > 22 || Math.abs(p.y - y) > 22) return
+      const d = Math.hypot(p.x - x, p.y - y)
+      if (d < bd) { bd = d; best = j }
+    })
+    return best
+  }
+
   const fxOf = (): Fx => {
     const p = propsRef.current
     return {
@@ -374,12 +398,17 @@ export function WireScene(props: WireSceneProps) {
                 data-hotspot={h.id}
                 aria-label={h.label}
                 ref={(el) => { hotRefs.current[i] = el }}
-                onPointerDown={(ev) => { ev.stopPropagation(); setPressed(h.id) }}
+                onPointerDown={(ev) => {
+                  ev.stopPropagation()
+                  setPressed(model.hotspots[spotAt(i, ev.clientX, ev.clientY, false)]?.id ?? h.id)
+                }}
                 onPointerUp={() => setPressed(null)}
                 onPointerLeave={() => setPressed(null)}
-                onClick={() => {
-                  const pt = eng.current?.hs[i]
-                  propsRef.current.onHotspot?.(h.id, { x: pt?.x ?? 0, y: pt?.y ?? 0 })
+                onClick={(ev) => {
+                  const j = spotAt(i, ev.clientX, ev.clientY, ev.detail === 0)
+                  const spot = propsRef.current.model.hotspots[j] ?? h
+                  const pt = eng.current?.hs[j]
+                  propsRef.current.onHotspot?.(spot.id, { x: pt?.x ?? 0, y: pt?.y ?? 0 })
                 }}
                 style={{
                   position: 'absolute', left: 0, top: 0, width: 44, height: 44, marginLeft: -22, marginTop: -22,

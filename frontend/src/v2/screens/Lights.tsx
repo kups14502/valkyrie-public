@@ -9,7 +9,7 @@ import { Icon, type IconName } from '../kit/icons'
 import { ago, useHosts, useLights, useThorRgb, useTick, type LightVM, type RgbVM } from '../kit/data'
 import { usePalette } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
-import { POSES, WireScene, parseColor, room, type CameraPose, type Light, type Model, type RGB } from '../kit/three'
+import { WireScene, apartment, apartmentView, parseColor, type CameraPose, type Light, type Model, type RGB } from '../kit/three'
 import { setThorRgb, type LightUpdate } from '../../lib/api'
 import { PRESETS, brightnessFromPct, hexToRgb, lightColor, pctFromBrightness, presetSwatchStyle, rgbToHex, useLightsControl } from '../../lib/lights'
 import './lights.css'
@@ -17,12 +17,12 @@ import './lights.css'
 // Lights in the red HUD style: the all-lights master as a big power plate, the
 // real presets as glass plates plus a Custom plate (the browser's color picker),
 // one icon-led row per bulb (a lit bulb's strip has the same Custom swatch) (its bulb icon glows
-// in the bulb's real color while it is on), Thor RGB, and the room model as a
-// compact panel that shows every bulb in its real color. Every bulb control
+// in the bulb's real color while it is on), Thor RGB, and the apartment model as a
+// compact panel that shows every bulb where it is, in its real color. Every bulb control
 // writes through src/lib/lights.ts useLightsControl: its desire overlay shows
 // what was asked at once and falls back to the bulb's real state when the call
-// fails, and the room re-lights from that same state.
-// Phone: one column. Landscape and desktop: master + presets | bulbs | room + Thor RGB.
+// fails, and the apartment re-lights from that same state.
+// Phone: one column. Landscape and desktop: master + presets | bulbs | apartment + Thor RGB.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 /** raw: Home Assistant's 0-255 brightness, sent back with a color pick so the bulb keeps its level */
@@ -135,21 +135,19 @@ function useMedia(q: string): boolean {
   return m
 }
 
-type Fit = { dist: number; sy: number }
-
-/** the room panel's header band: the room fits under it */
+/** the room panel's header band: the plan fits under it */
 const ROOM_HD = 24
+/** a lit bulb's pool of light on the floor, plan meters (about one room's width) */
+const POOL_M = 1.5
+/** the dot floor reaches just past the apartment's walls, so the plan's outline reads */
+const FLOOR_EXTENT = 1.3
 
 /**
- * Camera distance and vertical shift that fit the room into its compact box,
- * under the header band. Measures layout size (clientWidth/Height), so a
- * tilted column or a build-in transform does not skew it. From the 'lights'
- * pose, at the distances these boxes give, the room draws about 2.75 times as
- * wide and 1.65 times as tall as the projected radius of its bounding sphere,
- * with its middle 0.14 radius below the projection center (measured).
+ * The room box's layout size (clientWidth/Height), so a tilted column or a
+ * build-in transform does not skew it (the UI zoom stays out of it too).
  */
-function useBoxFit(box: RefObject<HTMLElement | null>, radius: number): Fit | null {
-  const [fit, setFit] = useState<Fit | null>(null)
+function useBoxSize(box: RefObject<HTMLElement | null>): { w: number; h: number } | null {
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   useLayoutEffect(() => {
     const el = box.current
     if (!el) return
@@ -157,20 +155,14 @@ function useBoxFit(box: RefObject<HTMLElement | null>, radius: number): Fit | nu
       const w = el.clientWidth
       const h = el.clientHeight
       if (w < 20 || h < 60) return
-      const ah = h - ROOM_HD
-      const fov = POSES.lights.fov ?? 38
-      const focal = (Math.min(w, h) * 0.5) / Math.tan((fov * Math.PI) / 360)
-      const R = Math.min((w * 0.9) / 2.75, (ah * 0.92) / 1.65)
-      const dist = Math.round(Math.max(6, Math.min(40, (focal * radius) / R)) * 100) / 100
-      const sy = Math.round(((ROOM_HD + ah / 2) / h - 0.5 - (0.14 * R) / h) * 1000) / 1000
-      setFit((cur) => (cur && Math.abs(cur.dist - dist) < 0.05 && Math.abs(cur.sy - sy) < 0.004 ? cur : { dist, sy }))
+      setSize((cur) => (cur && Math.abs(cur.w - w) < 1 && Math.abs(cur.h - h) < 1 ? cur : { w, h }))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [box, radius])
-  return fit
+  }, [box])
+  return size
 }
 
 /** The Thor RGB status line, the real ThorRgbControl's wording. */
@@ -355,12 +347,12 @@ export default function Lights({ active }: ScreenProps) {
   const shownSel = active ? sel : null
   const selBulb = shownSel ? all.find((b) => b.id === shownSel) : undefined
 
-  // ---- the room: a compact panel, the one 3D element on this screen ----
+  // ---- the apartment: a compact panel, the one 3D element on this screen ----
   const roomBox = useRef<HTMLDivElement>(null)
   const roomKey = all.map((l) => l.id + '\u0001' + l.name).join('\u0002')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const model = useMemo(() => room(all.map((l) => ({ id: l.id, name: l.name }))), [roomKey])
-  const fit = useBoxFit(roomBox, model.radius)
+  const model = useMemo(() => apartment(all.map((l) => ({ id: l.id, name: l.name }))), [roomKey])
+  const size = useBoxSize(roomBox)
 
   // The compact room on a narrow screen labels the selected bulb, or the lit ones while few are lit
   // (the light pools already say which are on), so names never pile up. Same segments, so the camera
@@ -373,22 +365,27 @@ export default function Lights({ active }: ScreenProps) {
     return { ...model, hotspots: model.hotspots.map((h) => (show.has(h.id) ? h : { ...h, label: '' })) }
   }, [model, wide, litKey, shownSel])
 
+  // The plan fills the box under its header band. A wide screen labels every bulb, so the fit keeps
+  // each label (11 px mono, starting 18 px right of its diamond) inside the box too.
+  const view = useMemo<CameraPose | null>(() => {
+    if (!size) return null
+    const labels = wide ? Object.fromEntries(model.hotspots.map((h) => [h.id, 24 + h.label.length * 6.8])) : undefined
+    return apartmentView(model, size.w, size.h, { top: ROOM_HD, right: 6, bottom: 6, left: 6, labels })
+  }, [model, size, wide])
   const pose = useMemo<CameraPose | null>(() => {
-    if (!fit) return null
-    const p = POSES.lights
-    // a little left of center leaves room for the bulb labels on the right
-    const shift: [number, number] = [-0.05, fit.sy]
-    // hidden: wait a little wider and lower, so opening the tab dollies into the room
-    if (!active && !reduced) return { ...p, yaw: p.yaw - 48, pitch: 12, dist: fit.dist * 1.22, shift }
-    return { ...p, dist: fit.dist, shift }
-  }, [fit, active, reduced])
+    if (!view) return null
+    // hidden: wait a little wider and lower, so opening the tab dollies into the apartment
+    if (!active && !reduced) return { ...view, yaw: view.yaw - 48, pitch: view.pitch - 20, dist: view.dist * 1.22 }
+    return view
+  }, [view, active, reduced])
 
   const glowOf = (b: Bulb) => (b.pct == null ? UNKNOWN_GLOW : b.pct / 100)
   const lightKey = all.map((b) => `${b.id}|${b.on ? 1 : 0}|${b.pct ?? ''}|${b.color}|${b.unavailable ? 1 : 0}`).join(';')
   const sceneLights = useMemo<Light[]>(() => model.hotspots.flatMap((h) => {
     const b = all.find((x) => x.id === h.id)
     if (!b || !b.on || b.unavailable) return []
-    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b) }]
+    // lamps sit low in their rooms: a glow and a pool on the floor, no cone through the furniture
+    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b), cone: false, radius: POOL_M }]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [model, lightKey])
   const heat = useMemo(() => {
@@ -496,7 +493,7 @@ export default function Lights({ active }: ScreenProps) {
       </div>
 
       <div className="lt-col lt-col-c">
-        {/* ROOM: compact, each bulb in its real color; a diamond finds its row */}
+        {/* APARTMENT: compact, each bulb where it is in its real color; a diamond finds its row */}
         <section className="vl-panel vl-build lt-p-room" style={{ '--i': 2 } as Vars}>
           <div ref={roomBox} className="lt-room">
             {pose && (
@@ -507,6 +504,7 @@ export default function Lights({ active }: ScreenProps) {
                 palette={palette}
                 heat={heat}
                 lights={sceneLights}
+                floorExtent={FLOOR_EXTENT}
                 orbit
                 orbitArea="model"
                 paused={!active}
@@ -517,7 +515,7 @@ export default function Lights({ active }: ScreenProps) {
               />
             )}
             <div className="lt-room-hd" aria-hidden>
-              <span className="lt-room-label"><Icon name="home" size={14} tone="dim" className="lt-hd-ic" />Room</span>
+              <span className="lt-room-label"><Icon name="home" size={14} tone="dim" className="lt-hd-ic" />Apartment</span>
               {selBulb && <span className="lt-room-sel">{selBulb.name}</span>}
             </div>
           </div>

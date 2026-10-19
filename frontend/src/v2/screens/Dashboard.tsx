@@ -13,7 +13,7 @@ import {
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
-import { POSES, WireScene, room, type CameraPose, type Light } from '../kit/three'
+import { WireScene, apartment, apartmentView, type CameraPose, type Light } from '../kit/three'
 import { EquityChart } from '../kit/three/EquityChart'
 import { apiErrorText, type LightState, type LightUpdate } from '../../lib/api'
 import { dateLabel, fetchTrackerSkips, parseDateKey, shiftDateKey } from '../../lib/supplementsApi'
@@ -1636,7 +1636,7 @@ function presetOf(l: LightState): string | null {
  * own level), and every bulb in its real color. `rows` (two columns and up):
  * a row per bulb with its brightness bar (sent once, on release) and its
  * switch. `chips` (phone): a chip per bulb, a tap switches it. `room`
- * (desktop): the room model under the list, each bulb glowing in its color.
+ * (desktop): the apartment model under the list, each bulb glowing where it is in its color.
  * Every write goes through useLightsControl's mutation, in order (useLightQueue).
  */
 function LightsBox({ i, active, variant, room: withRoom, fill }: {
@@ -2006,9 +2006,9 @@ function BulbSlider({ value, on, label, onCommit, onPreview }: {
 }
 
 /**
- * The room as an x-ray model, each bulb a pool of light in its real color and
- * strength (no diamonds: the list above names them). Fits its box; drag turns
- * it; paused while the Dashboard is not the visible tab.
+ * The apartment as an x-ray plan, each bulb a pool of light in its real color
+ * and strength where it is (no diamonds: the list above names them). Fits its
+ * box; drag turns it; paused while the Dashboard is not the visible tab.
  */
 function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
   const palette = usePalette()
@@ -2017,26 +2017,20 @@ function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
   const size = useSize(boxRef)
   const roomKey = bulbs.map((b) => `${b.id}\u0001${b.name}`).join('\u0002')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const model = useMemo(() => room(bulbs.map((b) => ({ id: b.id, name: b.name }))), [roomKey])
-  // From the 'lights' pose the room draws about 2.75 times as wide and 1.65 times as tall as the
-  // projected radius of its bounding sphere, its middle 0.14 radius below center (Lights.tsx useBoxFit).
+  const model = useMemo(() => apartment(bulbs.map((b) => ({ id: b.id, name: b.name }))), [roomKey])
+  // the plan fills the box, clear of the cap in its top-left corner
   const pose = useMemo<CameraPose | null>(() => {
     if (!size || size.w < 60 || size.h < 60) return null
-    const p = POSES.lights
-    const fov = p.fov ?? 38
-    const focal = (Math.min(size.w, size.h) * 0.5) / Math.tan((fov * Math.PI) / 360)
-    const R = Math.min((size.w * 0.9) / 2.75, (size.h * 0.9) / 1.65)
-    const dist = Math.round(Math.max(6, Math.min(40, (focal * model.radius) / R)) * 100) / 100
-    const sy = Math.round((-(0.14 * R) / size.h) * 1000) / 1000
-    return { ...p, dist, shift: [0, sy] }
-  }, [size, model.radius])
+    return apartmentView(model, size.w, size.h, { top: 22, right: 6, bottom: 4, left: 6 })
+  }, [size, model])
   const lightKey = bulbs.map((b) => `${b.id}|${b.on ? 1 : 0}|${b.pct ?? ''}|${b.color}|${b.unavailable ? 1 : 0}`).join(';')
   // a lit bulb of unknown brightness glows at 0.7 (drawing only, never shown as a number)
   const glowOf = (b: BulbV) => (b.pct == null ? 0.7 : b.pct / 100)
   const lights = useMemo<Light[]>(() => model.hotspots.flatMap((h) => {
     const b = bulbs.find((x) => x.id === h.id)
     if (!b || !b.on || b.unavailable) return []
-    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b) }]
+    // lamps sit low in their rooms: a glow and a pool on the floor (about a room wide), no cone through the furniture
+    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b), cone: false, radius: 1.5 }]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [model, lightKey])
   const heat = useMemo(() => {
@@ -2047,7 +2041,7 @@ function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
   }, [lightKey])
   const lit = bulbs.filter((b) => b.on && !b.unavailable).length
   return (
-    <div ref={boxRef} className="hm-room" role="img" aria-label={`The room, ${lit} of ${bulbs.length} bulbs lit`}>
+    <div ref={boxRef} className="hm-room" role="img" aria-label={`The apartment, ${lit} of ${bulbs.length} bulbs lit`}>
       {pose && (
         <WireScene
           style={{ position: 'absolute', inset: 0 }}
@@ -2056,6 +2050,7 @@ function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
           palette={palette}
           heat={heat}
           lights={lights}
+          floorExtent={1.3}
           orbit
           orbitArea="model"
           paused={!active}
@@ -2063,7 +2058,7 @@ function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
           showHotspots={false}
         />
       )}
-      <span className="hm-room-cap" aria-hidden><Icon name="home" size={12} tone="dim" />Room</span>
+      <span className="hm-room-cap" aria-hidden><Icon name="home" size={12} tone="dim" />Apartment</span>
     </div>
   )
 }

@@ -7,7 +7,11 @@
 //             renderer's own size, so a renderer sized in zoomed px shows), and
 //             the wireframe is drawn right under it. On the phone, a 1600x900
 //             window, and 1920x1080 and 2560x1440 at Brendon's zoom of 1.2,
-//             where every diamond used to float beside the model. The Lights
+//             where every diamond used to float beside the model. The rebuilt
+//             heroes (thor, odin, Loki) keep every hotspot id System maps its
+//             plates by, and every hotspot is in view and on its part: within
+//             5% of the model's radius of a drawn line, and inside the group it
+//             names where the model has one (thor's 'gpu' lines). The Lights
 //             room's bulb diamonds too (live bulbs, read only).
 //   devices   the phone and tablet as reporting hosts (backend routes/devices.ts):
 //             a host row with the battery, the detail's battery and storage
@@ -20,10 +24,12 @@ import { sleep } from '../lib/cdp.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
 
 const ok = (body) => ({ status: 200, body })
+// `spots`: the hotspot ids System maps its plates to (cpu, mem, disk...), which a rebuilt model must keep;
+// `all`: every one of them must be in view and on its part from the Hosts camera (the round-6 heroes)
 const MODELS = [
-  { id: 'thor', label: 'Thor' },
-  { id: 'odin', label: 'Odin' },
-  { id: 'frame', label: 'Loki' },
+  { id: 'thor', label: 'Thor', spots: ['cpu', 'mem', 'gpu', 'disk'], all: true },
+  { id: 'odin', label: 'Odin', spots: ['cpu', 'mem', 'disk', 'raid'], all: true },
+  { id: 'frame', label: 'Loki', spots: ['cpu', 'mem', 'disk', 'battery', 'lens'], all: true },
   { id: 'mimir', label: 'Mimir' },
   { id: 'phone', label: 'Phone' },
   { id: 'tablet', label: 'Tablet' },
@@ -101,9 +107,36 @@ function hotspotReport(sel = '.vl-page[data-active] .sys-detail-model [data-wire
     }
     return best === Infinity ? null : best / dpr
   }
+  // on its part: how far the point is from the nearest drawn segment, and whether it sits inside the
+  // box of the group named after it (thor's 'gpu' lines for the GPU spot) where the model has one,
+  // both in model units against a tolerance of 5% of the model's radius (a few px on screen)
+  const c = e.r.model
+  const tol = (c?.radius ?? 4) * 0.05
+  const segDist = (p, i) => {
+    const o = i * 6
+    const ax = c.pos[o], ay = c.pos[o + 1], az = c.pos[o + 2]
+    const dx = c.pos[o + 3] - ax, dy = c.pos[o + 4] - ay, dz = c.pos[o + 5] - az
+    const L2 = dx * dx + dy * dy + dz * dz
+    const t = L2 ? Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - ay) * dy + (p[2] - az) * dz) / L2)) : 0
+    return Math.hypot(ax + dx * t - p[0], ay + dy * t - p[1], az + dz * t - p[2])
+  }
+  const groupBox = (g) => {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    let n = 0
+    for (let i = 0; i < c.n; i++) {
+      if (c.styles[c.style[i]].group !== g) continue
+      n++
+      for (const k of [0, 3]) for (let a = 0; a < 3; a++) { const v = c.pos[i * 6 + k + a]; lo[a] = Math.min(lo[a], v); hi[a] = Math.max(hi[a], v) }
+    }
+    return n ? { lo, hi } : null
+  }
   const out = [0, 0, 0]
-  const spots = e.r.model?.hotspots ?? []
+  const spots = c?.hotspots ?? []
   const rows = spots.map((h) => {
+    let part = Infinity
+    for (let i = 0; i < c.n; i++) { const d = segDist(h.at, i); if (d < part) part = d }
+    const gb = groupBox(h.id)
+    const inGroup = gb ? h.at.every((v, a) => v >= gb.lo[a] - tol && v <= gb.hi[a] + tol) : null
     const ok = e.cam.project(h.at[0], h.at[1], h.at[2], out)
     const vis = ok && out[0] > 0 && out[0] < e.r.w && out[1] > 0 && out[1] < e.r.h
     const btn = scene.querySelector(`[data-hotspot="${h.id}"]`)
@@ -114,7 +147,7 @@ function hotspotReport(sel = '.vl-page[data-active] .sys-detail-model [data-wire
     const py = rect.top + out[1] * ky
     const cx = br ? br.left + br.width / 2 : NaN
     const cy = br ? br.top + br.height / 2 : NaN
-    return { id: h.id, vis, shown, off: Math.hypot(cx - px, cy - py), ink: vis ? inkNear(out[0], out[1], 24) : null }
+    return { id: h.id, vis, shown, off: Math.hypot(cx - px, cy - py), ink: vis ? inkNear(out[0], out[1], 24) : null, part, inGroup, tol }
   })
   return {
     model: scene.closest('[data-hero]')?.getAttribute('data-hero') ?? null,
@@ -162,6 +195,19 @@ function hotspotTests() {
             const worst = (k) => Math.max(0, ...drawn.map((x) => (Number.isFinite(x[k]) ? x[k] : 999)))
             t.note(`${m.label} @zoom ${r.zoom}: ${drawn.length}/${r.rows.length} diamonds in view, worst ${worst('off').toFixed(1)} px off, wireframe within ${worst('ink').toFixed(1)} px`)
             t.check(drawn.length >= Math.min(2, r.rows.length), `${m.label}: only ${drawn.length} of ${r.rows.length} hotspots project inside the scene (size ${JSON.stringify(r.size)})`)
+            if (m.spots) {
+              const ids = r.rows.map((x) => x.id)
+              const lost = m.spots.filter((id) => !ids.includes(id))
+              t.check(!lost.length, `${m.label}: the model lost the hotspots System maps by id: ${lost.join(', ')} (has ${ids.join(', ')})`)
+            }
+            if (m.all) {
+              const outside = r.rows.filter((x) => !x.vis)
+              t.check(!outside.length, `${m.label} @zoom ${r.zoom}: hotspots outside the scene: ${outside.map((x) => x.id).join(', ')} (size ${JSON.stringify(r.size)})`)
+              const loose = r.rows.filter((x) => !(x.part <= x.tol))
+              t.check(!loose.length, `${m.label}: hotspots off their parts: ${loose.map((x) => `${x.id} ${x.part.toFixed(2)} units from the nearest line`).join(', ')}`)
+              const stray = r.rows.filter((x) => x.inGroup === false)
+              t.check(!stray.length, `${m.label}: hotspots outside the part they name: ${stray.map((x) => x.id).join(', ')}`)
+            }
             const far = drawn.filter((x) => !(x.off <= 3))
             t.check(!far.length, `${m.label} @zoom ${r.zoom}: diamonds off their points: ${far.map((x) => `${x.id} ${Number.isFinite(x.off) ? x.off.toFixed(1) : 'missing'} px`).join(', ')} (renderer ${r.size.r}, box ${r.size.client}, on screen ${r.size.screen})`)
             const hidden = drawn.filter((x) => !x.shown)

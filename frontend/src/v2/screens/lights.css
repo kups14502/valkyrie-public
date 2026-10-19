@@ -412,7 +412,7 @@ html[data-motion='reduced'] .lt-sw { animation: vl-fade .12s linear both; }
 
 /* ---------- room: a compact panel, the f011 map box ---------- */
 .lt-p-room.vl-panel { padding: 0; }
-.lt-room { position: relative; height: 150px; }
+.lt-room { position: relative; height: 190px; }
 .lt-room-hd {
   position: absolute;
   left: 10px;

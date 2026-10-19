@@ -850,7 +850,8 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 
 /* the room (desktop): the x-ray model under the list, each bulb a pool of its color */
 .hm-room { position: relative; height: 220px; margin: 4px 0 0; border-top: 1px solid var(--line); overflow: hidden; }
-.hm-grow .hm-room { flex: 1 1 0; height: auto; min-height: 190px; }
+/* its floor keeps the right column inside a 900 px page with five bulbs and six hosts (the phone and the tablet report now) */
+.hm-grow .hm-room { flex: 1 1 0; height: auto; min-height: 168px; }
 .hm-room-cap {
   position: absolute;
   left: 10px;
