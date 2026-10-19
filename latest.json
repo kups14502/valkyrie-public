@@ -1,15 +1,15 @@
 {
-  "version": "0.3.140",
-  "notes": "v2 everywhere: real terminal skin, desktop and iPad, parity, account switcher",
-  "pub_date": "2026-10-18T22:48:05Z",
+  "version": "0.3.141",
+  "notes": "v2 round 5: desktop dashboard, media images, sessions, pop-out windows, lights engine, live equity, device dots and reporting, switcher setup",
+  "pub_date": "2026-10-19T04:37:43Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVgyblk1ZVJFQlRDNmt2VFRMdTJPWmpVQi8zMzNWRFBWemJpdzhkUkhMR212MHBLR21wNHorZE8rVTk2bW11V2VBTVFySUFRQW5sd045M1VpR1h4VlFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzYzNTUwCWZpbGU6VmFsa3lyaWVfMC4zLjE0MF94NjQtc2V0dXAuZXhlCm1UN1JHaGN1bGR4UnFYOTNiMXZJbzAxVHg3czViTFo2b3M5Z3Q0RkpIR2xKYy9jMHF4K1N6dGNuUzlKRVpnalhOMStUZjNTb0NiL0FZaUI5cG5MMEJ3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.140/Valkyrie_0.3.140_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZBVU85blp6V3VoM1ZIdll0RFdqWjE0bGtVYVlNU1NDWWtEWnpSOHp2dzA1K0o1VWRiR3FwTEU3S2pqdzdtS25iLzErU1FMeVQvOE4zWE9ZM3lCY1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzg0NTI5CWZpbGU6VmFsa3lyaWVfMC4zLjE0MV94NjQtc2V0dXAuZXhlCnBVOXVCR1VKN2EvRzlNei9GMXFJVFhyMVR3TWxlQ3dQemIrTzY3dzlmSWthNlZjN0czQ3A3L3FGc3grQ0Nnek5BOXd4T0VhWWw3bktnU1ZHeVd2ZkNRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.141/Valkyrie_0.3.141_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWF0TDBTOWd1RVBRcjllWHpSTlNQaHNRUmVsZUFPZkF5VldMOUtsOUQ2RVp6M2xaYm40NzZxSkJIYWt0VDlkT2xDQ21WWGlSK3FkVmZrR0hwS011VFE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzYzNDg2CWZpbGU6VmFsa3lyaWVfMC4zLjE0MF9hbWQ2NC5BcHBJbWFnZQpjM3RoamRJOUJ4N2luSU9PZEJRaWRqZWRiSEVKUlFCaVNmZS9pampuQ3hlOVUwN1Jzby9nR0dwVzlqdEIxNDFpMTI2YTVMeHhwOGFBWmZ5S3BDcVZDQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.140/Valkyrie_0.3.140_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVNqK0U1c1FaeWtiUU9IWm9IaHpVclFEa2x2M1drbnZYOVNvRkxqMnZUSmZ2QWhUOThzZWpmMzFNeTA2VjJzZDVhMksrRVNtUGpjY2NZV0c0Rkc4REF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzg0NDcwCWZpbGU6VmFsa3lyaWVfMC4zLjE0MV9hbWQ2NC5BcHBJbWFnZQovMktNMUxBWENpSk5EdEFvYnNia1JRZnVzNCtha2NnYUVHQmI0UUFwc3ZPUmpZa05HWFR4aGdQeVBLRkN5OWk4bXU4MHlyWUpUZTAwUFNlTnFkOUpCUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.141/Valkyrie_0.3.141_amd64.AppImage"
     }
   }
 }
