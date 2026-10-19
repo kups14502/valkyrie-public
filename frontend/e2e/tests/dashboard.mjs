@@ -42,12 +42,18 @@
 //            centered on its side, no diamonds, no apartment, no scroll and the
 //            three columns level at 1600x900 and the monitors (app and
 //            browser), and a press over the model opening System > Hosts with
-//            that host picked. /api/hosts is a fixed fake here.
+//            that host picked. /api/hosts is a fixed fake here, with a car in it
+//            (routes/vehicles.ts lists one Model Y by default).
+//   cars     the cars in the Systems box (`dash:cars`): after the phone and
+//            tablet, a car's battery and range and no CPU or memory, a car
+//            asleep still a live row, and a press opening System > Hosts with
+//            that car picked; the monitor still fits without a scroll.
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
 import { applyLight, quietThor, tradePage, tradeStatus } from '../lib/fixtures.mjs'
 import { tauriStub } from '../lib/tauri.mjs'
+import { carHost } from './hosts.mjs'
 
 const ok = (body) => ({ status: 200, body })
 const iso = (ms) => new Date(ms).toISOString()
@@ -840,7 +846,7 @@ function layoutTests() {
 
 // ---------- this device: the model of the machine the page runs on ----------
 
-/** /api/hosts with every case the box words differently: thor up, mimir down, Loki on battery, the phone reporting, the tablet before its first battery reading. */
+/** /api/hosts with every case the box words differently: thor up, mimir down, Loki on battery, the phone reporting, the tablet before its first battery reading, and a car (generic name). */
 function deviceHosts() {
   const now = Date.now()
   const load = (host, label, os, extra = {}) => ({
@@ -859,6 +865,7 @@ function deviceHosts() {
       { host: 'mimir', label: 'mimir', os: 'windows', online: false, stale: false, ts: now - 86_400_000, uptime: null, cpu: null, memory: null, disk: null, history: [] },
       ios('phone', { battery: { percent: 64, status: 'not charging' }, disk: { used: 101e9, total: 256e9, percent: 39.5 } }),
       ios('tablet', {}),
+      carHost('car_a', 'Car A'),
     ],
   }
 }
@@ -1057,6 +1064,58 @@ function deviceTests() {
   }))
 }
 
+/** The Systems box's rows as drawn: name, the numbers and their icons, the press's words. */
+function systemRows() {
+  return [...document.querySelectorAll('.vl-page[data-active] .hm-sys .hm-hrow')].map((r) => ({
+    name: (r.querySelector('.hm-hrow-name')?.textContent || '').trim(),
+    car: r.hasAttribute('data-car'),
+    off: r.hasAttribute('data-off'),
+    minis: [...r.querySelectorAll('.hm-mini')].map((m) => `${m.getAttribute('title')}=${(m.querySelector('.hm-mini-v')?.textContent || '').trim()}${m.querySelector('.hm-mini-bar') ? '' : ' (no bar)'}`),
+    aria: r.getAttribute('aria-label') || '',
+  }))
+}
+
+function carTests() {
+  return ['desk1080', 'phone'].map((device) => ({
+    name: `dash:cars:${device}`,
+    group: 'dashboard',
+    device,
+    timeout: 45_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      const doc = deviceHosts()
+      doc.hosts.push(carHost('car_b', 'Car B', { state: 'asleep', charging: 'disconnected', battery: 54, range: 201 }))
+      page.mock('/api/hosts', () => ok(doc))
+      await page.goto('/m/dashboard')
+      await shellUp(page)
+      await page.waitFor(() => document.querySelectorAll('.vl-page[data-active] .hm-sys .hm-hrow[data-car]').length >= 2, { timeout: 15_000, message: 'the cars are not in the Systems box' })
+      await sleep(500)
+      const rows = await page.eval(systemRows)
+      t.note(`rows: ${rows.map((r) => `${r.name} [${r.minis.join(', ')}]`).join(' | ')}`)
+      const names = rows.map((r) => r.name)
+      t.check(names.slice(-2).join('|') === 'Car A|Car B' && names.indexOf('Tablet') < names.indexOf('Car A'), `the Systems rows run ${names.join(', ')}, want the cars last`)
+      const a = rows.find((r) => r.name === 'Car A')
+      const b = rows.find((r) => r.name === 'Car B')
+      t.check(a && a.car && a.minis.join('|') === 'Battery, charging=76%|Range=230mi (no bar)', `Car A's row shows ${JSON.stringify(a?.minis)}, want its battery (charging) and range`)
+      t.check(a && !a.minis.some((m) => /^(CPU|Mem|Memory|Disk)=/.test(m)), `Car A's row shows CPU, memory or disk: ${JSON.stringify(a?.minis)}`)
+      t.check(a && /^Car A: Battery, charging 76%, Range 230 mi\. Open in System$/.test(a.aria), `Car A's row says "${a?.aria}"`)
+      t.check(b && !b.off && b.minis.join('|') === 'Battery=54%|Range=201mi (no bar)' && /^Car B: asleep, /.test(b.aria), `a sleeping car's row reads ${JSON.stringify(b)}, want a live row with its battery and range`)
+      if (device.startsWith('desk')) {
+        const f = await page.eval(pageFit)
+        t.check(f.scrollH <= f.clientH + 2, `the Dashboard scrolls (${f.scrollH} > ${f.clientH}) with two cars in Systems`)
+      }
+      await t.shot(page, 'dash')
+      await page.tap({ sel: '.vl-page[data-active] .hm-sys .hm-hrow', text: /^\s*Car A|Car A:/ })
+      await page.waitPath('/m/system/hosts', 6000)
+      await sleep(600)
+      const picked = await page.eval(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim())
+      t.check(/^Car A/.test(picked), `System > Hosts picked "${picked}", want Car A`)
+      t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s)`)
+    },
+  }))
+}
+
 export function dashboardTests() {
-  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...deviceTests()]
+  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...deviceTests(), ...carTests()]
 }

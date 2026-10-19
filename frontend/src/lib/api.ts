@@ -465,10 +465,35 @@ export const fetchSessions = async () => {
 // stats each publishes into bifrost. A host with no fresh file comes back
 // online:false so the panel can show it as offline rather than erroring.
 export type HostMetric = { percent: number; used: number; total: number }
+/**
+ * A car (backend routes/vehicles.ts, from Home Assistant's Tesla Fleet sensors,
+ * read only). state: awake, asleep (its numbers are from when it fell asleep),
+ * offline (Home Assistant cannot reach it) or unknown (no status sensor).
+ */
+export type VehicleStat = {
+  model: string | null
+  state: 'awake' | 'asleep' | 'offline' | 'unknown'
+  /** ms, when the car went into that state */
+  since: number | null
+  rangeMi: number | null
+  chargeLimit: number | null
+  charging: 'starting' | 'charging' | 'stopped' | 'complete' | 'disconnected' | 'no_power' | null
+  chargerKw: number | null
+  chargeRateMph: number | null
+  /** ms, when it reaches the limit (only while charging) */
+  fullAt: number | null
+  cable: boolean | null
+  locked: boolean | null
+  /** at the Home Assistant home zone, else away (never the place) */
+  home: boolean | null
+  insideF: number | null
+  outsideF: number | null
+  climateOn: boolean | null
+}
 export type HostStat = {
   host: string
   label: string
-  os: 'linux' | 'windows' | 'ios'
+  os: 'linux' | 'windows' | 'ios' | 'vehicle'
   online: boolean
   stale: boolean
   ts: number | null
@@ -481,6 +506,8 @@ export type HostStat = {
   // Only hosts with a battery (the Frame). While the host is offline this is
   // the last reading, taken at ts.
   battery?: { percent: number; status: 'charging' | 'discharging' | 'full' | 'not charging' | 'unknown' } | null
+  // Only the cars (os 'vehicle').
+  vehicle?: VehicleStat
   error?: string
   // The last hour, a point a minute, oldest first. odin keeps it in memory, so
   // it starts over when the backend restarts.

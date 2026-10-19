@@ -6,7 +6,7 @@ import {
   fetchImgToken, imgAuthRev, imgTrusted, musicImg, plexImg, plexImgPath, subscribeImgAuth, type PlexItem,
 } from '../../lib/api'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarApi'
-import type { LaunchTarget, ServiceUnit } from '../../lib/api'
+import type { LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
 import { lightColor, pctFromBrightness } from '../../lib/lights'
 import { fetchProjList } from '../../lib/projectsApi'
 import { shortName } from '../../lib/quickSessions'
@@ -160,11 +160,46 @@ export type HostVM = {
   mobile: boolean
   /** the phone and tablet: when odin last heard from it (ms), null otherwise */
   seen: number | null
+  /** the cars (host id car-<prefix>): range, charging and the rest; null for every other host */
+  vehicle: VehicleVM | null
+  /** ms, when the numbers were read (a sleeping car's are from when it fell asleep) */
+  ts: number | null
 }
 
+/** A car's facts, as /api/hosts gives them, re-checked and rounded for the page (model: HA's, e.g. "Model Y"). */
+export type VehicleVM = VehicleStat
+
 const gib = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10
+const fin = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+const r0 = (v: unknown): number | null => { const n = fin(v); return n == null ? null : Math.round(n) }
+const r1 = (v: unknown): number | null => { const n = fin(v); return n == null ? null : Math.round(n * 10) / 10 }
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null)
+const VEHICLE_STATE = ['awake', 'asleep', 'offline', 'unknown'] as const
+const CHARGING = ['starting', 'charging', 'stopped', 'complete', 'disconnected', 'no_power'] as const
+
+function vehicleVM(raw: VehicleStat | undefined): VehicleVM {
+  const v = (raw && typeof raw === 'object' ? raw : {}) as Partial<VehicleStat>
+  return {
+    model: typeof v.model === 'string' ? v.model : null,
+    state: v.state && (VEHICLE_STATE as readonly string[]).includes(v.state) ? v.state : 'unknown',
+    since: fin(v.since),
+    rangeMi: r0(v.rangeMi),
+    chargeLimit: r0(v.chargeLimit),
+    charging: v.charging && (CHARGING as readonly string[]).includes(v.charging) ? v.charging : null,
+    chargerKw: r1(v.chargerKw),
+    chargeRateMph: r0(v.chargeRateMph),
+    fullAt: fin(v.fullAt),
+    cable: bool(v.cable),
+    locked: bool(v.locked),
+    home: bool(v.home),
+    insideF: r0(v.insideF),
+    outsideF: r0(v.outsideF),
+    climateOn: bool(v.climateOn),
+  }
+}
+
 const reviveHosts = (d: unknown): HostVM[] | undefined => Array.isArray(d)
-  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, mobile: false, seen: null, ...h }) as HostVM)
+  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, mobile: false, seen: null, vehicle: null, ts: null, ...h }) as HostVM)
   : undefined
 
 export function useHosts(): Live<HostVM[]> {
@@ -186,6 +221,8 @@ export function useHosts(): Live<HostVM[]> {
     history: (h.history ?? []).map((p) => ({ t: p.t, cpu: p.cpu, mem: p.mem })),
     mobile: h.os === 'ios',
     seen: h.seen ?? null,
+    vehicle: h.os === 'vehicle' ? vehicleVM(h.vehicle) : null,
+    ts: fin(h.ts),
   })), 5_000, { revive: reviveHosts })
 }
 

@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { deviceHosts } from './devices.js'
+import { vehicleHosts } from './vehicles.js'
 
 // GET /api/hosts: health for every machine in the fleet on one panel.
 //
@@ -17,6 +18,9 @@ import { deviceHosts } from './devices.js'
 //
 //   * the phone and tablet come from routes/devices.ts: presence from odin's
 //     tailscale status, battery from an iOS Shortcut. No history for them.
+//
+//   * the cars come from routes/vehicles.ts: Home Assistant's Tesla Fleet
+//     sensors, read only. A sleeping car stays online with its last numbers.
 //
 //   * the Steam Frame sleeps, so it cannot publish on a timer. odin pulls it
 //     instead (pollFrame below), with a key the Frame accepts only as a forced
@@ -322,7 +326,13 @@ router.get('/hosts', async (_req, res) => {
     measureOdin(),
     ...REMOTE_HOSTS.map(readRemote),
   ])
-  res.json({ hosts: [...[odin, ...remotes, frameStat].map((h) => ({ ...h, history: history.get(h.host) ?? [] })), ...deviceHosts().map((d) => ({ ...d, history: [] }))] })
+  res.json({
+    hosts: [
+      ...[odin, ...remotes, frameStat].map((h) => ({ ...h, history: history.get(h.host) ?? [] })),
+      ...deviceHosts().map((d) => ({ ...d, history: [] })),
+      ...vehicleHosts().map((v) => ({ ...v, history: [] })),
+    ],
+  })
 })
 
 export default router

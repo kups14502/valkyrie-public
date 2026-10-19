@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import {
-  Camera, FRAME_FX, LAPTOP_FX, ODIN_FX, PHONE_FX, POSES, TABLET_FX, TOWER_FX, WireScene, compile, frameHeadset, laptop, odinRig, phone, tablet, thorTower,
+  Camera, FRAME_FX, LAPTOP_FX, MODEL_Y_FX, ODIN_FX, PHONE_FX, POSES, TABLET_FX, TOWER_FX, WireScene, compile, frameHeadset, laptop, modelY, odinRig, phone, tablet, thorTower,
   type Beam, type CameraPose, type Flow, type Model, type Vec3,
 } from './three'
 import { useHosts } from './data'
@@ -38,9 +38,12 @@ export const HERO_IDS: readonly HeroId[] = ['thor', 'odin', 'phone', 'tablet']
  * tailscale status knows them or an iOS Shortcut has posted their battery
  * (backend routes/devices.ts); until then they show as models only (Settings >
  * Hero, System > Hosts). logicserver has no model: its physical form is unknown.
+ * modelY is the cars' model (host ids car-<prefix>, backend routes/vehicles.ts):
+ * a car whose Home Assistant device model is a Model Y draws it, any other car
+ * draws none (see hostModel).
  */
-export type HostModelId = HeroId | 'frame' | 'mimir'
-export const HOST_MODEL_IDS: readonly HostModelId[] = ['thor', 'odin', 'frame', 'mimir', 'phone', 'tablet']
+export type HostModelId = HeroId | 'frame' | 'mimir' | 'modelY'
+export const HOST_MODEL_IDS: readonly HostModelId[] = ['thor', 'odin', 'frame', 'mimir', 'phone', 'tablet', 'modelY']
 
 /** Devices with a model that may have no host on the API: System > Hosts lists them as model-only rows until they report in. */
 export const MODEL_ONLY_IDS = ['phone', 'tablet'] as const
@@ -49,17 +52,24 @@ export const MODEL_ONLY_LABEL: Record<ModelOnlyId, string> = { phone: 'Phone', t
 
 // odin is the real rig (laptop + RAID enclosure, models/odin.ts); the older odinServer box stays exported but unused here.
 // frame is built without the ergo kit's optional top strap (frameHeadset({ topStrap: true }) adds it).
-const BUILD: Record<HostModelId, () => Model> = { thor: thorTower, odin: odinRig, frame: () => frameHeadset(), mimir: laptop, phone, tablet }
+const BUILD: Record<HostModelId, () => Model> = { thor: thorTower, odin: odinRig, frame: () => frameHeadset(), mimir: laptop, phone, tablet, modelY }
 // Beams and airflow are OFF on every hero since 2026-10-17 ("the pc looks like the car"); kept for reference only.
 export const HERO_FX: Record<HostModelId, { beams: Beam[]; flow: Flow[] }> = {
-  thor: TOWER_FX, odin: ODIN_FX, frame: FRAME_FX, mimir: LAPTOP_FX, phone: PHONE_FX, tablet: TABLET_FX,
+  thor: TOWER_FX, odin: ODIN_FX, frame: FRAME_FX, mimir: LAPTOP_FX, phone: PHONE_FX, tablet: TABLET_FX, modelY: MODEL_Y_FX,
 }
 const built: Partial<Record<HostModelId, Model>> = {}
 /** Shared, memoized model per id (built on first use). */
 export const heroModel = (id: HostModelId): Model => (built[id] ??= BUILD[id]())
 
-/** The model for an API host id (`HostVM.id`), or null when the host has no known shape (logicserver). */
-export function hostModel(hostId: string): HostModelId | null {
+/** The model for a car's Home Assistant device model ("Model Y"), or null for a car with none built. */
+const vehicleModel = (model: string | null | undefined): HostModelId | null => (/^model\s*y$/i.test((model ?? '').trim()) ? 'modelY' : null)
+
+/**
+ * The model for an API host id (`HostVM.id`), or null when the host has no known
+ * shape (logicserver). A car (car-<prefix>) goes by its device model, `vehicle`.
+ */
+export function hostModel(hostId: string, vehicle?: string | null): HostModelId | null {
+  if (hostId.startsWith('car-')) return vehicleModel(vehicle)
   return (HOST_MODEL_IDS as readonly string[]).includes(hostId) ? (hostId as HostModelId) : null
 }
 
@@ -67,9 +77,10 @@ export function hostModel(hostId: string): HostModelId | null {
  * Suggested POSES name per model for System > Hosts. thor keeps the pose
  * System already uses; odin's rig, the headset, the laptop and the slabs read
  * best from the raised front 3/4 ('device'), where the enclosure's bays, the
- * strap loop, the keyboard and the camera bump show.
+ * strap loop, the keyboard and the camera bump show. The car takes 'car': its
+ * nose and the whole left side, charge port included.
  */
-export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'device', frame: 'device', mimir: 'device', phone: 'device', tablet: 'device' }
+export const HOST_POSE: Record<HostModelId, string> = { thor: 'track', odin: 'device', frame: 'device', mimir: 'device', phone: 'device', tablet: 'device', modelY: 'car' }
 
 /**
  * POSES swing toward +x (the glass side they were written for). thor's real
@@ -112,22 +123,44 @@ const unit = (v: number | null | undefined, d: number) => (v == null ? d : Math.
  * idle glow (no metric), fans follow cpu. battery = HostVM.battery percent
  * (frame, mimir, phone, tablet), display a steady glow while online. Hosts
  * without a battery get no battery key, so thor and odin render exactly as before.
+ *
+ * A car (HostVM.vehicle): its pack glows with the charge and its ten module
+ * bands light from the rear up to the charge level (asleep too: the reading
+ * stands), the light bars and the cabin screen while it is awake, the charge
+ * port while a cable is in (bright while charging). Offline dims it all.
  */
 export function useHeat(hostId: string): { heat: Record<string, number>; online: boolean; cpu: number } {
   const hosts = useHosts()
   const h = hosts.data?.find((x) => x.id === hostId)
+  const v = h?.vehicle ?? null
   const online = !!h && h.online && !h.stale
-  const cpu = online ? unit(h?.cpu, 0.2) : 0.04
+  const cpu = online && !v ? unit(h?.cpu, 0.2) : 0.04
   const mem = online ? unit(h?.mem, 0.3) : 0.04
   const disk = online ? unit(h?.disk, 0.3) : 0.04
   const pct = h?.battery?.percent
   const battery = pct == null ? null : online ? unit(pct, 0.5) : 0.04
+  // a car is still there while asleep: only offline (or a stale reading) dims its pack
+  const car = v ? `${online ? 1 : 0}|${v.state}|${v.charging}|${v.cable}|${v.climateOn}|${pct ?? ''}` : ''
   const heat = useMemo(() => {
+    if (car) {
+      const [on, state, charging, cable, climate, p] = car.split('|')
+      const live = on === '1'
+      const level = Math.max(0, Math.min(100, Number(p) || 0))
+      const awake = live && state === 'awake'
+      const out: Record<string, number> = {
+        battery: live ? 0.3 + 0.55 * (level / 100) : 0.08,
+        lights: awake ? 0.72 : 0.1,
+        cabin: awake ? (climate === 'true' ? 0.9 : 0.55) : 0.06,
+        charge: charging === 'charging' || charging === 'starting' ? 1 : cable === 'true' ? 0.5 : 0.06,
+      }
+      for (let k = 0; k < 10; k++) out[`battery.c${k}`] = level >= k * 10 + 5 ? (live ? 0.35 + 0.6 * (level / 100) : 0.12) : 0.03
+      return out
+    }
     const out: Record<string, number> = { cpu, mem, disk, gpu: online ? 0.14 : 0.04, fans: cpu, psu: online ? 0.3 : 0.04 }
     if (battery != null) out.battery = battery
     if (hostId === 'frame' || hostId === 'mimir') out.display = online ? 0.55 : 0.04
     return out
-  }, [cpu, mem, disk, online, battery, hostId])
+  }, [car, cpu, mem, disk, online, battery, hostId])
   return { heat, online, cpu }
 }
 
@@ -220,6 +253,8 @@ export type HeroProps = {
   fill?: number
   /** override Settings > Hero: any model, e.g. hostModel(host.id) for System > Hosts */
   host?: HostModelId
+  /** the API host its glow follows, when that is not the model's own id (a car: car-<prefix>) */
+  hostId?: string
   onHotspot?: (id: string, at: { x: number; y: number }) => void
   activeHotspot?: string | null
   /** darkness 0..1 of the floor on the content side of the anchor, default 0.55 (0 = off; needs `anchor`) */
@@ -230,7 +265,7 @@ export type HeroProps = {
   children?: ReactNode
 }
 
-export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, onHotspot, activeHotspot, scrim = 0.55, className, style, children }: HeroProps) {
+export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, hostId, onHotspot, activeHotspot, scrim = 0.55, className, style, children }: HeroProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const shell = useShell()
   const palette = usePalette()
@@ -238,7 +273,7 @@ export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, onHots
   const [stored] = useHeroId()
   const id = host ?? stored
   const model = heroModel(id)
-  const { heat, online } = useHeat(id)
+  const { heat, online } = useHeat(hostId ?? id)
   const [geo, setGeo] = useState<Geo | null>(null)
 
   // Measure the box and the anchor's visible part inside it.

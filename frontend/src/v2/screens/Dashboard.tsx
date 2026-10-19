@@ -1420,14 +1420,28 @@ function Meter({ label, value, note, ticks }: { label: string; value: number | n
 const HOST_ORDER = ['thor', 'odin', 'frame', 'mimir']
 
 function sortHosts(list: HostVM[]): HostVM[] {
-  const rank = (id: string) => { const i = HOST_ORDER.indexOf(id); return i < 0 ? 99 : i }
-  return [...list].sort((a, b) => rank(a.id) - rank(b.id) || a.label.localeCompare(b.label))
+  // the machines in their order, then the phone and tablet, then the cars
+  const rank = (h: HostVM) => { const i = HOST_ORDER.indexOf(h.id); return i >= 0 ? i : h.vehicle ? 100 : 99 }
+  return [...list].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label))
 }
 
-type HostCell = { key: string; icon: IconName; label: string; v: number | null; alert: boolean }
+/** unit: what the number is in (default %); bar: false for a number with no 0-100 scale (a car's range) */
+type HostCell = { key: string; icon: IconName; label: string; v: number | null; alert: boolean; unit?: string; bar?: boolean }
 
-/** CPU, Mem, and Disk; a host with a battery shows the battery in place of the disk. The phone and tablet: battery and storage only. */
+/** A car: its battery (the bolt while it charges) and its range. */
+function carCells(h: HostVM): HostCell[] {
+  const v = h.vehicle!
+  const b = h.battery
+  const charging = v.charging === 'charging' || v.charging === 'starting'
+  return [
+    { key: 'bat', icon: charging ? 'charging' : 'battery', label: charging ? 'Battery, charging' : 'Battery', v: b?.percent ?? null, alert: !charging && (b?.percent ?? 100) <= 15 },
+    { key: 'range', icon: 'range', label: 'Range', v: v.rangeMi, alert: false, unit: 'mi', bar: false },
+  ]
+}
+
+/** CPU, Mem, and Disk; a host with a battery shows the battery in place of the disk. The phone and tablet: battery and storage only. A car: battery and range. */
 function hostCells(h: HostVM): HostCell[] {
+  if (h.vehicle) return carCells(h)
   if (reportsBatteryOnly(h)) return deviceCells(h)
   const cells: HostCell[] = [
     { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
@@ -1447,16 +1461,18 @@ function HostLine({ h, onPress }: { h: HostVM; onPress: () => void }) {
   const stale = h.online && h.stale
   const label = cap(h.label)
   const cells = hostCells(h)
-  const said = on ? cells.map((c) => `${c.label} ${c.v != null ? `${c.v}%` : 'unknown'}`).join(', ') : stale ? 'stale' : 'offline'
+  const said = on ? cells.map((c) => `${c.label} ${c.v != null ? `${c.v}${c.unit ? ` ${c.unit}` : '%'}` : 'unknown'}`).join(', ') : stale ? 'stale' : 'offline'
+  // a sleeping car is there (its numbers stand), only not glowing
+  const asleep = h.vehicle?.state === 'asleep'
   return (
-    <Press className="hm-hrow" data-off={!on || undefined} data-stale={stale || undefined} onPress={onPress} aria-label={`${label}: ${said}. Open in System`}>
-      <Icon name={hostIcon(h.id)} size={14} tone={on ? 'fg' : stale ? 'acc2' : 'faint'} glow={on} className="hm-ic" />
+    <Press className="hm-hrow" data-off={!on || undefined} data-stale={stale || undefined} data-car={h.vehicle ? '' : undefined} onPress={onPress} aria-label={`${label}: ${asleep ? 'asleep, ' : ''}${said}. Open in System`}>
+      <Icon name={hostIcon(h.id)} size={14} tone={on ? 'fg' : stale ? 'acc2' : 'faint'} glow={on && !asleep} className="hm-ic" />
       <span className="hm-hrow-name vl-ellipsis">{label}</span>
       {on ? cells.map((c) => (
-        <span key={c.key} className="hm-mini" data-alert={c.alert || undefined} title={c.label}>
+        <span key={c.key} className="hm-mini" data-alert={c.alert || undefined} data-k={c.key} title={c.label}>
           <Icon name={c.icon} size={11} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
-          <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
-          <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
+          {c.bar !== false && <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>}
+          <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>{c.unit ?? '%'}</small></> : '--'}</span>
         </span>
       )) : null}
       {on && !cells.length && <span className="hm-hrow-off">No battery reading yet</span>}
@@ -1531,7 +1547,7 @@ function useThisDevice(): HostModelId | null {
 
 /** a device's name until /api/hosts lists it (from then on the label comes from the data) */
 const DEVICE_LABEL: Record<HostModelId, string> = {
-  thor: 'Thor', odin: 'Odin', frame: 'Loki', mimir: 'Mimir', phone: MODEL_ONLY_LABEL.phone, tablet: MODEL_ONLY_LABEL.tablet,
+  thor: 'Thor', odin: 'Odin', frame: 'Loki', mimir: 'Mimir', phone: MODEL_ONLY_LABEL.phone, tablet: MODEL_ONLY_LABEL.tablet, modelY: 'Car',
 }
 
 /** camera pose per model, as System > Hosts picks it (HOST_POSE still names thor's by its old alias 'track') */

@@ -985,6 +985,8 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 .vl-host .vl-icon-glow { filter: drop-shadow(0 0 2px color-mix(in srgb, currentColor 85%, transparent)) drop-shadow(0 0 5px color-mix(in srgb, currentColor 40%, transparent)); }
 .vl-host[data-state='off'] .vl-icon { color: color-mix(in srgb, var(--fg) 36%, transparent); }
 .vl-host[data-state='stale'] .vl-icon { color: var(--acc2); }
+/* a car asleep: there and unlit, between online and offline */
+.vl-host[data-state='sleep'] .vl-icon { color: color-mix(in srgb, var(--fg) 66%, transparent); }
 .vl-host b {
   display: none;
   font-weight: 600;
@@ -994,6 +996,7 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 }
 .vl-host[data-state='off'] b { color: color-mix(in srgb, var(--fg) 38%, transparent); }
 .vl-host[data-state='stale'] b { color: var(--acc2); }
+.vl-host[data-state='sleep'] b { color: color-mix(in srgb, var(--fg) 66%, transparent); }
 .vl-strip-five { display: inline-flex; align-items: center; gap: 6px; }
 .vl-strip-k { letter-spacing: .12em; color: var(--dim); }
 .vl-strip-meter {

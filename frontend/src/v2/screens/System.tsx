@@ -500,7 +500,7 @@ export default function System({ active, sub }: ScreenProps) {
   // a model-only device (phone, tablet) picked while it has no host on the API
   const device = modelOnly(picked, list)
   const selected = list.find((h) => h.id === picked) ?? list.find((h) => h.id === 'thor') ?? list[0] ?? null
-  const pose = poseFor(device ?? (selected ? hostModel(selected.id) : null))
+  const pose = poseFor(device ?? (selected ? hostModel(selected.id, selected.vehicle?.model) : null))
 
   useEffect(() => {
     if (active) setPose(pose)
@@ -514,7 +514,9 @@ export default function System({ active, sub }: ScreenProps) {
   const watch = counted.filter((s) => s.health === 'watch').length
   const t = trade.data
   const center =
-    view === 'hosts' ? (hosts.data ? `${online}/${list.length} online${device ? ` · ${MODEL_ONLY_LABEL[device]} model` : selected?.online && selected.cpu != null ? ` · ${selected.label} ${selected.cpu}%` : ''}` : 'Hosts')
+    view === 'hosts' ? (hosts.data ? `${online}/${list.length} online${device ? ` · ${MODEL_ONLY_LABEL[device]} model`
+      : selected?.vehicle && selected.battery ? ` · ${selected.label} ${selected.battery.percent}%${selected.vehicle.rangeMi != null ? ` · ${selected.vehicle.rangeMi} mi` : ''}`
+        : selected?.online && selected.cpu != null ? ` · ${selected.label} ${selected.cpu}%` : ''}` : 'Hosts')
       : view === 'services' ? (sv ? `${counted.length - counted.filter((s) => s.health === 'alert').length} up · ${down} down${watch ? ` · ${watch} watch` : ''}` : 'Services')
         : t?.equity != null
           ? `${usd(t.equity)}${t.equitySource === 'day_open' ? ' day-open' : ''}${t.changePct != null ? ` · ${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}${t.liveTrips != null && t.targetTrips ? ` · ${t.liveTrips}/${t.targetTrips} trips` : ''}`
@@ -593,8 +595,9 @@ function HostsView({ on, selected, device, onPick }: { on: boolean; selected: Ho
               <span><Icon name="mem" size={11} tone="dim" />Mem</span>
               <span><Icon name="disk" size={11} tone="dim" />Disk</span>
             </div>
-            {list.map((h, k) => (
-              <HostRow key={h.id} h={h} k={k} t1={t1} selected={h.id === selected?.id} onPick={pick} />
+            {list.map((h, k) => (h.vehicle
+              ? <CarRow key={h.id} h={h} k={k} selected={h.id === selected?.id} onPick={pick} />
+              : <HostRow key={h.id} h={h} k={k} t1={t1} selected={h.id === selected?.id} onPick={pick} />
             ))}
             {devices.map((id, k) => (
               <DeviceRow key={id} id={id} k={list.length + k} selected={id === device} onPick={pick} />
@@ -605,7 +608,8 @@ function HostsView({ on, selected, device, onPick }: { on: boolean; selected: Ho
         )}
       </Block>
       {device ? <DeviceDetail ref={detailRef} id={device} on={on} i={2 + list.length + devices.length} />
-        : selected && <HostDetail ref={detailRef} host={selected} on={on} epoch={epoch} t1={t1} i={2 + list.length + devices.length} />}
+        : selected?.vehicle ? <CarDetail key={selected.id} ref={detailRef} host={selected} car={selected.vehicle} on={on} now={now} i={2 + list.length + devices.length} />
+          : selected && <HostDetail ref={detailRef} host={selected} on={on} epoch={epoch} t1={t1} i={2 + list.length + devices.length} />}
     </div>
   )
 }
@@ -910,6 +914,191 @@ function HostRow({ h, k, t1, selected, onPick }: { h: HostVM; k: number; t1: num
         <span className="sys-host-offline">No stats published</span>
       )}
     </Press>
+  )
+}
+
+// ---------- cars ----------
+
+type Car = NonNullable<HostVM['vehicle']>
+type CarFocus = 'battery' | 'range' | 'limit' | 'charge' | 'cabin'
+/** the model's diamond each plate lights, and the plate each diamond lights */
+const CAR_SPOT: Record<CarFocus, string> = { battery: 'battery', range: 'battery', limit: 'battery', charge: 'charge', cabin: 'cabin' }
+const SPOT_PLATE: Record<string, CarFocus> = { battery: 'battery', charge: 'charge', cabin: 'cabin' }
+
+/** asleep is still there (its numbers are from when it fell asleep); unknown means no status sensor */
+const CAR_STATE: Record<Car['state'], string> = { awake: 'Awake', asleep: 'Asleep', offline: 'Offline', unknown: 'Online' }
+const CHARGE_WORD: Record<NonNullable<Car['charging']>, string> = {
+  starting: 'Starting to charge', charging: 'Charging', stopped: 'Charging stopped', complete: 'Charge complete', disconnected: 'Unplugged', no_power: 'No power at the charger',
+}
+const isCharging = (v: Car) => v.charging === 'charging' || v.charging === 'starting'
+const isPlugged = (v: Car) => v.cable === true || (v.charging != null && v.charging !== 'disconnected')
+/** on (awake), sleep, stale or off: a sleeping car is not offline */
+const carState = (h: HostVM): 'on' | 'sleep' | 'stale' | 'off' => (!h.online ? 'off' : h.stale ? 'stale' : h.vehicle?.state === 'asleep' ? 'sleep' : 'on')
+/** the row's charging line: "Charging 11.5 kW", "Charge complete", "Not plugged in" */
+const chargeLine = (v: Car) => (isCharging(v) ? `Charging${v.chargerKw ? ` ${v.chargerKw} kW` : ''}`
+  : isPlugged(v) ? (v.charging && v.charging !== 'disconnected' ? CHARGE_WORD[v.charging] : 'Plugged in') : 'Not plugged in')
+
+/** A car: battery and state under its name, its range and charging where a host shows its load. */
+function CarRow({ h, k, selected, onPick }: { h: HostVM; k: number; selected: boolean; onPick: (id: string) => void }) {
+  const v = h.vehicle!
+  const state = carState(h)
+  const bat = h.battery
+  const charging = isCharging(v)
+  return (
+    <Press
+      className="sys-host sys-host-grid sys-car vl-build"
+      style={iv(2 + k)}
+      data-on={selected || undefined}
+      data-off={!h.online || undefined}
+      data-sleep={state === 'sleep' || undefined}
+      aria-pressed={selected}
+      aria-label={`${title(h.label)}: show its details`}
+      onPress={() => onPick(h.id)}
+    >
+      <span className="sys-host-tile" data-state={state}>
+        <Icon name="car" size={17} tone={state === 'off' ? 'faint' : state === 'stale' ? 'hot' : 'fg'} glow={state === 'on'} />
+      </span>
+      <span className="sys-host-id">
+        <span className="sys-host-name">{title(h.label)}</span>
+        <span className="sys-host-meta">
+          {state === 'stale' && <span data-tone="hot">Stale · </span>}
+          {CAR_STATE[v.state]}
+          {bat && (
+            <span className="sys-host-bat" data-tone={batteryTone(bat.percent)}>
+              <Icon name={bat.charging ? 'charging' : 'battery'} size={12} tone={bat.percent < 20 ? 'acc2' : 'dim'} title={bat.charging ? 'Battery, charging' : 'Battery'} />
+              {bat.percent}%
+            </span>
+          )}
+        </span>
+      </span>
+      <span className="sys-car-facts">
+        <b className="sys-car-range">{v.rangeMi ?? '--'}<small>mi</small></b>
+        <em className="sys-car-charge" data-on={charging || undefined}>
+          <Icon name={charging || isPlugged(v) ? 'plugged' : 'plug'} size={11} tone={charging ? 'fg' : 'dim'} glow={charging} />
+          {chargeLine(v)}
+        </em>
+      </span>
+    </Press>
+  )
+}
+
+type CarPlate = { id: CarFocus; icon: IconName; label: string; value: number | string | null; unit: string; sub: string | null; bar: number | null; tone: Tone; say: string }
+
+/**
+ * The picked car: its x-ray model, large, over its plates (Battery with the
+ * charging state, Range, Charge limit, and Charging power or Not plugged in),
+ * then the lock, home or away and the cabin as small facts. Each plate lights
+ * its part on the model (the pack, the charge port, the cabin) and each
+ * diamond lights its plate. Read only: nothing here wakes the car.
+ */
+function CarDetail({ host, car: v, on, now, i, ref }: { host: HostVM; car: Car; on: boolean; now: number; i: number; ref: RefObject<HTMLElement | null> }) {
+  const model = hostModel(host.id, v.model)
+  // keyed by the car (HostsView), so another car starts with nothing picked
+  const [focus, setFocus] = useState<CarFocus | null>(null)
+  const state = carState(host)
+  const pct = host.battery?.percent ?? null
+  const charging = isCharging(v)
+  const plugged = isPlugged(v)
+  const fullRange = pct != null && pct >= 5 && v.rangeMi != null ? Math.round((v.rangeMi / pct) * 100) : null
+  const toLimit = pct != null && v.chargeLimit != null ? v.chargeLimit - pct : null
+  const plates: CarPlate[] = [
+    { id: 'battery', icon: charging ? 'charging' : 'battery', label: 'Battery', value: pct, unit: '%', sub: v.charging ? CHARGE_WORD[v.charging] : null, bar: pct, tone: batteryTone(pct), say: `Battery ${pct ?? 'unknown'}%` },
+    { id: 'range', icon: 'range', label: 'Range', value: v.rangeMi, unit: 'mi', sub: fullRange != null ? `${fullRange} mi at 100%` : null, bar: pct, tone: 'fg', say: `Range ${v.rangeMi ?? 'unknown'} mi` },
+    { id: 'limit', icon: 'gauge', label: 'Charge limit', value: v.chargeLimit, unit: '%', sub: toLimit == null ? null : toLimit > 0 ? `${toLimit}% to go` : 'Reached', bar: v.chargeLimit, tone: 'fg', say: `Charge limit ${v.chargeLimit ?? 'unknown'}%` },
+    charging
+      ? {
+        id: 'charge', icon: 'plugged', label: 'Charging', value: v.chargerKw, unit: 'kW',
+        sub: [v.chargeRateMph ? `+${v.chargeRateMph} mi/h` : null, v.fullAt ? `full ${when(v.fullAt, now)} ET` : null].filter(Boolean).join(' · ') || null,
+        bar: pct != null && v.chargeLimit ? Math.min(100, (pct / v.chargeLimit) * 100) : null, tone: 'fg', say: `Charging ${v.chargerKw ?? 'unknown'} kW`,
+      }
+      : {
+        id: 'charge', icon: plugged ? 'plugged' : 'plug', label: 'Charging', value: plugged ? 'Plugged in' : 'Not plugged in', unit: '',
+        sub: plugged && v.charging && v.charging !== 'disconnected' ? CHARGE_WORD[v.charging] : null, bar: null, tone: 'fg', say: `Charging: ${plugged ? 'plugged in' : 'not plugged in'}`,
+      },
+  ]
+  const lit: CarFocus = focus ?? 'battery'
+  const onHotspot = (spot: string) => {
+    const plate = SPOT_PLATE[spot]
+    if (!plate) return
+    setFocus((cur) => (cur === plate ? null : plate))
+  }
+  const read = host.ts
+  const when1 = v.state === 'asleep' && v.since ? `asleep since ${when(v.since, now)} ET`
+    : !host.online && read ? `last read ${when(read, now)} ET`
+      : read ? `read ${ago(read, now)} ago` : null
+  const temps = [v.insideF != null ? `${v.insideF}°F inside` : null, v.outsideF != null ? `${v.outsideF}°F out` : null].filter(Boolean).join(' · ')
+
+  return (
+    <section ref={ref} className="vl-panel sys-block sys-detail sys-car-detail" style={iv(i)} data-nomodel={!model || undefined} data-state={state}>
+      <header className="vl-panel-head sys-head sys-detail-head vl-build" style={iv(i)}>
+        <span className="sys-detail-id vl-caps">
+          <Icon name="car" size={15} tone={state === 'off' ? 'faint' : state === 'stale' ? 'hot' : 'fg'} glow={state === 'on'} />
+          <span>{host.label}</span>
+          <span className="sys-detail-state" data-state={state}>{state === 'stale' ? 'Stale' : CAR_STATE[v.state]}</span>
+        </span>
+        {when1 && <span className="sys-detail-up"><Ico name="clock" size={12} />{when1}</span>}
+      </header>
+      <div className="sys-detail-body">
+        {model && (
+          <div className="sys-detail-model">
+            <Hero
+              active={on}
+              pose={poseFor(model)}
+              host={model}
+              hostId={host.id}
+              fill={0.94}
+              layoutKey={`${host.id}:car`}
+              className="absolute inset-0"
+              activeHotspot={focus ? CAR_SPOT[focus] : null}
+              onHotspot={onHotspot}
+            />
+          </div>
+        )}
+        <div className="sys-gauges" data-n={plates.length}>
+          {plates.map((m, k) => (
+            <Press
+              key={m.id}
+              className="sys-gauge vl-build"
+              style={iv(i + 1 + k)}
+              data-lit={m.id === lit || undefined}
+              data-plate={m.id}
+              aria-pressed={m.id === lit}
+              aria-label={`${m.say}: highlight on the model`}
+              onPress={() => setFocus(m.id === focus ? null : m.id)}
+            >
+              <span className="sys-gauge-head">
+                <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
+                <span className="sys-gauge-label">{m.label}</span>
+                {m.sub && <em className="vl-ellipsis">{m.sub}</em>}
+                <b data-tone={m.tone} data-text={typeof m.value === 'string' || undefined}>{m.value ?? '--'}{m.unit && <small>{m.unit}</small>}</b>
+              </span>
+              {typeof m.value !== 'string' && <Bar value={m.bar} tone={m.tone} ticks={4} />}
+            </Press>
+          ))}
+        </div>
+        <div className="sys-car-more vl-build" style={iv(i + 6)}>
+          {v.locked != null && (
+            <span className="sys-car-fact" data-fact="lock"><Icon name={v.locked ? 'locked' : 'unlocked'} size={13} tone={v.locked ? 'dim' : 'hot'} />{v.locked ? 'Locked' : 'Unlocked'}</span>
+          )}
+          {v.home != null && (
+            <span className="sys-car-fact" data-fact="home"><Icon name={v.home ? 'home' : 'away'} size={13} tone="dim" />{v.home ? 'Home' : 'Away'}</span>
+          )}
+          {temps && (
+            <Press
+              className="sys-car-fact"
+              data-fact="cabin"
+              data-lit={lit === 'cabin' || undefined}
+              aria-pressed={lit === 'cabin'}
+              aria-label={`Cabin ${temps}: highlight on the model`}
+              onPress={() => setFocus(focus === 'cabin' ? null : 'cabin')}
+            >
+              <Icon name="temp" size={13} tone={lit === 'cabin' ? 'fg' : 'dim'} glow={lit === 'cabin'} />{temps}
+              {v.climateOn && <span className="sys-car-climate">Climate on</span>}
+            </Press>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 

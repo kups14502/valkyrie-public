@@ -9,6 +9,7 @@ export { Builder, AX, rrLoop } from './build'
 export { frameHeadset, FRAME_FX, type FrameOptions } from './frame'
 export { laptop, LAPTOP_FX } from './laptop'
 export { phone, tablet, PHONE_FX, TABLET_FX } from './slate'
+export { modelY, MODEL_Y_FX } from './car'
 
 /**
  * Camera poses, degrees. All models are built to a ~4 unit radius, so the
@@ -35,6 +36,8 @@ export const POSES: Record<string, CameraPose> = {
   settings: { yaw: 206, pitch: 36, dist: 15, fov: 38 },
   /** same as settings, older name */
   display: { yaw: 206, pitch: 36, dist: 15, fov: 38 },
+  /** front 3/4 of a car's left side, a little above: the nose, the whole side and the charge port at the rear (System > Hosts) */
+  car: { yaw: 54, pitch: 13, dist: 14.5, fov: 34 },
   /** raised front 3/4 for the device models (headset strap loop, laptop keyboard, slab camera bump) */
   device: { yaw: 32, pitch: 26, dist: 14.5, fov: 38 },
 }

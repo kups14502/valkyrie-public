@@ -1109,6 +1109,14 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-mini[data-alert] .hm-mini-v { color: var(--acc2); }
 .hm-hrows[data-old] .hm-mini-v { color: var(--dim); }
 .hm-hrows[data-old] .hm-mini-bar i { opacity: .5; }
+/* a car: its name takes the first cell's room (car names run longer than host names), then battery and range */
+.hm-hrow[data-car] .hm-hrow-name { grid-column: 2 / 4; }
+.hm-hrow[data-car] .hm-hrow-off { grid-column: 4 / 6; }
+.hm-mini[data-k='range'] { justify-content: flex-end; }
+/* a monitor shows the whole Dashboard with no scroll: a longer Systems list (a car or two after the
+   machines, the phone and the tablet) packs its rows tighter instead of pushing the column past the window */
+.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(7)) .hm-hrow { min-height: 31px; }
+.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(8)) .hm-hrow { min-height: 28px; }
 
 /* ---------- desktop: one type step up (DPR 1 screens read small) ---------- */
 

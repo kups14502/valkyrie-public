@@ -251,10 +251,12 @@ export function useIntent(name: string, handler: () => void, on = true): void {
 const HOST_ORDER = ['thor', 'odin', 'frame', 'mimir']
 const hostRank = (id: string) => {
   const i = HOST_ORDER.indexOf(id)
-  return i < 0 ? HOST_ORDER.length : i
+  // the phone and tablet after the machines, the cars last
+  return i >= 0 ? i : id.startsWith('car-') ? HOST_ORDER.length + 1 : HOST_ORDER.length
 }
-const hostState = (h: HostVM): 'on' | 'off' | 'stale' => (h.stale ? 'stale' : h.online ? 'on' : 'off')
-const STATE_WORD = { on: 'online', off: 'offline', stale: 'stale' } as const
+/** a sleeping car is there, not offline: it reads asleep, unlit */
+const hostState = (h: HostVM): 'on' | 'off' | 'stale' | 'sleep' => (h.stale ? 'stale' : !h.online ? 'off' : h.vehicle?.state === 'asleep' ? 'sleep' : 'on')
+const STATE_WORD = { on: 'online', off: 'offline', stale: 'stale', sleep: 'asleep' } as const
 const titleCase = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 
 /** The frameless desktop app's window (Tauri on Windows, Linux, macOS); the Android app has none. */

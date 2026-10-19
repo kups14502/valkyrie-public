@@ -1,10 +1,10 @@
 import type { CSSProperties, ReactElement } from 'react'
 import {
-  Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
+  Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
-  House, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListMusic, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
-  Moon, Music, Palette, Pill, Plus, Power, RefreshCw, Rocket, Search, Server, Settings, ShieldCheck,
-  Smartphone, Sparkles, SquareTerminal, Sun, Tablet, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
+  House, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
+  Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
+  Smartphone, Sparkles, SquareTerminal, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
   UtensilsCrossed, createLucideIcon, type LucideIcon,
 } from 'lucide-react'
 
@@ -44,6 +44,15 @@ export const ICONS = {
   phone: Smartphone,
   tablet: Tablet,
   logicserver: HardDrive,
+  // the cars (host ids car-<prefix>, see hostIcon)
+  car: CarFront,
+  range: Route,
+  plug: Plug,
+  plugged: PlugZap,
+  locked: Lock,
+  unlocked: LockOpen,
+  away: MapPin,
+  temp: Thermometer,
   // metrics
   cpu: Cpu,
   mem: MemoryStick,
@@ -134,8 +143,8 @@ export function Icon({ name, size = 16, tone = 'fg', glow = false, className, st
   )
 }
 
-/** The icon for a host id from /api/hosts (falls back to a generic monitor). */
-export const hostIcon = (id: string): IconName => (id in ICONS ? (id as IconName) : 'thor')
+/** The icon for a host id from /api/hosts: a car for car-<prefix>, else by id (falls back to a generic monitor). */
+export const hostIcon = (id: string): IconName => (id.startsWith('car-') ? 'car' : id in ICONS ? (id as IconName) : 'thor')
 
 export const isIconName = (v: unknown): v is IconName => typeof v === 'string' && Object.prototype.hasOwnProperty.call(ICONS, v)
 

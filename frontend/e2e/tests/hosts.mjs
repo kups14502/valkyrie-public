@@ -24,6 +24,15 @@
 //   devices  the phone and tablet as reporting hosts (backend routes/devices.ts):
 //             a host row with the battery, the detail's battery and storage
 //             gauges, no "Model only"
+//   cars     the cars (backend routes/vehicles.ts, generic fixture names): a row
+//             per car with its battery, range and charging line and never
+//             "Offline" for a car that sleeps; the picked car's Model Y
+//             wireframe with its plates (Battery and its charging state,
+//             Range, Charge limit, Charging power or Not plugged in) and the
+//             lock, home or away and cabin facts; each diamond lights its plate
+//             and each plate its diamond; a car with no wireframe (any model
+//             but the Y) keeps its plates; the strip reads a sleeping car as
+//             asleep. The Model Y also runs the hotspot check above.
 //
 // The hotspot check reads the scene's engine, which WireScene hangs on its
 // element in dev builds only (the probe is one).
@@ -41,6 +50,36 @@ const MODELS = [
   { id: 'mimir', label: 'Mimir' },
   { id: 'phone', label: 'Phone' },
   { id: 'tablet', label: 'Tablet' },
+  { id: 'modelY', label: 'Car A', spots: ['battery', 'charge', 'cabin'], all: true },
+]
+
+/**
+ * A car as /api/hosts lists it (routes/vehicles.ts vehicleHosts). Generic names
+ * only. Car A: a Model Y, awake, charging at home. Car B: asleep, unplugged and
+ * away, of a model with no wireframe.
+ */
+function carHost(id, label, o = {}) {
+  const now = Date.now()
+  const charging = o.charging ?? 'charging'
+  const on = charging === 'charging' || charging === 'starting'
+  return {
+    host: `car-${id}`, label, os: 'vehicle', online: o.online ?? true, stale: false, ts: now - 180_000,
+    uptime: null, cpu: null, memory: null, disk: null,
+    battery: { percent: o.battery ?? 76, status: on ? 'charging' : charging === 'complete' ? 'full' : 'discharging' },
+    vehicle: {
+      model: o.model ?? 'Model Y', state: o.state ?? 'awake', since: now - 2 * 3_600_000,
+      rangeMi: o.range ?? 230, chargeLimit: 80, charging,
+      chargerKw: on ? 11.5 : 0, chargeRateMph: on ? 30 : 0, fullAt: on ? now + 3_600_000 : null,
+      cable: on || charging === 'complete', locked: o.locked ?? true, home: o.home ?? true,
+      insideF: 66, outsideF: 64, climateOn: false,
+    },
+    error: o.online === false ? 'Home Assistant cannot reach the car' : undefined,
+    history: [],
+  }
+}
+const CARS = () => [
+  carHost('car_a', 'Car A'),
+  carHost('car_b', 'Car B', { model: 'Model S', state: 'asleep', charging: 'disconnected', battery: 54, range: 201, locked: false, home: false }),
 ]
 
 /** The phone and tablet as /api/hosts lists them once they report (routes/devices.ts deviceHosts). */
@@ -55,7 +94,7 @@ function deviceHost(id, { battery, status, storage = null }) {
 }
 
 /** odin's real hosts (one GET through the probe), every one online, plus the two devices. */
-async function hostsDoc(base, devices = true) {
+async function hostsDoc(base, devices = true, cars = devices) {
   let real = []
   try {
     real = (await (await fetch(`${base}/api/hosts`, { signal: AbortSignal.timeout(10_000) })).json()).hosts ?? []
@@ -82,6 +121,7 @@ async function hostsDoc(base, devices = true) {
     hosts.push(deviceHost('phone', { battery: 80, status: 'not charging' }))
     hosts.push(deviceHost('tablet', { battery: 55, status: 'charging', storage: [101.5, 256] }))
   }
+  if (cars) hosts.push(...CARS())
   return { hosts }
 }
 
@@ -287,7 +327,7 @@ function hotspotTests() {
         const doc = await hostsDoc(t.env.base)
         page.mock('/api/hosts', () => ok(doc))
         await page.goto('/m/system/hosts')
-        await page.waitFor(() => document.querySelectorAll('.vl-page[data-active] .sys-host').length >= 6, { timeout: 15_000, message: 'System > Hosts did not list the six hosts' })
+        await page.waitFor(() => document.querySelectorAll('.vl-page[data-active] .sys-host').length >= 8, { timeout: 15_000, message: 'System > Hosts did not list the six hosts and two cars' })
         for (const m of MODELS) {
           await t.step(`${m.label}`, async () => {
             await pick(page, m.label)
@@ -418,8 +458,121 @@ function deviceTests() {
   return out
 }
 
-export function hostTests() {
-  return [...hotspotTests(), ...roomTests(), ...deviceTests()]
+/** The picked car's detail as drawn: its words, plates, facts, model and diamonds. */
+function carReport() {
+  const d = document.querySelector('.vl-page[data-active] .sys-car-detail')
+  if (!d) return { error: 'no car detail on the page' }
+  const txt = (el) => (el?.textContent || '').replace(/\s+/g, ' ').trim()
+  return {
+    id: txt(d.querySelector('.sys-detail-id > span:nth-child(2)')),
+    state: txt(d.querySelector('.sys-detail-state')),
+    when: txt(d.querySelector('.sys-detail-up')),
+    hero: d.querySelector('[data-hero]')?.getAttribute('data-hero') ?? null,
+    nomodel: d.hasAttribute('data-nomodel'),
+    plates: [...d.querySelectorAll('.sys-gauge')].map((g) => ({ id: g.getAttribute('data-plate'), aria: g.getAttribute('aria-label'), text: txt(g), lit: g.hasAttribute('data-lit'), bar: !!g.querySelector('.vl-bar') })),
+    facts: [...d.querySelectorAll('.sys-car-fact')].map((f) => ({ id: f.getAttribute('data-fact'), text: txt(f), lit: f.hasAttribute('data-lit') })),
+    // a diamond is active when it carries its label (WireScene adds a third span)
+    active: [...d.querySelectorAll('[data-hotspot]')].filter((b) => b.children.length >= 3).map((b) => b.getAttribute('data-hotspot')),
+    spots: [...d.querySelectorAll('[data-hotspot]')].map((b) => b.getAttribute('data-hotspot')),
+  }
 }
 
-export { hostsDoc }
+function carTests() {
+  const out = []
+  for (const device of ['phone', 'desk1080']) {
+    out.push({
+      name: `hosts:cars:${device}`,
+      group: 'hosts',
+      device,
+      timeout: 60_000,
+      async run(t) {
+        const page = await t.page()
+        quietThor(page)
+        const doc = await hostsDoc(t.env.base)
+        page.mock('/api/hosts', () => ok(doc))
+        await page.goto('/m/system/hosts')
+        await page.waitFor(() => [...document.querySelectorAll('.vl-page[data-active] .sys-car')].length >= 2, { timeout: 15_000, message: 'the two cars are not on System > Hosts' })
+        await sleep(600)
+
+        // ---- the rows ----
+        const rows = await page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .sys-car')].map((e) => ({
+          name: (e.querySelector('.sys-host-name')?.textContent || '').trim(),
+          meta: (e.querySelector('.sys-host-meta')?.textContent || '').replace(/\s+/g, ' ').trim(),
+          bat: (e.querySelector('.sys-host-bat')?.textContent || '').trim(),
+          range: (e.querySelector('.sys-car-range')?.textContent || '').replace(/\s+/g, '').trim(),
+          charge: (e.querySelector('.sys-car-charge')?.textContent || '').replace(/\s+/g, ' ').trim(),
+          off: e.hasAttribute('data-off'),
+          cells: e.querySelectorAll('.sys-cell, .sys-spark').length,
+          tile: e.querySelector('.sys-host-tile')?.getAttribute('data-state'),
+        })))
+        const a = rows.find((r) => r.name === 'Car A')
+        const b = rows.find((r) => r.name === 'Car B')
+        t.note(`rows: ${JSON.stringify(rows)}`)
+        t.check(a && /^Awake/.test(a.meta) && a.bat === '76%' && a.range === '230mi' && a.charge === 'Charging 11.5 kW', `Car A's row reads ${JSON.stringify(a)}, want Awake, 76%, 230 mi, Charging 11.5 kW`)
+        t.check(b && /^Asleep/.test(b.meta) && b.bat === '54%' && b.range === '201mi' && b.charge === 'Not plugged in', `Car B's row reads ${JSON.stringify(b)}, want Asleep, 54%, 201 mi, Not plugged in`)
+        t.check(b && !b.off && b.tile === 'sleep' && !/Offline/.test(b.meta), `a sleeping car reads as offline: ${JSON.stringify(b)}`)
+        t.check(rows.every((r) => r.cells === 0), 'a car row draws CPU, memory, disk or the last hour')
+        const strip = await page.eval(() => [...document.querySelectorAll('.vl-strip-hosts .vl-host')].map((e) => `${(e.querySelector('b')?.textContent || '').trim()}:${e.getAttribute('data-state')}`))
+        t.check(strip.includes('Car A:on') && strip.includes('Car B:sleep'), `the strip reads the cars as ${JSON.stringify(strip)}, want Car A on and Car B asleep`)
+
+        // ---- Car A: its model, plates and facts ----
+        await pick(page, 'Car A')
+        await page.waitFor(() => !!document.querySelector('.vl-page[data-active] .sys-car-detail [data-hero="modelY"] [data-wire-scene]')?.__wire, { timeout: 8000, message: "Car A's Model Y did not draw" })
+        await sleep(1200)
+        let r = await page.eval(carReport)
+        if (r.error) throw new Error(r.error)
+        t.check(r.id === 'Car A' && r.state === 'Awake', `the detail head reads "${r.id}" "${r.state}", want Car A Awake`)
+        t.check(/^read \d+m ago$/.test(r.when), `the detail says "${r.when}", want how long ago it was read`)
+        t.check(r.hero === 'modelY' && !r.nomodel, `Car A draws ${r.hero}, want modelY`)
+        t.check(['battery', 'charge', 'cabin'].every((id) => r.spots.includes(id)), `Car A's diamonds are ${r.spots.join(', ')}, want battery, charge and cabin`)
+        const aria = r.plates.map((p) => p.aria)
+        const want = [/^Battery 76%/, /^Range 230 mi/, /^Charge limit 80%/, /^Charging 11\.5 kW/]
+        t.check(r.plates.length === 4 && want.every((re, k) => re.test(aria[k] ?? '')), `Car A's plates are ${JSON.stringify(aria)}, want Battery 76%, Range 230 mi, Charge limit 80%, Charging 11.5 kW`)
+        t.check(/Charging/.test(r.plates[0]?.text ?? '') && /303 mi at 100%/.test(r.plates[1]?.text ?? '') && /4% to go/.test(r.plates[2]?.text ?? '') && /\+30 mi\/h · full .+ ET/.test(r.plates[3]?.text ?? ''),
+          `Car A's plate notes read ${JSON.stringify(r.plates.map((p) => p.text))}`)
+        t.check(r.plates[0]?.lit && r.plates.filter((p) => p.lit).length === 1, `Car A leads with ${JSON.stringify(r.plates.filter((p) => p.lit).map((p) => p.id))}, want the battery alone`)
+        const facts = r.facts.map((f) => f.text)
+        t.check(facts[0] === 'Locked' && facts[1] === 'Home' && /66°F inside · 64°F out/.test(facts[2] ?? ''), `Car A's facts read ${JSON.stringify(facts)}, want Locked, Home, 66°F inside · 64°F out`)
+        t.check(!/[—]/.test(JSON.stringify(r)), 'an em dash in the car detail')
+
+        // each diamond lights its plate, each plate its diamond
+        const tapSpot = async (id) => { await page.tap({ sel: `.vl-page[data-active] .sys-car-detail [data-hotspot="${id}"]` }); await sleep(350) }
+        await tapSpot('charge')
+        r = await page.eval(carReport)
+        t.check(r.plates.find((p) => p.lit)?.id === 'charge' && r.active.join() === 'charge', `the charge port diamond lit ${JSON.stringify(r.plates.find((p) => p.lit)?.id)} (active ${r.active}), want the Charging plate`)
+        await tapSpot('cabin')
+        r = await page.eval(carReport)
+        t.check(r.facts.find((f) => f.id === 'cabin')?.lit && !r.plates.some((p) => p.lit) && r.active.join() === 'cabin', `the cabin diamond lit ${JSON.stringify(r.facts)} (active ${r.active}), want the cabin fact`)
+        await tapSpot('cabin')
+        r = await page.eval(carReport)
+        t.check(r.plates.find((p) => p.lit)?.id === 'battery' && !r.active.length, `a second tap on the cabin diamond left ${JSON.stringify(r.plates.find((p) => p.lit)?.id)} lit (active ${r.active}), want the battery back`)
+        await page.tap({ sel: '.vl-page[data-active] .sys-car-detail .sys-gauge[data-plate="range"]' })
+        await sleep(350)
+        r = await page.eval(carReport)
+        t.check(r.plates.find((p) => p.lit)?.id === 'range' && r.active.join() === 'battery', `the Range plate lit ${JSON.stringify(r.plates.find((p) => p.lit)?.id)} with diamond ${r.active}, want Range and the battery pack`)
+        await t.shot(page, 'car-a')
+
+        // ---- Car B: asleep, unplugged, away, no wireframe for its model ----
+        await pick(page, 'Car B')
+        await page.waitFor(() => /^Car B$/.test(document.querySelector('.vl-page[data-active] .sys-car-detail .sys-detail-id > span:nth-child(2)')?.textContent || ''), { timeout: 8000, message: 'Car B did not show' })
+        await sleep(600)
+        r = await page.eval(carReport)
+        t.check(r.state === 'Asleep' && /^asleep since .+ ET$/.test(r.when), `Car B's head reads "${r.state}" "${r.when}", want Asleep, asleep since a time in ET`)
+        t.check(r.nomodel && r.hero == null, `Car B (no wireframe for its model) draws ${r.hero}`)
+        const bAria = r.plates.map((p) => p.aria)
+        t.check(/^Battery 54%/.test(bAria[0] ?? '') && /^Range 201 mi/.test(bAria[1] ?? '') && /^Charging: not plugged in/.test(bAria[3] ?? ''), `Car B's plates are ${JSON.stringify(bAria)}`)
+        t.check(/Not plugged in/.test(r.plates[3]?.text ?? '') && !r.plates[3]?.bar, `Car B's charging plate reads ${JSON.stringify(r.plates[3])}, want Not plugged in with no bar`)
+        t.check(r.facts.map((f) => f.text).slice(0, 2).join('|') === 'Unlocked|Away', `Car B's facts read ${JSON.stringify(r.facts.map((f) => f.text))}, want Unlocked, Away`)
+        await t.shot(page, 'car-b')
+        t.check(!page.writes.length, 'System > Hosts wrote something')
+      },
+    })
+  }
+  return out
+}
+
+export function hostTests() {
+  return [...hotspotTests(), ...roomTests(), ...deviceTests(), ...carTests()]
+}
+
+export { hostsDoc, carHost }
