@@ -5,6 +5,7 @@ import {
   DEVICE_IDS, checkDeviceToken, isDeviceId, readDeviceReport, saveDeviceReport,
   type BatteryStatus, type DeviceId, type DeviceReport,
 } from '../lib/devices.js'
+import { haRequest } from './lights.js'
 
 // The iPhone and iPad as hosts on /api/hosts (hosts.ts appends deviceHosts()).
 //
@@ -17,6 +18,11 @@ import {
 //     automation POSTs it to /api/devices/<id>/report with that device's own
 //     token (scripts/deviceToken.mts issues it, lib/devices.ts keeps its hash).
 //     The steps to build the Shortcut are in scripts/ios-battery-shortcut.md.
+//
+//   * battery, charging and storage from the Home Assistant iOS app, which reports
+//     sensor.<device>_battery_level, _battery_state and _storage by itself. Its
+//     sign-in is password-free from the phone's and iPad's tailnet addresses only
+//     (HA trusted_networks, set up 2026-10-19). The newest of the two sources wins.
 //
 // The report route is mounted ahead of requireAuth (index.ts): a Shortcut has
 // no app token, so the per-device token is its whole credential. It is
@@ -89,6 +95,58 @@ async function pollTailscale() {
 void pollTailscale()
 setInterval(() => void pollTailscale(), POLL_MS).unref()
 
+// ---------- battery and storage from the Home Assistant app ----------
+
+type HaState = { entity_id: string; state: string; last_updated?: string; last_reported?: string; attributes?: Record<string, unknown> }
+const haReads: Partial<Record<DeviceId, DeviceReport>> = {}
+const deviceOfEntity = (slug: string): DeviceId | null => (/ipad/.test(slug) ? 'tablet' : /iphone|phone/.test(slug) ? 'phone' : null)
+/** "127.87 GB" (the app's storage attributes) in bytes, else null. */
+const bytesOf = (v: unknown): number | null => {
+  const m = /^s*([d.]+)s*(KB|MB|GB|TB)s*$/i.exec(String(v ?? ''))
+  if (!m) return null
+  const mult: Record<string, number> = { KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 }
+  const n = Number(m[1]) * mult[m[2].toUpperCase()]
+  return Number.isFinite(n) ? n : null
+}
+const tsOf = (s: HaState): number => Math.max(Date.parse(s.last_reported ?? '') || 0, Date.parse(s.last_updated ?? '') || 0)
+
+let haPolling = false
+async function pollHa() {
+  if (haPolling) return
+  haPolling = true
+  try {
+    const states = (await haRequest('GET', '/api/states')) as HaState[]
+    if (!Array.isArray(states)) return
+    const by = new Map(states.map((st) => [st.entity_id, st]))
+    for (const st of states) {
+      const m = /^sensor.(.+)_battery_level$/.exec(st.entity_id)
+      if (!m) continue
+      const dev = deviceOfEntity(m[1])
+      const pct = Number(st.state)
+      if (!dev || !Number.isFinite(pct) || pct < 0 || pct > 100) continue
+      const bs = String(by.get(`sensor.${m[1]}_battery_state`)?.state ?? '').toLowerCase()
+      const status: BatteryStatus = bs === 'charging' ? 'charging' : bs === 'full' ? 'full'
+        : bs === 'not charging' || bs === 'unplugged' || bs === 'discharging' ? 'discharging' : 'unknown'
+      const stor = by.get(`sensor.${m[1]}_storage`)
+      const total = bytesOf(stor?.attributes?.Total)
+      const avail = bytesOf(stor?.attributes?.Available)
+      const ts = tsOf(st) || Date.now()
+      const cur = haReads[dev]
+      if (cur && cur.ts > ts) continue
+      haReads[dev] = {
+        ts, battery: Math.round(pct), status,
+        storageTotal: total, storageUsed: total != null && avail != null ? Math.max(0, total - avail) : null,
+      }
+    }
+  } catch (err) {
+    console.warn('[devices] home assistant read failed', { error: (err as Error).message.slice(0, 120) })
+  } finally {
+    haPolling = false
+  }
+}
+void pollHa()
+setInterval(() => void pollHa(), POLL_MS).unref()
+
 // ---------- the hosts view ----------
 
 type HostMetric = { percent: number; used: number; total: number }
@@ -122,7 +180,9 @@ export function deviceHosts(now = Date.now()): DeviceHost[] {
   const out: DeviceHost[] = []
   for (const id of DEVICE_IDS) {
     const p = presence[id]
-    const r = report(id)
+    const own = report(id)
+    const ha = haReads[id] ?? null
+    const r = own && ha ? (own.ts >= ha.ts ? own : ha) : own ?? ha
     if (!p && !r) continue
     const seen = Math.max(p?.lastSeen ?? 0, r?.ts ?? 0) || null
     const online = Boolean(p?.online) || (seen != null && now - seen < ONLINE_MS)

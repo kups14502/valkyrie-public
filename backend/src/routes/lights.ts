@@ -40,7 +40,7 @@ function makeToken(): string {
 
 const HA_TIMEOUT_MS = 8_000
 
-async function haRequest(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+export async function haRequest(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
   const cfg = getConfig()
   const r = await fetch(`${cfg.ha_url}${path}`, {
     method,

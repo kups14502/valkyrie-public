@@ -744,7 +744,7 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
         {host.online && !metrics.length ? (
           <div className="sys-detail-off vl-build" style={iv(i + 1)}>
             <b><Icon name="battery" size={16} tone="dim" />No battery report yet</b>
-            <span>Set up the Valkyrie battery Shortcut on this device</span>
+            <span>Open the Home Assistant app on this device (odin:8123)</span>
           </div>
         ) : host.online ? (
           <div className="sys-gauges">
