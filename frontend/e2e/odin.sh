@@ -24,6 +24,10 @@ git ls-files -co --exclude-standard -- . \
   | grep -v -E '^(lab/|vite\.v2probe\.config\.ts$|vite\.frame\.config\.ts$)' \
   | tar -czf - -T - \
   | ssh -o BatchMode=yes odin 'cd ~/valkyrie-e2e/frontend && rm -rf src e2e public && tar -xzf -'
+# the backend's code too: the chat contract tests build pages with the server's own parser
+( cd .. && git ls-files -co --exclude-standard -- backend/src backend/scripts backend/package.json backend/tsconfig.json \
+  | tar -czf - -T - ) \
+  | ssh -o BatchMode=yes odin 'cd ~/valkyrie-e2e && rm -rf backend/src backend/scripts && tar -xzf - && { [ -e backend/node_modules ] || ln -s ~/valkyrie/backend/node_modules backend/node_modules; }'
 ssh -o BatchMode=yes odin 'bash ~/valkyrie-e2e/e2e-up.sh'
 args=""
 for a in "$@"; do args="$args '${a//\'/\'\\\'\'}'"; done
