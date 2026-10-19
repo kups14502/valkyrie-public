@@ -37,7 +37,7 @@ export const POSES: Record<string, CameraPose> = {
   /** same as settings, older name */
   display: { yaw: 206, pitch: 36, dist: 15, fov: 38 },
   /** front 3/4 of a car's left side, a little above: the nose, the whole side and the charge port at the rear (System > Hosts) */
-  car: { yaw: 54, pitch: 13, dist: 14.5, fov: 34 },
+  car: { yaw: 56, pitch: 17, dist: 14.5, fov: 34 },
   /** raised front 3/4 for the device models (headset strap loop, laptop keyboard, slab camera bump) */
   device: { yaw: 32, pitch: 26, dist: 14.5, fov: 38 },
 }
