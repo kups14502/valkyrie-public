@@ -102,7 +102,7 @@ const haReads: Partial<Record<DeviceId, DeviceReport>> = {}
 const deviceOfEntity = (slug: string): DeviceId | null => (/ipad/.test(slug) ? 'tablet' : /iphone|phone/.test(slug) ? 'phone' : null)
 /** "127.87 GB" (the app's storage attributes) in bytes, else null. */
 const bytesOf = (v: unknown): number | null => {
-  const m = /^s*([d.]+)s*(KB|MB|GB|TB)s*$/i.exec(String(v ?? ''))
+  const m = /^\s*([\d.]+)\s*(KB|MB|GB|TB)\s*$/i.exec(String(v ?? ''))
   if (!m) return null
   const mult: Record<string, number> = { KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 }
   const n = Number(m[1]) * mult[m[2].toUpperCase()]
@@ -119,7 +119,7 @@ async function pollHa() {
     if (!Array.isArray(states)) return
     const by = new Map(states.map((st) => [st.entity_id, st]))
     for (const st of states) {
-      const m = /^sensor.(.+)_battery_level$/.exec(st.entity_id)
+      const m = /^sensor\.(.+)_battery_level$/.exec(st.entity_id)
       if (!m) continue
       const dev = deviceOfEntity(m[1])
       const pct = Number(st.state)
