@@ -1049,10 +1049,11 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 .vl-strip-right { font-weight: 600; letter-spacing: .04em; }
 .vl-strip-date { color: var(--dim); }
 .vl-strip-time { color: var(--text); }
-/* mid widths (landscape phone, small tablets): host labels give way to the screen's context */
+/* mid widths (landscape phone, small tablets): the hosts show as icons only (their names in the
+   tooltip), so seven hosts and a car's long name never run into the date or the screen's context */
 @media (min-width: 640px) and (max-width: 1099px) {
-  .vl-strip[data-center] .vl-host b { display: none; }
-  .vl-strip[data-center] .vl-strip-hosts { gap: 7px; }
+  .vl-strip .vl-host b { display: none; }
+  .vl-strip .vl-strip-hosts { gap: 7px; }
 }
 .vl-strip-right b { font-weight: 600; color: var(--faint); margin: 0 5px; }
 /* the Settings gear: dim at rest, lit with the glow while Settings is open; a 44 px target */

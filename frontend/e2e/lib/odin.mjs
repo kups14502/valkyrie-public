@@ -19,10 +19,14 @@ const SSH = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', 'odin']
 const made = new Set()
 const alive = new Set()
 
+// On odin itself (the suite runs there since 2026-10-19) the command runs locally, not through ssh.
+const ON_ODIN = process.platform === 'linux'
+
 function ssh(cmd, timeout = 20_000) {
   return new Promise((resolve, reject) => {
-    execFile('ssh', [...SSH, cmd], { timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`ssh odin: ${(stderr || err.message).trim().slice(0, 300)}`))
+    const [bin, args] = ON_ODIN ? ['bash', ['-c', cmd]] : ['ssh', [...SSH, cmd]]
+    execFile(bin, args, { timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`${ON_ODIN ? 'odin' : 'ssh odin'}: ${(stderr || err.message).trim().slice(0, 300)}`))
       else resolve(stdout)
     })
   })

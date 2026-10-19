@@ -2,6 +2,12 @@
 
 Run it before every ship of v2 (`src/v2`, `/m/*`): the UI on the phone, the iPad, the desktop browser and the desktop app.
 
+Run it ON ODIN (since 2026-10-19), so thor's memory stays free for games: from `frontend/` on thor,
+`bash e2e/odin.sh [run.mjs arguments]` copies this working tree into odin's `~/valkyrie-e2e`, starts
+odin's read-only probe (:5197, proxying to the backend on odin's loopback) and headless browser
+(:9333, `e2e/browser.sh`), and runs the suite there. `bash e2e/odin.sh --stop` stops both. The
+commands below still work on thor with thor's own probe and `e2e/browser.ps1`.
+
 ```bash
 # from frontend/, with the read-only probe up (npx vite --config vite.v2probe.config.ts)
 node e2e/run.mjs                        # everything, about 8 minutes

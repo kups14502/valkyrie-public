@@ -80,11 +80,15 @@ async function cdpVersion() {
 export async function ensureBrowser(log = console.log) {
   let v = await cdpVersion()
   if (v) return v
-  log('headless Edge is not on :9333, starting it with e2e/browser.ps1 (private desktop)')
-  const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve(HERE, '..', 'browser.ps1')], {
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  // On odin (Linux, where the suite runs since 2026-10-19 so thor's memory stays free): e2e/browser.sh.
+  const linux = process.platform === 'linux'
+  log(`headless browser is not on :9333, starting it with e2e/${linux ? 'browser.sh' : 'browser.ps1'}`)
+  const ps = linux
+    ? spawn('bash', [resolve(HERE, '..', 'browser.sh')], { stdio: ['ignore', 'pipe', 'pipe'] })
+    : spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve(HERE, '..', 'browser.ps1')], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   let out = ''
   ps.stdout.on('data', (d) => { out += d })
   ps.stderr.on('data', (d) => { out += d })
