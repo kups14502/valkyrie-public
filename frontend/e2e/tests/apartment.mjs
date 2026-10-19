@@ -1,6 +1,7 @@
 // APARTMENT: the apartment model (src/v2/kit/three/models/apartment.ts) on the
-// Lights tab and in the Dashboard's Lights box, over a fake Home Assistant
-// that reports the five bulbs the model knows by their entity ids.
+// Lights tab, over a fake Home Assistant that reports the five bulbs the model
+// knows by their entity ids. The Dashboard's Lights box drew it too until
+// 2026-10-19; its place there holds This device (tests/dashboard.mjs device).
 //
 //   lights:apartment   the Lights tab draws the apartment with a diamond per
 //                      bulb: every bulb's hotspot sits on its own fixture (the
@@ -10,13 +11,8 @@
 //                      color and an off one does not. Tapping each diamond
 //                      selects that bulb (the panel's header names it, its row
 //                      is marked), a second tap lets go, and nothing is sent.
-//   dash:apartment     the Dashboard's Lights box (three columns) draws the
-//                      same apartment with no diamonds: all five hotspots sit
-//                      on their fixtures and project inside the box, below its
-//                      cap, each fixture drawn within a few px of its point,
-//                      and the lit bulbs glow there in their colors.
 //
-// Both read the scene's engine, which WireScene hangs on its element in dev
+// It reads the scene's engine, which WireScene hangs on its element in dev
 // builds only (the probe is one). Every write is answered in the browser and
 // any write fails the test.
 
@@ -155,7 +151,10 @@ async function tapDiamond(page, scene, id) {
     const r = await page.eval((s, hid) => {
       const root = document.querySelector(s)
       const dia = root?.querySelector(`[data-hotspot="${CSS.escape(hid)}"] span`)
-      if (!dia) return { error: `no diamond for ${hid}` }
+      if (!dia) {
+        const act = [...document.querySelectorAll('.vl-page[data-active]')].map((p) => p.getAttribute('data-screen'))
+        return { error: `no diamond for ${hid} (on ${location.pathname}, active page ${act.join('+') || 'none'}, scene ${root ? `with ${root.querySelectorAll('[data-hotspot]').length} hotspots` : 'missing'})` }
+      }
       dia.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
       const b = dia.getBoundingClientRect()
       const x = b.left + b.width / 2, y = b.top + b.height / 2
@@ -269,51 +268,8 @@ function lightsTabTests() {
   return out
 }
 
-function dashboardTests() {
-  const out = []
-  for (const device of ['desktop', 'desk1080']) {
-    out.push({
-      name: `dash:apartment:${device}`,
-      group: 'dashboard',
-      device,
-      timeout: 45_000,
-      async run(t) {
-        const page = await t.page()
-        quietThor(page)
-        const st = fakeLights(page)
-        await page.goto('/m/dashboard')
-        const sel = '.vl-page[data-active] .hm-lights .hm-room [data-wire-scene]'
-        await page.waitFor(() => document.querySelectorAll('.vl-page[data-active] .hm-lights .hm-bulb').length >= 5, { timeout: 15_000, message: 'the Lights box did not list the five bulbs' })
-        const r = await landed(page, sel)
-        t.note(`${device} @zoom ${r.zoom}: box ${r.size.client}, ${r.segs} segments, ${r.rows.map((x) => `${x.id.replace('light.', '')} at ${x.x.toFixed(0)},${x.y.toFixed(0)}`).join(', ')}`)
-        const box = await page.eval(() => {
-          const el = document.querySelector('.vl-page[data-active] .hm-lights .hm-room')
-          const cap = el?.querySelector('.hm-room-cap')
-          const er = el?.getBoundingClientRect()
-          const cr = cap?.getBoundingClientRect()
-          return {
-            aria: el?.getAttribute('aria-label') ?? null,
-            cap: cap?.textContent?.trim() ?? null,
-            // the cap's bottom edge in the scene's own px
-            capBottom: er && cr ? (cr.bottom - er.top) / (er.height / el.clientHeight) : null,
-          }
-        })
-        t.check(box.cap === 'Apartment', `the Lights box's room cap reads "${box.cap}", want Apartment`)
-        t.check(box.aria === 'The apartment, 3 of 5 bulbs lit', `the room says "${box.aria}", want "The apartment, 3 of 5 bulbs lit"`)
-        modelChecks(t, r, st, 'Dashboard')
-        t.check(r.rows.every((x) => !x.diamond), 'the Dashboard room draws diamonds; its list names the bulbs')
-        const under = r.rows.filter((x) => box.capBottom != null && x.y < box.capBottom + 2)
-        t.check(!under.length, `bulbs under the room's cap: ${under.map((x) => x.id).join(', ')}`)
-        await t.shot(page)
-        t.check(!page.writes.length, `the Dashboard wrote something: ${page.writes.map((w) => `${w.method} ${w.path}`).join(', ')}`)
-      },
-    })
-  }
-  return out
-}
-
 export function apartmentTests() {
-  return [...lightsTabTests(), ...dashboardTests()]
+  return lightsTabTests()
 }
 
 export { apartmentReport }

@@ -24,7 +24,20 @@
 //            with no token. Moved to a remote base, the posters carry the image
 //            token and still load (a tokenless one gets the remote's 401).
 //   layout   no Meals row; three columns on a monitor that fill the page with no
-//            scroll.
+//            scroll; no apartment anywhere on the Dashboard (the one model it
+//            draws is This device's).
+//   device   This device: the model of the machine the page runs on (the
+//            desktop app's machine name over the Tauri stand-in, held back
+//            1.2 s so a guess drawn before it answers shows, else the device
+//            profile: thor, mimir, Loki, the phone, the tablet), no other model
+//            drawn first, its caption, name, state and numbers (battery and
+//            storage on the phone, the hint before the tablet's first battery
+//            reading), between Lights and Systems on a monitor and at the top
+//            of Systems on the phone and iPad, the model inside its box and
+//            centered on its side, no diamonds, no apartment, no scroll and the
+//            three columns level at 1600x900 and the monitors (app and
+//            browser), and a press over the model opening System > Hosts with
+//            that host picked. /api/hosts is a fixed fake here.
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -189,7 +202,8 @@ function lightsTests() {
         const lit = b.presets.filter((p) => p.on).map((p) => p.label)
         t.check(lit.length === 1 && lit[0] === 'Red', `the lit preset is ${JSON.stringify(lit)}, want Red (a red of 224 is Red at full scale)`)
         t.check(b.plate === 'Turn all lights off', `the all-lights plate says "${b.plate}"`)
-        if (device === 'desk1080') t.check(b.room, 'the desktop Lights box has no room model under the list')
+        // the apartment left the Dashboard (2026-10-19): its place in the column holds This device
+        t.check(!b.room, 'the Lights box still draws the apartment model')
         await t.shot(page)
         t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s) on its own`)
       },
@@ -676,6 +690,39 @@ function mediaTests() {
 
 // ---------- layout: no Meals, three columns that fill the page ----------
 
+/**
+ * Every x-ray scene on the Dashboard: how many, which sit outside This device,
+ * and how many draw the apartment (its fixtures are the bulb.* line groups).
+ */
+function dashboardScenes() {
+  const root = document.querySelector('.vl-page[data-active]')
+  const scenes = [...(root?.querySelectorAll('[data-wire-scene]') ?? [])]
+  return {
+    scenes: scenes.length,
+    outside: scenes.filter((s) => !s.closest('.hm-dev-in')).map((s) => String(s.closest('.vl-panel, section, [class]')?.className ?? s.tagName).slice(0, 60)),
+    apartment: scenes.filter((s) => (s.__wire?.r?.model?.styles ?? []).some((st) => typeof st?.group === 'string' && st.group.startsWith('bulb.'))).length,
+    room: !!root?.querySelector('.hm-room, .lt-room'),
+  }
+}
+
+/** No apartment anywhere on the Dashboard (2026-10-19): the one model it draws is This device's. */
+function checkNoRoom(t, s) {
+  t.check(!s.room, 'the Dashboard still has a room block')
+  t.check(!s.apartment, `the Dashboard draws the apartment model (${s.apartment} scene(s) with bulb fixtures)`)
+  t.check(!s.outside.length, `the Dashboard draws a model outside This device: ${s.outside.join(', ')}`)
+  t.check(s.scenes <= 1, `the Dashboard draws ${s.scenes} models, want This device's alone`)
+}
+
+/** The page's scroll against its height, and where each column's last block ends. */
+function pageFit() {
+  const root = document.querySelector('.vl-page[data-active]')
+  const ends = [...(root?.querySelectorAll('.hm-layout > .hm-col') ?? [])].map((c) => {
+    const last = [...c.children].filter((e) => e.getBoundingClientRect().height > 0).at(-1)
+    return last ? Math.round(last.getBoundingClientRect().bottom) : null
+  })
+  return { scrollH: root.scrollHeight, clientH: root.clientHeight, ends }
+}
+
 function layoutTests() {
   const out = []
   for (const device of ['phone', 'ipad', 'desktop', 'desk1080', 'desk1440']) {
@@ -714,6 +761,7 @@ function layoutTests() {
           t.check(r.where.media === 'hm-a' && r.where.trade === 'hm-b' && r.where.lights === 'hm-c', `blocks sit in ${JSON.stringify(r.where)}, want media left, trade middle, lights right`)
           t.check(r.scrollH <= r.clientH + 2, `the monitor Dashboard scrolls (${r.scrollH} > ${r.clientH}): the columns should fill the page exactly`)
         }
+        checkNoRoom(t, await page.eval(dashboardScenes))
         const lr = await page.eval(layoutReport)
         t.check(lr.docSW <= lr.W + 1, `the Dashboard is wider than the screen (${lr.docSW} > ${lr.W})`)
         await t.shot(page)
@@ -723,6 +771,189 @@ function layoutTests() {
   return out
 }
 
+// ---------- this device: the model of the machine the page runs on ----------
+
+/** /api/hosts with every case the box words differently: thor up, mimir down, Loki on battery, the phone reporting, the tablet before its first battery reading. */
+function deviceHosts() {
+  const now = Date.now()
+  const load = (host, label, os, extra = {}) => ({
+    host, label, os, online: true, stale: false, ts: now, uptime: 90_000,
+    cpu: { usage: 23, cores: 16 }, memory: { percent: 41, used: 13 * 1024 ** 3, total: 32 * 1024 ** 3 }, disk: { percent: 62, used: 1.2e12, total: 2e12 },
+    history: [], ...extra,
+  })
+  const ios = (host, extra) => ({ host, label: host, os: 'ios', online: true, stale: false, ts: now - 60_000, seen: now - 60_000, uptime: null, cpu: null, memory: null, disk: null, battery: null, history: [], ...extra })
+  return {
+    hosts: [
+      load('thor', 'thor', 'windows'),
+      load('odin', 'odin', 'linux'),
+      load('frame', 'loki', 'linux', { battery: { percent: 72, status: 'discharging' } }),
+      { host: 'mimir', label: 'mimir', os: 'windows', online: false, stale: false, ts: now - 86_400_000, uptime: null, cpu: null, memory: null, disk: null, history: [] },
+      ios('phone', { battery: { percent: 64, status: 'not charging' }, disk: { used: 101e9, total: 256e9, percent: 39.5 } }),
+      ios('tablet', {}),
+    ],
+  }
+}
+
+/** The This device block as drawn: its model, words, rows, place, and the model's projected outline against its box. */
+function deviceReport() {
+  const root = document.querySelector('.vl-page[data-active]')
+  const inner = root?.querySelector('.hm-dev-in')
+  if (!inner) return { error: 'no This device block' }
+  const scene = inner.querySelector('[data-wire-scene]')
+  const e = scene?.__wire
+  const press = inner.querySelector('.hm-dev-press')
+  const col = inner.closest('.hm-col')
+  const order = col ? [...col.children].map((c) => (c.contains(inner) ? (c.classList.contains('hm-sys') ? 'sys+dev' : 'dev') : c.classList.contains('hm-lights') ? 'lights' : c.classList.contains('hm-sys') ? 'sys' : 'other')) : []
+  const inSys = inner.closest('.hm-sys')
+  let outline = null
+  if (e?.r?.model) {
+    const c = e.r.model
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < c.pos.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], c.pos[i + k]); hi[k] = Math.max(hi[k], c.pos[i + k]) }
+    const out = [0, 0, 0]
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, ok = true
+    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
+      if (!e.cam.project(x, y, z, out)) { ok = false; continue }
+      x0 = Math.min(x0, out[0]); x1 = Math.max(x1, out[0]); y0 = Math.min(y0, out[1]); y1 = Math.max(y1, out[1])
+    }
+    // the anchor in the scene's own px
+    const sr = scene.getBoundingClientRect()
+    const ar = inner.querySelector('.hm-dev-anchor').getBoundingClientRect()
+    const k = sr.width / e.r.w
+    const a = { l: (ar.left - sr.left) / k, r: (ar.right - sr.left) / k, t: (ar.top - sr.top) / k, b: (ar.bottom - sr.top) / k }
+    outline = { ok, w: e.r.w, h: e.r.h, x0, y0, x1, y1, a, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, moving: JSON.stringify(e.cam.cur) !== JSON.stringify(e.cam.to) }
+  }
+  const shown = (el) => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0
+  const ib = inner.getBoundingClientRect()
+  return {
+    cap: (inner.querySelector('.hm-dev-top > span')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    box: { l: Math.round(ib.left), t: Math.round(ib.top), w: Math.round(ib.width), h: Math.round(ib.height) },
+    visible: ib.width >= 120 && ib.height >= 80 && ib.top >= -1 && ib.bottom <= innerHeight + 1 && ib.left >= -1 && ib.right <= innerWidth + 1,
+    hero: inner.querySelector('.vl-hero')?.getAttribute('data-hero') ?? null,
+    name: (inner.querySelector('.hm-dev-name')?.textContent || '').trim(),
+    state: (inner.querySelector('.hm-dev-state')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    rows: [...inner.querySelectorAll('.hm-dev-row')].map((r) => `${(r.querySelector('.hm-dev-k')?.textContent || '').trim()} ${(r.querySelector('.hm-mini-v')?.textContent || '').trim()}`),
+    hint: (inner.querySelector('.hm-dev-hint')?.textContent || '').trim(),
+    aria: press?.getAttribute('aria-label') ?? '',
+    order, inSys: !!inSys,
+    beforeRows: inSys ? !!inSys.querySelector('.hm-hrows') && !!(inner.compareDocumentPosition(inSys.querySelector('.hm-hrows')) & Node.DOCUMENT_POSITION_FOLLOWING) : null,
+    diamonds: [...inner.querySelectorAll('[data-hotspot]')].filter(shown).length,
+    orbit: shown(inner.querySelector('[data-orbit-zone]')),
+    outline,
+  }
+}
+
+/**
+ * Holds the desktop app's local_hostname answer back `ms` (run after the Tauri
+ * stub): a Dashboard that draws a guess before the name answers gets caught.
+ */
+const slowHostname = (ms) => `(() => {
+  const t = window.__TAURI_INTERNALS__
+  if (!t) return
+  const inv = t.invoke
+  t.invoke = (cmd, args) => (cmd === 'local_hostname' ? new Promise((r) => setTimeout(r, ${ms})).then(() => inv(cmd, args)) : inv(cmd, args))
+})()`
+
+/** Every model This device draws, in order, from the first paint (window.__devHeroes). */
+const HERO_WATCH = `(() => {
+  const seen = window.__devHeroes = []
+  const look = () => {
+    for (const el of document.querySelectorAll('.hm-dev-in .vl-hero[data-hero]')) {
+      const id = el.getAttribute('data-hero')
+      if (seen[seen.length - 1] !== id) seen.push(id)
+    }
+  }
+  new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-hero'] })
+})()`
+
+function deviceTests() {
+  const cases = [
+    { name: 'app-thor', device: 'desk1080', app: 'THOR', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
+    { name: 'app-thor-1600', device: 'desktop', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
+    { name: 'app-mimir', device: 'desk1440', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [] },
+    { name: 'app-mimir-1080', device: 'desk1080', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [] },
+    { name: 'browser', device: 'desktop', want: 'thor', label: 'Thor', state: /^Online/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
+    { name: 'headset', device: 'desktop', storage: { 'valkyrie-device-mode': 'vr' }, want: 'frame', label: 'Loki', state: /^Online/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%', 'Battery 72%'] },
+    { name: 'phone', device: 'phone', want: 'phone', label: 'Phone', state: /^Online$/, rows: ['Battery 64%', 'Storage 40%'] },
+    { name: 'ipad', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], hint: /No battery reading yet/ },
+  ]
+  return cases.map((c) => ({
+    name: `dash:device:${c.name}`,
+    group: 'dashboard',
+    device: c.device,
+    timeout: 45_000,
+    async run(t) {
+      const page = await t.page({ storage: c.storage ?? {}, scripts: [...(c.app ? [tauriStub({ hostname: c.app }), slowHostname(1200)] : []), HERO_WATCH] })
+      quietThor(page)
+      page.mock('/api/hosts', () => ok(deviceHosts()))
+      await page.goto('/m/dashboard')
+      await shellUp(page)
+      await page.waitFor(() => !!document.querySelector('.vl-page[data-active] .hm-dev-in [data-wire-scene]')?.__wire, { timeout: 15_000, message: 'This device drew no model' })
+      if (c.app) {
+        const asked = (await page.eval(() => (window.__tauriCalls ?? []).filter((x) => x.cmd === 'local_hostname').length)) ?? 0
+        t.check(asked >= 1, 'the desktop app never asked its machine name (local_hostname)')
+      }
+      // on screen (an off-screen scene does not draw), then the camera flies to the fitted pose once the column has its height: read it once it holds still
+      await page.eval(() => document.querySelector('.vl-page[data-active] .hm-dev-in').scrollIntoView({ block: 'center', behavior: 'instant' }))
+      let r
+      for (let k = 0; k < 30; k++) {
+        await sleep(250)
+        r = await page.eval(deviceReport)
+        if (r.error || (r.outline && !r.outline.moving && k >= 3)) break
+      }
+      if (r.error) throw new Error(r.error)
+      t.check(!r.outline?.moving, 'the camera never settled on This device')
+      t.note(`${c.name}: ${r.hero} "${r.name}" "${r.state}" [${r.rows.join(', ')}] order ${r.order.join(' > ')}`)
+      t.check(r.hero === c.want, `This device draws ${r.hero}, want ${c.want}`)
+      const heroes = (await page.eval(() => window.__devHeroes ?? [])) ?? []
+      t.check(heroes.join('>') === c.want, `This device drew ${heroes.join(' > ') || 'nothing'} on the way; want ${c.want} alone (no other model first)`)
+      t.check(/^this device$/i.test(r.cap), `the block's caption reads "${r.cap}", want This device`)
+      t.check(r.visible, `This device is not on screen (${JSON.stringify(r.box)})`)
+      t.check(r.name === c.label, `This device is named "${r.name}", want ${c.label}`)
+      t.check(c.state.test(r.state), `This device reads "${r.state}", want ${c.state}`)
+      t.check(r.rows.join('|') === c.rows.join('|'), `This device's numbers are ${JSON.stringify(r.rows)}, want ${JSON.stringify(c.rows)}`)
+      if (c.hint) t.check(c.hint.test(r.hint), `no battery hint (got "${r.hint}")`)
+      else t.check(!r.hint, `a battery hint where a reading came in: "${r.hint}"`)
+      const desk = c.device.startsWith('desk')
+      if (desk) t.check(r.order.join('>') === 'lights>dev>sys', `the right column reads ${r.order.join(' > ')}, want lights > this device > systems`)
+      else t.check(r.inSys && r.beforeRows, `This device is not at the top of the Systems box (in it: ${r.inSys}, before the hosts: ${r.beforeRows})`)
+      checkNoRoom(t, await page.eval(dashboardScenes))
+      // a monitor (and the app's window) shows the whole Dashboard: no scroll, the three columns ending together
+      if (desk && !c.storage) {
+        const f = await page.eval(pageFit)
+        t.check(f.scrollH <= f.clientH + 2, `the Dashboard scrolls (${f.scrollH} > ${f.clientH}) with This device in the right column`)
+        const ends = f.ends.filter((v) => v != null)
+        t.check(ends.length === 3 && Math.max(...ends) - Math.min(...ends) <= 3, `the three columns end at ${JSON.stringify(f.ends)}, want them level`)
+      }
+      t.check(!r.diamonds && !r.orbit, `This device shows ${r.diamonds} diamond(s)${r.orbit ? ' and an orbit zone' : ''}; the press lies over the model`)
+      const o = r.outline
+      t.check(o && o.ok, 'the model does not project through the live camera')
+      if (o) {
+        const in1 = (v, lo, hi) => v >= lo - 2 && v <= hi + 2
+        t.check(in1(o.x0, 0, o.w) && in1(o.x1, 0, o.w) && in1(o.y0, 0, o.h) && in1(o.y1, 0, o.h), `the model runs out of its box: ${[o.x0, o.y0, o.x1, o.y1].map(Math.round)} in ${o.w}x${o.h}`)
+        t.check(in1(o.cx, o.a.l, o.a.r) && in1(o.cy, o.a.t, o.a.b), `the model is not centered on its side of the box: center ${Math.round(o.cx)},${Math.round(o.cy)}, anchor ${JSON.stringify(Object.fromEntries(Object.entries(o.a).map(([k, v]) => [k, Math.round(v)])))}`)
+      }
+      t.check(new RegExp(`^This device, ${c.label}:`).test(r.aria), `the press says "${r.aria}"`)
+      await t.shot(page, 'dash')
+      // the press, over the model, opens System > Hosts with this device picked
+      const at = await page.eval(() => {
+        const a = document.querySelector('.vl-page[data-active] .hm-dev-anchor')
+        a.scrollIntoView({ block: 'center', behavior: 'instant' })
+        const b = a.getBoundingClientRect()
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+      })
+      await sleep(300)
+      await page.tap({ x: at.x, y: at.y })
+      await page.waitPath('/m/system/hosts', 6000)
+      await sleep(600)
+      const picked = await page.eval(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim())
+      t.check(picked.toLowerCase().startsWith(c.label.toLowerCase()), `System > Hosts picked "${picked}", want ${c.label}`)
+      await t.shot(page)
+      t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s)`)
+    },
+  }))
+}
+
 export function dashboardTests() {
-  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests()]
+  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...deviceTests()]
 }

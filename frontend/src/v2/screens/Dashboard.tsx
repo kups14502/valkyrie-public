@@ -13,9 +13,12 @@ import {
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
-import { WireScene, apartment, apartmentView, type CameraPose, type Light } from '../kit/three'
+import { HOST_POSE, Hero, MODEL_ONLY_IDS, MODEL_ONLY_LABEL, hostModel, useHeat, type HostModelId } from '../kit/hero'
+import { thisDeviceId } from '../kit/thisDevice'
 import { EquityChart } from '../kit/three/EquityChart'
-import { apiErrorText, type LightState, type LightUpdate } from '../../lib/api'
+import { apiErrorText, localHostname, type LightState, type LightUpdate } from '../../lib/api'
+import { isTauri } from '../../lib/auth'
+import { useProfile } from '../../lib/deviceMode'
 import { dateLabel, fetchTrackerSkips, parseDateKey, shiftDateKey } from '../../lib/supplementsApi'
 import { useDailyTracker, useTrackerDays, workoutFor } from '../../lib/dailyTracker'
 import { PRESETS, brightnessFromPct, lightColor, pctFromBrightness, presetSwatchStyle, useLightsControl, type LightPatch } from '../../lib/lights'
@@ -33,13 +36,14 @@ import './dashboard.css'
 // the other day's line, hold Exercise to skip), the calendar (today first,
 // then the next six days; a tap opens the calendar sheet), AI (live and asking
 // sessions, usage meters), media (playing or newest added, downloads) and
-// every host (CPU / Mem / Disk, battery where the host has one).
+// every host (CPU / Mem / Disk, battery where the host has one), led by this
+// device: the 3D model of the phone or iPad in hand with its battery and storage.
 // From 600 px: two columns, the ticker becomes the head of a Trade box (equity,
 // the 3D equity chart) and every bulb gets its brightness bar.
 // Desktop: three columns that reach the bottom of the page: [quick start,
 // upload, tracker, media with the newest backdrop and a poster grid] [trade,
-// AI, calendar] [lights with the room, hosts]. The equity chart, the room and
-// the poster grid take the height that is left, so no box stretches empty.
+// AI, calendar] [lights, this device, hosts]. The equity chart, this device's
+// model and the poster grid take the height that is left, so no box stretches empty.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -184,6 +188,7 @@ export default function Dashboard({ active }: ScreenProps) {
   useEffect(() => {
     if (!active) setCal(null)
   }, [active])
+  const device = useThisDevice()
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
   // the order above (Upload right under Quick Start, Lights right under it).
@@ -205,14 +210,14 @@ export default function Dashboard({ active }: ScreenProps) {
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
-              <LightsBox i={3} active={active} variant="chips" />
+              <LightsBox i={3} variant="chips" />
               <Tracker />
               <Calendar onOpen={setCal} />
             </div>
             <div className="hm-col hm-b">
               <AiBlock wide={false} i={9} />
               <MediaBox i={10} />
-              <Systems i={11} />
+              <Systems i={11} device={device} active={active} />
             </div>
           </>
         ) : cols === 2 ? (
@@ -220,7 +225,7 @@ export default function Dashboard({ active }: ScreenProps) {
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
-              <LightsBox i={3} active={active} variant="rows" />
+              <LightsBox i={3} variant="rows" />
               <Tracker />
               <Calendar onOpen={setCal} />
             </div>
@@ -228,7 +233,7 @@ export default function Dashboard({ active }: ScreenProps) {
               <TradeBox active={active} i={1} />
               <AiBlock wide={false} i={9} />
               <MediaBox i={10} />
-              <Systems i={11} />
+              <Systems i={11} device={device} active={active} />
             </div>
           </>
         ) : (
@@ -245,7 +250,8 @@ export default function Dashboard({ active }: ScreenProps) {
               <Calendar onOpen={setCal} />
             </div>
             <div className="hm-col hm-c">
-              <LightsBox i={3} active={active} variant="rows" room fill={fill} />
+              <LightsBox i={3} variant="rows" />
+              <ThisDevice id={device} active={active} i={4} fill={fill} />
               <Systems i={11} />
             </div>
           </>
@@ -555,7 +561,7 @@ function TradeBox({ active, i, fill }: { active: boolean; i: number; fill?: bool
           <span className="hm-trade-kv">
             <span className="hm-trade-k" data-on={t.marketOpen || undefined}>
               <HIcon name="clock" size={12} lit={t.marketOpen} />
-              {t.marketOpen ? 'Market open' : `Market closed${t.marketReason ? `, ${t.marketReason}` : ''}`}
+              <span className="vl-ellipsis">{t.marketOpen ? 'Market open' : `Market closed${t.marketReason ? `, ${t.marketReason}` : ''}`}</span>
             </span>
             {lastTrade && (
               <span className="hm-trade-k" title={t.lastTrade ?? undefined}>
@@ -1416,8 +1422,9 @@ function sortHosts(list: HostVM[]): HostVM[] {
 
 type HostCell = { key: string; icon: IconName; label: string; v: number | null; alert: boolean }
 
-/** CPU, Mem, and Disk; a host with a battery shows the battery in place of the disk. */
+/** CPU, Mem, and Disk; a host with a battery shows the battery in place of the disk. The phone and tablet: battery and storage only. */
 function hostCells(h: HostVM): HostCell[] {
+  if (reportsBatteryOnly(h)) return deviceCells(h)
   const cells: HostCell[] = [
     { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
     { key: 'mem', icon: 'mem', label: 'Mem', v: h.mem, alert: (h.mem ?? 0) >= 90 },
@@ -1447,26 +1454,36 @@ function HostLine({ h, onPress }: { h: HostVM; onPress: () => void }) {
           <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
           <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
         </span>
-      )) : <span className="hm-hrow-off">{stale ? 'Stale' : 'Offline'}</span>}
+      )) : null}
+      {on && !cells.length && <span className="hm-hrow-off">No battery reading yet</span>}
+      {!on && <span className="hm-hrow-off">{stale ? 'Stale' : 'Offline'}</span>}
       <Chevron />
     </Press>
   )
 }
 
-/** Every host from /api/hosts: icon, name, its load as mini bars. A row opens System > Hosts with that host picked. */
-function Systems({ i }: { i: number }) {
+/** System > Hosts keeps its pick under 'sysHost'; writing it first lands on the tapped host. */
+function useOpenHost(): (id?: string) => void {
   const { go } = useShell()
-  const hosts = useHosts()
-  // System > Hosts keeps its pick under this setting; writing it first lands on the tapped host
   const [, setSysHost] = useSetting<string>('sysHost', 'thor')
+  return (id?: string) => {
+    if (id) setSysHost(id)
+    go(SYSTEM, 'hosts')
+  }
+}
+
+/**
+ * Every host from /api/hosts: icon, name, its load as mini bars. A row opens
+ * System > Hosts with that host picked. `device` (phone, iPad): this device's
+ * compact block leads the list.
+ */
+function Systems({ i, device, active = false }: { i: number; device?: HostModelId | null; active?: boolean }) {
+  const hosts = useHosts()
+  const open = useOpenHost()
   const now = useTick(30_000)
   const list = sortHosts(hosts.data ?? [])
   const online = list.filter((h) => h.online && !h.stale).length
   const age = oldAge(hosts, now, 60_000)
-  const open = (id?: string) => {
-    if (id) setSysHost(id)
-    go(SYSTEM, 'hosts')
-  }
 
   return (
     <Panel className="hm-glance hm-sys" i={i} dense>
@@ -1477,6 +1494,7 @@ function Systems({ i }: { i: number }) {
         </span>
         <Chevron />
       </Press>
+      {device && <ThisDevice id={device} active={active} compact />}
       {list.length ? (
         <div className="hm-hrows" data-old={age ? '' : undefined}>
           {list.map((h) => <HostLine key={h.id} h={h} onPress={() => open(h.id)} />)}
@@ -1484,6 +1502,175 @@ function Systems({ i }: { i: number }) {
       ) : (
         <p className="hm-quiet hm-g-quiet">{!hosts.data ? (hosts.failed ? 'Hosts not answering' : 'Reading hosts') : 'No hosts reporting'}</p>
       )}
+    </Panel>
+  )
+}
+
+// ---------- this device: the machine in front of Brendon, as its x-ray model ----------
+
+/**
+ * The host id of the device the page runs on (kit/thisDevice). The desktop app
+ * asks its own machine name first, so it stays null until that answers: thor's
+ * tower never flashes up on mimir. A browser has no name to ask.
+ */
+function useThisDevice(): HostModelId | null {
+  const { resolved } = useProfile()
+  const [name, setName] = useState<string | null | undefined>(() => (isTauri() ? undefined : null))
+  useEffect(() => {
+    if (name !== undefined) return
+    let live = true
+    void localHostname().then((n) => { if (live) setName(n) })
+    return () => { live = false }
+  }, [name])
+  return name === undefined ? null : thisDeviceId(name, resolved)
+}
+
+/** a device's name until /api/hosts lists it (from then on the label comes from the data) */
+const DEVICE_LABEL: Record<HostModelId, string> = {
+  thor: 'Thor', odin: 'Odin', frame: 'Loki', mimir: 'Mimir', phone: MODEL_ONLY_LABEL.phone, tablet: MODEL_ONLY_LABEL.tablet,
+}
+
+/** camera pose per model, as System > Hosts picks it (HOST_POSE still names thor's by its old alias 'track') */
+const devicePose = (m: HostModelId): string => (HOST_POSE[m] === 'track' ? 'hosts' : HOST_POSE[m])
+
+/** "45m", "12h 5m", "3d 4h" */
+function upFor(sec: number | null): string | null {
+  if (sec == null || !Number.isFinite(sec)) return null
+  const m = Math.floor(sec / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
+/** the phone and tablet report a battery and storage, never CPU or memory */
+const reportsBatteryOnly = (h: HostVM) => h.mobile || (h.cpu == null && h.mem == null && !!h.battery)
+
+/**
+ * This device's numbers: CPU, memory and disk, plus the battery where it has
+ * one (Loki); the phone and tablet their battery and storage (storage once
+ * either has reported).
+ */
+function deviceCells(h: HostVM): HostCell[] {
+  const b = h.battery
+  const bat: HostCell[] = b
+    ? [{ key: 'bat', icon: b.charging ? 'charging' : 'battery', label: b.charging ? 'Battery, charging' : 'Battery', v: b.percent, alert: !b.charging && b.percent <= 15 }]
+    : []
+  const disk = (label: string): HostCell => ({ key: 'disk', icon: 'disk', label, v: h.disk, alert: (h.disk ?? 0) >= 90 })
+  if (reportsBatteryOnly(h)) return [...bat, ...(b || h.disk != null ? [disk('Storage')] : [])]
+  return [
+    { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
+    { key: 'mem', icon: 'mem', label: 'Memory', v: h.mem, alert: (h.mem ?? 0) >= 90 },
+    disk('Disk'),
+    ...bat,
+  ]
+}
+
+/**
+ * This device: the x-ray model of the machine the page runs on, its heat and
+ * glow from the live load (Hero, as on System > Hosts), its name, online state
+ * and uptime, and its live numbers. The whole block is one press that opens
+ * System > Hosts with it picked; the model sits under it, so it neither turns
+ * nor takes a swipe here. Desktop: its own box in the right column, the model
+ * taking the height the column leaves. `compact` (phone, iPad): a short block
+ * that leads the Systems box.
+ */
+function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; active: boolean; i?: number; compact?: boolean; fill?: boolean }) {
+  const hosts = useHosts()
+  const open = useOpenHost()
+  const now = useTick(30_000)
+  const anchor = useRef<HTMLDivElement>(null)
+  const inRef = useRef<HTMLDivElement>(null)
+  // The hero fits the model from client rects, which the panel's build-in tilt
+  // skews while it plays; each time the build-in ends, it measures again.
+  const [built, setBuilt] = useState(0)
+  useEffect(() => {
+    const el = inRef.current?.closest('.vl-build')
+    if (!el) return
+    const done = (e: Event) => { if (e.target === el) setBuilt((n) => n + 1) }
+    el.addEventListener('animationend', done)
+    return () => el.removeEventListener('animationend', done)
+  }, [])
+  // the same online test the model glows by
+  const { online } = useHeat(id ?? '')
+  const h = id ? hosts.data?.find((x) => x.id === id) ?? null : null
+  const model = id ? hostModel(id) : null
+  const label = h ? cap(h.label) : id ? DEVICE_LABEL[id] : 'This device'
+  const stale = !!h && h.online && h.stale
+  const cells = h && online ? deviceCells(h) : []
+  // the phone or tablet is up and its first battery reading has not come in
+  const noBattery = !!h && online && reportsBatteryOnly(h) && !h.battery
+  const modelOnly = !!id && !!hosts.data && !h && (MODEL_ONLY_IDS as readonly string[]).includes(id)
+  const state = !id || !hosts.data ? (hosts.failed ? 'Not answering' : '--')
+    : !h ? (modelOnly ? 'Not reporting' : 'Not listed')
+    : online ? 'Online' : stale ? 'Stale' : 'Offline'
+  const up = online && h ? upFor(h.uptime) : null
+  const seen = h && !h.online && h.seen ? `seen ${ago(h.seen, now)} ago` : null
+  const detail = up ? `up ${up}` : seen
+  const said = [
+    state === '--' ? 'reading' : state.toLowerCase(),
+    detail,
+    ...cells.map((c) => `${c.label} ${c.v != null ? `${c.v}%` : 'unknown'}`),
+    noBattery ? 'no battery reading yet' : null,
+  ].filter(Boolean).join(', ')
+  const stateLine = (
+    <span className="hm-dev-state vl-ellipsis" data-state={online ? 'on' : stale ? 'stale' : 'off'}>
+      {state}{detail && <span className="hm-dim"> · {detail}</span>}
+    </span>
+  )
+
+  const inner = (
+    <div ref={inRef} className="hm-dev-in" data-compact={compact || undefined}>
+      {model && <div ref={anchor} className="hm-dev-anchor" aria-hidden />}
+      {model && (
+        <div className="hm-dev-scene" aria-hidden>
+          <Hero
+            active={active}
+            pose={devicePose(model)}
+            host={model}
+            anchor={anchor}
+            fill={compact ? 0.9 : 0.94}
+            scrim={0.6}
+            layoutKey={`${model}:${compact ? 'c' : 'f'}:${built}`}
+            className="absolute inset-0"
+          />
+        </div>
+      )}
+      <Press className="hm-dev-press" disabled={!id} onPress={() => { if (id) open(id) }} aria-label={`This device, ${label}: ${said}. Open in System`}>
+        <span className="hm-dev-top">
+          <span className={compact ? 'hm-dev-cap' : 'hm-g-label'} data-lit={online || undefined}>
+            <HIcon name={hostIcon(id ?? 'thor')} lit={online} size={compact ? 12 : 14} />This device
+          </span>
+          {/* desktop: the state is the head's value, as on every other box; compact: under the name */}
+          {!compact && stateLine}
+          {!compact && <Chevron />}
+        </span>
+        <span className="hm-dev-id">
+          <span className="hm-dev-name vl-ellipsis">{label}</span>
+          {compact && stateLine}
+        </span>
+        {(cells.length > 0 || noBattery) && (
+          <span className="hm-dev-rows" data-old={oldAge(hosts, now, 60_000) ? '' : undefined}>
+            {noBattery && (
+              <span className="hm-dev-hint vl-ellipsis"><Icon name="battery" size={12} tone="dim" className="hm-ic" />No battery reading yet</span>
+            )}
+            {cells.map((c) => (
+              <span key={c.key} className="hm-dev-row" data-alert={c.alert || undefined}>
+                <Icon name={c.icon} size={12} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
+                <span className="hm-dev-k">{c.key === 'bat' ? 'Battery' : c.label}</span>
+                <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
+                <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
+              </span>
+            ))}
+          </span>
+        )}
+      </Press>
+    </div>
+  )
+
+  if (compact) return inner
+  return (
+    <Panel className={cx('hm-glance hm-dev', fill && 'hm-grow')} i={i} dense>
+      {inner}
     </Panel>
   )
 }
@@ -1635,17 +1822,12 @@ function presetOf(l: LightState): string | null {
  * (with Undo), the presets (they color the bulbs that are on, each keeps its
  * own level), and every bulb in its real color. `rows` (two columns and up):
  * a row per bulb with its brightness bar (sent once, on release) and its
- * switch. `chips` (phone): a chip per bulb, a tap switches it. `room`
- * (desktop): the apartment model under the list, each bulb glowing where it is in its color.
- * Every write goes through useLightsControl's mutation, in order (useLightQueue).
+ * switch. `chips` (phone): a chip per bulb, a tap switches it. The apartment
+ * model lives on the Lights tab; on the desktop its old place in this column
+ * holds this device's model. Every write goes through useLightsControl's
+ * mutation, in order (useLightQueue).
  */
-function LightsBox({ i, active, variant, room: withRoom, fill }: {
-  i: number
-  active: boolean
-  variant: 'chips' | 'rows'
-  room?: boolean
-  fill?: boolean
-}) {
+function LightsBox({ i, variant }: { i: number; variant: 'chips' | 'rows' }) {
   const { go } = useShell()
   const qc = useQueryClient()
   // the persisted view model paints the first frame; the real control (shared
@@ -1717,7 +1899,7 @@ function LightsBox({ i, active, variant, room: withRoom, fill }: {
     : !bulbs.length ? 'No bulbs reported' : null
 
   return (
-    <Panel className={cx('hm-glance hm-lights', `hm-lights-${variant}`, fill && 'hm-grow')} i={i} dense lit={anyOn}>
+    <Panel className={cx('hm-glance hm-lights', `hm-lights-${variant}`)} i={i} dense lit={anyOn}>
       <div className="hm-g hm-g-split">
         <Press className="hm-g-main" onPress={() => go(LIGHTS)} aria-label="Lights, open Lights">
           <span className="hm-g-label" data-lit={anyOn || undefined}><HIcon name={anyOn ? 'bulb' : 'bulbOff'} lit={anyOn} />Lights</span>
@@ -1752,7 +1934,6 @@ function LightsBox({ i, active, variant, room: withRoom, fill }: {
           <div className="hm-bulbs" role="group" aria-label="Bulbs">
             {ordered.map((b) => <BulbLine key={b.id} b={b} onToggle={() => toggle(b)} onPct={(v) => setPct(b, v)} />)}
           </div>
-          {withRoom && <LightsRoom bulbs={bulbs} active={active} />}
         </>
       ) : (
         <>
@@ -2001,64 +2182,6 @@ function BulbSlider({ value, on, label, onCommit, onPreview }: {
       <i className="hm-sl-track" aria-hidden />
       <i className="hm-sl-fill" aria-hidden />
       <i className="hm-sl-head" aria-hidden />
-    </div>
-  )
-}
-
-/**
- * The apartment as an x-ray plan, each bulb a pool of light in its real color
- * and strength where it is (no diamonds: the list above names them). Fits its
- * box; drag turns it; paused while the Dashboard is not the visible tab.
- */
-function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
-  const palette = usePalette()
-  const reduced = useReducedMotion()
-  const boxRef = useRef<HTMLDivElement>(null)
-  const size = useSize(boxRef)
-  const roomKey = bulbs.map((b) => `${b.id}\u0001${b.name}`).join('\u0002')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const model = useMemo(() => apartment(bulbs.map((b) => ({ id: b.id, name: b.name }))), [roomKey])
-  // the plan fills the box, clear of the cap in its top-left corner
-  const pose = useMemo<CameraPose | null>(() => {
-    if (!size || size.w < 60 || size.h < 60) return null
-    return apartmentView(model, size.w, size.h, { top: 22, right: 6, bottom: 4, left: 6 })
-  }, [size, model])
-  const lightKey = bulbs.map((b) => `${b.id}|${b.on ? 1 : 0}|${b.pct ?? ''}|${b.color}|${b.unavailable ? 1 : 0}`).join(';')
-  // a lit bulb of unknown brightness glows at 0.7 (drawing only, never shown as a number)
-  const glowOf = (b: BulbV) => (b.pct == null ? 0.7 : b.pct / 100)
-  const lights = useMemo<Light[]>(() => model.hotspots.flatMap((h) => {
-    const b = bulbs.find((x) => x.id === h.id)
-    if (!b || !b.on || b.unavailable) return []
-    // lamps sit low in their rooms: a glow and a pool on the floor (about a room wide), no cone through the furniture
-    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b), cone: false, radius: 1.5 }]
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [model, lightKey])
-  const heat = useMemo(() => {
-    const h: Record<string, number> = { screens: 0.3, fans: 0.3 }
-    for (const b of bulbs) h[`bulb.${b.id}`] = b.on && !b.unavailable ? 0.35 + 0.65 * glowOf(b) : 0.04
-    return h
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightKey])
-  const lit = bulbs.filter((b) => b.on && !b.unavailable).length
-  return (
-    <div ref={boxRef} className="hm-room" role="img" aria-label={`The apartment, ${lit} of ${bulbs.length} bulbs lit`}>
-      {pose && (
-        <WireScene
-          style={{ position: 'absolute', inset: 0 }}
-          model={model}
-          pose={pose}
-          palette={palette}
-          heat={heat}
-          lights={lights}
-          floorExtent={1.3}
-          orbit
-          orbitArea="model"
-          paused={!active}
-          motion={reduced ? 'reduced' : 'full'}
-          showHotspots={false}
-        />
-      )}
-      <span className="hm-room-cap" aria-hidden><Icon name="home" size={12} tone="dim" />Apartment</span>
     </div>
   )
 }

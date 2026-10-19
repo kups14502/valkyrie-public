@@ -6,6 +6,9 @@
 //            a failure rejecting only what it carried, random answer times
 //            ending where the last tap said) and its desire rules (merge,
 //            satisfied, overlay).
+//   device   e2e/device-unit.mjs: src/v2/kit/thisDevice.ts, which device the
+//            Dashboard's "This device" box draws (the desktop app's machine
+//            name when it is a known machine, else the device profile).
 //
 // The backend half of the lights (routes/lights.ts, the engine that holds each
 // bulb to its target) is backend/scripts/lightsEngine.test.mts, run on odin.
@@ -40,6 +43,20 @@ export function unitTests() {
         t.note(`lights-unit: ${pass} passed, ${fail} failed`)
         t.check(code === 0, `e2e/lights-unit.mjs exited ${code}`)
         t.check(fail === 0 && pass >= 8, `lights-unit: ${pass} passed, ${fail} failed`)
+        for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
+      },
+    },
+    {
+      name: 'unit:this-device',
+      group: 'unit',
+      timeout: 60_000,
+      async run(t) {
+        const { code, out } = await runNode(resolve(HERE, '..', 'device-unit.mjs'), 50_000)
+        const pass = Number(/ℹ pass (\d+)/.exec(out)?.[1] ?? NaN)
+        const fail = Number(/ℹ fail (\d+)/.exec(out)?.[1] ?? NaN)
+        t.note(`device-unit: ${pass} passed, ${fail} failed`)
+        t.check(code === 0, `e2e/device-unit.mjs exited ${code}`)
+        t.check(fail === 0 && pass >= 5, `device-unit: ${pass} passed, ${fail} failed`)
         for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
       },
     },
