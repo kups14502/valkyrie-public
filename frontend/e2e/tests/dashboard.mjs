@@ -1,14 +1,17 @@
 // DASHBOARD: the round-5 Dashboard and the trade figure's honesty.
 //
-//   lights   the Lights box lists every bulb (rows with a bar and a switch on
-//            the desktop and iPad, chips on the phone), reads the preset every
-//            lit bulb shows at full scale (a red of 224 is Red), and writes in
-//            order with the newest press winning: fast taps under a slow Home
-//            Assistant never put two commands for one bulb in flight and end
-//            where the last tap said; a preset then a switch keep their order;
-//            a bar drag sends one command; all off then Undo brings back only
-//            the bulbs that were on; a refusal toasts and falls back. Home
-//            Assistant is a fake here: every write is answered in the browser.
+//   lights   the Lights box has one all-lights bar (the room's level, as the
+//            head reads it) and a chip per bulb with no bar of its own (desktop,
+//            iPad and phone alike), reads the preset every lit bulb shows at
+//            full scale (a red of 224 is Red), and writes in order with the
+//            newest press winning: fast chip taps under a slow Home Assistant
+//            never put two commands for one bulb in flight and end where the
+//            last tap said; a preset then a switch keep their order; a drag on
+//            the all-lights bar sends one command, on release, for the bulbs
+//            that are on (none while every bulb is off); all off then Undo
+//            brings back only the bulbs that were on; a refusal toasts and
+//            falls back. Home Assistant is a fake here: every write is answered
+//            in the browser.
 //            The Lights tab takes the same fast presses (a bulb's switch, three
 //            presets in a row) through src/lib/lights.ts's queue: one command in
 //            flight, the bulbs end where the last press said and the lit preset
@@ -30,9 +33,11 @@
 //            desktop app's machine name over the Tauri stand-in, held back
 //            1.2 s so a guess drawn before it answers shows, else the device
 //            profile: thor, mimir, Loki, the phone, the tablet), no other model
-//            drawn first, its caption, name, state and numbers (battery and
-//            storage on the phone, the hint before the tablet's first battery
-//            reading), between Lights and Systems on a monitor and at the top
+//            drawn first, its caption, name, state and numbers with what each
+//            is out of (cores, used / total; battery and storage on the phone,
+//            the hint before the tablet's first battery reading), the last
+//            hour of CPU and memory in the monitor's box (none in the phone's
+//            and iPad's block), between Lights and Systems on a monitor and at the top
 //            of Systems on the phone and iPad, the model inside its box and
 //            centered on its side, no diamonds, no apartment, no scroll and the
 //            three columns level at 1600x900 and the monitors (app and
@@ -106,56 +111,77 @@ function fakeHA(page, { latency = 0, refuse = () => 0 } = {}) {
   return st
 }
 
-/** The Lights box as the screen draws it: one entry per bulb. */
+/** The Lights box as the screen draws it: the all-lights bar, one chip per bulb, the presets, in their order. */
 function lightsBox() {
   const box = document.querySelector('.vl-page[data-active] .hm-lights')
   if (!box) return null
-  const rows = [...box.querySelectorAll('.hm-bulb')].map((r) => ({
-    kind: 'row',
-    name: (r.querySelector('.hm-bulb-name')?.textContent || '').trim(),
-    on: r.hasAttribute('data-on'),
-    na: r.hasAttribute('data-na'),
-    pct: (r.querySelector('.hm-bulb-pct')?.textContent || '').trim(),
-    bar: !!r.querySelector('.hm-sl[role="slider"]'),
-    sw: r.querySelector('.hm-bulb-pw')?.getAttribute('aria-label') ?? null,
-    color: getComputedStyle(r).getPropertyValue('--c').trim(),
-  }))
   const chips = [...box.querySelectorAll('.hm-chip')].map((c) => ({
-    kind: 'chip',
     name: (c.querySelector('.hm-chip-name')?.textContent || '').trim(),
     on: c.hasAttribute('data-on'),
     na: c.hasAttribute('data-na'),
     pct: (c.querySelector('.hm-chip-v')?.textContent || '').trim(),
     sw: c.getAttribute('aria-label'),
     color: getComputedStyle(c).getPropertyValue('--c').trim(),
+    // a chip carries no level bar of its own (2026-10-19: one bar for the room)
+    bar: !!c.querySelector('.hm-sl, .hm-chip-bar, [role="slider"]'),
   }))
+  const r = box.querySelector('.hm-allbar')
+  const sl = r?.querySelector('.hm-sl[role="slider"]')
+  const room = r ? {
+    label: (r.querySelector('.hm-allbar-name')?.textContent || '').trim(),
+    on: r.hasAttribute('data-on'),
+    pct: (r.querySelector('.hm-allbar-pct')?.textContent || '').trim(),
+    slider: sl ? { label: sl.getAttribute('aria-label'), now: sl.getAttribute('aria-valuenow') } : null,
+    color: getComputedStyle(r).getPropertyValue('--c').trim(),
+  } : null
   const presets = [...box.querySelectorAll('.hm-pre')].map((p) => ({ label: (p.getAttribute('aria-label') || '').split(',')[0], on: p.getAttribute('aria-pressed') === 'true' }))
+  // the parts in the order they read: presets (pres), the all-lights bar (room), the chips
+  const order = [...box.querySelectorAll('.hm-pres, .hm-allbar, .hm-chips')].map((e) => (e.classList.contains('hm-pres') ? 'presets' : e.classList.contains('hm-allbar') ? 'bar' : 'chips'))
   return {
-    rows, chips, presets,
+    chips, room, presets, order,
+    sliders: box.querySelectorAll('[role="slider"]').length,
+    oldRows: box.querySelectorAll('.hm-bulb, .hm-bulb-pw').length,
     value: (box.querySelector('.hm-g-value')?.textContent || '').replace(/\s+/g, ' ').trim(),
     plate: box.querySelector('.hm-plate')?.getAttribute('aria-label') ?? null,
-    room: !!box.querySelector('[data-wire-scene]'),
+    model: !!box.querySelector('[data-wire-scene]'),
   }
 }
 
-/** The bulb's switch (a row's power button, or the chip itself). */
-const switchOf = (variant, name) => (variant === 'rows'
-  ? { sel: '.vl-page[data-active] .hm-lights .hm-bulb-pw', text: new RegExp(`\\b${name}\\b`) }
-  : { sel: '.vl-page[data-active] .hm-lights .hm-chip', text: new RegExp(`\\b${name}\\b`) })
+/** A bulb's switch: its chip (every screen). */
+const switchOf = (name) => ({ sel: '.vl-page[data-active] .hm-lights .hm-chip', text: new RegExp(`\\b${name}\\b`) })
 
-async function isOn(page, variant, name) {
-  return page.eval((v, n) => {
+async function isOn(page, name) {
+  return page.eval((n) => {
     const box = document.querySelector('.vl-page[data-active] .hm-lights')
-    const el = [...box.querySelectorAll(v === 'rows' ? '.hm-bulb-pw' : '.hm-chip')].find((e) => new RegExp(`\\b${n}\\b`).test(e.getAttribute('aria-label') || ''))
+    const el = [...box.querySelectorAll('.hm-chip')].find((e) => new RegExp(`\\b${n}\\b`).test(e.getAttribute('aria-label') || ''))
     return el ? el.getAttribute('aria-pressed') === 'true' : null
-  }, variant, name)
+  }, name)
+}
+
+/** A chip's figure ("40%", "Off", "n/a") by the bulb's name. */
+async function chipPct(page, name) {
+  return page.eval((n) => {
+    const el = [...document.querySelectorAll('.vl-page[data-active] .hm-lights .hm-chip')].find((e) => (e.querySelector('.hm-chip-name')?.textContent || '').trim() === n)
+    return el ? (el.querySelector('.hm-chip-v')?.textContent || '').trim() : null
+  }, name)
+}
+
+/** The all-lights bar's track in viewport px (it is scrolled into view first). */
+async function roomBar(page) {
+  return page.eval(() => {
+    const sl = document.querySelector('.vl-page[data-active] .hm-lights .hm-allbar .hm-sl')
+    if (!sl) return null
+    sl.scrollIntoView({ block: 'center', behavior: 'instant' })
+    const r = sl.getBoundingClientRect()
+    return { l: r.left, w: r.width, y: r.top + r.height / 2 }
+  })
 }
 
 async function lightsUp(page) {
   await shellUp(page)
   await page.waitFor(() => {
     const box = document.querySelector('.vl-page[data-active] .hm-lights')
-    return box && box.querySelectorAll('.hm-bulb, .hm-chip').length >= 5 && !box.querySelector('.hm-plate')?.disabled
+    return box && box.querySelectorAll('.hm-chip').length >= 5 && !box.querySelector('.hm-plate')?.disabled
   }, { timeout: 15_000, message: 'the Lights box never listed the five fake bulbs' })
   await sleep(500)
 }
@@ -172,8 +198,8 @@ async function burst(page, target, n, gap = 110) {
 
 function lightsTests() {
   const out = []
-  // every bulb, its real color, the preset at full scale; no writes
-  for (const [device, variant] of [['desk1080', 'rows'], ['ipad', 'rows'], ['phone', 'chips']]) {
+  // one bar for the room, every bulb as a chip in its real color, the preset at full scale; no writes
+  for (const [device, wide] of [['desk1080', true], ['ipad', true], ['phone', false]]) {
     out.push({
       name: `dash:lights:list:${device}`,
       group: 'dashboard',
@@ -186,32 +212,44 @@ function lightsTests() {
         await page.goto('/m/dashboard')
         await lightsUp(page)
         const b = await page.eval(lightsBox)
-        const list = variant === 'rows' ? b.rows : b.chips
+        const list = b.chips
         t.check(sameSet(list.map((x) => x.name), ['Desk', 'Lamp', 'Strip', 'Office', 'Shelf']), `the Lights box lists ${JSON.stringify(list.map((x) => x.name))}, want all five bulbs`)
-        t.check(variant === 'rows' ? !b.chips.length : !b.rows.length, `the ${device} shows ${variant === 'rows' ? 'chips' : 'rows'} too`)
+        t.check(!b.oldRows, `the ${device} still draws ${b.oldRows} per-bulb row part(s)`)
+        t.check(list.every((x) => !x.bar), `a bulb chip carries its own bar: ${JSON.stringify(list.filter((x) => x.bar).map((x) => x.name))}`)
+        t.check(list.filter((x) => !x.na).every((x) => /^Turn .+ (on|off)$/.test(x.sw ?? '')), `a reachable chip is not its bulb's switch: ${JSON.stringify(list.map((x) => x.sw))}`)
         const desk = list.find((x) => x.name === 'Desk')
         const lamp = list.find((x) => x.name === 'Lamp')
         const strip = list.find((x) => x.name === 'Strip')
         t.check(desk?.on && /78/.test(desk.pct), `Desk should read on at 78% ("${desk?.pct}")`)
         t.check(lamp && !lamp.on && /off/i.test(lamp.pct), `Lamp should read off ("${lamp?.pct}")`)
-        t.check(strip?.na && /unavailable|n\/a/i.test(variant === 'rows' ? await page.eval(() => document.querySelector('.vl-page[data-active] .hm-bulb[data-na]')?.textContent ?? '') : strip.pct), 'the unreachable bulb does not say so')
+        t.check(strip?.na && /unavailable|n\/a/i.test(strip.pct), `the unreachable bulb does not say so ("${strip?.pct}")`)
         t.check(/^rgb\(\s*2\d\d,\s*\d{1,2},\s*\d{1,2}\s*\)$|#[ef][0-9a-f]0{4}|red/i.test(desk?.color ?? ''), `Desk's color is "${desk?.color}", want its red`)
-        if (variant === 'rows') t.check(list.filter((x) => !x.na).every((x) => x.bar && x.sw), 'a reachable bulb row has no brightness bar or no switch')
+        // the one bar: the room's level the head reads (Desk 78, Office 50, Shelf 25: 51%), in the lit bulbs' red
+        t.check(b.sliders === 1, `the Lights box has ${b.sliders} brightness bars, want the one all-lights bar`)
+        t.check(b.room && /^All lights$/i.test(b.room.label), `no all-lights bar (${JSON.stringify(b.room)})`)
+        if (b.room) {
+          const head = /·\s*(\d+)%/.exec(b.value)?.[1]
+          t.check(b.room.on && head === '51' && b.room.slider?.now === '51' && /^51%$/.test(b.room.pct), `the all-lights bar reads ${b.room.pct} (bar at ${b.room.slider?.now}) and the head "${b.value}", want both at the room's 51%`)
+          t.check(/all lights/i.test(b.room.slider?.label ?? ''), `the bar is labeled "${b.room.slider?.label}"`)
+          t.check(/^rgb\(\s*2\d\d,\s*\d{1,2},\s*\d{1,2}\s*\)$|#[ef][0-9a-f]0{4}|red/i.test(b.room.color), `the bar's color is "${b.room.color}", want the lit bulbs' red`)
+        }
+        const want = wide ? 'presets>bar>chips' : 'bar>chips>presets'
+        t.check(b.order.join('>') === want, `the Lights box reads ${b.order.join(' > ')}, want ${want.replace(/>/g, ' > ')}`)
         t.check(/3 of 4 on/.test(b.value), `the Lights head reads "${b.value}", want 3 of 4 on`)
         t.check(b.presets.length === 8, `${b.presets.length} presets, want all 8`)
         const lit = b.presets.filter((p) => p.on).map((p) => p.label)
         t.check(lit.length === 1 && lit[0] === 'Red', `the lit preset is ${JSON.stringify(lit)}, want Red (a red of 224 is Red at full scale)`)
         t.check(b.plate === 'Turn all lights off', `the all-lights plate says "${b.plate}"`)
         // the apartment left the Dashboard (2026-10-19): its place in the column holds This device
-        t.check(!b.room, 'the Lights box still draws the apartment model')
+        t.check(!b.model, 'the Lights box still draws the apartment model')
         await t.shot(page)
         t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s) on its own`)
       },
     })
   }
 
-  // fast presses under a slow Home Assistant
-  for (const [device, variant] of [['desk1080', 'rows'], ['phone', 'chips']]) {
+  // fast chip presses under a slow Home Assistant
+  for (const device of ['desk1080', 'phone']) {
     out.push({
       name: `dash:lights:taps:${device}`,
       group: 'dashboard',
@@ -224,46 +262,47 @@ function lightsTests() {
         await page.goto('/m/dashboard')
         await lightsUp(page)
 
-        await t.step('one switch: one command, exactly as pressed', async () => {
-          await page.tap(switchOf(variant, 'Lamp'))
+        await t.step('one chip tap: one command for that bulb, exactly as pressed', async () => {
+          await page.tap(switchOf('Lamp'))
           const w = await waitW(page, 1)
-          t.check(w.json?.entity_id === ID('Lamp') && w.json?.state === 'on' && Object.keys(w.json).length === 2, `Lamp's switch sent ${w.body}`)
-          await page.waitFor((v) => {
+          t.check(w.json?.entity_id === ID('Lamp') && w.json?.state === 'on' && Object.keys(w.json).length === 2, `Lamp's chip sent ${w.body}`)
+          await page.waitFor(() => {
             const box = document.querySelector('.vl-page[data-active] .hm-lights')
-            const el = [...box.querySelectorAll(v === 'rows' ? '.hm-bulb-pw' : '.hm-chip')].find((e) => /\bLamp\b/.test(e.getAttribute('aria-label') || ''))
+            const el = [...box.querySelectorAll('.hm-chip')].find((e) => /\bLamp\b/.test(e.getAttribute('aria-label') || ''))
             return el?.getAttribute('aria-pressed') === 'true'
-          }, { args: [variant], timeout: 1000, message: 'Lamp did not show on at once (the press waited for the slow call)' })
+          }, { timeout: 1000, message: 'Lamp did not show on at once (the press waited for the slow call)' })
           await sleep(3200)
-          t.check(await isOn(page, variant, 'Lamp') === true, 'Lamp fell back off after the call landed')
+          t.check(page.writes.length === 1, `one chip tap sent ${page.writes.length} commands`)
+          t.check(await isOn(page, 'Lamp') === true, 'Lamp fell back off after the call landed')
         })
 
         await t.step('three fast taps on a lit bulb: off, then the newest, and it ends off', async () => {
           const from = ha.log.length
-          await burst(page, switchOf(variant, 'Desk'), 3)
+          await burst(page, switchOf('Desk'), 3)
           await sleep(4500)
           const sent = ha.log.slice(from).filter((u) => u.entity_id === ID('Desk'))
           t.check(sent.length >= 1 && sent.length <= 2, `3 taps sent ${sent.length} Desk command(s): ${JSON.stringify(sent.map((u) => u.state))}, want them to collapse to 2 at most`)
           t.check(sent.at(-1)?.state === 'off', `the last Desk command was ${sent.at(-1)?.state}, want off (three taps from on)`)
           t.check(ha.lights.find((l) => l.entity_id === ID('Desk'))?.on === false, 'the fake bulb is not off at the end')
-          t.check(await isOn(page, variant, 'Desk') === false, 'the Dashboard does not show Desk off at the end')
+          t.check(await isOn(page, 'Desk') === false, 'the Dashboard does not show Desk off at the end')
         })
 
         await t.step('four fast taps: it ends where the fourth put it', async () => {
           const from = ha.log.length
-          await burst(page, switchOf(variant, 'Shelf'), 4)
+          await burst(page, switchOf('Shelf'), 4)
           await sleep(4500)
           const sent = ha.log.slice(from).filter((u) => u.entity_id === ID('Shelf'))
           t.check(sent.length >= 1 && sent.length <= 3, `4 taps sent ${sent.length} Shelf commands: ${JSON.stringify(sent.map((u) => u.state))}`)
           t.check(sent.at(-1)?.state === 'on', `the last Shelf command was ${sent.at(-1)?.state}, want on (four taps from on)`)
           t.check(ha.lights.find((l) => l.entity_id === ID('Shelf'))?.on === true, 'the fake Shelf is not on at the end')
           await sleep(1500)
-          t.check(await isOn(page, variant, 'Shelf') === true, 'the Dashboard does not show Shelf on at the end')
+          t.check(await isOn(page, 'Shelf') === true, 'the Dashboard does not show Shelf on at the end')
         })
 
         await t.step('a preset, then a switch at once: sent in that order', async () => {
           const from = ha.log.length
           await page.tap({ sel: '.vl-page[data-active] .hm-lights .hm-pre', text: /\bBlue, for the lights that are on/ })
-          await page.tap(switchOf(variant, 'Office'))
+          await page.tap(switchOf('Office'))
           await sleep(4500)
           const sent = ha.log.slice(from)
           const pre = sent.findIndex((u) => JSON.stringify(u.rgb_color) === '[70,130,255]')
@@ -283,25 +322,24 @@ function lightsTests() {
     })
   }
 
-  out.push({
-    name: 'dash:lights:bar-and-undo:desk1080',
+  // the all-lights bar (mouse on the monitor, a finger on the phone), then the plate and its Undo
+  for (const device of ['desk1080', 'phone']) out.push({
+    name: `dash:lights:bar-and-undo:${device}`,
     group: 'dashboard',
-    device: 'desk1080',
-    timeout: 60_000,
+    device,
+    timeout: 70_000,
     async run(t) {
       const page = await t.page()
       quietThor(page)
       const ha = fakeHA(page, { latency: 300 })
       await page.goto('/m/dashboard')
       await lightsUp(page)
+      const lit = ['Desk', 'Office', 'Shelf'].map(ID)
 
-      await t.step('a bar drag sends one command, on release', async () => {
-        const bar = await page.eval(() => {
-          const row = [...document.querySelectorAll('.vl-page[data-active] .hm-bulb')].find((r) => /Office/.test(r.textContent || ''))
-          const r = row?.querySelector('.hm-sl')?.getBoundingClientRect()
-          return r ? { l: r.left, w: r.width, y: r.top + r.height / 2 } : null
-        })
-        if (!bar) throw new Error('no brightness bar on the Office row')
+      await t.step('a drag on the all-lights bar sends one command, on release, for the bulbs that are on', async () => {
+        const bar = await roomBar(page)
+        if (!bar) throw new Error('no all-lights bar in the Lights box')
+        await sleep(300)
         const from = ha.log.length
         await page.swipe(bar.l + bar.w * 0.2, bar.y, bar.l + bar.w * 0.4, bar.y, { steps: 10, ms: 300 })
         await sleep(1500)
@@ -309,9 +347,19 @@ function lightsTests() {
         t.check(sent.length === 1, `a bar drag sent ${sent.length} commands: ${JSON.stringify(sent)}`)
         const b = sent[0]
         if (b) {
-          t.check(b.entity_id === ID('Office') && b.state === 'on', `the drag sent ${JSON.stringify(b)}`)
+          t.check(Array.isArray(b.entity_id) && sameSet(b.entity_id, lit) && b.state === 'on', `the drag sent ${JSON.stringify(b)}, want the three lit bulbs (never Lamp, which is off, or Strip, which is unreachable) on`)
           t.check(typeof b.brightness === 'number' && Math.abs(b.brightness - 102) <= 6, `the drag to 40% sent brightness ${b.brightness}, want about 102`)
+          t.check(b.rgb_color === undefined && b.color_temp_kelvin === undefined, `the bar carried a color: ${JSON.stringify(b)}`)
         }
+        // the fake applied it: every lit chip reads the new level, Lamp stays off, and the bar holds it
+        await sleep(1200)
+        const pcts = {}
+        for (const n of ['Desk', 'Office', 'Shelf', 'Lamp']) pcts[n] = await chipPct(page, n)
+        t.check(['Desk', 'Office', 'Shelf'].every((n) => /^(39|40|41)%$/.test(pcts[n] ?? '')) && /^off$/i.test(pcts.Lamp ?? ''), `after the drag the chips read ${JSON.stringify(pcts)}, want the lit three at 40% and Lamp Off`)
+        t.check(ha.lights.find((l) => l.entity_id === ID('Lamp'))?.on === false, 'the bar turned Lamp on')
+        const room = (await page.eval(lightsBox))?.room
+        t.check(room && /^(39|40|41)%$/.test(room.pct) && /^(39|40|41)$/.test(room.slider?.now ?? ''), `the all-lights bar reads ${room?.pct} (at ${room?.slider?.now}) after the drag, want 40%`)
+        await t.shot(page, 'bar')
       })
 
       await t.step('all off, then Undo: only the bulbs that were on come back', async () => {
@@ -329,6 +377,25 @@ function lightsTests() {
         t.check(back?.state === 'on' && sameSet(back.entity_id, before), `Undo sent ${JSON.stringify(back)}, want ${JSON.stringify(before)} on`)
         t.check(sameSet(ha.lights.filter((l) => l.on).map((l) => l.entity_id), before), 'after Undo the lit bulbs are not the ones that were lit')
       })
+
+      await t.step('every bulb off: a bar drag sends nothing and says to turn a light on', async () => {
+        let since = Date.now()
+        await page.tap('.vl-page[data-active] .hm-lights .hm-plate')
+        await page.waitToast(/All lights off/, { since })
+        await sleep(1200)
+        const room = (await page.eval(lightsBox))?.room
+        t.check(room && !room.on && /^off$/i.test(room.pct), `with every bulb off the all-lights bar reads ${JSON.stringify(room)}, want Off`)
+        const bar = await roomBar(page)
+        if (!bar) throw new Error('no all-lights bar in the Lights box')
+        await sleep(300)
+        const writes = page.writes.length
+        since = Date.now()
+        await page.swipe(bar.l + bar.w * 0.2, bar.y, bar.l + bar.w * 0.6, bar.y, { steps: 10, ms: 300 })
+        await page.waitToast(/Turn a light on first/, { since })
+        await sleep(800)
+        t.check(page.writes.length === writes, `a bar drag with every bulb off sent ${page.writes.length - writes} command(s): ${page.writes.slice(writes).map((w) => w.body).join(' | ')}`)
+        t.check(ha.lights.every((l) => !l.on), 'a bulb came on from the all-lights bar')
+      })
     },
   })
 
@@ -344,7 +411,7 @@ function lightsTests() {
       await page.goto('/m/dashboard')
       await lightsUp(page)
       const since = Date.now()
-      await page.tap(switchOf('chips', 'Lamp'))
+      await page.tap(switchOf('Lamp'))
       // the toast carries the reason the server gave
       await page.waitToast(/Could not turn Lamp on: e2e refused this write/, { since })
       await page.waitFor(() => {
@@ -782,9 +849,11 @@ function deviceHosts() {
     history: [], ...extra,
   })
   const ios = (host, extra) => ({ host, label: host, os: 'ios', online: true, stale: false, ts: now - 60_000, seen: now - 60_000, uptime: null, cpu: null, memory: null, disk: null, battery: null, history: [], ...extra })
+  // thor's last hour: a sample a minute, CPU 20-50%, memory 40-42%
+  const hour = Array.from({ length: 60 }, (_, k) => ({ t: now - (59 - k) * 60_000, cpu: 20 + ((k * 7) % 31), mem: 40 + (k % 3), disk: 62 }))
   return {
     hosts: [
-      load('thor', 'thor', 'windows'),
+      load('thor', 'thor', 'windows', { history: hour }),
       load('odin', 'odin', 'linux'),
       load('frame', 'loki', 'linux', { battery: { percent: 72, status: 'discharging' } }),
       { host: 'mimir', label: 'mimir', os: 'windows', online: false, stale: false, ts: now - 86_400_000, uptime: null, cpu: null, memory: null, disk: null, history: [] },
@@ -833,7 +902,22 @@ function deviceReport() {
     name: (inner.querySelector('.hm-dev-name')?.textContent || '').trim(),
     state: (inner.querySelector('.hm-dev-state')?.textContent || '').replace(/\s+/g, ' ').trim(),
     rows: [...inner.querySelectorAll('.hm-dev-row')].map((r) => `${(r.querySelector('.hm-dev-k')?.textContent || '').trim()} ${(r.querySelector('.hm-mini-v')?.textContent || '').trim()}`),
+    sizes: [...inner.querySelectorAll('.hm-dev-row')].map((r) => (r.querySelector('.hm-dev-sz')?.textContent || '').trim()),
     hint: (inner.querySelector('.hm-dev-hint')?.textContent || '').trim(),
+    // the last hour: its caption and how many line segments each series draws
+    hist: (() => {
+      const h = inner.querySelector('.hm-dev-hist')
+      if (!h || !shown(h)) return null
+      const seg = (sel) => ((h.querySelector(sel)?.getAttribute('d') || '').match(/[ML]/g) || []).length
+      const sv = h.querySelector('svg')?.getBoundingClientRect()
+      return { cap: (h.querySelector('.hm-dev-hist-cap')?.textContent || '').replace(/\s+/g, ' ').trim(), cpu: seg('.hm-spark-cpu'), mem: seg('.hm-spark-mem'), h: sv ? Math.round(sv.height) : 0, w: sv ? Math.round(sv.width) : 0 }
+    })(),
+    // the text column against the model's anchor: nothing written over the model
+    textRight: Math.round(Math.max(0, ...[...inner.querySelectorAll('.hm-dev-id, .hm-dev-rows, .hm-dev-hist')].map((e) => e.getBoundingClientRect().right))),
+    anchorLeft: Math.round(inner.querySelector('.hm-dev-anchor')?.getBoundingClientRect().left ?? 0),
+    tall: inner.hasAttribute('data-tall'),
+    // the text column's blocks top to bottom (head, name, numbers, last hour), as [top, bottom]
+    blocks: [...inner.querySelectorAll('.hm-dev-top, .hm-dev-id, .hm-dev-rows, .hm-dev-hist')].filter(shown).map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)] }),
     aria: press?.getAttribute('aria-label') ?? '',
     order, inSys: !!inSys,
     beforeRows: inSys ? !!inSys.querySelector('.hm-hrows') && !!(inner.compareDocumentPosition(inSys.querySelector('.hm-hrows')) & Node.DOCUMENT_POSITION_FOLLOWING) : null,
@@ -867,15 +951,20 @@ const HERO_WATCH = `(() => {
 })()`
 
 function deviceTests() {
+  const LOAD = ['CPU 23%', 'Memory 41%', 'Disk 62%']
+  const SIZES = ['16 cores', '13.0 / 32.0 GB', '1.2 / 2.0 TB']
+  // thor's fake last hour peaks at 50% CPU
+  const HOUR_CAP = /^Last hour\s*CPU\s*Mem\s*peak 50%$/
   const cases = [
-    { name: 'app-thor', device: 'desk1080', app: 'THOR', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
-    { name: 'app-thor-1600', device: 'desktop', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
-    { name: 'app-mimir', device: 'desk1440', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [] },
-    { name: 'app-mimir-1080', device: 'desk1080', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [] },
-    { name: 'browser', device: 'desktop', want: 'thor', label: 'Thor', state: /^Online/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%'] },
-    { name: 'headset', device: 'desktop', storage: { 'valkyrie-device-mode': 'vr' }, want: 'frame', label: 'Loki', state: /^Online/, rows: ['CPU 23%', 'Memory 41%', 'Disk 62%', 'Battery 72%'] },
-    { name: 'phone', device: 'phone', want: 'phone', label: 'Phone', state: /^Online$/, rows: ['Battery 64%', 'Storage 40%'] },
-    { name: 'ipad', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], hint: /No battery reading yet/ },
+    { name: 'app-thor', device: 'desk1080', app: 'THOR', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true },
+    { name: 'app-thor-1600', device: 'desktop', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true },
+    { name: 'app-thor-1440', device: 'desk1440', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true, tall: true },
+    { name: 'app-mimir', device: 'desk1440', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [], sizes: [] },
+    { name: 'app-mimir-1080', device: 'desk1080', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [], sizes: [] },
+    { name: 'browser', device: 'desktop', want: 'thor', label: 'Thor', state: /^Online/, rows: LOAD, sizes: SIZES, hour: true },
+    { name: 'headset', device: 'desktop', storage: { 'valkyrie-device-mode': 'vr' }, want: 'frame', label: 'Loki', state: /^Online/, rows: [...LOAD, 'Battery 72%'], sizes: [...SIZES, ''] },
+    { name: 'phone', device: 'phone', want: 'phone', label: 'Phone', state: /^Online$/, rows: ['Battery 64%', 'Storage 40%'], sizes: ['', '101 / 256 GB'] },
+    { name: 'ipad', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/ },
   ]
   return cases.map((c) => ({
     name: `dash:device:${c.name}`,
@@ -912,6 +1001,20 @@ function deviceTests() {
       t.check(r.name === c.label, `This device is named "${r.name}", want ${c.label}`)
       t.check(c.state.test(r.state), `This device reads "${r.state}", want ${c.state}`)
       t.check(r.rows.join('|') === c.rows.join('|'), `This device's numbers are ${JSON.stringify(r.rows)}, want ${JSON.stringify(c.rows)}`)
+      t.check(r.sizes.join('|') === c.sizes.join('|'), `This device's numbers are out of ${JSON.stringify(r.sizes)}, want ${JSON.stringify(c.sizes)}`)
+      if (c.hour) {
+        t.check(r.hist && HOUR_CAP.test(r.hist.cap), `This device's last hour reads ${JSON.stringify(r.hist)}, want "Last hour CPU Mem peak 50%"`)
+        if (r.hist) t.check(r.hist.cpu >= 59 && r.hist.mem >= 59 && r.hist.h >= 18 && r.hist.w >= 100, `the last hour draws CPU ${r.hist.cpu} and memory ${r.hist.mem} points in ${r.hist.w}x${r.hist.h}, want the 60 samples each in a visible line`)
+        // no large empty area beside the model: the text column runs to the box's foot, no gap in it over a fifth of the box
+        const bottom = r.box.t + r.box.h
+        const lastEnd = r.blocks.at(-1)?.[1] ?? r.box.t
+        const gaps = r.blocks.slice(1).map((b, k) => b[0] - r.blocks[k][1])
+        t.check(bottom - lastEnd <= 24 && Math.max(0, ...gaps) <= r.box.h / 5, `This device's text column leaves empty space: blocks ${JSON.stringify(r.blocks)} in a box from ${r.box.t} to ${bottom}`)
+      } else {
+        t.check(!r.hist, `This device draws a last hour it has no samples for: ${JSON.stringify(r.hist)}`)
+      }
+      if (c.tall != null) t.check(r.tall === c.tall, `This device ${r.tall ? 'is' : 'is not'} in its tall layout (${JSON.stringify(r.box)}), want ${c.tall ? 'tall' : 'short'}`)
+      t.check(r.textRight <= r.anchorLeft + 2, `This device's text runs over the model (text right ${r.textRight}, model anchor left ${r.anchorLeft})`)
       if (c.hint) t.check(c.hint.test(r.hint), `no battery hint (got "${r.hint}")`)
       else t.check(!r.hint, `a battery hint where a reading came in: "${r.hint}"`)
       const desk = c.device.startsWith('desk')

@@ -6,7 +6,7 @@ import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, equityAge, nyDayKey, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick,
+  ago, equityAge, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
   useTrade, useTracker, useUsage,
   type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession, type TradeVM,
 } from '../kit/data'
@@ -31,15 +31,15 @@ import './dashboard.css'
 // Dashboard: one page with everything Valkyrie does, in the order Brendon
 // uses it. Phone (one column, in this order): the trade ticker line (the
 // newest session, bot online, 7 days), quick start, upload (pictures to thor,
-// for the session just started), lights (every bulb, a tap switches one, the
-// presets, a plate that switches them all), the daily tracker (day stepping,
+// for the session just started), lights (one bar for all of them, every bulb,
+// a tap switches one, the presets, a plate that switches them all), the daily tracker (day stepping,
 // the other day's line, hold Exercise to skip), the calendar (today first,
 // then the next six days; a tap opens the calendar sheet), AI (live and asking
 // sessions, usage meters), media (playing or newest added, downloads) and
 // every host (CPU / Mem / Disk, battery where the host has one), led by this
 // device: the 3D model of the phone or iPad in hand with its battery and storage.
 // From 600 px: two columns, the ticker becomes the head of a Trade box (equity,
-// the 3D equity chart) and every bulb gets its brightness bar.
+// the 3D equity chart) and the presets get their names.
 // Desktop: three columns that reach the bottom of the page: [quick start,
 // upload, tracker, media with the newest backdrop and a poster grid] [trade,
 // AI, calendar] [lights, this device, hosts]. The equity chart, this device's
@@ -1338,17 +1338,21 @@ function resetLabel(iso: string | null, now: number): string {
 
 /**
  * AI: the live sessions (asking first, then working; desktop adds the idle
- * ones) and the usage meters of the account being burned. The head and the rows
- * open AI > Sessions, the meters AI > Usage.
+ * ones) and the usage meters of the account thor runs on now (the hottest
+ * account is the fallback, tagged "busiest"). The head and the rows open
+ * AI > Sessions, the meters AI > Usage.
  */
 function AiBlock({ wide, i }: { wide: boolean; i: number }) {
   const { go } = useShell()
   const usage = useUsage()
+  const sw = useSwitchStatus()
   const sessions = useSessions()
   const now = useTick(30_000)
   const hostLabel = useHostLabel()
 
   const u = usage.data
+  // the account thor's terminals use now, not the hottest one; hottest is the fallback
+  const on = onAccount(u, sw.data, 'thor')
   const uAge = oldAge(usage, now)
   const dead = u?.accounts.filter((a) => a.dead).length ?? 0
   const list = liveSessions(sessions.data, wide)
@@ -1360,7 +1364,7 @@ function AiBlock({ wide, i }: { wide: boolean; i: number }) {
     <Panel className="hm-glance hm-ai" i={i} dense lit={lit}>
       <Press className="hm-g-head hm-g-press" onPress={open} aria-label="AI sessions and usage, open AI">
         <span className="hm-g-label" data-lit={lit || undefined}><HIcon name="claude" lit={lit} />AI</span>
-        {u?.label && <span className="hm-g-acct vl-ellipsis" title="The account the usage meters show">{u.label}</span>}
+        {on.label && <span className="hm-g-acct vl-ellipsis" title={on.source === 'host' ? 'The account thor runs on now' : `The hottest account (${on.note ?? 'switcher off'})`}>{on.label}{on.source === 'hottest' && <i className="hm-g-acct-hot"> busiest</i>}</span>}
         <span className="hm-g-value"><SessionCount s={sessions} now={now} /></span>
         <Chevron />
       </Press>
@@ -1382,8 +1386,8 @@ function AiBlock({ wide, i }: { wide: boolean; i: number }) {
       ) : null}
       <Press className="hm-g-meters" onPress={() => go(AI, 'usage')} aria-label="Usage meters, open AI usage">
         <span className="hm-meters" data-old={uAge ? '' : undefined}>
-          <Meter label="5h" value={u?.five ?? null} note={resetLabel(u?.fiveResetsAt ?? null, now)} />
-          <Meter label="Week" value={u?.week ?? null} note={resetLabel(u?.weekResetsAt ?? null, now)} ticks={7} />
+          <Meter label="5h" value={on.five} note={resetLabel(on.fiveResetsAt, now)} />
+          <Meter label="Week" value={on.week} note={resetLabel(on.weekResetsAt, now)} ticks={7} />
         </span>
         {(dead > 0 || uAge || (!u && usage.failed)) && (
           <span className="hm-g-foot">
@@ -1565,14 +1569,72 @@ function deviceCells(h: HostVM): HostCell[] {
   ]
 }
 
+/** "25.4 / 31.1 GB" (GiB, as Windows and htop show memory; System > Hosts words it the same) */
+const memSizes = (h: HostVM) => (h.memUsedGb != null && h.memTotalGb != null ? `${h.memUsedGb.toFixed(1)} / ${h.memTotalGb.toFixed(1)} GB` : null)
+
+/** "3.1 / 4.0 TB", "101 / 256 GB" (decimal, as drives are sold; as System > Hosts words it) */
+function diskSizes(h: HostVM): string | null {
+  if (h.diskUsedGb == null || h.diskTotalGb == null) return null
+  const dec = (gib: number) => (gib * 1024 ** 3) / 1e9
+  const one = (gb: number, unit: 'TB' | 'GB') => (unit === 'TB' ? (gb / 1000).toFixed(1) : gb >= 10 ? gb.toFixed(0) : gb.toFixed(1))
+  const used = dec(h.diskUsedGb), total = dec(h.diskTotalGb)
+  const tu = total >= 1000 ? 'TB' : 'GB'
+  const uu = used >= 100 && tu === 'TB' ? 'TB' : 'GB'
+  return uu === tu ? `${one(used, uu)} / ${one(total, tu)} ${tu}` : `${one(used, uu)} ${uu} / ${one(total, tu)} ${tu}`
+}
+
+/** what a number is out of: the cores, used / total, charging */
+function cellSizes(h: HostVM, key: string): string | null {
+  if (key === 'cpu') return h.cores ? `${h.cores} cores` : null
+  if (key === 'mem') return memSizes(h)
+  if (key === 'disk') return diskSizes(h)
+  if (key === 'bat') return h.battery?.charging ? 'charging' : null
+  return null
+}
+
+const HOUR = 3_600_000
+
+/** The last hour as System > Hosts draws it: a flat line pair, fixed 0-100, x by clock, CPU in hot, memory in fg. */
+function DevSpark({ h, t1 }: { h: HostVM; t1: number }) {
+  const W = 120, H = 40
+  const t0 = t1 - HOUR
+  const path = (k: 'cpu' | 'mem') => {
+    let d = ''
+    let prev = -Infinity
+    for (const p of h.history) {
+      const v = p[k]
+      // a gap of more than 3 minutes breaks the line instead of bridging it
+      if (v == null || p.t < t0 - 30_000) { prev = -Infinity; continue }
+      const x = Math.max(0, Math.min(1, (p.t - t0) / HOUR)) * W
+      const y = H - 1 - (Math.max(0, Math.min(100, v)) / 100) * (H - 2)
+      d += `${p.t - prev > 180_000 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+      prev = p.t
+    }
+    return d
+  }
+  return (
+    <svg className="hm-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
+      <line className="hm-spark-mid" x1={0} x2={W} y1={H / 2} y2={H / 2} />
+      <line className="hm-spark-base" x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} />
+      <path className="hm-spark-mem" d={path('mem')} />
+      <path className="hm-spark-cpu" d={path('cpu')} />
+    </svg>
+  )
+}
+
+/** a This device box from this height (layout px) sets its numbers larger and gives the last hour more room */
+const DEV_TALL = 400
+
 /**
  * This device: the x-ray model of the machine the page runs on, its heat and
  * glow from the live load (Hero, as on System > Hosts), its name, online state
- * and uptime, and its live numbers. The whole block is one press that opens
- * System > Hosts with it picked; the model sits under it, so it neither turns
- * nor takes a swipe here. Desktop: its own box in the right column, the model
- * taking the height the column leaves. `compact` (phone, iPad): a short block
- * that leads the Systems box.
+ * and uptime, and its live numbers with what each is out of (cores, used /
+ * total). The whole block is one press that opens System > Hosts with it
+ * picked; the model sits under it, so it neither turns nor takes a swipe here.
+ * Desktop: its own box in the right column and the column's elastic part: the
+ * model takes the right side at the box's full height, the facts and the last
+ * hour (CPU and memory, as System > Hosts draws it) the left. `compact` (phone,
+ * iPad): a short block that leads the Systems box, as tall as its text.
  */
 function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; active: boolean; i?: number; compact?: boolean; fill?: boolean }) {
   const hosts = useHosts()
@@ -1617,9 +1679,20 @@ function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; 
       {state}{detail && <span className="hm-dim"> · {detail}</span>}
     </span>
   )
+  const old = oldAge(hosts, now, 60_000)
+  // desktop: the last hour of CPU and memory (System > Hosts' sparkline), x by the server's clock up to its newest sample
+  const histOn = !compact && !!h && online && h.history.length > 1
+  const t1 = histOn ? h.history[h.history.length - 1].t : now
+  const hour = histOn ? h.history.filter((p) => p.t >= t1 - HOUR - 30_000) : []
+  const hasMem = hour.some((p) => p.mem != null)
+  const peak = hour.length > 1 ? Math.round(Math.max(h?.cpu ?? 0, ...hour.map((p) => p.cpu ?? 0))) : null
+  const size = useSize(inRef, !compact)
+  const tall = !compact && !!size && size.h >= DEV_TALL
+  // compact with nothing under the name (offline, not listed): the block hugs its text
+  const bare = !!compact && !cells.length && !noBattery
 
   const inner = (
-    <div ref={inRef} className="hm-dev-in" data-compact={compact || undefined}>
+    <div ref={inRef} className="hm-dev-in" data-compact={compact || undefined} data-tall={tall || undefined} data-bare={bare || undefined}>
       {model && <div ref={anchor} className="hm-dev-anchor" aria-hidden />}
       {model && (
         <div className="hm-dev-scene" aria-hidden>
@@ -1628,9 +1701,9 @@ function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; 
             pose={devicePose(model)}
             host={model}
             anchor={anchor}
-            fill={compact ? 0.9 : 0.94}
+            fill={compact ? 0.9 : 0.96}
             scrim={0.6}
-            layoutKey={`${model}:${compact ? 'c' : 'f'}:${built}`}
+            layoutKey={`${model}:${compact ? 'c' : 'f'}:${tall ? 't' : 's'}:${built}`}
             className="absolute inset-0"
           />
         </div>
@@ -1640,27 +1713,41 @@ function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; 
           <span className={compact ? 'hm-dev-cap' : 'hm-g-label'} data-lit={online || undefined}>
             <HIcon name={hostIcon(id ?? 'thor')} lit={online} size={compact ? 12 : 14} />This device
           </span>
-          {/* desktop: the state is the head's value, as on every other box; compact: under the name */}
-          {!compact && stateLine}
           {!compact && <Chevron />}
         </span>
         <span className="hm-dev-id">
           <span className="hm-dev-name vl-ellipsis">{label}</span>
-          {compact && stateLine}
+          {stateLine}
         </span>
         {(cells.length > 0 || noBattery) && (
-          <span className="hm-dev-rows" data-old={oldAge(hosts, now, 60_000) ? '' : undefined}>
+          <span className="hm-dev-rows" data-old={old ? '' : undefined}>
             {noBattery && (
               <span className="hm-dev-hint vl-ellipsis"><Icon name="battery" size={12} tone="dim" className="hm-ic" />No battery reading yet</span>
             )}
-            {cells.map((c) => (
-              <span key={c.key} className="hm-dev-row" data-alert={c.alert || undefined}>
-                <Icon name={c.icon} size={12} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
-                <span className="hm-dev-k">{c.key === 'bat' ? 'Battery' : c.label}</span>
-                <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
-                <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
-              </span>
-            ))}
+            {cells.map((c) => {
+              const sz = h ? cellSizes(h, c.key) : null
+              return (
+                <span key={c.key} className="hm-dev-row" data-alert={c.alert || undefined}>
+                  <Icon name={c.icon} size={tall ? 13 : 12} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
+                  <span className="hm-dev-k">{c.key === 'bat' ? 'Battery' : c.label}</span>
+                  <span className="hm-dev-sz vl-ellipsis">{sz}</span>
+                  <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
+                  <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
+                </span>
+              )
+            })}
+          </span>
+        )}
+        {!compact && !cells.length && !noBattery && h && <span className="hm-dev-off">No stats published</span>}
+        {histOn && hour.length > 1 && (
+          <span className="hm-dev-hist" data-old={old ? '' : undefined}>
+            <span className="hm-dev-hist-cap">
+              <span className="hm-dev-hist-k">Last hour</span>
+              <i className="hm-key" data-c="cpu" />CPU
+              {hasMem && <><i className="hm-key" data-c="mem" />Mem</>}
+              {peak != null && <span className="hm-dev-peak">peak {peak}%</span>}
+            </span>
+            <span className="hm-dev-spark"><DevSpark h={h} t1={t1} /></span>
           </span>
         )}
       </Press>
@@ -1781,7 +1868,7 @@ function useLightQueue(send: (u: LightUpdate) => Promise<unknown>, landed: () =>
     }
     sync()
   }
-  /** lane: 'room' for the presets and all on / off, the bulb's id for its own switch and bar */
+  /** lane: 'room' for the presets and all on / off, 'level' for the all-lights bar, the bulb's id for its own switch */
   const run = (lane: string, c: LightCmd) => {
     if (!targetsOf(c.update).length) return
     // a newer command in a lane replaces the waiting one and takes its turn at the back
@@ -1820,12 +1907,14 @@ function presetOf(l: LightState): string | null {
 /**
  * Lights: the count (the head opens Lights), the plate that switches them all
  * (with Undo), the presets (they color the bulbs that are on, each keeps its
- * own level), and every bulb in its real color. `rows` (two columns and up):
- * a row per bulb with its brightness bar (sent once, on release) and its
- * switch. `chips` (phone): a chip per bulb, a tap switches it. The apartment
- * model lives on the Lights tab; on the desktop its old place in this column
- * holds this device's model. Every write goes through useLightsControl's
- * mutation, in order (useLightQueue).
+ * own level), one all-lights brightness bar (the room's level, as the head
+ * reads it; a drag sets every bulb that is on, sent once on release), and a
+ * chip per bulb in its real color (a tap switches it). `rows` (two columns and
+ * up): presets with their names, the bar, the chips. `chips` (phone): the bar,
+ * the chips, the presets as diamonds. Per-bulb levels and colors live on the
+ * Lights tab, and so does the apartment model; on the desktop its old place in
+ * this column holds this device's model. Every write goes through
+ * useLightsControl's mutation, in order (useLightQueue).
  */
 function LightsBox({ i, variant }: { i: number; variant: 'chips' | 'rows' }) {
   const { go } = useShell()
@@ -1867,13 +1956,18 @@ function LightsBox({ i, variant }: { i: number; variant: 'chips' | 'rows' }) {
     if (!need()) return
     q.run(b.id, { update: { entity_id: b.id, state: b.on ? 'off' : 'on' }, fail: `Could not turn ${b.name} ${b.on ? 'off' : 'on'}` })
   }
-  const setPct = (b: BulbV, v: number) => {
+  // the all-lights bar sets every bulb that is on, never a dark one; its own lane, so a waiting preset or switch is never dropped for it
+  const setLevel = (v: number) => {
     if (!need()) return
-    q.run(b.id, {
-      update: v <= 0 ? { entity_id: b.id, state: 'off' } : { entity_id: b.id, state: 'on', brightness: brightnessFromPct(v) },
-      fail: v <= 0 ? `Could not turn ${b.name} off` : `Could not set ${b.name} to ${v}%`,
+    if (!lit.length) { toast('Turn a light on first'); return }
+    const ids = lit.map((b) => b.id)
+    q.run('level', {
+      update: v <= 0 ? { entity_id: ids, state: 'off' } : { entity_id: ids, state: 'on', brightness: brightnessFromPct(v) },
+      fail: v <= 0 ? 'Could not turn the lights off' : `Could not set the lights to ${v}%`,
     })
   }
+  // the bar in the lit bulbs' colors: one color, or a run through each when they differ
+  const litColors = [...new Set(lit.map((b) => b.color))]
   // presets color the bulbs that are on, never a dark one, and carry no brightness (the backend pins each bulb's own)
   const applyPreset = (p: Swatch) => {
     if (!need()) return
@@ -1928,19 +2022,27 @@ function LightsBox({ i, variant }: { i: number; variant: 'chips' | 'rows' }) {
       </div>
       {empty ? (
         <p className="hm-quiet hm-g-quiet">{empty}</p>
-      ) : variant === 'rows' ? (
-        <>
-          <Presets active={preset} idle={!anyOn} names onPick={applyPreset} />
-          <div className="hm-bulbs" role="group" aria-label="Bulbs">
-            {ordered.map((b) => <BulbLine key={b.id} b={b} onToggle={() => toggle(b)} onPct={(v) => setPct(b, v)} />)}
-          </div>
-        </>
       ) : (
         <>
-          <div className="hm-chips" role="group" aria-label="Bulbs">
+          {variant === 'rows' && <Presets active={preset} idle={!anyOn} names onPick={applyPreset} />}
+          <RoomBar
+            value={avg}
+            on={anyOn}
+            color={litColors[0] ?? 'var(--fg)'}
+            mix={litColors.length > 1 ? `linear-gradient(90deg, ${litColors.join(', ')})` : null}
+            busy={roomBusy}
+            onCommit={setLevel}
+          />
+          <div
+            className="hm-chips"
+            role="group"
+            aria-label="Bulbs"
+            data-wide={variant === 'rows' || undefined}
+            data-per={variant === 'rows' ? (ordered.length === 4 ? 2 : ordered.length >= 7 ? 4 : 3) : undefined}
+          >
             {ordered.map((b) => <BulbChip key={b.id} b={b} onToggle={() => toggle(b)} />)}
           </div>
-          <Presets active={preset} idle={!anyOn} onPick={applyPreset} />
+          {variant === 'chips' && <Presets active={preset} idle={!anyOn} onPick={applyPreset} />}
         </>
       )}
     </Panel>
@@ -1973,40 +2075,44 @@ function Presets({ active, idle, names, onPick }: { active: string | null; idle:
   )
 }
 
-/** One bulb as a row: its icon in its real color, the name, the brightness bar, the figure, the switch. */
-function BulbLine({ b, onToggle, onPct }: { b: BulbV; onToggle: () => void; onPct: (v: number) => void }) {
-  const lit = b.on && !b.unavailable
-  // the value under the pointer while the bar moves (the bulb is told on release)
+/**
+ * The all-lights bar: the room's level as the head reads it (the lit bulbs'
+ * average, unknown when one of them does not report it), filled in the lit
+ * bulbs' colors (`mix`: a run through each when they differ), a hairline while
+ * every bulb is off. A drag sets every bulb that is on, sent once on release
+ * (BulbSlider).
+ */
+function RoomBar({ value, on, color, mix, busy, onCommit }: {
+  value: number | null
+  on: boolean
+  color: string
+  mix: string | null
+  busy: boolean
+  onCommit: (v: number) => void
+}) {
+  // the value under the pointer while the bar moves (the bulbs are told on release)
   const [preview, setPreview] = useState<number | null>(null)
-  const shown = preview !== null ? (preview > 0 ? preview : null) : lit ? b.pct : null
+  const lit = preview !== null ? preview > 0 : on
+  const shown = preview !== null ? (preview > 0 ? preview : null) : on ? value : null
   return (
-    <div className="hm-bulb" data-on={lit || undefined} data-na={b.unavailable || undefined} data-busy={b.busy || undefined} style={{ '--c': b.color } as Vars}>
-      <span className="hm-bulb-id">
-        <Icon name={lit ? 'bulb' : 'bulbOff'} size={15} tone={lit ? 'fg' : b.unavailable ? 'faint' : 'dim'} glow={lit} className="hm-bulb-ic" />
-        <span className="hm-bulb-name vl-ellipsis" title={b.name}>{b.name}</span>
+    <div
+      className="hm-allbar"
+      data-on={lit || undefined}
+      data-busy={busy || undefined}
+      data-mix={mix ? '' : undefined}
+      style={{ '--c': color, ...(mix ? { '--mix': mix } : {}) } as Vars}
+    >
+      <span className="hm-allbar-id">
+        <Icon name={lit ? 'bulb' : 'bulbOff'} size={15} tone={lit ? 'fg' : 'dim'} glow={lit} className="hm-allbar-ic" />
+        <span className="hm-allbar-name">All lights</span>
       </span>
-      {b.unavailable ? (
-        <span className="hm-bulb-na"><Icon name="offline" size={12} tone="dim" />Unavailable</span>
-      ) : (
-        <>
-          <BulbSlider value={b.on ? b.pct : 0} on={preview !== null ? preview > 0 : b.on} label={`${b.name} brightness`} onPreview={setPreview} onCommit={onPct} />
-          <span className="hm-bulb-pct">{shown != null ? <>{shown}<small>%</small></> : b.on && preview === null ? '--' : 'Off'}</span>
-          <Press
-            className="hm-bulb-pw"
-            data-on={b.on || undefined}
-            aria-pressed={b.on}
-            aria-label={b.on ? `Turn ${b.name} off` : `Turn ${b.name} on`}
-            onPress={onToggle}
-          >
-            <Icon name="power" size={14} tone={b.on ? 'fg' : 'dim'} glow={b.on} />
-          </Press>
-        </>
-      )}
+      <BulbSlider value={on ? value : 0} on={lit} label="All lights brightness" onPreview={setPreview} onCommit={onCommit} />
+      <span className="hm-allbar-pct">{shown != null ? <>{shown}<small>%</small></> : on && preview === null ? '--' : 'Off'}</span>
     </div>
   )
 }
 
-/** One bulb as a chip (phone): icon in its real color, name, level, a bar in its color along the foot. A tap switches it. */
+/** One bulb as a chip: its icon in its real color, the name, its level or Off. A tap switches it. */
 function BulbChip({ b, onToggle }: { b: BulbV; onToggle: () => void }) {
   const lit = b.on && !b.unavailable
   return (
@@ -2015,16 +2121,15 @@ function BulbChip({ b, onToggle }: { b: BulbV; onToggle: () => void }) {
       data-on={lit || undefined}
       data-na={b.unavailable || undefined}
       data-busy={b.busy || undefined}
-      style={{ '--c': b.color, '--v': lit ? b.pct ?? 100 : 0 } as Vars}
+      style={{ '--c': b.color } as Vars}
       disabled={b.unavailable}
       aria-pressed={b.on}
       aria-label={b.unavailable ? `${b.name}, unavailable` : b.on ? `Turn ${b.name} off` : `Turn ${b.name} on`}
       onPress={onToggle}
     >
       <Icon name={lit ? 'bulb' : 'bulbOff'} size={14} tone={lit ? 'fg' : b.unavailable ? 'faint' : 'dim'} glow={lit} className="hm-chip-ic" />
-      <span className="hm-chip-name vl-ellipsis">{b.name}</span>
+      <span className="hm-chip-name vl-ellipsis" title={b.name}>{b.name}</span>
       <span className="hm-chip-v">{b.unavailable ? 'n/a' : lit ? (b.pct != null ? `${b.pct}%` : 'On') : 'Off'}</span>
-      <i className="hm-chip-bar" aria-hidden />
     </Press>
   )
 }
@@ -2033,7 +2138,7 @@ function BulbChip({ b, onToggle }: { b: BulbV; onToggle: () => void }) {
 const SL_HOLD_MS = 4_000
 
 /**
- * A bulb's brightness bar, filled in the bulb's color. A mouse sets the value
+ * A brightness bar (the all-lights bar), filled in its --c color. A mouse sets the value
  * at once and drags it; a finger sets it on a sideways drag or on lift (a
  * vertical move hands the gesture back to the page scroll). It commits ONCE
  * per gesture (release, tap, or key up after the arrows): a command per move

@@ -601,6 +601,7 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   color: var(--fg);
 }
 .hm-g-acct { flex: 0 1 auto; min-width: 0; font-size: 11px; line-height: 16px; color: var(--dim); }
+.hm-g-acct-hot { font-style: normal; font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
 .hm-g-value { margin-left: auto; font-size: 11.5px; line-height: 16px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hm-g-value b { font-size: 15px; font-weight: 700; color: var(--ink-hi); }
 .hm-asking { color: var(--acc2); }
@@ -726,54 +727,44 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-pres:not([data-names]) .hm-pre { min-height: 34px; }
 .hm-pres:not([data-names]) .hm-pre-sw { width: 10px; height: 10px; transform: rotate(45deg); box-shadow: 0 0 6px color-mix(in srgb, var(--sw) 70%, transparent); }
 
-/* a row per bulb: icon in its real color, name, brightness bar, figure, switch; a lit row carries a wash of its color */
-.hm-bulbs { display: block; margin: 0 10px 2px; border-top: 1px solid var(--line); }
-.hm-bulb {
+/* the all-lights bar: the room's level as one bar in the lit bulbs' colors; lit, the row carries a wash of their color */
+.hm-lights { container: hm-lt / inline-size; }
+.hm-allbar {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 10.5em) minmax(0, 1fr) 42px 30px;
+  grid-template-columns: auto minmax(0, 1fr) 48px;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 14px;
   min-height: 40px;
+  margin: 0 10px 7px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
-.hm-bulb + .hm-bulb { border-top: 1px solid var(--line); }
-.hm-bulb::before {
+.hm-allbar::before {
   content: '';
   position: absolute;
-  inset: 1px -10px 0;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 15%, transparent), color-mix(in srgb, var(--c) 4%, transparent) 45%, transparent 75%);
+  inset: 0 -10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 16%, transparent), color-mix(in srgb, var(--c) 5%, transparent) 45%, transparent 80%);
   opacity: 0;
   transition: opacity .3s var(--ease);
   pointer-events: none;
 }
-.hm-bulb[data-on]::before { opacity: 1; }
-.hm-bulb > * { position: relative; }
-.hm-bulb-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.hm-bulb-ic { flex: none; transition: color .3s, filter .3s; }
-.hm-bulb[data-on] .hm-bulb-ic { color: var(--c); filter: drop-shadow(0 0 3px var(--c)) drop-shadow(0 0 8px color-mix(in srgb, var(--c) 60%, transparent)); }
-.hm-bulb-name { font-size: 13px; line-height: 17px; font-weight: 600; color: var(--text); }
-.hm-bulb:not([data-on]) .hm-bulb-name { color: var(--dim); font-weight: 500; }
-.hm-bulb[data-na] .hm-bulb-name { color: var(--faint); }
-.hm-bulb-pct { font-size: 13px; line-height: 16px; font-weight: 700; text-align: right; color: var(--ink-hi); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hm-bulb-pct small { margin-left: 1px; font-size: 9.5px; font-weight: 500; color: var(--dim); }
-.hm-bulb:not([data-on]) .hm-bulb-pct { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
-.hm-bulb-na { grid-column: 2 / 5; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint); }
-.hm-bulb-pw {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--fg) 11%, transparent), color-mix(in srgb, var(--fg) 3%, transparent)),
-    rgba(0, 0, 0, .9);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 20%, transparent);
-  transition: transform .12s var(--ease), box-shadow .2s;
-}
-.hm-bulb-pw::after { content: ''; position: absolute; inset: -6px -5px; }
-.hm-bulb-pw[data-on] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 70%, transparent), 0 0 8px color-mix(in srgb, var(--fg) 30%, transparent); }
-.hm-bulb-pw[data-pressed] { transform: scale(.9); }
-/* a command for the bulb on its way or waiting: its icon breathes until it lands */
-.hm-bulb[data-busy] .hm-bulb-ic, .hm-chip[data-busy] .hm-chip-ic { animation: hm-busy .9s ease-in-out infinite alternate; }
+.hm-allbar[data-on]::before { opacity: 1; }
+.hm-allbar > * { position: relative; }
+.hm-allbar-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.hm-allbar-ic { flex: none; transition: color .3s, filter .3s; }
+.hm-allbar[data-on] .hm-allbar-ic { color: var(--c); filter: drop-shadow(0 0 3px var(--c)) drop-shadow(0 0 8px color-mix(in srgb, var(--c) 60%, transparent)); }
+.hm-allbar-name { font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap; }
+.hm-allbar:not([data-on]) .hm-allbar-name { color: var(--dim); }
+.hm-allbar-pct { font-size: 15px; line-height: 18px; font-weight: 700; text-align: right; color: var(--ink-hi); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-allbar-pct small { margin-left: 1px; font-size: 10px; font-weight: 500; color: var(--dim); }
+.hm-allbar:not([data-on]) .hm-allbar-pct { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+/* bulbs in more than one color: the fill runs through each */
+.hm-allbar[data-mix] .hm-sl-fill { background: var(--mix); }
+/* phone: right under the head, a little tighter */
+.hm-lights-chips .hm-allbar { min-height: 42px; margin: 0 8px 6px; column-gap: 12px; }
+/* a command on its way or waiting: the icon breathes until it lands */
+.hm-allbar[data-busy] .hm-allbar-ic, .hm-chip[data-busy] .hm-chip-ic { animation: hm-busy .9s ease-in-out infinite alternate; }
 
 /* the brightness bar, filled in the bulb's own color; a hairline while the bulb is off */
 .hm-sl { position: relative; height: 30px; min-width: 0; cursor: pointer; touch-action: pan-y; outline: none; }
@@ -806,8 +797,17 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-sl[data-unknown] .hm-sl-fill, .hm-sl[data-unknown] .hm-sl-head { opacity: 0; }
 .hm-sl:focus-visible .hm-sl-track { box-shadow: 0 0 0 1px var(--fg); }
 
-/* phone: a chip per bulb, two across, a bar in the bulb's color along the foot */
+/* a chip per bulb in its real color, a tap switches it. Phone: two across, an odd last one full width.
+   Two columns and up (data-wide): rows of three (two for four bulbs, four from seven), a short last row
+   shared out; two across in a narrow box (the iPad's column). */
 .hm-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 0 8px 6px; }
+.hm-chips[data-wide] { display: flex; flex-wrap: wrap; padding: 0 10px 9px; }
+.hm-chips[data-wide] > .hm-chip { flex: 1 1 calc((100% - 10px) / 3 - .5px); min-height: 36px; }
+.hm-chips[data-wide][data-per='2'] > .hm-chip { flex-basis: calc((100% - 5px) / 2 - .5px); }
+.hm-chips[data-wide][data-per='4'] > .hm-chip { flex-basis: calc((100% - 15px) / 4 - .5px); }
+@container hm-lt (max-width: 459px) {
+  .hm-chips[data-wide] > .hm-chip, .hm-chips[data-wide][data-per] > .hm-chip { flex-basis: calc((100% - 5px) / 2 - .5px); }
+}
 .hm-chip {
   position: relative;
   display: flex;
@@ -835,36 +835,29 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-chip-v { flex: none; font-size: 11.5px; font-weight: 700; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
 .hm-chip:not([data-on]) .hm-chip-name { color: var(--dim); font-weight: 500; }
 .hm-chip:not([data-on]) .hm-chip-v { font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 10px; color: var(--faint); }
-.hm-chip-bar {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 2px;
-  width: calc(var(--v) * 1%);
-  background: var(--c);
-  box-shadow: 0 0 6px var(--c);
-  transition: width .4s var(--ease);
-}
 .hm-chip[data-pressed] { transform: scale(.97); }
 .hm-chip:disabled { opacity: .5; }
 
-/* this device: its x-ray model on the right (the anchor the hero fits it to), its name, state and
-   numbers on the left over the dimmed floor, one press over all of it. Desktop: its own box between
-   Lights and Systems, the model the right column's elastic part (the box is as tall as its text and
-   takes whatever height the column leaves). Compact (phone, iPad): a short block leading Systems. */
+/* this device: its x-ray model on the right (the anchor the hero fits it to), its name, state, numbers
+   and last hour on the left over the dimmed floor, one press over all of it. Desktop: its own box between
+   Lights and Systems and the right column's elastic part: the model takes the right side at the box's
+   full height, the last hour grows with the box, and a tall box (data-tall, Dashboard.tsx DEV_TALL) sets
+   the numbers larger. Compact (phone, iPad): a short block leading Systems, as tall as its text. */
 .hm-dev-in {
   /* the text column; the model's anchor takes the rest */
-  --hm-dev-text: 46%;
+  --hm-dev-text: clamp(210px, 47%, 310px);
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 180px;
+  min-height: 200px;
 }
 .hm-grow .hm-dev-in { flex: 1 1 0; min-height: auto; }
 .hm-dev-in[data-compact] { --hm-dev-text: 58%; min-height: 112px; margin: 0 10px; border-top: 1px solid var(--line); }
+/* nothing under the name (offline, not listed): no empty band under the state */
+.hm-dev-in[data-compact][data-bare] { min-height: 74px; }
 /* desktop: under the head row; compact: the full height beside the text */
-.hm-dev-anchor { position: absolute; top: 26px; right: 0; bottom: 2px; left: var(--hm-dev-text); pointer-events: none; }
-.hm-dev-in[data-compact] .hm-dev-anchor { top: 8px; bottom: 8px; }
+.hm-dev-anchor { position: absolute; top: 26px; right: 2px; bottom: 2px; left: var(--hm-dev-text); pointer-events: none; }
+.hm-dev-in[data-compact] .hm-dev-anchor { top: 8px; right: 0; bottom: 8px; }
 .hm-dev-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* the press lies over the model: no orbit and no diamonds here (System > Hosts has both), and a swipe still changes tabs */
 .hm-dev-scene .vl-hero { pointer-events: none; }
@@ -875,18 +868,17 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
   width: 100%;
-  padding: 8px 10px 8px;
+  padding: 8px 10px 10px;
   text-align: left;
   transition: background-color .12s;
 }
-.hm-dev-in[data-compact] .hm-dev-press { padding: 8px 0; }
+.hm-dev-in[data-compact] .hm-dev-press { padding: 8px 0 9px; }
 .hm-dev-press[data-pressed] { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
 .hm-dev-press[data-pressed] .hm-chev { color: var(--fg); }
 .hm-dev-press:disabled { cursor: default; }
 .hm-dev-top { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
-.hm-dev-top > .hm-dev-state { margin-left: auto; min-width: 0; }
+.hm-dev-top > .hm-chev { margin-left: auto; }
 .hm-dev-in[data-compact] .hm-dev-top { min-height: 14px; }
 /* inside Systems the block's label is a quiet cap, not a second section title */
 .hm-dev-cap {
@@ -901,22 +893,56 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   color: var(--dim);
 }
 .hm-dev-cap[data-lit] { color: var(--fg); }
-.hm-dev-id, .hm-dev-rows { width: var(--hm-dev-text); min-width: 0; }
-.hm-dev-id { display: flex; flex-direction: column; }
-.hm-dev-name { font-size: 17px; line-height: 21px; font-weight: 700; letter-spacing: -.01em; color: var(--ink-hi); }
+.hm-dev-id, .hm-dev-rows, .hm-dev-hist, .hm-dev-off { width: calc(var(--hm-dev-text) - 12px); min-width: 0; }
+.hm-dev-in[data-compact] :is(.hm-dev-id, .hm-dev-rows) { width: calc(var(--hm-dev-text) - 8px); }
+.hm-dev-id { display: flex; flex-direction: column; margin-top: 1px; }
+.hm-dev-name { font-size: 18px; line-height: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--ink-hi); }
 .hm-dev-in[data-compact] .hm-dev-name { font-size: 14px; line-height: 18px; }
 .hm-dev-state { font-size: 11.5px; line-height: 15px; color: var(--text); }
 .hm-dev-state[data-state='off'] { color: var(--faint); }
 .hm-dev-state[data-state='stale'] { color: var(--acc2); }
-/* the numbers sit at the bottom of a tall box, right under the name in a short one */
-.hm-dev-rows { margin-top: auto; display: flex; flex-direction: column; }
-.hm-dev-row { display: grid; grid-template-columns: 12px 50px minmax(0, 1fr) auto; align-items: center; column-gap: 6px; min-height: 20px; }
+/* the numbers: label, what it is out of, the figure, and the bar under them. The padding is the least
+   gap; height the last hour cannot take is shared out above and below them (auto margins) */
+.hm-dev-rows { display: flex; flex-direction: column; gap: 6px; margin-block: auto; padding-top: 9px; }
+.hm-dev-in[data-compact] .hm-dev-rows { gap: 6px; padding-top: 7px; }
+.hm-dev-row { display: grid; grid-template-columns: 12px auto minmax(0, 1fr) auto; align-items: center; column-gap: 6px; row-gap: 3px; }
+.hm-dev-row > .hm-mini-bar { grid-column: 2 / -1; }
 .hm-dev-k { font-size: 11.5px; line-height: 15px; color: var(--dim); white-space: nowrap; }
+.hm-dev-sz { min-width: 0; font-size: 10.5px; line-height: 14px; text-align: right; color: var(--dim); }
+.hm-dev-row .hm-mini-v { min-width: 0; }
 .hm-dev-row[data-alert] .hm-mini-bar i { background: var(--acc2); }
 .hm-dev-row[data-alert] .hm-mini-v { color: var(--acc2); }
 .hm-dev-rows[data-old] .hm-mini-v { color: var(--dim); }
 .hm-dev-rows[data-old] .hm-mini-bar i { opacity: .5; }
 .hm-dev-hint { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+.hm-dev-off { padding-top: 10px; font-size: 11.5px; line-height: 15px; color: var(--faint); }
+/* the last hour of CPU and memory: the elastic part of the text column, up to a cap */
+.hm-dev-hist { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 44px; max-height: 128px; padding-top: 10px; }
+.hm-dev-hist-cap { display: flex; align-items: center; min-width: 0; font-size: 10.5px; line-height: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.hm-dev-hist-k { margin-right: 4px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text); }
+.hm-dev-peak { margin-left: auto; padding-left: 8px; }
+.hm-key { flex: none; display: inline-block; width: 10px; height: 2px; margin: 0 4px 0 8px; background: var(--fg); opacity: .7; }
+.hm-key[data-c='cpu'] { background: var(--hot); opacity: 1; box-shadow: 0 0 4px var(--hot); }
+.hm-dev-spark { position: relative; flex: 1 1 0; min-height: 26px; margin-top: 5px; }
+.hm-spark { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+.hm-spark path, .hm-spark line { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.hm-spark-base { stroke: var(--line-strong); stroke-width: 1; }
+.hm-spark-mid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 1 3; }
+.hm-spark-cpu { stroke: var(--hot); stroke-width: 1.5; filter: drop-shadow(0 0 2px color-mix(in srgb, var(--hot) 60%, transparent)); }
+.hm-spark-mem { stroke: var(--fg); stroke-opacity: .8; stroke-width: 1.2; }
+.hm-dev-hist[data-old] .hm-spark path { opacity: .5; }
+/* a tall box: the numbers a step up, more air, a taller last hour */
+.hm-dev-in[data-tall] .hm-dev-name { font-size: 26px; line-height: 31px; }
+.hm-dev-in[data-tall] .hm-dev-state { font-size: 12.5px; line-height: 17px; }
+.hm-dev-in[data-tall] .hm-dev-rows { gap: 14px; padding-top: 20px; }
+.hm-dev-in[data-tall] .hm-dev-row { row-gap: 6px; }
+.hm-dev-in[data-tall] .hm-dev-k { font-size: 12.5px; line-height: 16px; }
+.hm-dev-in[data-tall] .hm-dev-sz { font-size: 11.5px; line-height: 15px; }
+.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v { font-size: 19px; line-height: 22px; }
+.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v small { font-size: 11px; }
+.hm-dev-in[data-tall] .hm-dev-row .hm-mini-bar { height: 5px; }
+.hm-dev-in[data-tall] .hm-dev-hist { max-height: 260px; padding-top: 20px; }
+.hm-dev-in[data-tall] .hm-dev-hist-cap { font-size: 11.5px; line-height: 15px; }
 
 /* media: the head opens Media; a playing track with its play / pause plate; newest posters; downloads */
 .hm-media { padding-bottom: 9px; }
@@ -1107,8 +1133,10 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   html:not([data-font='sans']) .hm-next-title { font-size: 19px; line-height: 23px; }
   html:not([data-font='sans']) .hm-next-when { font-size: 22px; line-height: 25px; }
   .hm-meter-val { font-size: 24px; line-height: 27px; }
-  .hm-bulb-name { font-size: 13.5px; }
-  .hm-bulb-pct, .hm-tk-boxed .hm-tk-v { font-size: 14.5px; }
+  .hm-chip-name { font-size: 13px; }
+  .hm-allbar-name { font-size: 11.5px; }
+  .hm-allbar-pct { font-size: 16px; }
+  .hm-tk-boxed .hm-tk-v { font-size: 14.5px; }
   .hm-pre-name { font-size: 10px; }
   .hm-trade-what, .hm-trade-k { font-size: 12px; }
   .hm-trade-eq { font-size: 38px; line-height: 42px; }
@@ -1123,7 +1151,6 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 @media (hover: hover) and (pointer: fine) {
   .hm-pre:not([data-on]):hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sw) 55%, transparent); }
   .hm-pre:not([data-on]):hover .hm-pre-name { color: var(--text); }
-  .hm-bulb-pw:hover .vl-icon { color: var(--fg); }
   .hm-sl:hover .hm-sl-head { height: 18px; margin-top: -9px; }
   .hm-sl:not([data-on]):hover .hm-sl-track { background: color-mix(in srgb, var(--fg) 45%, transparent); }
   .hm-chip:hover { filter: brightness(1.15); }
@@ -1147,3 +1174,5 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 /* Settings > Density: comfortable (the other rows are keyed in settings.css) */
 html[data-density='comfortable'] .hm-arow { min-height: 34px; }
 html[data-density='comfortable'] .hm-now-main { min-height: 40px; }
+html[data-density='comfortable'] .hm-chips[data-wide] > .hm-chip { min-height: 44px; }
+html[data-density='comfortable'] .hm-allbar { min-height: 48px; }
