@@ -15,7 +15,11 @@ fi
 if curl -s -m 2 http://127.0.0.1:9333/json/version >/dev/null; then echo "already running"; exit 0; fi
 if [ ! -x "$BIN" ]; then echo "chrome-headless-shell not installed (see the header)"; exit 1; fi
 mkdir -p "$PROFILE"
+# odin has no mouse, so Chrome would report (hover: none) and (pointer: none) and the app would hide
+# its hover-only controls on the desktop tests. blink-settings declare a fine pointer that hovers,
+# as on thor; the phone and iPad tests still get touch through CDP touch emulation.
 setsid nohup "$BIN" --remote-debugging-port=9333 --remote-debugging-address=127.0.0.1 --remote-allow-origins='*' \
+  --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 \
   "--user-data-dir=$PROFILE" --no-first-run --no-default-browser-check --hide-scrollbars --mute-audio \
   --disable-gpu --renderer-process-limit=2 --no-sandbox about:blank >/dev/null 2>&1 < /dev/null &
 for _ in $(seq 1 40); do

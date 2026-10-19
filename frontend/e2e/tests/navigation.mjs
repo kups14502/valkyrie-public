@@ -188,11 +188,14 @@ export function navigationTests() {
     timeout: 45_000,
     async run(t) {
       const page = await t.page()
+      // an empty session board: a long live list fills the AI tab with swipeable rows and leaves no
+      // free row to swipe the tab on (2026-10-19), which says nothing about the tab swipe itself
+      page.mock('/api/session-board', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
       await page.goto('/m/dashboard')
       await shellUp(page)
       await sleep(1500)
       await t.step('swipe left: Dashboard to AI', async () => {
-        const row = await page.eval(swipeRow)
+        const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
         if (!row) throw new Error('no free row on the Dashboard to swipe on')
         await page.swipe(row.x1, row.y, row.x2, row.y, { steps: 10, ms: 160 })
         await page.waitPath(/^\/m\/ai\//)
@@ -200,7 +203,7 @@ export function navigationTests() {
       })
       await sleep(900)
       await t.step('swipe right: AI back to the Dashboard', async () => {
-        const row = await page.eval(swipeRow)
+        const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
         if (!row) throw new Error('no free row on AI to swipe on')
         await page.swipe(row.x2, row.y, row.x1, row.y, { steps: 10, ms: 160 })
         await page.waitPath('/m/dashboard')
@@ -208,7 +211,7 @@ export function navigationTests() {
       })
       await sleep(600)
       await t.step('a vertical drag does not change the tab', async () => {
-        const row = await page.eval(swipeRow)
+        const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
         if (!row) throw new Error('no free row')
         await page.swipe(row.x1 - 40, row.y + 120, row.x1 - 30, row.y - 120, { steps: 10, ms: 200 })
         await sleep(500)

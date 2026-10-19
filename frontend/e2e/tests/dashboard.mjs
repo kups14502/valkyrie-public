@@ -1055,8 +1055,9 @@ function deviceTests() {
       await sleep(300)
       await page.tap({ x: at.x, y: at.y })
       await page.waitPath('/m/system/hosts', 6000)
-      await sleep(600)
-      const picked = await page.eval(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim())
+      // the System tab mounts with its large model: on a slower browser (odin, no GPU) that takes
+      // well over the old fixed 600 ms, so wait for its header rather than sleeping a set time
+      const picked = await page.waitFor(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim(), { timeout: 8000 }).catch(() => '')
       t.check(picked.toLowerCase().startsWith(c.label.toLowerCase()), `System > Hosts picked "${picked}", want ${c.label}`)
       await t.shot(page)
       t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s)`)
@@ -1108,8 +1109,9 @@ function carTests() {
       await t.shot(page, 'dash')
       await page.tap({ sel: '.vl-page[data-active] .hm-sys .hm-hrow', text: /^\s*Car A|Car A:/ })
       await page.waitPath('/m/system/hosts', 6000)
-      await sleep(600)
-      const picked = await page.eval(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim())
+      // the System tab mounts with its large model: on a slower browser (odin, no GPU) that takes
+      // well over the old fixed 600 ms, so wait for its header rather than sleeping a set time
+      const picked = await page.waitFor(() => (document.querySelector('.vl-page[data-active] .sys-detail-id')?.textContent || '').trim(), { timeout: 8000 }).catch(() => '')
       t.check(/^Car A/.test(picked), `System > Hosts picked "${picked}", want Car A`)
       t.check(!page.writes.length, `the Dashboard wrote ${page.writes.length} time(s)`)
     },
