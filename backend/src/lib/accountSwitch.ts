@@ -328,6 +328,17 @@ async function probe(t: PoolToken): Promise<ProbeRec> {
   }
 }
 
+/**
+ * One 1-token probe with an account's pool (year-long) token, for the usage card: its 5-hour and
+ * weekly readings. null when the account has no pool token or its token was refused. Reads the
+ * vault and state only; writes nothing, so it never races the switcher's tick.
+ */
+export async function probePoolToken(id: string): Promise<{ at: number; httpStatus: number; quota: Quota | null } | null> {
+  const t = loadPool().get(id)
+  if (!t || loadState().dead[id]) return null
+  return probe(t)
+}
+
 async function probeInto(s: State, t: PoolToken): Promise<ProbeRec> {
   const r = await probe(t)
   if (r.httpStatus === 401 || r.httpStatus === 403) {

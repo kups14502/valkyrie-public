@@ -4,7 +4,7 @@ import { promisify } from 'node:util'
 import { writeFileSync, readFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { CLAUDE_ACCOUNTS, DEFAULT_CLAUDE_DIR } from '../lib/claudeAccounts.js'
-import { poolProbe } from '../lib/accountSwitch.js'
+import { poolProbe, probePoolToken } from '../lib/accountSwitch.js'
 
 const exec = promisify(execFile)
 const router = Router()
@@ -312,6 +312,36 @@ function withPoolFallback(id: string, read: QuotaRead): QuotaRead & { quotaSourc
   }
 }
 
+// Every account's 5-hour and weekly numbers come from its year-long pool token first (Brendon,
+// 2026-10-19: "switch all the ai usage stats to the 1 year token"): it never signs out, and reading
+// it never refreshes, so no grant can go stale or rotate under a running session. The switcher's own
+// probe is used while it is under POOL_FRESH_MS old; otherwise one 1-token probe here, at most once
+// per POOL_FRESH_MS per account. An account without a pool token falls back to its own sign-in.
+const POOL_FRESH_MS = 4 * 60_000
+const poolReads = new Map<string, { at: number; quota: ClaudeQuota | null }>()
+const toClaudeQuota = (q: { sessionPct: number; weeklyPct: number; sessionResetsAt: string | null; weeklyResetsAt: string | null; status?: string | null }): ClaudeQuota =>
+  ({ sessionPct: q.sessionPct, weeklyPct: q.weeklyPct, sessionResetsAt: q.sessionResetsAt, weeklyResetsAt: q.weeklyResetsAt, status: q.status ?? null })
+
+async function readPoolQuota(id: string): Promise<ClaudeQuota | null | undefined> {
+  const now = Date.now()
+  const sw = poolProbe(id)
+  if (sw && now - sw.at < POOL_FRESH_MS) return toClaudeQuota(sw.quota)
+  const mine = poolReads.get(id)
+  if (mine && now - mine.at < POOL_FRESH_MS) return mine.quota
+  const r = await probePoolToken(id)
+  if (!r) return undefined // no pool token (or it was refused): use the account's own sign-in
+  const quota = r.quota ? toClaudeQuota(r.quota) : (mine?.quota ?? null)
+  poolReads.set(id, { at: r.at, quota })
+  return quota
+}
+
+type AccountQuota = QuotaRead & { quotaSource: 'own' | 'switcher' | null }
+async function readAccountQuota(acct: { id: string; configDir: string; label: string }): Promise<AccountQuota> {
+  const pool = await readPoolQuota(acct.id)
+  if (pool) return { quota: pool, authError: null, quotaSource: 'switcher' }
+  return withPoolFallback(acct.id, await readClaudeOAuthQuota(acct.configDir, acct.label))
+}
+
 async function readClaudeAIQuota(): Promise<ClaudeQuota | null> {
   const sessionKey = process.env.CLAUDE_SESSION_KEY
   if (!sessionKey) return null
@@ -415,7 +445,7 @@ async function refreshAIUsage(): Promise<void> {
         const [blocks, usage, quota] = await Promise.all([
           readClaudeBlocks(env),
           readClaudeUsage(env),
-          readClaudeOAuthQuota(acct.configDir, acct.label).then((r) => withPoolFallback(acct.id, r)),
+          readAccountQuota(acct),
         ])
         return { acct, blocks, usage, quota: quota.quota, authError: quota.authError, quotaSource: quota.quotaSource }
       }))
@@ -456,7 +486,7 @@ async function refreshQuotasOnly(): Promise<void> {
     try {
       const current = cache?.data
       if (!current?.aiClients) return
-      const reads = await Promise.all(CLAUDE_ACCOUNTS.map((acct) => readClaudeOAuthQuota(acct.configDir, acct.label).then((r) => withPoolFallback(acct.id, r))))
+      const reads = await Promise.all(CLAUDE_ACCOUNTS.map((acct) => readAccountQuota(acct)))
       const byId = new Map(CLAUDE_ACCOUNTS.map((acct, i) => [acct.id, reads[i]]))
       const aiClients = current.aiClients.map((c: { id: string }) => {
         const read = byId.get(c.id)
