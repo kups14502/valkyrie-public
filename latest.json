@@ -1,15 +1,15 @@
 {
-  "version": "0.3.145",
-  "notes": "hero: thor faces through the glass toward the front fans on System > Hosts and This device",
-  "pub_date": "2026-10-19T16:58:19Z",
+  "version": "0.3.146",
+  "notes": "Hosts: the Model Y as a host, battery and charging from Home Assistant",
+  "pub_date": "2026-10-19T20:04:32Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVY1NklUWkxLRHZJdnR3cXRlWGlGOHQ4bDdOVGxOdFBKWEVDdExSRmhVNE5xckhFNGQ5YXJWWm9wR0ZNYlNua1B3c0Y4VXE3bytoaTRjd1MxSXlIK3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDI4OTk2CWZpbGU6VmFsa3lyaWVfMC4zLjE0NV94NjQtc2V0dXAuZXhlCkNJS2o5RUpKVHZPVnZaY3FaU04rcWtpYWs5RCtybmxvRVlKWlo1S1A3c1h5K2RsdlVBWEJmZ3hLTnZJWjBMc0gyRENlRTlTLzF2OUM1dW1xYUJaUkFnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.145/Valkyrie_0.3.145_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWI4OTl1Wml2djZrZGhYZWdKNWYrV0gvdkI2bUg0b1ZMakN2MEk4UVFEWlIyT3ZRcnVOVTJUR3N6ZGo1SEtjVEJrY3hSbnpkZll0RWNUTnQzWU82bGdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQwMTQwCWZpbGU6VmFsa3lyaWVfMC4zLjE0Nl94NjQtc2V0dXAuZXhlClNjYkJkMmpyQTFsZGYwSEZ6VkJDVHZJWVBhaGFQSStmQ0p2NWpzUFNKWjY4K1ZFL1ZxYTZ1WXZCOFMyb0J2MHNVT3FZVStEMHVWaGpLMU5ielkvZkF3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.146/Valkyrie_0.3.146_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpDSDlKdVl0eUdmVUVxalBQZ2hnRjhlTGdlVTROT0kvQUQ0bzlDaU4wWjljSFBjOVJBVTB4MnJzNmNNM05jQnpDaUptbnY1cTFVSkxmZ2g4WlZKcVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDI4OTM0CWZpbGU6VmFsa3lyaWVfMC4zLjE0NV9hbWQ2NC5BcHBJbWFnZQpNeTBoZ25VaVJScnZ4V1lWMVp4SDBwOFBaSVh5U3hDaW5lbTdLTStsN2FZU3Nqa3dLM092TGM0MGNBWGNIQTFwRSttaDB1TUQvSjFVYVlUTEw0aWpCQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.145/Valkyrie_0.3.145_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVQckN1TGlJeHNlK2VOUm1lUzUzQTJ3d2Z5YVNWUGFINVlYZ3JtUEpOYzZjWW5pVkUxQjBpUExRZjhNYW1CSHg5R1Nka1ZCbVgzNGtuUnJPb2p3VndVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQwMDgwCWZpbGU6VmFsa3lyaWVfMC4zLjE0Nl9hbWQ2NC5BcHBJbWFnZQo4NGNmZjF6L1ZEVlQxdy9iaDFwS2NEUnp3TTluNXhibXkvdUxqeUJEYVZQNlNrRUJPaFZRemhteGgyMHY1MnI5em1jbHlKUURZM1kyMGNqWTlRQ2lEQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.146/Valkyrie_0.3.146_amd64.AppImage"
     }
   }
 }
