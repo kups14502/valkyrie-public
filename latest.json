@@ -1,15 +1,15 @@
 {
-  "version": "0.3.143",
-  "notes": "v2 Dashboard: This device, the x-ray model of the machine Valkyrie runs on",
-  "pub_date": "2026-10-19T06:47:50Z",
+  "version": "0.3.144",
+  "notes": "Dashboard: one All lights bar with bulb chips; This device fills its box with sizes and the last hour",
+  "pub_date": "2026-10-19T16:20:58Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWV3Vyt5aFA1bEFMWjUyeC9BaVZqWGg5MEFadWFBK1l0UEJDVEx4NGN2VEJ0UXFZdUdFVHgxVGRnVjJnek5hOWhuUUQvR2w1NVZSZDByQ2hSdnlQMGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzkyMzY2CWZpbGU6VmFsa3lyaWVfMC4zLjE0M194NjQtc2V0dXAuZXhlCjRpc1dYU2tDR0RuMGN4YmYycmNiOGpBdVNmcEEzMTk4Z1JwSWs4c2pETGJ4dE1ubi8zeFlCdDNyUUM2T2ovUXU5L1lNNzRoVFJ5dmx6SjJ1V3hZR0N3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.143/Valkyrie_0.3.143_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlodEhDREJzQXRhWGg0NWNhMlptOXdHdDFpSHJ1bStjSU1ISng0ck55Uy9wbU1IN3liM3BIbXFHaFZXUHdRbWNiYThHZy8vM3Y2UitpNXhWUmtQc3dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDI2NzIzCWZpbGU6VmFsa3lyaWVfMC4zLjE0NF94NjQtc2V0dXAuZXhlClZMampkTFJiZ0ppdTZxdEhrdGJST2psdlJoZUtQdEhxWldJRTNIUEFUNXI2ajg2dkFZYXVGR0NIWk5JbXk3YkdHQWhubk55K284VnFUR3NFTFB4ZEFRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.144/Valkyrie_0.3.144_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJZb2JvNEJkbUtkQkFUeVpubEdUWjhSSUgzRmZSbWxFcTMyQTNXanlxK0twR0dleVZBT3JnaGtaSHlrVkRRUDVmdEFJa1lpbllSSlhJRnl3b00wRGdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzkyMzA2CWZpbGU6VmFsa3lyaWVfMC4zLjE0M19hbWQ2NC5BcHBJbWFnZQpaUjQ2NmJvVkhIMWszZC9qYk1KMHRzR2ZTTUJITzc1SU9nLzhSS1IrMXVrTlBjYlRPSkQxNVpkTHpKMGFWbFlCZEVQWExuWGUxVnhhQWMvdFI0a3pEQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.143/Valkyrie_0.3.143_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWZKMkJ4TlFHNlBqZjJWS0QzU2JKRzZKVHJNK3hqcmNLWERCTmppL29hd0pWaTQ4anY2U1VjM3N1ZmtiYTRwcEdWN2ppYnAzclNtbzI2c3lTYTdIb3d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDI2NjYzCWZpbGU6VmFsa3lyaWVfMC4zLjE0NF9hbWQ2NC5BcHBJbWFnZQp0aHl4aVFJS2VrcWZtbk04RHUyaU1zOHNHWmVUWGtieE5uV1FqVUFzaEhCV1JMWTZUVVp5QXZabXRFR2VnTEhqYzRoTnArc3pZTXJNSzlaclNBVlhBQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.144/Valkyrie_0.3.144_amd64.AppImage"
     }
   }
 }
