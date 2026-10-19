@@ -3,21 +3,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchLights, setLight, type LightState, type LightUpdate } from './api'
 
 // Shared light control: the presets, the unit conversions, the intent overlay,
-// and the slider sync. Both the Lights page and pad mode drive lights through
-// this, so there's one source of truth for what a light update does.
+// the send queue, and the slider sync. The Lights page, the dashboards, the pad
+// and the lights button all drive lights through this, so there is one source
+// of truth for what a light update does.
 //
-// The model, after the whole-room slider + preset sequence used to make the
-// bulbs thrash:
+// The model:
 //
 //   1. The query cache holds SERVER TRUTH only. Nothing optimistic is ever
-//      written into it, so a poll can never fight a rollback or a stale
-//      snapshot for ownership of the same array.
-//   2. What the user asked for lives beside it, in a per-entity DESIRE with an
-//      expiry. Reads are server truth with the live desires laid over the top,
-//      so a mid-transition poll cannot yank a value backward: it loses to the
-//      desire until the bulb agrees or the window lapses.
-//   3. Desires are module-level, so the Lights page and the pad's LightsPanel
-//      show the same thing instead of each holding private optimistic state.
+//      written into it. The backend's rows already show a command's target
+//      until the bulb reports it (a row with pending: true), for every client.
+//   2. What this client asked for lives beside it, in a per-entity DESIRE: the
+//      merge of every patch since the server last agreed, so a brightness and
+//      then a color both show at once. It only has to bridge the moment until
+//      the server's own row carries the target.
+//   3. Commands go out ONE AT A TIME from this client, the newest per bulb
+//      winning. Two POSTs in flight at once can reach the backend in either
+//      order, and the older one landing last is how fast switching ended up
+//      somewhere it was never set.
 
 export const PRESETS: { label: string; rgb: [number, number, number] | null; kelvin: number | null }[] = [
   { label: 'Warm', rgb: null, kelvin: 2200 },
@@ -80,6 +82,11 @@ export function hexToRgb(hex: string): [number, number, number] | null {
 
 export type LightPatch = Omit<LightUpdate, 'entity_id'>
 
+/** A server row; `pending` is set by backends that hold a command's target until the bulb reports it. */
+type ServerRow = LightState & { pending?: boolean }
+
+const targetsOf = (u: Pick<LightUpdate, 'entity_id'>): string[] => (Array.isArray(u.entity_id) ? [...u.entity_id] : [u.entity_id])
+
 function patchOf(u: LightUpdate): LightPatch {
   const p: LightPatch = { state: u.state }
   if (u.brightness !== undefined) p.brightness = u.brightness
@@ -88,13 +95,99 @@ function patchOf(u: LightUpdate): LightPatch {
   return p
 }
 
+/**
+ * Two patches for one bulb as the one patch they add up to: off wins outright,
+ * an on keeps the earlier on's brightness and color unless it sets its own, and
+ * rgb and kelvin replace each other (they are two modes, never both).
+ */
+export function mergePatch(prev: LightPatch | undefined, next: LightPatch): LightPatch {
+  if (next.state === 'off' || !prev || prev.state === 'off') return { ...next }
+  const out: LightPatch = { state: 'on' }
+  const b = next.brightness ?? prev.brightness
+  if (b !== undefined) out.brightness = b
+  if (next.rgb_color) out.rgb_color = next.rgb_color
+  else if (next.color_temp_kelvin !== undefined) out.color_temp_kelvin = next.color_temp_kelvin
+  else if (prev.rgb_color) out.rgb_color = prev.rgb_color
+  else if (prev.color_temp_kelvin !== undefined) out.color_temp_kelvin = prev.color_temp_kelvin
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// The send queue
+// ---------------------------------------------------------------------------
+
+type Job = { update: LightUpdate; resolve: (v: unknown) => void; reject: (e: unknown) => void }
+
+/**
+ * One POST in flight at a time. Updates asked meanwhile wait, and when the
+ * POST returns they go as few POSTs as they add up to: per bulb the merge of
+ * its patches (the newest winning), bulbs with the same result in one POST.
+ * A lone waiting update goes exactly as it was asked. Each caller's promise
+ * settles with the POST that carried its update.
+ */
+export function createSendQueue(send: (u: LightUpdate) => Promise<unknown>) {
+  let busy = false
+  let waiting: Job[] = []
+
+  function batches(jobs: Job[]): { update: LightUpdate; jobs: Job[] }[] {
+    if (jobs.length === 1) return [{ update: jobs[0].update, jobs }]
+    const per = new Map<string, { patch: LightPatch; jobs: Set<Job> }>()
+    for (const j of jobs) {
+      const p = patchOf(j.update)
+      for (const id of targetsOf(j.update)) {
+        const cur = per.get(id)
+        if (cur) { cur.patch = mergePatch(cur.patch, p); cur.jobs.add(j) } else per.set(id, { patch: p, jobs: new Set([j]) })
+      }
+    }
+    const groups = new Map<string, { ids: string[]; patch: LightPatch; jobs: Set<Job> }>()
+    for (const [id, { patch, jobs: js }] of per) {
+      const key = JSON.stringify(patch)
+      const g = groups.get(key)
+      if (g) { g.ids.push(id); js.forEach((j) => g.jobs.add(j)) } else groups.set(key, { ids: [id], patch, jobs: new Set(js) })
+    }
+    return [...groups.values()].map((g) => ({ update: { entity_id: g.ids.length === 1 ? g.ids[0] : g.ids, ...g.patch }, jobs: [...g.jobs] }))
+  }
+
+  async function run() {
+    if (busy) return
+    busy = true
+    try {
+      while (waiting.length) {
+        const jobs = waiting
+        waiting = []
+        const failed = new Map<Job, unknown>()
+        for (const b of batches(jobs)) {
+          try {
+            await send(b.update)
+          } catch (e) {
+            for (const j of b.jobs) if (!failed.has(j)) failed.set(j, e)
+          }
+        }
+        for (const j of jobs) {
+          if (failed.has(j)) j.reject(failed.get(j))
+          else j.resolve(undefined)
+        }
+      }
+    } finally {
+      busy = false
+    }
+  }
+
+  return (update: LightUpdate): Promise<unknown> => new Promise((resolve, reject) => {
+    waiting.push({ update, resolve, reject })
+    void run()
+  })
+}
+
+const sendLight = createSendQueue(setLight)
+
 // ---------------------------------------------------------------------------
 // Desired state
 // ---------------------------------------------------------------------------
 
-// How long a command owns a bulb's displayed state. Long enough for a Cync
-// bulb to obey and report (they take a couple of seconds under load), short
-// enough that a bulb which never obeys goes back to telling the truth.
+// How long a command owns a bulb's displayed state in this client. The
+// backend's own row takes over as soon as the command is accepted; this only
+// covers a backend that does not hold targets, or one that does not answer.
 const DESIRE_MS = 9_000
 
 type Desire = { patch: LightPatch; at: number }
@@ -131,7 +224,7 @@ function scheduleExpiry() {
 
 function want(entities: string[], patch: LightPatch) {
   const at = Date.now()
-  for (const id of entities) desires.set(id, { patch, at })
+  for (const id of entities) desires.set(id, { patch: mergePatch(desires.get(id)?.patch, patch), at })
   scheduleExpiry()
   emit()
 }
@@ -144,7 +237,7 @@ function forget(entities: string[]) {
 
 // Tolerances match the backend's: bulbs quantize brightness, rgb, and kelvin,
 // so an exact match is a test no bulb passes.
-function satisfied(row: LightState, p: LightPatch): boolean {
+export function satisfied(row: LightState, p: LightPatch): boolean {
   if (p.state === 'off') return !row.on
   if (!row.on) return false
   if (row.unavailable) return true
@@ -166,7 +259,7 @@ function satisfied(row: LightState, p: LightPatch): boolean {
 // A color command switches the bulb's mode, so the field for the mode it left
 // becomes meaningless. Blanking it here is what stops the dot from showing the
 // previous rgb color for a second after a Warm/Neutral/Cool tap.
-function overlay(row: LightState, p: LightPatch): LightState {
+export function overlay(row: LightState, p: LightPatch): LightState {
   if (p.state === 'off') return { ...row, on: false }
   const toCt = p.color_temp_kelvin != null
   const toRgb = !!p.rgb_color
@@ -191,10 +284,10 @@ export function useLightsControl() {
   const lights = useQuery({
     queryKey: ['lights'],
     queryFn: fetchLights,
-    // Poll harder while a command is outstanding: the desire overlay makes a
-    // mid-transition read harmless, so the only thing left to optimize is how
-    // fast the real bulb state catches up with what the user asked for.
-    refetchInterval: hasDesires ? 1_200 : 5_000,
+    // Poll harder while a command is outstanding, here or at the backend: the
+    // overlay makes a mid-transition read harmless, so the only thing left to
+    // optimize is how fast the bulb's confirmation reaches the screen.
+    refetchInterval: (q) => (hasDesires || (q.state.data as ServerRow[] | undefined)?.some((r) => r.pending) ? 1_200 : 5_000),
     refetchOnWindowFocus: true,
     // Server truth only. Nothing optimistic is written here, so there is no
     // window in which a refetch and a rollback own the same array.
@@ -203,7 +296,7 @@ export function useLightsControl() {
 
   const server = useMemo(() => lights.data ?? [], [lights.data])
 
-  // Drop a desire the moment the bulb agrees with it. Done in an effect, not
+  // Drop a desire the moment the server agrees with it. Done in an effect, not
   // during render, so the map is never mutated mid-render.
   useEffect(() => {
     if (!server.length || desires.size === 0) return
@@ -223,14 +316,13 @@ export function useLightsControl() {
   }), [server, version])
 
   const mutation = useMutation({
-    mutationFn: setLight,
+    mutationFn: sendLight,
     onMutate: (update: LightUpdate) => {
-      const targets = Array.isArray(update.entity_id) ? update.entity_id : [update.entity_id]
+      const targets = targetsOf(update)
       want(targets, patchOf(update))
       return { targets }
     },
     // Fall back to server truth for the bulbs that failed, and only those.
-    // The old whole-array snapshot rollback also undid every newer command.
     onError: (_err, _vars, ctx) => { if (ctx?.targets) forget(ctx.targets) },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['lights'] }) },
   })
@@ -272,10 +364,9 @@ export function useLightsControl() {
   }
 
   // No brightness here on purpose. A color change must not flatten five bulbs
-  // that are at five different levels onto one room average, and the backend
-  // pins each bulb to its OWN last brightness, which is what stops a Cync bulb
-  // from picking a new one as it switches color mode. That mode switch throwing
-  // away the brightness just set is the bug this whole path exists to avoid.
+  // that are at five different levels onto one room average: the backend
+  // completes each bulb's command with that bulb's own level, so the color and
+  // the brightness go out together and the bulb cannot pick its own.
   const bulkPreset = (rgb: [number, number, number] | null, kelvin: number | null) => {
     if (litTargets.length === 0) return
     mutate({

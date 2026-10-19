@@ -209,10 +209,13 @@ function rgbStatus(d: RgbVM | undefined, failed: boolean, updatedAt: number, pen
  * (unknown) unless the bulb reported it or the user set it.
  *
  * Writes: every one goes through useLightsControl's mutation, which lays the
- * desire over the live state at once, forgets it when the call fails (the bulb
- * falls back to what it really is) and refetches on success. This adds the
- * error toast, a refresh of the dock's and Home's read, and the in-flight set
- * that keeps a control from sending twice.
+ * desire over the live state at once, sends one command at a time with the
+ * newest per bulb winning, forgets the desire when the call fails (the bulb
+ * falls back to what it really is) and refetches on success. Every press goes:
+ * a tap is never dropped because an earlier one is still out, so the last
+ * thing asked is where the bulb ends up. This adds the error toast, a refresh
+ * of the dock's and Home's read, and the in-flight set the controls mark
+ * themselves busy by.
  */
 function useBulbs() {
   const qc = useQueryClient()
@@ -242,12 +245,10 @@ function useBulbs() {
     setBusy(Object.fromEntries(inflight.current))
   }
   const { mutateAsync } = ctl.mutation
-  /** once: a button press, refused while a command for any of its bulbs is still out (a slider release always goes) */
-  const send = (u: LightUpdate, failed: string, once = false) => {
+  const send = (u: LightUpdate, failed: string) => {
     const ids = Array.isArray(u.entity_id) ? [...u.entity_id] : [u.entity_id]
     if (!ids.length) return
     if (!server) { toast('Lights: still reading Home Assistant'); return }
-    if (once && ids.some((id) => inflight.current.has(id))) return
     mark(ids, 1)
     mutateAsync(u)
       .then(() => { void qc.invalidateQueries({ queryKey: ['v2', 'lights'] }) })
@@ -305,22 +306,22 @@ export default function Lights({ active }: ScreenProps) {
     setCenter(allNA ? `0/${all.length} reachable` : avail.length ? `${lit.length}/${avail.length} on${avg !== null ? ` · ${avg}%` : ''}` : null)
   }, [active, lights.has, allNA, all.length, avail.length, lit.length, avg, setCenter])
 
-  // ---- writes (useBulbs sends them; a control waits while a command for its bulbs is out) ----
+  // ---- writes (useBulbs sends them; a control shows busy while a command for its bulbs is out, and still takes presses) ----
   const availBusy = avail.some((b) => !!busy[b.id])
   const litBusy = lit.some((b) => !!busy[b.id])
 
-  // switching on keeps the brightness the bulb last had (the backend pins it); unknown stays unknown
-  const toggleBulb = (b: Bulb) => send({ entity_id: b.id, state: b.on ? 'off' : 'on' }, `Could not turn ${b.name} ${b.on ? 'off' : 'on'}`, true)
+  // switching on restores the level and color the bulb last had (the backend completes the command); unknown stays unknown
+  const toggleBulb = (b: Bulb) => send({ entity_id: b.id, state: b.on ? 'off' : 'on' }, `Could not turn ${b.name} ${b.on ? 'off' : 'on'}`)
   const setBulbPct = (b: Bulb, v: number) => send(
     v <= 0 ? { entity_id: b.id, state: 'off' } : { entity_id: b.id, state: 'on', brightness: brightnessFromPct(v) },
     v <= 0 ? `Could not turn ${b.name} off` : `Could not set ${b.name} to ${v}%`,
   )
   // a color pick carries the level the bulb is at: sent without one, a Cync bulb changing color mode picks its own
   const colorBulb = (b: Bulb, p: Swatch) =>
-    send({ entity_id: b.id, state: 'on', ...(b.raw != null ? { brightness: b.raw } : {}), ...colorOf(p) }, `Could not set ${b.name} to ${p.label}`, true)
+    send({ entity_id: b.id, state: 'on', ...(b.raw != null ? { brightness: b.raw } : {}), ...colorOf(p) }, `Could not set ${b.name} to ${p.label}`)
   const toggleAll = () => {
     if (!avail.length) return
-    send({ entity_id: avail.map((b) => b.id), state: anyOn ? 'off' : 'on' }, `Could not turn the lights ${anyOn ? 'off' : 'on'}`, true)
+    send({ entity_id: avail.map((b) => b.id), state: anyOn ? 'off' : 'on' }, `Could not turn the lights ${anyOn ? 'off' : 'on'}`)
   }
   // the master drag owns the bulbs that were lit when it started (all of them when none were)
   const masterTargets = useRef<string[]>([])
@@ -330,14 +331,14 @@ export default function Lights({ active }: ScreenProps) {
     v <= 0 ? 'Could not turn the lights off' : `Could not set the lights to ${v}%`,
   )
   // presets color the bulbs that are ON, never a dark one, and carry no brightness:
-  // five bulbs at five levels keep their own (the backend pins each one)
+  // five bulbs at five levels keep their own (the backend completes each bulb's command with its own level)
   const applyPreset = (p: Swatch) => {
     if (!lit.length) { toast('Turn a light on first'); return }
-    send({ entity_id: lit.map((b) => b.id), state: 'on', ...colorOf(p) }, `Could not apply ${p.label}`, true)
+    send({ entity_id: lit.map((b) => b.id), state: 'on', ...colorOf(p) }, `Could not apply ${p.label}`)
   }
-  // a picked color is one deliberate commit (ColorPick sends once per pick), so it always goes,
-  // like a slider release. The room gets it as a preset does: no brightness, the backend pins each
-  // lit bulb to its own level. One bulb gets the level it is at, as a preset tap on its strip does.
+  // a picked color is one deliberate commit (ColorPick sends once per pick). The room gets it as a
+  // preset does: no brightness, the backend completes each lit bulb's command with its own level.
+  // One bulb gets the level it is at, as a preset tap on its strip does.
   const applyCustom = (rgb: RGB) => {
     if (!lit.length) { toast('Turn a light on first'); return }
     send({ entity_id: lit.map((b) => b.id), state: 'on', rgb_color: rgb }, 'Could not apply the custom color')
@@ -425,7 +426,7 @@ export default function Lights({ active }: ScreenProps) {
               aria-label={anyOn ? 'Turn all lights off' : 'Turn all lights on'}
               aria-busy={availBusy || undefined}
               data-busy={availBusy || undefined}
-              disabled={!avail.length || availBusy}
+              disabled={!avail.length}
               onPress={toggleAll}
             >
               <Icon name="power" size={22} tone={anyOn ? 'ink' : 'dim'} glow={anyOn} />
@@ -571,7 +572,7 @@ function PresetPlates({ active, custom, idle, busy, onPick, onCustom }: {
   custom: string | null
   /** nothing to color yet: dimmed, a tap explains why */
   idle?: boolean
-  /** a command for the lit bulbs is in flight: no second preset until it lands */
+  /** a command for the lit bulbs is in flight (a newer pick still goes, and wins) */
   busy?: boolean
   onPick: (p: Swatch) => void
   onCustom: (rgb: RGB) => void
@@ -601,7 +602,6 @@ function PresetPlates({ active, custom, idle, busy, onPick, onCustom }: {
             data-on={on || undefined}
             className="lt-pre"
             style={{ '--sw': p.swatch } as Vars}
-            disabled={busy}
             onPress={() => onPick(p)}
           >
             <span className="lt-chip" aria-hidden />
@@ -659,7 +659,7 @@ function ColorPick({ value, label, onPreview, onCommit }: {
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const cb = useRef({ onPreview, onCommit })
-  cb.current = { onPreview, onCommit }
+  useLayoutEffect(() => { cb.current = { onPreview, onCommit } })
   const waiting = useRef(false)
   useEffect(() => {
     const el = ref.current
@@ -722,7 +722,6 @@ function Swatches({ label, active, color, busy, onPick, onCustom }: {
           data-on={active === p.label || undefined}
           className="lt-sw"
           style={{ '--sw': p.swatch, '--n': n } as Vars}
-          disabled={busy}
           onPress={() => onPick(p)}
         />
       ))}
@@ -752,7 +751,7 @@ function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onCo
   b: Bulb
   i: number
   selected: boolean
-  /** a command for this bulb is in flight: its power and colors wait for it */
+  /** a command for this bulb is in flight (a newer press still goes, and wins) */
   busy: boolean
   rowRef: (el: HTMLDivElement | null) => void
   onSelect: () => void
@@ -812,7 +811,6 @@ function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onCo
               aria-busy={busy || undefined}
               aria-pressed={b.on}
               aria-label={b.on ? `Turn ${b.name} off` : `Turn ${b.name} on`}
-              disabled={busy}
               onPress={onToggle}
             >
               <Icon name="power" size={15} tone={b.on ? 'fg' : 'dim'} glow={b.on} />
@@ -862,7 +860,7 @@ function Slider({ value, onCommit, onStart, onPreview, size, label, disabled, lo
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const cb = useRef({ onCommit, onStart, onPreview })
-  cb.current = { onCommit, onStart, onPreview }
+  useLayoutEffect(() => { cb.current = { onCommit, onStart, onPreview } })
   const [drag, setDrag] = useState(false)
   const [held, setHeld] = useState<number | null>(null)
   const last = useRef(0)

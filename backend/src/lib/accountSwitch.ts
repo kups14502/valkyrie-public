@@ -7,6 +7,7 @@ import {
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { CLAUDE_ACCOUNTS } from './claudeAccounts.js'
+import { linkSwitcher } from './accountSignin.js'
 import { capturePane, listSessions, paneInMode, remoteLabel, SSH_BIN, typeLine } from '../terminal/tmux.js'
 import {
   ACCOUNT_ID_RE, HOSTS, buildLiveCredentials, classifyLimitText, countRecent, decide, eligibility, exhaustedMessage,
@@ -878,6 +879,20 @@ export function reportLimit(host: HostName, payload: { sessionId?: string; messa
   return { accepted: true, limit, why: 'checking now' }
 }
 
+// The pool token's own probe and the account's usage card (its /login grant) read the same
+// account's weekly use. Far apart while both are fresh, the pool token is another seat's: the
+// browser that pressed Authorize was signed in as someone else.
+function identityWarning(s: State, id: string): string | null {
+  const p = s.probes[id]
+  const u = usageCache?.clients.find((c) => c.id === id)
+  if (!p?.quota || !u?.quota || u.authError || !usageCache) return null
+  if (Math.abs(p.at - usageCache.dataAt) > 15 * 60_000) return null
+  const a = Math.round(p.quota.weeklyPct)
+  const b = Math.round(u.quota.weeklyPct)
+  if (Math.abs(a - b) <= 5) return null
+  return `the pool token's weekly use (${a}%) does not match this account's card (${b}%); it may belong to another seat, so sign it in again in a private window`
+}
+
 export type SwitchStatus = Awaited<ReturnType<typeof getStatus>>
 
 export async function getStatus(opts: { refresh?: boolean } = {}) {
@@ -917,6 +932,9 @@ export async function getStatus(opts: { refresh?: boolean } = {}) {
         switches24h: countRecent(hs.switches, now),
         checkedAt: iso(hs.checkedAt),
         lastError: hs.lastError,
+        // thor: the ids its own vault held at the last check (null before the first). odin reads
+        // the vault above directly.
+        vaultIds: h === 'thor' ? hs.vaultIds : null,
         next: next.target ? { id: next.target.id, label: next.target.label } : null,
         nextReason: next.target ? 'most room' : (next.ranked.find((r) => !r.ok && r.why !== 'active now')?.why ?? 'no other account'),
       }
@@ -935,6 +953,8 @@ export async function getStatus(opts: { refresh?: boolean } = {}) {
         eligible: e.ok,
         why: e.why,
         activeOn: HOSTS.filter((h) => s.hosts[h].active === a.id),
+        onThor: s.hosts.thor.vaultIds ? s.hosts.thor.vaultIds.includes(a.id) : null,
+        identityWarning: identityWarning(s, a.id),
       }
     }),
     recent: readLog(20),
@@ -1021,6 +1041,39 @@ export async function pauseHostByHand(host: HostName): Promise<void> {
     saveState(s)
   })
 }
+
+// A sign-in just filed a token (lib/accountSignin.ts): forget the old token's refusal, failures
+// and reading, and count it in thor's vault when it reached thor, so the switcher can use it at
+// once instead of after thor's next 5-minute check.
+async function markProvisioned(id: string, onThor: boolean): Promise<void> {
+  try {
+    await withLock(async () => {
+      const s = loadState()
+      delete s.dead[id]
+      delete s.probes[id]
+      delete s.notified[`dead:${id}`]
+      for (const h of HOSTS) delete s.hosts[h].failed[id]
+      const v = s.hosts.thor.vaultIds
+      if (onThor && v && !v.includes(id)) s.hosts.thor.vaultIds = [...v, id].sort()
+      saveState(s)
+    }, 15_000)
+    vaultCache = null
+    writeLog({ kind: 'config', host: null, from: null, to: id, reason: `pool token stored for ${labelOf(id)} (odin${onThor ? ' and thor' : ' only'})`, ok: true })
+  } catch (err) {
+    console.error('[account-switch] could not note the new token', (err as Error).message)
+  }
+}
+
+linkSwitcher({
+  thorVaultIds: () => loadState().hosts.thor.vaultIds,
+  deadIds: () => Object.keys(loadState().dead),
+  provisioned: (id, onThor) => { void markProvisioned(id, onThor) },
+  notAdopted: () => {
+    const cfg = readConfig()
+    const s = loadState()
+    return HOSTS.filter((h) => cfg.hosts[h] && !s.hosts[h].adopted)
+  },
+})
 
 export function setKill(on: boolean): void {
   ensureBase()

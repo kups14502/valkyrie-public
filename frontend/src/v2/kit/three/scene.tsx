@@ -71,6 +71,12 @@ type Engine = {
 
 const DIAMOND = 12
 
+/** The UI zoom lib/zoom puts on <html> (1 in a browser that never set one). */
+const uiZoom = (): number => {
+  const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom'))
+  return Number.isFinite(z) && z > 0 ? z : 1
+}
+
 /**
  * The x-ray stage: perspective dot floor, the wireframe hero, beams, airflow,
  * bulbs and tappable diamond hotspots. One RAF loop that stops when paused,
@@ -216,14 +222,27 @@ export function WireScene(props: WireSceneProps) {
       hs: [], sumMs: 0, frames: 0, statT: performance.now(),
     }
     eng.current = e
+    // dev builds only: the probe reads the live camera to check every diamond against its projected point
+    if (import.meta.env.DEV) (wrap as HTMLDivElement & { __wire?: Engine }).__wire = e
+    // The renderer works in the box's own CSS px (layout size), the space the
+    // diamonds, the orbit disc and any overlay are positioned in. Under the UI
+    // zoom (lib/zoom: CSS zoom on <html>) a client rect is zoomed and those
+    // transforms are not: sizing from the client rect put every diamond zoom x
+    // its distance from the corner, beside the model at his 1.2 (a tilting
+    // .vl-build parent skews a client rect the same way). The zoom goes into
+    // the backing store instead, so the lines stay sharp.
     const size = () => {
-      const b = wrap.getBoundingClientRect()
-      r.resize(b.width, b.height, Math.min(2, window.devicePixelRatio || 1))
+      const w = wrap.clientWidth, h = wrap.clientHeight
+      const dpr = Math.min(2, (window.devicePixelRatio || 1) * uiZoom())
+      if (w === r.w && h === r.h && Math.abs(dpr - r.dpr) < 0.01) return
+      r.resize(w, h, dpr)
       kick()
     }
     size()
     const ro = new ResizeObserver(size)
     ro.observe(wrap)
+    // applyZoom fires a window resize: the box keeps its CSS size, only the backing store changes
+    window.addEventListener('resize', size)
     const io = new IntersectionObserver((ents) => {
       const vis = ents.some((x) => x.isIntersecting)
       if (vis !== e.onscreen) { e.onscreen = vis; e.last = 0; if (vis) kick() }
@@ -236,6 +255,7 @@ export function WireScene(props: WireSceneProps) {
     kick()
     return () => {
       ro.disconnect()
+      window.removeEventListener('resize', size)
       io.disconnect()
       document.removeEventListener('visibilitychange', onVis)
       mq?.removeEventListener('change', onMQ)

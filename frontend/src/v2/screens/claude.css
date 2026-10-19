@@ -272,6 +272,50 @@
 .vc-ghead-act + .vc-ghead-act { margin-left: 12px; }
 .vc-ghead-note { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--dim); }
 
+/* a group that folds: its whole label side is the button, a chevron leads it (turned while folded) */
+.vc-ghead-fold {
+  flex: 1;
+  align-self: stretch;
+  min-height: 34px;
+  margin: -4px 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: none;
+}
+.vc-ghead-fold[data-pressed] .vc-ghead-t { text-shadow: var(--text-glow); }
+.vc-ghead-chev { flex: none; margin-left: -2px; transition: transform .18s var(--ease); }
+.vc-ghead[data-folded] .vc-ghead-chev { transform: rotate(-90deg); }
+.vc-group[data-folded] .vc-ghead { border-bottom-color: transparent; }
+.vc-group[data-folded] .vc-ghead-t { color: var(--text); }
+/* one area's Recover: quieter than the whole desk's, so the headers stay about the areas */
+.vc-ghead-act[data-quiet] { font-weight: 500; color: var(--dim); }
+@media (hover: hover) and (pointer: fine) {
+  .vc-ghead-fold:hover .vc-ghead-chev { color: var(--fg); }
+  .vc-ghead-act[data-quiet]:hover { color: var(--text); }
+  .vc-ghead-act[data-quiet]:hover .vl-icon { color: var(--fg); }
+}
+
+/* Recent: a caption line (no panel) over one panel per area */
+.vc-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 4px 2px 0;
+  color: var(--fg);
+}
+.vc-sec-l { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.vc-areas { display: flex; flex-direction: column; gap: 10px; }
+/* the list column measures itself (the app zoom hides from media queries): two columns of areas once it is wide */
+.vc-main { container: vc-main / inline-size; }
+@container vc-main (min-width: 860px) {
+  .vc-areas { display: block; column-count: 2; column-gap: 14px; }
+  .vc-areas > .vc-group { break-inside: avoid; margin-bottom: 10px; }
+  .vc-areas > .vc-group:last-child { margin-bottom: 0; }
+}
+
 /* open terminals: reattach on the row, a two-tap close on its right edge (reminders reuse the close) */
 .vc-term { display: flex; align-items: stretch; }
 .vc-term-main {
@@ -307,9 +351,22 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc2) 60%, transparent);
 }
 .vc-term-x[data-pressed] { background: color-mix(in srgb, var(--acc2) 18%, #000); }
+/* the pane in its own window (where windows exist) */
+.vc-term-pop {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  border-left: 1px solid var(--line);
+  transition: background-color .15s;
+}
+.vc-term-pop[data-pressed] { background: color-mix(in srgb, var(--fg) 12%, #000); }
+.vc-term-pop[data-pressed] .vl-icon { color: var(--fg); }
 @media (hover: hover) and (pointer: fine) {
   .vc-term-main:hover { background: color-mix(in srgb, var(--fg) 6%, #000); }
   .vc-term-x:hover { color: var(--acc2); }
+  .vc-term-pop:hover { background: color-mix(in srgb, var(--fg) 6%, #000); }
+  .vc-term-pop:hover .vl-icon { color: var(--fg); }
 }
 
 /* select mode: the check box in the state icon's place, the picked row lit */
@@ -509,8 +566,8 @@
 /* a working or asking session's title is lit (the accent); an idle or closed one and every project name are body text */
 .vc-row-title[data-a='idle'] { color: var(--text); }
 .vc-row-title[data-closed] { font-weight: 500; color: var(--text); }
-.vc-prow .vc-row-title, .vc-grow-name { color: var(--text); }
-.vc-prow[data-on] .vc-row-title, .vc-grow[data-on] .vc-grow-name { color: var(--ink-hi); }
+.vc-prow .vc-row-title { color: var(--text); }
+.vc-prow[data-on] .vc-row-title { color: var(--ink-hi); }
 .vc-row-sub {
   display: flex;
   align-items: center;
@@ -684,6 +741,51 @@
 }
 .vc-prow .vc-row-meta { padding-top: 1px; }
 .vc-prow[data-on] { background: color-mix(in srgb, var(--fg) 9%, #000); }
+/* a project row: the row opens it (its own window where windows exist), "Open here" beside it */
+.vc-pline { position: relative; display: flex; align-items: stretch; }
+.vc-pline > .vc-prow { flex: 1; width: auto; min-width: 0; }
+.vc-pline[data-on] { background: color-mix(in srgb, var(--fg) 9%, #000); }
+.vc-phere {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0 10px 0 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--dim);
+  border-left: 1px solid var(--line);
+  transition: color .15s;
+}
+.vc-phere[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
+.vc-phere[data-pressed] .vl-icon { color: var(--fg); }
+.vc-pline[data-on] .vc-phere { color: var(--text); }
+/* a mouse: "Open here" floats over the row's right end while the pointer is on the row (or it has
+   focus), the way the session rows' hover actions do, so nine rows do not repeat it at rest */
+@media (hover: hover) and (pointer: fine) {
+  .vc-pline { --vc-row-bg: var(--vc-fill); }
+  .vc-pline:hover { --vc-row-bg: color-mix(in srgb, var(--fg) 6%, #000); }
+  .vc-pline[data-on] { --vc-row-bg: color-mix(in srgb, var(--fg) 9%, #000); }
+  .vc-pline:hover > .vc-prow:not([data-pressed]) { background: var(--vc-row-bg); }
+  .vc-phere {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0 10px 0 40px;
+    border-left: 0;
+    background: linear-gradient(90deg, transparent, var(--vc-row-bg) 30px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s, color .15s;
+  }
+  .vc-pline:hover .vc-phere, .vc-pline:focus-within .vc-phere { opacity: 1; pointer-events: auto; }
+  .vc-phere:hover { color: var(--fg); }
+  .vc-phere:hover .vl-icon { color: var(--fg); }
+}
 .vc-prow[data-on]::before {
   content: '';
   position: absolute;
@@ -863,23 +965,6 @@ textarea.vc-field { resize: vertical; }
 .vc-detail-card.vl-panel { padding: 12px 16px 10px; }
 .vc-detail-head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; min-width: 0; }
 .vc-detail-name { font-size: 20px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; min-width: 0; }
-.vc-glance.vl-panel { padding: 2px 10px 2px; }
-.vc-grow {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  width: 100%;
-  min-height: 46px;
-  padding: 7px 2px;
-  text-align: left;
-  transition: background-color .15s;
-}
-.vc-grow .vc-picon { margin-top: 1px; }
-.vc-grow[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, #000); }
-.vc-grow-name { font-size: 13px; line-height: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vc-grow-next { font-size: 11.5px; line-height: 15px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@media (hover: hover) and (pointer: fine) { .vc-grow:hover { background: color-mix(in srgb, var(--fg) 6%, #000); } }
 
 /* ---------- bottom anchor: the undo bar, or the phone's New session ---------- */
 
@@ -1208,6 +1293,8 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
     column-gap: 36px;
     padding-top: 26px;
   }
+  /* Sessions has no third column: the list takes the room, its areas in two columns once wide */
+  .vc:not([data-proj]) { grid-template-columns: 260px minmax(0, 1180px); }
   .vc[data-detail] { grid-template-columns: 260px minmax(0, 600px) minmax(0, 460px); column-gap: 28px; }
   .vc-side { top: 26px; }
   .vc-stat b { font-size: 28px; line-height: 32px; }

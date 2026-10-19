@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api, fetchAIUsage, fetchHosts, fetchLights, fetchMediaDownloads, fetchMediaRequests,
   fetchMusicRecent, fetchPlexRecent, fetchServices, fetchSessionList, fetchTradeBotStatus,
-  musicImg, plexImg, type PlexItem,
+  fetchImgToken, imgAuthRev, imgTrusted, musicImg, plexImg, plexImgPath, subscribeImgAuth, type PlexItem,
 } from '../../lib/api'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarApi'
 import type { LaunchTarget, ServiceUnit } from '../../lib/api'
@@ -156,11 +156,15 @@ export type HostVM = {
   diskTotalGb: number | null
   /** last hour, oldest first, 0-100 */
   history: { t: number; cpu: number | null; mem: number | null }[]
+  /** true for the phone and tablet, which report a battery (and maybe storage) and nothing else */
+  mobile: boolean
+  /** the phone and tablet: when odin last heard from it (ms), null otherwise */
+  seen: number | null
 }
 
 const gib = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10
 const reviveHosts = (d: unknown): HostVM[] | undefined => Array.isArray(d)
-  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, ...h }) as HostVM)
+  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, mobile: false, seen: null, ...h }) as HostVM)
   : undefined
 
 export function useHosts(): Live<HostVM[]> {
@@ -180,6 +184,8 @@ export function useHosts(): Live<HostVM[]> {
     diskUsedGb: h.disk ? gib(h.disk.used) : null,
     diskTotalGb: h.disk ? gib(h.disk.total) : null,
     history: (h.history ?? []).map((p) => ({ t: p.t, cpu: p.cpu, mem: p.mem })),
+    mobile: h.os === 'ios',
+    seen: h.seen ?? null,
   })), 5_000, { revive: reviveHosts })
 }
 
@@ -406,6 +412,14 @@ export type TradeVM = {
   /** the bot's own line for its last trade ("sell HPE at the broker on ..."), null when none */
   lastTrade: string | null
   lastTradeAt: number | null
+  /** cash in the account, from the same read as `equity` (null when unknown) */
+  cash: number | null
+  /**
+   * ms epoch of the newest broker read on file, whatever its age
+   * (portfolio.newest_sample_at), null when there is none: the day-open
+   * fallback says when the broker was last read
+   */
+  lastReadAt: number | null
 }
 
 const reviveTrade = (d: unknown): TradeVM | undefined => {
@@ -413,7 +427,7 @@ const reviveTrade = (d: unknown): TradeVM | undefined => {
   const t = d as Partial<TradeVM>
   return {
     equitySource: null, equityAgeMin: null, upDetail: '', liveTrips: null, targetTrips: 0, rulesOk: null, spendTotal: 0, windowDays: null,
-    equitySampledAt: null, marketReason: '', callsTotal: 0, callsToday: 0, lastTrade: null, lastTradeAt: null,
+    equitySampledAt: null, marketReason: '', callsTotal: 0, callsToday: 0, lastTrade: null, lastTradeAt: null, cash: null, lastReadAt: null,
     ...t,
     generatedAt: t.generatedAt ?? null,
   } as TradeVM
@@ -427,7 +441,7 @@ const msOf = (iso: unknown): number | null => {
 
 /** fields of /api/tradebot/status that src/lib's TradeBotDoc does not type (yet) */
 type TradeExtras = {
-  portfolio: { live_equity_sampled_at?: string | null }
+  portfolio: { live_equity_sampled_at?: string | null; newest_sample_at?: string | null }
   productivity?: { last_trade_detail?: string | null; last_trade_at?: string | null }
 }
 
@@ -470,6 +484,8 @@ export function useTrade(on = false): Live<TradeVM> {
       callsToday: t.spend.calls_today,
       lastTrade: x.productivity?.last_trade_detail || null,
       lastTradeAt: msOf(x.productivity?.last_trade_at),
+      cash: t.portfolio.live_cash ?? null,
+      lastReadAt: msOf(x.portfolio.newest_sample_at),
     }
   }, on ? TRADE_LIVE_MS : TRADE_IDLE_MS, { revive: reviveTrade })
   const { updatedAt } = live
@@ -495,11 +511,20 @@ export function equitySampleTime(t: TradeVM): number | null {
   return null
 }
 
-/** a broker read younger than this is "live" */
-export const EQUITY_LIVE_MS = 10 * 60_000
+/**
+ * a broker read younger than this is "live". The sampler reads every minute in
+ * the weekday session and every 10 minutes otherwise, so 15 minutes keeps an
+ * on-time read live at any hour and lets one missed read show its age.
+ */
+export const EQUITY_LIVE_MS = 15 * 60_000
+
+/** the equity is a broker read whose cash equals its total: no open positions */
+export function tradeAllCash(t: TradeVM): boolean {
+  return t.equitySource === 'sample' && t.cash != null && t.equity != null && t.equity > 0 && Math.abs(t.cash - t.equity) < 0.01
+}
 
 export type EquityAge = {
-  /** live = a broker read under 10 minutes old; read = an older broker read; day_open = the 09:40 fallback */
+  /** live = a broker read under 15 minutes old; read = an older broker read; day_open = the 09:40 fallback */
   kind: 'live' | 'read' | 'day_open' | 'unknown'
   /** ms epoch of the read, null when unknown */
   at: number | null
@@ -568,17 +593,72 @@ export function tradeSession(t: TradeVM, now: number): TradeSession | null {
 }
 
 // ---------- media ----------
+//
+// No image URL is ever cached here. A URL carries the API base in use when it
+// was built and, off the tailnet, a 12-hour token. The desktop app moves the
+// base to odin's tailnet address after the bundle loads, so URLs persisted by
+// a fetch (or built before the token came in) pointed at the wrong host or
+// carried no live token: empty posters on the desktop Dashboard while Movies
+// and Shows, which build at render time, were fine. The caches keep the Plex
+// path; the hooks build URLs at render time through lib/api's plexImg and
+// musicImg, keyed on useImgKey.
+
+/**
+ * Image readiness as one memo key: -1 while image URLs cannot load yet (the
+ * image token is still on its way), else a revision that changes whenever a
+ * URL built now would differ (the token arrived or renewed). Fetches the
+ * short-lived image token when the API base needs one; an address the backend
+ * trusts (the tailnet) needs none and is ready at once.
+ */
+export function useImgKey(): number {
+  const need = !imgTrusted()
+  const tok = useQuery({
+    queryKey: ['plex-img-token'],
+    queryFn: fetchImgToken,
+    enabled: need,
+    // the token lives 12 h: renew well inside that, and on focus after a long sleep
+    staleTime: 5 * 3600_000,
+    refetchInterval: 5 * 3600_000,
+    retry: 1,
+  })
+  const rev = useSyncExternalStore(subscribeImgAuth, imgAuthRev, imgAuthRev)
+  return !need || tok.isFetched ? rev : -1
+}
+
+/** An image URL for a Plex path, built now; null while the key says images cannot load yet. */
+export const plexArtUrl = (key: number, path: string | null, w: number, h?: number): string | null =>
+  key < 0 || !path ? null : plexImg(path, w, h ? { h } : {})
+/** The same off the music server (square). */
+export const musicArtUrl = (key: number, path: string | null, w: number): string | null =>
+  key < 0 || !path ? null : musicImg(path, w)
+
+type Obj = Record<string, unknown>
+const isObj = (o: unknown): o is Obj => !!o && typeof o === 'object'
+/** Cached rows from a build that stored image URLs: `fix` turns each one into a row with paths. */
+const reviveRows = <R>(c: unknown, fix: (o: Obj) => R): R[] | undefined =>
+  Array.isArray(c) && c.every(isObj) ? c.map(fix) : undefined
 
 export type MediaVM = { key: string; title: string; subtitle: string; img: string | null }
+/** A MediaVM as the cache keeps it: the Plex image path, not a URL. */
+type MediaRow = Omit<MediaVM, 'img'> & { thumb: string | null }
+
+const toMediaRow = (o: Obj): MediaRow => {
+  if ('thumb' in o) return o as MediaRow
+  const { img, ...rest } = o
+  return { ...(rest as Omit<MediaRow, 'thumb'>), thumb: plexImgPath(img) }
+}
 
 /** Recently added on the main Plex server (movies and shows). */
 export function usePlexRecent(): Live<MediaVM[]> {
-  return useLive('plexRecent', async () => (await fetchPlexRecent(18)).map((i): MediaVM => ({
+  const q = useLive('plexRecent', async () => (await fetchPlexRecent(18)).map((i): MediaRow => ({
     key: i.ratingKey,
     title: i.title,
     subtitle: i.year ? String(i.year) : i.type,
-    img: i.thumb ? plexImg(i.thumb, 300) : null,
-  })), 120_000)
+    thumb: i.thumb,
+  })), 120_000, { revive: (c) => reviveRows(c, toMediaRow) })
+  const imgKey = useImgKey()
+  const data = useMemo(() => q.data?.map((r): MediaVM => ({ ...r, img: plexArtUrl(imgKey, r.thumb, 300) })), [q.data, imgKey])
+  return { ...q, data }
 }
 
 /** A Plex recently-added item with everything a poster row or detail needs. */
@@ -603,7 +683,12 @@ export type PlexRichVM = MediaVM & {
   seasons: number[]
   /** ratingKeys behind this item: [key], or every folded season in the grouped list */
   keys: string[]
+  /** the Plex paths behind img and art: build another size with plexArtUrl */
+  thumb: string | null
+  artPath: string | null
 }
+/** A PlexRichVM as the cache keeps it: paths, no URLs. */
+type PlexRichRow = Omit<PlexRichVM, 'img' | 'art'>
 
 const noDash = (s: string, sep = ' · ') => s.replace(/\s*[\u2014\u2013]\s*/g, sep)
 const PLEX_SEASON = /^(.*?)\s+[\u2014\u2013-]\s+Season\s+(\d+)$/i
@@ -617,7 +702,7 @@ export const seasonLabel = (nums: number[]): string => {
   return run ? `Seasons ${s[0]}-${s[s.length - 1]}` : `Seasons ${s.join(', ')}`
 }
 
-const toPlexRich = (i: PlexItem): PlexRichVM => {
+const toPlexRow = (i: PlexItem): PlexRichRow => {
   const season = i.type === 'season' ? PLEX_SEASON.exec(i.title) : null
   const kind: PlexRichVM['kind'] = i.type === 'movie' || i.type === 'show' || i.type === 'season' || i.type === 'episode' ? i.type : 'other'
   const show = season ? noDash(season[1]) : null
@@ -626,12 +711,12 @@ const toPlexRich = (i: PlexItem): PlexRichVM => {
     key: i.ratingKey,
     title: show ?? noDash(i.title),
     subtitle: num != null ? `Season ${num}` : i.year ? String(i.year) : kind === 'movie' ? 'Movie' : kind === 'episode' ? 'Episode' : 'Show',
-    img: i.thumb ? plexImg(i.thumb, 300) : null,
+    thumb: i.thumb,
     kind,
     year: i.year,
     added: (i.addedAt ?? 0) * 1000,
     summary: noDash(i.summary ?? '', ', ').trim(),
-    art: i.art ? plexImg(i.art, 640, { h: 360 }) : null,
+    artPath: i.art,
     contentRating: i.contentRating && i.contentRating !== 'Not Rated' ? i.contentRating : null,
     duration: kind === 'movie' ? i.duration : null,
     episodes: i.leafCount,
@@ -640,6 +725,18 @@ const toPlexRich = (i: PlexItem): PlexRichVM => {
     keys: [i.ratingKey],
   }
 }
+
+const toPlexRichRow = (o: Obj): PlexRichRow => {
+  if ('thumb' in o) return o as PlexRichRow
+  const { img, art, ...rest } = o
+  return { ...(rest as Omit<PlexRichRow, 'thumb' | 'artPath'>), thumb: plexImgPath(img), artPath: plexImgPath(art) }
+}
+
+const withPlexImgs = (r: PlexRichRow, imgKey: number): PlexRichVM => ({
+  ...r,
+  img: plexArtUrl(imgKey, r.thumb, 300),
+  art: plexArtUrl(imgKey, r.artPath, 640, 360),
+})
 
 /** Folds seasons of the same show into one item at the most recent season's place. */
 export function groupPlexSeasons(items: PlexRichVM[]): PlexRichVM[] {
@@ -662,8 +759,14 @@ export function groupPlexSeasons(items: PlexRichVM[]): PlexRichVM[] {
     g.episodes = (g.episodes ?? 0) + (it.episodes ?? 0) || null
     g.added = Math.max(g.added, it.added)
     if (!g.summary && it.summary) g.summary = it.summary
-    if (!g.img && it.img) g.img = it.img
-    if (!g.art && it.art) g.art = it.art
+    if (!g.thumb && it.thumb) {
+      g.thumb = it.thumb
+      g.img = it.img
+    }
+    if (!g.artPath && it.artPath) {
+      g.artPath = it.artPath
+      g.art = it.art
+    }
   }
   for (const g of shows.values()) {
     g.seasons.sort((a, b) => a - b)
@@ -679,21 +782,42 @@ export function groupPlexSeasons(items: PlexRichVM[]): PlexRichVM[] {
  * single item ("Seasons 1-5"); both lists come from one fetch and one cache.
  */
 export function usePlexRecentRich(opts?: { grouped?: boolean }): Live<PlexRichVM[]> {
-  const q = useLive('plexRich', async () => (await fetchPlexRecent(30)).map(toPlexRich), 120_000)
+  const q = useLive('plexRich', async () => (await fetchPlexRecent(30)).map(toPlexRow), 120_000, {
+    revive: (c) => reviveRows(c, toPlexRichRow),
+  })
+  const imgKey = useImgKey()
   const grouped = !!opts?.grouped
-  const data = useMemo(() => (grouped && q.data ? groupPlexSeasons(q.data) : q.data), [grouped, q.data])
-  return grouped ? { ...q, data } : q
+  const data = useMemo(() => {
+    if (!q.data) return undefined
+    const vms = q.data.map((r) => withPlexImgs(r, imgKey))
+    return grouped ? groupPlexSeasons(vms) : vms
+  }, [grouped, q.data, imgKey])
+  return { ...q, data }
 }
 
 /** Music: artists played lately and albums added lately. */
 export function useMusicRecent(): Live<{ played: MediaVM[]; added: MediaVM[] }> {
-  return useLive('musicRecent', async () => {
+  const q = useLive('musicRecent', async () => {
     const r = await fetchMusicRecent()
     return {
-      played: r.played.map((a) => ({ key: a.ratingKey, title: a.title, subtitle: a.genres[0] ?? 'artist', img: a.thumb ? musicImg(a.thumb, 300) : null })),
-      added: r.added.map((a) => ({ key: a.ratingKey, title: a.title, subtitle: a.artist, img: a.thumb ? musicImg(a.thumb, 300) : null })),
+      played: r.played.map((a): MediaRow => ({ key: a.ratingKey, title: a.title, subtitle: a.genres[0] ?? 'artist', thumb: a.thumb })),
+      added: r.added.map((a): MediaRow => ({ key: a.ratingKey, title: a.title, subtitle: a.artist, thumb: a.thumb })),
     }
-  }, 120_000)
+  }, 120_000, {
+    revive: (c) => {
+      if (!isObj(c)) return undefined
+      const played = reviveRows(c.played, toMediaRow)
+      const added = reviveRows(c.added, toMediaRow)
+      return played && added ? { played, added } : undefined
+    },
+  })
+  const imgKey = useImgKey()
+  const data = useMemo(() => {
+    if (!q.data) return undefined
+    const vm = (r: MediaRow): MediaVM => ({ ...r, img: musicArtUrl(imgKey, r.thumb, 300) })
+    return { played: q.data.played.map(vm), added: q.data.added.map(vm) }
+  }, [q.data, imgKey])
+  return { ...q, data }
 }
 
 // ---------- daily tracker ----------

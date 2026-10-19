@@ -5,10 +5,12 @@ import path from 'node:path'
 const router = Router()
 
 // Everything here is FILE-ONLY and read-only. The trade bot's own cron jobs are
-// the writers: status.py every 5 min, equity_sampler.py every 10 min with the
+// the writers: status.py every 5 min; equity_sampler.py every 10 min with the
 // broker snapshot and every other weekday-session minute equity-only
-// (--equity-only), scan_v2 per cycle. This route never touches the broker, holds
-// no credentials, and does no work a request should wait on.
+// (--equity-only), and since 2026-10-18 also nights and weekends (equity-only
+// every 10 min, one full run an hour), so the live figure is never more than
+// about 10 minutes old; scan_v2 per cycle. This route never touches the broker,
+// holds no credentials, and does no work a request should wait on.
 const BOT_DIR = '/home/brendon/trade-bot'
 const STATUS_FILE = path.join(BOT_DIR, 'logs', 'status.json')
 const SNAPSHOT_FILE = path.join(BOT_DIR, 'logs', 'broker_snapshot.json')
@@ -59,6 +61,17 @@ const SAMPLE_MATCH_MS = 1_000
 // The sampler writes zoned ISO times; a zoneless one would be read in whatever
 // zone this process runs in, which is a guess, so it is refused.
 const ZONED_ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/
+// status.py's history grid: HISTORY_MAX_POINTS equal buckets over the window.
+const HISTORY_MAX_POINTS = 96
+// The session series reads as much of the file's tail as it takes to reach the
+// start of the window: 512 KB holds about a week at today's cadence. The cap is
+// status.py's own HISTORY_TAIL_BYTES, so this never sees more than it does.
+const SERIES_TAIL_MIN_BYTES = 512 * 1024
+const SERIES_TAIL_MAX_BYTES = 4 * 1024 * 1024
+// The weekday hours the sampler ran in before the off-hours samples: New York
+// 9:00 through 16:59. Every history point used to fall inside them.
+const SESSION_FIRST_HOUR = 9
+const SESSION_LAST_HOUR = 16
 
 type StatusDoc = Record<string, unknown>
 
@@ -719,7 +732,10 @@ const round2 = (n: number): number => Math.round(n * 100) / 100
  *
  * live_equity_sampled_at is the exact time of the sample behind live_equity, or
  * null when that is not known exactly; live_equity_age_min is recomputed
- * against `nowMs` whenever it is. Without a portfolio block nothing is added.
+ * against `nowMs` whenever it is. newest_sample_at is the newest broker read on
+ * file whatever its age (null when there is none, or it is from the future), so
+ * a page showing the day-open fallback can say when the broker was last read.
+ * Without a portfolio block nothing is added.
  */
 function applyNewestSample(status: StatusDoc, sample: EquitySample | null, nowMs: number): StatusDoc {
   const portfolio = status.portfolio
@@ -734,6 +750,7 @@ function applyNewestSample(status: StatusDoc, sample: EquitySample | null, nowMs
 
   const age = sample ? nowMs - sample.ms : NaN
   const current = sample != null && age >= -SAMPLE_FUTURE_SKEW_MS && age <= SAMPLE_MAX_AGE_MS
+  const newestAt = sample != null && age >= -SAMPLE_FUTURE_SKEW_MS ? new Date(sample.ms).toISOString() : null
 
   let newer = false
   if (sample && current) {
@@ -752,6 +769,7 @@ function applyNewestSample(status: StatusDoc, sample: EquitySample | null, nowMs
         live_equity_source: 'sample',
         live_equity_age_min: round2(age / 60_000),
         live_equity_sampled_at: new Date(sample.ms).toISOString(),
+        newest_sample_at: newestAt,
       },
     }
   }
@@ -768,9 +786,159 @@ function applyNewestSample(status: StatusDoc, sample: EquitySample | null, nowMs
           ...portfolio,
           live_equity_age_min: round2((nowMs - sample.ms) / 60_000),
           live_equity_sampled_at: new Date(sample.ms).toISOString(),
+          newest_sample_at: newestAt,
         }
-      : { ...portfolio, live_equity_sampled_at: null },
+      : { ...portfolio, live_equity_sampled_at: null, newest_sample_at: newestAt },
   }
+}
+
+// ---------- session history series ----------
+
+type SeriesPoint = { ts: string; total: number }
+
+const NY_HOUR = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hourCycle: 'h23',
+})
+// New York's offset is a whole number of hours, so one answer holds for a whole
+// UTC hour: cached per hour, a week of rows costs about 170 lookups.
+const sessionHours = new Map<number, boolean>()
+
+/** Does this instant fall in the sampler's old weekday window (New York 9:00 to 16:59)? */
+function inSessionWindow(ms: number): boolean {
+  if (!Number.isFinite(ms)) return false
+  const key = Math.floor(ms / 3_600_000)
+  let inside = sessionHours.get(key)
+  if (inside === undefined) {
+    const parts = NY_HOUR.formatToParts(ms)
+    const weekday = parts.find((p) => p.type === 'weekday')?.value
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value)
+    inside = weekday !== 'Sat' && weekday !== 'Sun' && hour >= SESSION_FIRST_HOUR && hour <= SESSION_LAST_HOUR
+    if (sessionHours.size > 5000) sessionHours.clear()
+    sessionHours.set(key, inside)
+  }
+  return inside
+}
+
+/** One history row as status.py's read_history accepts it (any source), or null. */
+function parseHistoryRow(line: string): { ms: number; ts: string; total: number } | null {
+  const t = line.trim()
+  if (!t.startsWith('{')) return null
+  let row: unknown
+  try {
+    row = JSON.parse(t)
+  } catch {
+    return null
+  }
+  if (!isObj(row)) return null
+  const ts = typeof row.ts === 'string' ? row.ts : ''
+  if (!ZONED_ISO_RE.test(ts)) return null
+  const ms = Date.parse(ts)
+  const total = fnum(row.total)
+  if (!Number.isFinite(ms) || total == null) return null
+  return { ms, ts, total }
+}
+
+/**
+ * status.py's history series rebuilt over session-window rows only.
+ *
+ * Every history point used to be a weekday 9:00 to 16:59 reading, because the
+ * sampler only ran then, and the Trades chart (one slot per trading day, the
+ * session across it) and the Dashboard's session change are built on that.
+ * Since the sampler also runs nights and weekends, status.py's series, which
+ * does not look at the time of day, would put a Sunday and an 8 PM reading on
+ * that axis. Filtering its points afterward is not enough: its buckets are 105
+ * minutes wide and the last row in each wins, so the bucket spanning the close
+ * would lose its session reading to an evening one.
+ *
+ * So this is status.py's own grid (HISTORY_MAX_POINTS equal buckets over the
+ * window ending at its generated_at, rows before the window dropped, the last
+ * row in each bucket wins) applied to session-window rows written by then:
+ * the series status.py drew before the off-hours samples existed. Zoneless
+ * rows are skipped (status.py reads them as ET; only the v1 backfill wrote any,
+ * months outside the window). Complete lines only; non-throwing.
+ */
+function sessionSeriesFromText(text: string, generatedMs: number, windowDays: number): SeriesPoint[] {
+  const end = text.lastIndexOf('\n')
+  if (end === -1) return []
+  const span = windowDays * 86_400_000
+  const start = generatedMs - span
+  const bucketMs = span / HISTORY_MAX_POINTS
+  const best = new Map<number, { ms: number; ts: string; total: number }>()
+  for (const line of text.slice(0, end).split('\n')) {
+    const row = parseHistoryRow(line)
+    if (!row || row.ms < start || row.ms > generatedMs || !inSessionWindow(row.ms)) continue
+    const idx = Math.min(Math.max(Math.floor((row.ms - start) / bucketMs), 0), HISTORY_MAX_POINTS - 1)
+    const cur = best.get(idx)
+    // ties go to the later line, as in status.py's stable sort
+    if (!cur || row.ms >= cur.ms) best.set(idx, row)
+  }
+  return [...best.entries()].sort((a, b) => a[0] - b[0]).map(([, r]) => ({ ts: r.ts, total: r.total }))
+}
+
+/** ms of the first parseable row in a tail, or null when it holds none. */
+function firstRowMs(text: string): number | null {
+  for (const line of text.split('\n')) {
+    const row = parseHistoryRow(line)
+    if (row) return row.ms
+  }
+  return null
+}
+
+let seriesCache: { key: string; points: SeriesPoint[] } | null = null
+
+/**
+ * The session series for status.json's window, or null when the file cannot be
+ * read. Reads a growing tail until it reaches back past the window start (or
+ * holds the whole file, or hits the cap), and caches by file size, mtime and
+ * the window, so a request between two samples costs one stat.
+ */
+async function readSessionSeries(file: string, generatedMs: number, windowDays: number): Promise<SeriesPoint[] | null> {
+  let size: number, mtime: number
+  try {
+    const st = await fs.stat(file)
+    size = st.size
+    mtime = st.mtimeMs
+  } catch {
+    return null
+  }
+  const key = `${file}:${size}:${mtime}:${generatedMs}:${windowDays}`
+  if (seriesCache?.key === key) return seriesCache.points
+  const start = generatedMs - windowDays * 86_400_000
+  let bytes = SERIES_TAIL_MIN_BYTES
+  let text: string | null
+  for (;;) {
+    text = await readTail(file, bytes)
+    if (text == null) return null
+    if (bytes >= size || bytes >= SERIES_TAIL_MAX_BYTES) break
+    const first = firstRowMs(text)
+    if (first != null && first < start) break
+    bytes *= 2
+  }
+  const points = sessionSeriesFromText(text, generatedMs, windowDays)
+  seriesCache = { key, points }
+  return points
+}
+
+/**
+ * status.json with history.points replaced by the session series. The change
+ * figures (first_total, change_usd and the rest) stay status.py's. When the
+ * file cannot be read, status.py's own points are kept minus the off-hours
+ * ones, so the axis still holds. Without a history block nothing changes.
+ */
+async function applySessionSeries(status: StatusDoc, file: string = HISTORY_FILE): Promise<StatusDoc> {
+  const history = status.history
+  if (!isObj(history)) return status
+  const generatedMs = Date.parse(String(status.generated_at ?? ''))
+  const windowDays = fnum(history.window_days)
+  let points: unknown[] | null = null
+  if (Number.isFinite(generatedMs) && windowDays != null && windowDays > 0) {
+    points = await readSessionSeries(file, generatedMs, windowDays)
+  }
+  if (points == null) {
+    const own = Array.isArray(history.points) ? history.points : []
+    points = own.filter((p) => isObj(p) && inSessionWindow(Date.parse(String(p.ts ?? ''))))
+  }
+  return { ...status, history: { ...history, points } }
 }
 
 // ---------- status ----------
@@ -802,7 +970,7 @@ async function readStatus(): Promise<StatusResult> {
 router.get('/tradebot/status', async (_req, res) => {
   const result = await readStatus()
   if (!result.ok) return res.status(503).json({ error: 'status unavailable', detail: result.detail })
-  const status = applyNewestSample(result.status, await readNewestSample(), Date.now())
+  const status = await applySessionSeries(applyNewestSample(result.status, await readNewestSample(), Date.now()))
   res.json({ ...status, stale: result.stale })
 })
 
@@ -824,7 +992,7 @@ router.get('/tradebot/page', async (_req, res) => {
 
   const data: PagePayload = {
     generated_at: new Date().toISOString(),
-    status: applyNewestSample(status.status, sample, Date.now()),
+    status: await applySessionSeries(applyNewestSample(status.status, sample, Date.now())),
     stale: status.stale,
     broker,
     broker_error: brokerError,
@@ -845,7 +1013,7 @@ router.get('/tradebot/page', async (_req, res) => {
 })
 
 // Named exports for the tail-parser tests only; the app mounts the default.
-export { newestSampleInTail, readNewestSample, applyNewestSample }
-export type { EquitySample }
+export { newestSampleInTail, readNewestSample, applyNewestSample, sessionSeriesFromText, applySessionSeries, inSessionWindow }
+export type { EquitySample, SeriesPoint }
 
 export default router

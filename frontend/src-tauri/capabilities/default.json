@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "Every app window: the main one and the pop-outs (session-*, project-*), which src/v2/kit/windows.ts opens and which drag, focus, title and close themselves.",
   "windows": [
     "main",
-    "session-*"
+    "session-*",
+    "project-*"
   ],
   "permissions": [
     "core:default",
@@ -15,6 +16,9 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-close",
-    "core:window:allow-show"
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-title"
   ]
 }

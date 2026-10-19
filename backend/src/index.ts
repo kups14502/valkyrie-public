@@ -35,6 +35,7 @@ import projRoute from './routes/proj.js'
 import mcpRoute from './routes/mcp.js'
 import accountSwitchRoute from './routes/accountSwitch.js'
 import accountSigninRoute from './routes/accountSignin.js'
+import devicesRoute from './routes/devices.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
 
@@ -103,6 +104,9 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }))
 // desktop app's auto-update mirror.
 app.use('/api', authRoute)
 app.use('/api', updatesRoute)
+// The phone and tablet's battery reports (an iOS Shortcut): authenticated by
+// a per-device token inside the route, so it sits ahead of requireAuth.
+app.use('/api', devicesRoute)
 
 app.use('/api', requireAuth)
 app.use('/api', systemRoute)

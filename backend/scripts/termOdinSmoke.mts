@@ -14,7 +14,10 @@
  *      /bin/sh against a directory named to break a shell ($(...), quotes,
  *      spaces, ;), with printf as the program, never Claude.
  *   5. The equity tail parser in routes/tradebot.ts (newestSampleInTail,
- *      readNewestSample, applyNewestSample), when that file exports them.
+ *      readNewestSample, applyNewestSample with newest_sample_at), and the
+ *      session series that keeps off-hours samples off the chart axis
+ *      (inSessionWindow, sessionSeriesFromText, applySessionSeries), when
+ *      that file exports them.
  *
  * Linux only (/bin/sh). Self-contained: it makes its own temp dir and points
  * HOME, the data dir, the targets file, the tmux socket and the Claude path
@@ -326,6 +329,9 @@ type TradeExports = {
   newestSampleInTail?: (text: string) => Sample | null
   readNewestSample?: (file?: string) => Promise<Sample | null>
   applyNewestSample?: (status: Record<string, unknown>, sample: Sample | null, nowMs: number) => Record<string, unknown>
+  sessionSeriesFromText?: (text: string, generatedMs: number, windowDays: number) => { ts: string; total: number }[]
+  applySessionSeries?: (status: Record<string, unknown>, file?: string) => Promise<Record<string, unknown>>
+  inSessionWindow?: (ms: number) => boolean
 }
 const TB = (await import('../src/routes/tradebot.js')) as unknown as TradeExports
 if (!TB.newestSampleInTail || !TB.readNewestSample || !TB.applyNewestSample) {
@@ -408,6 +414,76 @@ if (!TB.newestSampleInTail || !TB.readNewestSample || !TB.applyNewestSample) {
   assert.equal(pf(apply(status(fromSample), null, now)).live_equity_sampled_at, null)
   assert.equal(pf(apply(status(fromSample), null, now)).live_equity, 7590)
   ok('apply: never fabricates: stale (over 2 h), future and not-newer samples leave status.json alone')
+
+  // newest_sample_at: when the broker was last read, whatever the age, so a day-open page can say so
+  s = apply(status({ ...fromSample, live_equity_source: 'day_open' }), sample('2026-10-16T16:00:00Z'), now)
+  if ('newest_sample_at' in pf(s)) {
+    assert.equal(pf(s).newest_sample_at, '2026-10-16T16:00:00.000Z', 'a stale read still names its time')
+    assert.equal(pf(s).live_equity_source, 'day_open')
+    s = apply(status({ ...fromSample, live_equity_source: 'day_open' }), sample('2026-10-16T18:40:00Z'), now)
+    assert.equal(pf(s).newest_sample_at, null, 'a read from the future is no read')
+    s = apply(status({ live_equity: 7554.15, live_cash: null, live_equity_source: 'day_open', live_equity_age_min: null }), sample('2026-10-16T18:29:00Z'), now)
+    assert.equal(pf(s).newest_sample_at, '2026-10-16T18:29:00.000Z')
+    assert.equal(pf(apply(status(fromSample), null, now)).newest_sample_at, null)
+    ok('apply: newest_sample_at names the newest broker read on file (stale included, future and none are null)')
+  } else {
+    console.log('skip newest_sample_at: routes/tradebot.ts does not set it')
+  }
+
+  // the session series: since the sampler also runs nights and weekends, only weekday
+  // 9:00 to 16:59 New York readings may reach the per-trading-day chart axis
+  if (TB.sessionSeriesFromText && TB.inSessionWindow && TB.applySessionSeries) {
+    const inWin = TB.inSessionWindow
+    assert.equal(inWin(at('2026-10-16T14:00:00Z')), true, 'Fri 10:00 AM ET')
+    assert.equal(inWin(at('2026-10-16T13:00:00Z')), true, 'Fri 9:00 AM ET')
+    assert.equal(inWin(at('2026-10-16T12:59:00Z')), false, 'Fri 8:59 AM ET')
+    assert.equal(inWin(at('2026-10-16T20:59:00Z')), true, 'Fri 4:59 PM ET')
+    assert.equal(inWin(at('2026-10-16T21:00:00Z')), false, 'Fri 5:00 PM ET')
+    assert.equal(inWin(at('2026-10-17T15:00:00Z')), false, 'Sat 11:00 AM ET')
+    assert.equal(inWin(at('2026-10-19T00:45:00Z')), false, 'Sun 8:45 PM ET')
+    assert.equal(inWin(at('2026-11-02T14:30:00Z')), true, 'Mon 9:30 AM EST (after the clocks change)')
+    assert.equal(inWin(at('2026-11-02T13:30:00Z')), false, 'Mon 8:30 AM EST')
+    assert.equal(inWin(NaN), false)
+    ok('inSessionWindow: weekday 9:00 to 16:59 in New York, either side of daylight saving')
+
+    const row = (ts: string, total: number, extra: Record<string, unknown> = {}) => line({ ts, total, source: 'live', ...extra })
+    const gen = at('2026-10-19T00:45:00Z') // Sun 8:45 PM ET
+    const text = [
+      row('2026-10-09T15:00:00Z', 1),            // before the 7-day window
+      row('2026-10-15T14:00:00Z', 100),          // Thu 10:00 AM
+      row('2026-10-15T14:01:00Z', 101),          // same 105-minute bucket: the later row wins
+      row('2026-10-16T19:00:00Z', 200),          // Fri 3:00 PM
+      row('2026-10-16T23:00:00Z', 999),          // Fri 7:00 PM: off-hours, dropped
+      row('2026-10-17T15:00:00Z', 998),          // Sat: dropped
+      row('2026-10-18T22:00:00Z', 997),          // Sun 6:00 PM: dropped
+      line({ ts: '2026-10-16T15:00:00', total: 996 }), // zoneless: skipped
+      'not json',
+      row('2026-10-16T20:30:00Z', 201),          // Fri 4:30 PM
+      row('2026-10-19T01:00:00Z', 995),          // after generated_at
+      row('2026-10-16T20:45:00Z', 202),          // a partial last line (no newline) is an append in flight
+    ].join('\n')
+    const pts = TB.sessionSeriesFromText(text, gen, 7)
+    assert.deepEqual(pts.map((p) => p.total), [101, 200, 201], `series ${JSON.stringify(pts)}`)
+    assert.ok(pts.every((p) => typeof p.ts === 'string' && /Z$|[+-]\d\d:\d\d$/.test(p.ts)))
+    assert.deepEqual(TB.sessionSeriesFromText('', gen, 7), [])
+    ok('session series: session-window rows only (off-hours, weekend, zoneless, out-of-window and partial rows dropped), last row per bucket')
+
+    const hist = path.join(T, 'equity_history_series.jsonl')
+    fs.writeFileSync(hist, text + '\n')
+    const st = { generated_at: new Date(gen).toISOString(), history: { window_days: 7, points: [{ ts: '2026-10-18T22:00:00Z', total: 997 }], change_usd: -12 } }
+    const applied = await TB.applySessionSeries(st, hist)
+    const h = applied.history as { points: { total: number }[]; change_usd: number }
+    // the last line is complete now: 4:45 PM shares 4:30 PM's 105-minute bucket and, being later, wins it
+    assert.deepEqual(h.points.map((p) => p.total), [101, 200, 202], `the file's session series replaces the points: ${JSON.stringify(h.points)}`)
+    assert.equal(h.change_usd, -12, 'the change figures stay status.py\'s')
+    const fallback = await TB.applySessionSeries({ ...st, history: { ...st.history, points: [{ ts: '2026-10-16T19:00:00Z', total: 5 }, { ts: '2026-10-17T15:00:00Z', total: 6 }] } }, path.join(T, 'missing.jsonl'))
+    assert.deepEqual((fallback.history as { points: { total: number }[] }).points.map((p) => p.total), [5], 'an unreadable file keeps status.py\'s points minus the off-hours ones')
+    const noHist = { generated_at: st.generated_at }
+    assert.equal(await TB.applySessionSeries(noHist, hist), noHist)
+    ok('applySessionSeries: the file\'s session series replaces history.points; unreadable keeps the session points; no history is untouched')
+  } else {
+    console.log('skip the session series: routes/tradebot.ts does not export it')
+  }
 }
 
 // ------------------------------------------------------------ done ----

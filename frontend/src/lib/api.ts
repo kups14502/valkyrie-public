@@ -468,10 +468,12 @@ export type HostMetric = { percent: number; used: number; total: number }
 export type HostStat = {
   host: string
   label: string
-  os: 'linux' | 'windows'
+  os: 'linux' | 'windows' | 'ios'
   online: boolean
   stale: boolean
   ts: number | null
+  // The phone and tablet only: when tailscale or a Shortcut report last heard from it (ms).
+  seen?: number | null
   uptime: number | null
   cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
   memory: HostMetric | null
@@ -1410,22 +1412,61 @@ export type MediaDownload = {
 // don't need it at all (trusted by socket address).
 let imgToken: { token: string; expiresAt: number } | null = null
 
+// Bumped whenever an image URL built now would differ from one built before
+// (a token arrived or renewed), so render-time URLs can be memo keys.
+let imgRev = 0
+const imgListeners = new Set<() => void>()
+export const subscribeImgAuth = (l: () => void) => {
+  imgListeners.add(l)
+  return () => { imgListeners.delete(l) }
+}
+export const imgAuthRev = () => imgRev
+
 export const fetchImgToken = async () => {
   const r = await api.get<{ token: string; expiresAt: number }>('/plex/img-token')
-  imgToken = r.data
+  // A new token changes every image URL, so the browser would fetch every
+  // poster again: keep the one the URLs carry while it has hours left.
+  if (!imgToken || imgToken.expiresAt < Date.now() + 3 * 3600_000) {
+    imgToken = r.data
+    imgRev++
+    imgListeners.forEach((l) => l())
+  }
   return r.data
+}
+
+// Image URLs are built on the API base in use NOW, never the one this module
+// started with: the desktop app moves api.defaults.baseURL to odin's tailnet
+// address in resolveApiBase, after import. A URL is therefore only good for
+// the moment it is built: build it at render time and never persist it (cache
+// the Plex path instead).
+const imgBase = () => api.defaults.baseURL ?? baseURL
+
+/** True when the API base in use trusts this client by its tailnet address, so image URLs need no token. */
+export const imgTrusted = (): boolean => {
+  const b = imgBase()
+  return b.startsWith('/') ? onTailnet : TAILNET_BASES.some((t) => b.startsWith(`${t}/`))
 }
 
 export const plexImg = (path: string, w = 300, opts: { server?: PlexServerName; h?: number } = {}): string => {
   const params = new URLSearchParams({ path, w: String(w) })
   if (opts.h) params.set('h', String(opts.h))
   if (opts.server === 'music') params.set('server', 'music')
-  if (imgToken && imgToken.expiresAt > Date.now() + 60_000) params.set('token', imgToken.token)
-  return `${baseURL}/plex/img?${params.toString()}`
+  if (!imgTrusted() && imgToken && imgToken.expiresAt > Date.now() + 60_000) params.set('token', imgToken.token)
+  return `${imgBase()}/plex/img?${params.toString()}`
 }
 
 // Album art and artist photos: square, off the music server.
 export const musicImg = (path: string, w = 300): string => plexImg(path, w, { server: 'music', h: w })
+
+/** The Plex path inside an image URL an older build persisted (null when it is not one). */
+export const plexImgPath = (url: unknown): string | null => {
+  if (typeof url !== 'string' || !url.includes('/plex/img?')) return null
+  try {
+    return new URL(url, 'http://local').searchParams.get('path')
+  } catch {
+    return null
+  }
+}
 
 export type PlexServer = { machineIdentifier: string; friendlyName: string; version: string }
 

@@ -78,14 +78,14 @@ case "$1" in
   auth)
     if [ "$2" = status ]; then echo '{"loggedIn":true,"email":"smoke@example.invalid","authMethod":"claude.ai"}'; exit 0; fi
     echo "Opening browser to sign in…"
-    echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=FAKESTATE"
+    echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=goodstate1234567890"
     printf "Paste code here if prompted > "
     read -r code
     if [ "$code" = "${GOOD}" ]; then echo '{"claudeAiOauth":{"accessToken":"fake"}}' > "$CLAUDE_CONFIG_DIR/.credentials.json"; echo "Login successful."; else echo "Login failed: Request failed with status code 400"; fi
     ;;
   setup-token)
     echo " This will guide you through long-lived (1-year) auth token setup for your Claude account."
-    echo "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=FAKESTATE2"
+    echo "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=goodstate1234567890"
     printf " Paste code here if prompted > "
     read -r code
     if [ "$code" = "${GOOD}" ]; then printf '\\n Long-lived authentication token created successfully!\\n\\n Your OAuth token (valid for 1 year):\\n\\n ${FAKE_TOKEN}\\n\\n Store this token securely.\\n'; else echo "OAuth error: bad code"; fi
@@ -189,7 +189,16 @@ echo sent
     const id2 = body.request.id
     r = await waitFor(id2, (x) => x.needsCode)
     check('manual path skips thor', r.fallbackReason === 'manual', r.detail)
-    await j('POST', `/account-switch/signin/${id2}/code`, { code: 'wrongcode1234567890#wrongstate123456' })
+    // a code is checked against the link's state first: one from another link never reaches the CLI
+    ;[st] = await j('POST', `/account-switch/signin/${id2}/code`, { code: 'wrongcode1234567890#wrongstate123456' })
+    check('a code from an older link is 409', st === 409, String(st))
+    r = await waitFor(id2, (x) => x.needsCode)
+    check('the sign-in still waits after an old link\'s code', r.needsCode === true && !r.finishedAt, `${r.stage} ${r.detail}`)
+    // the whole callback address works as well as code#state
+    check('parseCode reads a callback address', lib.parseCode('https://console.anthropic.com/oauth/code/callback?code=goodcode1234567890&state=goodstate1234567890') === GOOD)
+    check('stateOf reads the link', lib.stateOf('https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=goodstate1234567890') === 'goodstate1234567890')
+    // the right link, the wrong code: the CLI refuses it
+    await j('POST', `/account-switch/signin/${id2}/code`, { code: 'wrongcode1234567890#goodstate1234567890' })
     r = await waitFor(id2, (x) => x.finishedAt)
     check('wrong code fails', r.ok === false && /Login failed/.test(r.detail ?? ''), r.detail)
 

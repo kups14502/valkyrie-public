@@ -3,8 +3,8 @@ import { createPortal, flushSync } from 'react-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   MUSIC_PAGE, addMediaRequest, fetchAlbumTracks, fetchArtistAlbums, fetchArtistTracks, fetchImgToken, fetchMusicAlbums, fetchMusicArtist,
-  fetchMusicArtists, fetchMusicRecent, fetchPlexLibrary, fetchPlexSections, fetchPlexServer, musicImg, onTailnet, openInApp, plexAppHomeLink,
-  plexAppItemLink, plexImg, plexWatchLink, plexWebHomeLink, plexWebItemLink, searchMediaRequests, searchMusic, sendMediaMessage,
+  fetchMusicArtists, fetchMusicRecent, fetchPlexLibrary, fetchPlexSections, fetchPlexServer, onTailnet, openInApp, plexAppHomeLink,
+  plexAppItemLink, plexWatchLink, plexWebHomeLink, plexWebItemLink, searchMediaRequests, searchMusic, sendMediaMessage,
   shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
   type MediaSearchResult, type MusicAlbum, type MusicArtist, type MusicSearchResults, type MusicTrack, type PlexItem, type PlexSection,
 } from '../../lib/api'
@@ -13,7 +13,7 @@ import { Bar, Glyph, Press, cx, toast } from '../kit/ui'
 import { Icon, type IconName, type IconTone } from '../kit/icons'
 import { useReducedMotion } from '../kit/motion'
 import {
-  ago, useLive, useMediaQueue, usePlexRecentRich, useTick,
+  ago, musicArtUrl, plexArtUrl, useImgKey, useLive, useMediaQueue, usePlexRecentRich, useTick,
   type DownloadVM, type Live, type PlexRichVM, type RequestVM,
 } from '../kit/data'
 import './media.css'
@@ -57,9 +57,17 @@ const longAgo = (ms: number, now: number) => {
   return mo < 24 ? `${mo} mo` : `${Math.round(mo / 12)} y`
 }
 const monthYear = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-/** The same Plex image at another size (the hero gets a sharp copy, tiles stay small). */
-const resized = (url: string | null, w: number, h: number) =>
-  url ? url.replace(/([?&])w=\d+/, `$1w=${w}`).replace(/([?&])h=\d+/, `$1h=${h}`) : null
+
+// Every image here is built at render time from a Plex path, through lib/api's plexImg and
+// musicImg on the API base in use now (with the image token when that base needs one). Nothing
+// keeps a URL: the desktop app moves the base after load, and the token expires.
+/** <Art> src for a Plex path: undefined (the wait state) until image URLs can load. */
+const plexSrc = (imgKey: number, path: string | null, w: number, h?: number) => (imgKey < 0 ? undefined : plexArtUrl(imgKey, path, w, h))
+/** The same for album art and artist photos off the music server. */
+const musicSrc = (imgKey: number, path: string | null, w: number) => (imgKey < 0 ? undefined : musicArtUrl(imgKey, path, w))
+/** A title's backdrop, sharp enough for a 3x phone; the poster when Plex has no backdrop. */
+const backdropSrc = (imgKey: number, it: { artPath: string | null; thumb: string | null }) =>
+  it.artPath ? plexSrc(imgKey, it.artPath, 1280, 720) : plexSrc(imgKey, it.thumb, 300)
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value)
@@ -434,19 +442,6 @@ function useMq(query: string): boolean {
   return useSyncExternalStore(sub, () => mq?.matches ?? false, () => false)
 }
 
-/** Off the tailnet a poster URL needs the image token: true once it is in (or not needed). */
-function useImgReady(): boolean {
-  const tok = useQuery({
-    queryKey: ['plex-img-token'],
-    queryFn: fetchImgToken,
-    enabled: !onTailnet,
-    refetchInterval: 6 * 3600_000,
-    staleTime: Infinity,
-    retry: 1,
-  })
-  return onTailnet || tok.isFetched
-}
-
 // ---------- Watch items ----------
 
 type WatchItem = {
@@ -460,8 +455,9 @@ type WatchItem = {
   /** ms epoch, 0 when unknown */
   added: number
   summary: string
-  img: string | null
-  art: string | null
+  /** Plex image paths (poster, backdrop): the URLs are built at render time */
+  thumb: string | null
+  artPath: string | null
   /** audience rating out of 10, when the source has it */
   rating: number | null
   /** path on watch.plex.tv when Plex has a catalog match (opens the iOS app on the title) */
@@ -481,8 +477,8 @@ const fromRich = (r: PlexRichVM): WatchItem => {
     ].filter((x): x is string => !!x),
     added: r.added,
     summary: r.summary,
-    img: r.img,
-    art: r.art,
+    thumb: r.thumb,
+    artPath: r.artPath,
     rating: null,
     // the shared view model has no watchPath yet; read it once it does
     watch: (r as { watchPath?: string | null }).watchPath ?? null,
@@ -534,8 +530,8 @@ const fromTitle = (r: TitleRow): WatchItem => ({
   facts: [r.cr, r.kind === 'movie' ? runtime(r.dur) : r.kids ? plural(r.kids, 'season') : null].filter((x): x is string => !!x),
   added: r.added,
   summary: r.summary,
-  img: r.thumb ? plexImg(r.thumb, 300) : null,
-  art: r.art ? plexImg(r.art, 640, { h: 360 }) : null,
+  thumb: r.thumb,
+  artPath: r.art,
   rating: r.rating,
   watch: r.watch,
 })
@@ -558,6 +554,7 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
   const queue = useMediaQueue()
   const p = usePlayerNow()
   const starter = useStarter()
+  const imgKey = useImgKey()
   const now = useTick(60_000)
   const [sel, setSel] = useState<WatchItem | null>(null)
   const [searching, setSearching] = useState(false)
@@ -601,7 +598,7 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
       aria-pressed={m.key === cur?.key}
       onPress={() => setSel(m)}
     >
-      <Art src={m.img} ratio="2/3" />
+      <Art src={plexSrc(imgKey, m.thumb, 300)} ratio="2/3" />
       <span className="vm-tile-t">{m.title}</span>
       <span className="vm-tile-s">
         {m.added > 0 && now - m.added < NEW_MS && <b className="vm-new" title="Added this week" />}
@@ -697,7 +694,7 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
               keyFor={src}
             >
               {playedList.map((m) => (
-                <MusicTile key={m.key} m={m} sub={m.sub || 'Artist'} cur={src === m.key} playing={p.playing} wait={starter.pending === m.key} onPress={() => tap(m)} />
+                <MusicTile key={m.key} m={m} sub={m.sub || 'Artist'} cur={src === m.key} playing={p.playing} wait={starter.pending === m.key} imgKey={imgKey} onPress={() => tap(m)} />
               ))}
             </Row>
           )}
@@ -711,7 +708,7 @@ function Dashboard({ setSub }: { setSub: (s: string) => void }) {
               keyFor={src}
             >
               {addedList.map((m) => (
-                <MusicTile key={m.key} m={m} sub={m.sub} cur={src === m.key} playing={p.playing} wait={starter.pending === m.key} onPress={() => tap(m)} />
+                <MusicTile key={m.key} m={m} sub={m.sub} cur={src === m.key} playing={p.playing} wait={starter.pending === m.key} imgKey={imgKey} onPress={() => tap(m)} />
               ))}
             </Row>
           )}
@@ -775,11 +772,11 @@ function WatchHero({ item, newest, now }: { item: WatchItem; newest: boolean; no
     item.rating != null ? `${item.rating.toFixed(1)}/10` : null,
     item.added ? `added ${longAgo(item.added, now)} ago` : null,
   ].filter(Boolean).join(' · ')
-  // the backdrop is the biggest image on screen: fetch it sharp for a 3x phone
-  const art = resized(item.art, 1280, 720) ?? item.img
+  const imgKey = useImgKey()
   return (
     <section className="vm-whero vl-build-on" key={item.key}>
-      <Art src={art} ratio="16/9" className="vm-whero-art vl-build" eager />
+      {/* the backdrop is the biggest image on screen: fetched sharp for a 3x phone */}
+      <Art src={backdropSrc(imgKey, item)} ratio="16/9" className="vm-whero-art vl-build" eager />
       <div className="vm-whero-text">
         {/* the kind icon is lit while the title is new this week */}
         <span className="vm-cap vl-build" style={iv(1)} title={fresh ? 'Added this week' : undefined}>
@@ -942,11 +939,12 @@ function TitleSheet({ item, onClose }: { item: WatchItem | null; onClose: () => 
 function TitleDetail({ item, now }: { item: WatchItem; now: number }) {
   const fresh = item.added > 0 && now - item.added < NEW_MS
   const facts = [item.label, ...item.facts, item.rating != null ? `${item.rating.toFixed(1)}/10` : null].filter(Boolean).join(' · ')
+  const imgKey = useImgKey()
   return (
     <div className="vm-detail vl-build-on">
-      {item.art && <Art src={resized(item.art, 1280, 720)} ratio="16/9" className="vm-detail-back" eager />}
+      {item.artPath && <Art src={plexSrc(imgKey, item.artPath, 1280, 720)} ratio="16/9" className="vm-detail-back" eager />}
       <div className="vm-detail-top">
-        <Art src={item.img} ratio="2/3" className="vm-detail-poster vl-build" eager />
+        <Art src={plexSrc(imgKey, item.thumb, 300)} ratio="2/3" className="vm-detail-poster vl-build" eager />
         <div className="vm-detail-text">
           <span className="vm-cap vl-build" style={iv(1)} title={fresh ? 'Added this week' : undefined}>
             <Icon name={item.kind === 'movie' ? 'movie' : 'watch'} size={13} tone={fresh ? 'hot' : 'dim'} glow={fresh} />
@@ -1340,7 +1338,7 @@ const BESIDE_MIN = 900
 
 function Library({ kind, visible }: { kind: 'movie' | 'show'; visible: boolean }) {
   const idx = useTitleIndex(kind)
-  const imgOk = useImgReady()
+  const imgKey = useImgKey()
   const qc = useQueryClient()
   const now = useTick(60_000)
   const [sel, setSel] = useState<WatchItem | null>(null)
@@ -1380,8 +1378,7 @@ function Library({ kind, visible }: { kind: 'movie' | 'show'; visible: boolean }
       }
       return { row: r, item: fromTitle(r), letter, tag }
     })
-    // imgOk: the poster URLs pick up the image token once it is in
-  }, [view, sort, imgOk])
+  }, [view, sort])
   const has = useMemo(() => new Set(view.first.keys()), [view.first])
   const strip = sort === 'title'
   const top = useTopLetter(mainRef, visible && strip, tiles, view.list[0]?.letter ?? null)
@@ -1460,7 +1457,7 @@ function Library({ kind, visible }: { kind: 'movie' | 'show'; visible: boolean }
                   aria-label={`${m.title}, ${m.label}`}
                   onPress={() => pick(paneOpen && sel?.key === m.key ? null : m)}
                 >
-                  <Art src={imgOk ? m.img : undefined} ratio="2/3">
+                  <Art src={plexSrc(imgKey, m.thumb, 300)} ratio="2/3">
                     {tag && <b className="vm-ltag" aria-hidden>{tag}</b>}
                   </Art>
                   <span className="vm-tile-t">{m.title}</span>
@@ -1495,8 +1492,8 @@ type MusicItem = {
   title: string
   /** artist: first genre ('' when none); album: the artist */
   sub: string
+  /** the Plex path of the art; the URL is built at render time */
   thumb: string | null
-  img: string | null
   /** ms epoch last played (artists) or added (albums), 0 when unknown */
   at: number
   artistKey: string | null
@@ -1507,6 +1504,16 @@ type MusicVM = { played: MusicItem[]; added: MusicItem[] }
 
 const ts = (s: number | null | undefined) => (s ? s * 1000 : 0)
 
+/** Older builds cached an image URL beside each path: keep the fields, drop the URL. */
+const reviveMusic = (c: unknown): MusicVM | undefined => {
+  const v = c as Partial<MusicVM> | null
+  if (!v || !Array.isArray(v.played) || !Array.isArray(v.added)) return undefined
+  const row = (m: MusicItem): MusicItem => ({
+    key: m.key, kind: m.kind, title: m.title, sub: m.sub, thumb: m.thumb ?? null, at: m.at, artistKey: m.artistKey, year: m.year,
+  })
+  return { played: v.played.map(row), added: v.added.map(row) }
+}
+
 /** Music with the dates the shared view model drops (lastPlayedAt, addedAt), so ages can show. */
 function useMusic(): Live<MusicVM> {
   return useLive('mediaMusic', async (): Promise<MusicVM> => {
@@ -1514,14 +1521,14 @@ function useMusic(): Live<MusicVM> {
     return {
       played: r.played.map((a) => ({
         key: a.ratingKey, kind: 'artist', title: a.title, sub: a.genres[0] ?? '', thumb: a.thumb,
-        img: a.thumb ? musicImg(a.thumb, 300) : null, at: ts(a.lastPlayedAt), artistKey: a.ratingKey, year: null,
+        at: ts(a.lastPlayedAt), artistKey: a.ratingKey, year: null,
       })),
       added: r.added.map((a) => ({
         key: a.ratingKey, kind: 'album', title: a.title, sub: a.artist, thumb: a.thumb,
-        img: a.thumb ? musicImg(a.thumb, 300) : null, at: ts(a.addedAt), artistKey: a.artistKey, year: a.year,
+        at: ts(a.addedAt), artistKey: a.artistKey, year: a.year,
       })),
     }
-  }, 120_000)
+  }, 120_000, { revive: reviveMusic })
 }
 
 // What the current queue was started from (an artist or album key), so the hero and the tiles
@@ -1603,7 +1610,16 @@ function useStarter() {
 }
 type Starter = ReturnType<typeof useStarter>
 
-function MusicTile({ m, sub, cur, playing, wait, onPress }: { m: MusicItem; sub: string; cur: boolean; playing: boolean; wait: boolean; onPress: () => void }) {
+function MusicTile({ m, sub, cur, playing, wait, imgKey, onPress }: {
+  m: MusicItem
+  sub: string
+  cur: boolean
+  playing: boolean
+  wait: boolean
+  /** useImgKey() of the row */
+  imgKey: number
+  onPress: () => void
+}) {
   return (
     <Press
       data-key={m.key}
@@ -1614,7 +1630,7 @@ function MusicTile({ m, sub, cur, playing, wait, onPress }: { m: MusicItem; sub:
       aria-label={cur ? `${playing ? 'Pause' : 'Resume'} ${m.title}` : `Play ${m.title}`}
       onPress={onPress}
     >
-      <Art src={m.img} ratio="1/1">{cur && <Eq on={playing} />}</Art>
+      <Art src={musicSrc(imgKey, m.thumb, 300)} ratio="1/1">{cur && <Eq on={playing} />}</Art>
       <span className="vm-tile-t">{m.title}</span>
       <span className="vm-tile-s">{sub}</span>
     </Press>
@@ -1707,21 +1723,21 @@ function useAlbumIndex(): ListIndex<AlbumRow> {
 }
 
 const artistItem = (r: ArtistRow): MusicItem => ({
-  key: r.key, kind: 'artist', title: r.title, sub: r.genre, thumb: r.thumb, img: r.thumb ? musicImg(r.thumb, 300) : null, at: 0, artistKey: r.key, year: null,
+  key: r.key, kind: 'artist', title: r.title, sub: r.genre, thumb: r.thumb, at: 0, artistKey: r.key, year: null,
 })
 const albumItem = (a: MusicAlbum): MusicItem => ({
-  key: a.ratingKey, kind: 'album', title: a.title, sub: a.artist, thumb: a.thumb, img: a.thumb ? musicImg(a.thumb, 300) : null,
+  key: a.ratingKey, kind: 'album', title: a.title, sub: a.artist, thumb: a.thumb,
   at: ts(a.addedAt), artistKey: a.artistKey, year: a.year,
 })
 const albumRowItem = (r: AlbumRow): MusicItem => ({
-  key: r.key, kind: 'album', title: r.title, sub: r.artist, thumb: r.thumb, img: r.thumb ? musicImg(r.thumb, 300) : null, at: 0, artistKey: r.artistKey, year: r.year,
+  key: r.key, kind: 'album', title: r.title, sub: r.artist, thumb: r.thumb, at: 0, artistKey: r.artistKey, year: r.year,
 })
 /** An album's artist as the album knows it (name and key); the artist page fetches the rest. */
 const artistOf = (key: string, name: string): MusicItem => ({
-  key, kind: 'artist', title: name, sub: '', thumb: null, img: null, at: 0, artistKey: key, year: null,
+  key, kind: 'artist', title: name, sub: '', thumb: null, at: 0, artistKey: key, year: null,
 })
 const trackAlbum = (t: MusicTrack): MusicItem | null => (t.albumKey ? {
-  key: t.albumKey, kind: 'album', title: noDash(t.album), sub: noDash(t.artist), thumb: t.thumb, img: t.thumb ? musicImg(t.thumb, 300) : null,
+  key: t.albumKey, kind: 'album', title: noDash(t.album), sub: noDash(t.artist), thumb: t.thumb,
   at: 0, artistKey: t.artistKey, year: t.year,
 } : null)
 
@@ -1782,13 +1798,13 @@ function Back({ to }: { to: BackTo }) {
 // ---------- Music rows ----------
 
 /** One artist: art, name, album count (or genre). The A to Z list and the search results share it. */
-function ArtistLine({ r, on, eq, playing, imgOk, onPress }: {
+function ArtistLine({ r, on, eq, playing, imgKey, onPress }: {
   r: ArtistRow
   on: boolean
   /** the playing track is this artist's */
   eq: boolean
   playing: boolean
-  imgOk: boolean
+  imgKey: number
   onPress: () => void
 }) {
   return (
@@ -1798,7 +1814,7 @@ function ArtistLine({ r, on, eq, playing, imgOk, onPress }: {
       aria-label={r.albums ? `${r.title}, ${plural(r.albums, 'album')}` : r.genre ? `${r.title}, ${r.genre}` : r.title}
       onPress={onPress}
     >
-      <Art src={imgOk ? (r.thumb ? musicImg(r.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <Art src={musicSrc(imgKey, r.thumb, 120)} ratio="1/1" className="vm-arow-art" />
       <span className="vm-arow-t">{r.title}</span>
       {eq && <Eq on={playing} />}
       {/* the artist list carries no album count from Plex today; the genre stands in */}
@@ -1808,18 +1824,18 @@ function ArtistLine({ r, on, eq, playing, imgOk, onPress }: {
 }
 
 /** One album: art, title over artist and year. */
-function AlbumLine({ r, on, eq, playing, imgOk, onPress }: {
+function AlbumLine({ r, on, eq, playing, imgKey, onPress }: {
   r: AlbumRow
   on: boolean
   eq: boolean
   playing: boolean
-  imgOk: boolean
+  imgKey: number
   onPress: () => void
 }) {
   const sub = [r.artist, r.year].filter(Boolean).join(' · ')
   return (
     <Press className="vm-arow vm-arow2" data-on={on || undefined} aria-label={sub ? `${r.title}, ${sub}` : r.title} onPress={onPress}>
-      <Art src={imgOk ? (r.thumb ? musicImg(r.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <Art src={musicSrc(imgKey, r.thumb, 120)} ratio="1/1" className="vm-arow-art" />
       <span className="vm-arow-text">
         <span className="vm-arow-t">{r.title}</span>
         {sub && <span className="vm-arow-s">{sub}</span>}
@@ -1830,12 +1846,12 @@ function AlbumLine({ r, on, eq, playing, imgOk, onPress }: {
 }
 
 /** One track in the search results: art, title over artist and album, the length; a tap plays it. */
-function TrackLine({ t, cur, playing, wait, imgOk, onPress }: {
+function TrackLine({ t, cur, playing, wait, imgKey, onPress }: {
   t: MusicTrack
   cur: boolean
   playing: boolean
   wait: boolean
-  imgOk: boolean
+  imgKey: number
   onPress: () => void
 }) {
   const sub = [t.trackArtist ?? t.artist, t.album].filter(Boolean).map((s) => noDash(s)).join(' · ')
@@ -1848,7 +1864,7 @@ function TrackLine({ t, cur, playing, wait, imgOk, onPress }: {
       aria-label={cur ? `${playing ? 'Pause' : 'Resume'} ${t.title}` : `Play ${t.title}`}
       onPress={onPress}
     >
-      <Art src={imgOk ? (t.thumb ? musicImg(t.thumb, 120) : null) : undefined} ratio="1/1" className="vm-arow-art" />
+      <Art src={musicSrc(imgKey, t.thumb, 120)} ratio="1/1" className="vm-arow-art" />
       <span className="vm-arow-text">
         <span className="vm-arow-t">{noDash(t.title)}</span>
         {sub && <span className="vm-arow-s">{sub}</span>}
@@ -1953,12 +1969,12 @@ function ListHead({ mode, setMode, idx, retryKey }: {
 }
 
 /** The Albums list: its own component, so the 4,900-album index loads only once it is opened. */
-function AlbumList({ mode, setMode, rowH, visible, imgOk, hilite, playingAlbum, playing, onAlbum }: {
+function AlbumList({ mode, setMode, rowH, visible, imgKey, hilite, playingAlbum, playing, onAlbum }: {
   mode: ListMode
   setMode: (m: ListMode) => void
   rowH: number
   visible: boolean
-  imgOk: boolean
+  imgKey: number
   hilite: string | null
   playingAlbum: string | null
   playing: boolean
@@ -1972,7 +1988,7 @@ function AlbumList({ mode, setMode, rowH, visible, imgOk, hilite, playingAlbum, 
       visible={visible}
       stripLabel="Albums A to Z"
       row={(r) => (
-        <AlbumLine r={r} on={hilite === r.key} eq={playingAlbum === r.key} playing={playing} imgOk={imgOk} onPress={() => onAlbum(albumRowItem(r))} />
+        <AlbumLine r={r} on={hilite === r.key} eq={playingAlbum === r.key} playing={playing} imgKey={imgKey} onPress={() => onAlbum(albumRowItem(r))} />
       )}
     >
       <ListHead mode={mode} setMode={setMode} idx={idx} retryKey="musicAlbums" />
@@ -1990,7 +2006,7 @@ const ARTIST_CAP = 8
  * Artists, albums and tracks matching the search. Artists come from the loaded A to Z index (every
  * match, at once) plus any the server found that it lacks; albums and tracks from the server.
  */
-function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, imgOk, p, hiArtist, hiAlbum, pendingTrack, onArtist, onAlbum, onTrack }: {
+function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, imgKey, p, hiArtist, hiAlbum, pendingTrack, onArtist, onAlbum, onTrack }: {
   typed: string
   q: string
   found: MusicSearchResults | undefined
@@ -1999,7 +2015,7 @@ function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, i
   artists: readonly ArtistRow[]
   artistH: number
   rowH: number
-  imgOk: boolean
+  imgKey: number
   p: PlayerNow
   hiArtist: string | null
   hiAlbum: string | null
@@ -2032,7 +2048,7 @@ function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, i
           <ol className="vm-alist-win vm-rlist" style={rows(artistH)}>
             {(all ? artistList : artistList.slice(0, ARTIST_CAP)).map((r) => (
               <li key={r.key}>
-                <ArtistLine r={r} on={hiArtist === r.key} eq={now?.artistKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => onArtist(artistItem(r))} />
+                <ArtistLine r={r} on={hiArtist === r.key} eq={now?.artistKey === r.key} playing={p.playing} imgKey={imgKey} onPress={() => onArtist(artistItem(r))} />
               </li>
             ))}
           </ol>
@@ -2047,7 +2063,7 @@ function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, i
           <ol className="vm-alist-win vm-rlist" style={rows(rowH)}>
             {albums.map((r) => (
               <li key={r.key}>
-                <AlbumLine r={r} on={hiAlbum === r.key} eq={now?.albumKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => onAlbum(albumRowItem(r))} />
+                <AlbumLine r={r} on={hiAlbum === r.key} eq={now?.albumKey === r.key} playing={p.playing} imgKey={imgKey} onPress={() => onAlbum(albumRowItem(r))} />
               </li>
             ))}
           </ol>
@@ -2059,7 +2075,7 @@ function MusicResults({ typed, q, found, busy, failed, artists, artistH, rowH, i
           <ol className="vm-alist-win vm-rlist" style={rows(rowH)}>
             {tracks.map((t) => (
               <li key={t.ratingKey}>
-                <TrackLine t={t} cur={p.item?.key === tKey(t)} playing={p.playing} wait={pendingTrack === t.ratingKey} imgOk={imgOk} onPress={() => onTrack(t)} />
+                <TrackLine t={t} cur={p.item?.key === tKey(t)} playing={p.playing} wait={pendingTrack === t.ratingKey} imgKey={imgKey} onPress={() => onTrack(t)} />
               </li>
             ))}
           </ol>
@@ -2085,7 +2101,7 @@ function MusicLib({ visible }: { visible: boolean }) {
   const recent = useMusic()
   const p = usePlayerNow()
   const starter = useStarter()
-  const imgOk = useImgReady()
+  const imgKey = useImgKey()
   const qc = useQueryClient()
   const [mode, setMode] = useStored<ListMode>('v2.media.musicList', 'artists', isListMode)
   const [text, setText] = useState('')
@@ -2208,7 +2224,7 @@ function MusicLib({ visible }: { visible: boolean }) {
         album={album}
         p={p}
         starter={starter}
-        imgOk={imgOk}
+        imgKey={imgKey}
         visible={visible}
         back={from === 'artist' && artist && toArtistPage ? { label: artist.title, go: toArtistPage } : wide ? null : toList}
         onArtist={from === 'list' && toArtistPage ? toArtistPage : undefined}
@@ -2222,7 +2238,7 @@ function MusicLib({ visible }: { visible: boolean }) {
         artist={artist}
         p={p}
         starter={starter}
-        imgOk={imgOk}
+        imgKey={imgKey}
         back={wide ? null : toList}
         onAlbum={(al) => openTo({ artist, album: albumItem(al), from: 'artist' })}
       />
@@ -2253,7 +2269,7 @@ function MusicLib({ visible }: { visible: boolean }) {
             artists={artists.list}
             artistH={artistH}
             rowH={rowH}
-            imgOk={imgOk}
+            imgKey={imgKey}
             p={p}
             hiArtist={hiArtist}
             hiAlbum={hiAlbum}
@@ -2268,7 +2284,7 @@ function MusicLib({ visible }: { visible: boolean }) {
             setMode={setMode}
             rowH={rowH}
             visible={listOn}
-            imgOk={imgOk}
+            imgKey={imgKey}
             hilite={hiAlbum}
             playingAlbum={nowTrack?.albumKey ?? null}
             playing={p.playing}
@@ -2281,7 +2297,7 @@ function MusicLib({ visible }: { visible: boolean }) {
             visible={listOn}
             stripLabel="Artists A to Z"
             row={(r) => (
-              <ArtistLine r={r} on={hiArtist === r.key} eq={nowTrack?.artistKey === r.key} playing={p.playing} imgOk={imgOk} onPress={() => openArtist(artistItem(r))} />
+              <ArtistLine r={r} on={hiArtist === r.key} eq={nowTrack?.artistKey === r.key} playing={p.playing} imgKey={imgKey} onPress={() => openArtist(artistItem(r))} />
             )}
           >
             <ListHead mode={mode} setMode={setMode} idx={artists} retryKey="musicArtists" />
@@ -2298,10 +2314,10 @@ function MusicLib({ visible }: { visible: boolean }) {
 }
 
 /** An artist or album at the top of its page: art, what it is (or what is playing), Play and Shuffle. */
-function MusicHead({ item, thumb, imgOk, sub, isCur, p, wait, onPlay, onShuffle }: {
+function MusicHead({ item, thumb, imgKey, sub, isCur, p, wait, onPlay, onShuffle }: {
   item: MusicItem
   thumb: string | null
-  imgOk: boolean
+  imgKey: number
   sub: string
   isCur: boolean
   p: PlayerNow
@@ -2310,8 +2326,8 @@ function MusicHead({ item, thumb, imgOk, sub, isCur, p, wait, onPlay, onShuffle 
   onShuffle: () => void
 }) {
   const playing = isCur && p.playing
-  const art = imgOk ? (thumb ? musicImg(thumb, 600) : null) : undefined
-  const aura = imgOk && thumb ? musicImg(thumb, 300) : null
+  const art = musicSrc(imgKey, thumb, 600)
+  const aura = musicArtUrl(imgKey, thumb, 300)
   const cap = isCur
     ? `${p.playing ? 'Playing' : 'Paused'}${p.index >= 0 && p.queue.length > 1 ? ` · ${p.index + 1} / ${p.queue.length}` : ''}`
     : item.kind === 'artist' ? 'Artist' : 'Album'
@@ -2341,11 +2357,11 @@ function MusicHead({ item, thumb, imgOk, sub, isCur, p, wait, onPlay, onShuffle 
 }
 
 /** An artist: Play / Shuffle everything, then the albums (newest first); an album opens its tracks. */
-function ArtistPane({ artist, p, starter, imgOk, back, onAlbum }: {
+function ArtistPane({ artist, p, starter, imgKey, back, onAlbum }: {
   artist: MusicItem
   p: PlayerNow
   starter: Starter
-  imgOk: boolean
+  imgKey: number
   back: BackTo | null
   onAlbum: (a: MusicAlbum) => void
 }) {
@@ -2375,7 +2391,7 @@ function ArtistPane({ artist, p, starter, imgOk, back, onAlbum }: {
       <MusicHead
         item={artist}
         thumb={artist.thumb ?? meta.data?.thumb ?? null}
-        imgOk={imgOk}
+        imgKey={imgKey}
         sub={sub}
         isCur={isCur}
         p={p}
@@ -2392,7 +2408,7 @@ function ArtistPane({ artist, p, starter, imgOk, back, onAlbum }: {
               const cur = src === al.ratingKey
               return (
                 <Press key={al.ratingKey} className="vm-tile vm-atile" data-on={cur || undefined} aria-label={`${al.title}: tracks`} onPress={() => onAlbum(al)}>
-                  <Art src={imgOk ? (al.thumb ? musicImg(al.thumb, 300) : null) : undefined} ratio="1/1">{cur && <Eq on={p.playing} />}</Art>
+                  <Art src={musicSrc(imgKey, al.thumb, 300)} ratio="1/1">{cur && <Eq on={p.playing} />}</Art>
                   <span className="vm-tile-t">{al.title}</span>
                   <span className="vm-tile-s">{[al.year, al.trackCount ? plural(al.trackCount, 'track') : null].filter(Boolean).join(' · ')}</span>
                 </Press>
@@ -2407,11 +2423,11 @@ function ArtistPane({ artist, p, starter, imgOk, back, onAlbum }: {
 }
 
 /** An album: Play / Shuffle, then every track; a track plays the album from there. */
-function AlbumPane({ album, p, starter, imgOk, visible, back, onArtist }: {
+function AlbumPane({ album, p, starter, imgKey, visible, back, onArtist }: {
   album: MusicItem
   p: PlayerNow
   starter: Starter
-  imgOk: boolean
+  imgKey: number
   visible: boolean
   back: BackTo | null
   /** opened from a list (not its artist's page): "More by <artist>" goes there */
@@ -2431,7 +2447,7 @@ function AlbumPane({ album, p, starter, imgOk, visible, back, onArtist }: {
       <MusicHead
         item={album}
         thumb={album.thumb}
-        imgOk={imgOk}
+        imgKey={imgKey}
         sub={sub}
         isCur={isCur}
         p={p}

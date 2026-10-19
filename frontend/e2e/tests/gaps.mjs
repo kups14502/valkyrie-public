@@ -18,6 +18,7 @@
 // The terminal and the uploads have their own files (terminal.mjs, upload.mjs).
 
 import { sleep } from '../lib/cdp.mjs'
+import { hostsDoc } from './hosts.mjs'
 import {
   BOARD_IDS, ODIN_TARGETS, PROJ_ID, SESSION_HOSTS, TARGETS,
   applyLight, fullBoardState, lightsState, panesState, projList, projState, quietThor, rgbState,
@@ -567,6 +568,9 @@ function settingsTests() {
       async run(t) {
         const page = await t.page()
         quietThor(page)
+        // odin's hosts without the phone and tablet: once they report (routes/devices.ts) they are hosts, not model-only rows
+        const doc = await hostsDoc(t.env.base, false)
+        page.mock('/api/hosts', () => ({ status: 200, body: doc }))
         await page.goto('/m/system/hosts')
         await page.waitFor(() => document.querySelector('.vl-page[data-active] .sys-device'), { timeout: 12_000, message: 'no model-only device rows on System > Hosts' })
         await page.tap({ sel: '.vl-page[data-active] .sys-device', text: /Tablet/ })

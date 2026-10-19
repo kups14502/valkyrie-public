@@ -34,14 +34,15 @@ export const HERO_IDS: readonly HeroId[] = ['thor', 'odin', 'phone', 'tablet']
 
 /**
  * Every device the hero can draw. thor, odin, frame and mimir are API host ids
- * (frame is labeled Loki). phone and tablet do not report to /api/hosts yet:
- * they show as models only (Settings > Hero, System > Hosts), with no stats.
- * logicserver has no model: its physical form is unknown.
+ * (frame is labeled Loki). phone and tablet join /api/hosts once odin's
+ * tailscale status knows them or an iOS Shortcut has posted their battery
+ * (backend routes/devices.ts); until then they show as models only (Settings >
+ * Hero, System > Hosts). logicserver has no model: its physical form is unknown.
  */
 export type HostModelId = HeroId | 'frame' | 'mimir'
 export const HOST_MODEL_IDS: readonly HostModelId[] = ['thor', 'odin', 'frame', 'mimir', 'phone', 'tablet']
 
-/** Devices with a model and no host on the API: System > Hosts lists them as model-only rows until they report in. */
+/** Devices with a model that may have no host on the API: System > Hosts lists them as model-only rows until they report in. */
 export const MODEL_ONLY_IDS = ['phone', 'tablet'] as const
 export type ModelOnlyId = (typeof MODEL_ONLY_IDS)[number]
 export const MODEL_ONLY_LABEL: Record<ModelOnlyId, string> = { phone: 'Phone', tablet: 'Tablet' }
@@ -80,8 +81,8 @@ const unit = (v: number | null | undefined, d: number) => (v == null ? d : Math.
 /**
  * WireScene heat for a host: { cpu, mem, disk } 0..1 from live data, gpu a dim
  * idle glow (no metric), fans follow cpu. battery = HostVM.battery percent
- * (frame, mimir), display a steady glow while online. Hosts without a battery
- * get no battery key, so thor and odin render exactly as before.
+ * (frame, mimir, phone, tablet), display a steady glow while online. Hosts
+ * without a battery get no battery key, so thor and odin render exactly as before.
  */
 export function useHeat(hostId: string): { heat: Record<string, number>; online: boolean; cpu: number } {
   const hosts = useHosts()
@@ -218,15 +219,19 @@ export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, onHots
     const measure = () => {
       const b = box.getBoundingClientRect()
       if (b.width < 20 || b.height < 20) return
+      // Geo is in the box's own CSS px, the space the scene renders and places
+      // its diamonds in. Client rects come back zoomed under the UI zoom, so
+      // they are divided by the box's on-screen scale (see WireScene's size()).
+      const k = box.offsetWidth > 0 ? b.width / box.offsetWidth : 1
       const a = anchor?.current?.getBoundingClientRect()
-      const l = a ? Math.max(b.left, a.left) : b.left
-      const r = a ? Math.min(b.right, a.right) : b.right
-      const t = a ? Math.max(b.top, a.top) : b.top
-      const btm = a ? Math.min(b.bottom, a.bottom) : b.bottom
+      const l = ((a ? Math.max(b.left, a.left) : b.left) - b.left) / k
+      const r = ((a ? Math.min(b.right, a.right) : b.right) - b.left) / k
+      const t = ((a ? Math.max(b.top, a.top) : b.top) - b.top) / k
+      const btm = ((a ? Math.min(b.bottom, a.bottom) : b.bottom) - b.top) / k
       const next: Geo = {
-        w: Math.round(b.width), h: Math.round(b.height),
-        l: Math.round(l - b.left), r: Math.round(Math.max(l + 60, r) - b.left),
-        t: Math.round(t - b.top), b: Math.round(Math.max(t + 60, btm) - b.top),
+        w: box.clientWidth || Math.round(b.width / k), h: box.clientHeight || Math.round(b.height / k),
+        l: Math.round(l), r: Math.round(Math.max(l + 60, r)),
+        t: Math.round(t), b: Math.round(Math.max(t + 60, btm)),
       }
       setGeo((cur) => (cur && cur.w === next.w && cur.h === next.h && Math.abs(cur.l - next.l) < 2 && Math.abs(cur.r - next.r) < 2 &&
         Math.abs(cur.t - next.t) < 2 && Math.abs(cur.b - next.b) < 2 ? cur : next))

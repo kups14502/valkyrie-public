@@ -2,7 +2,7 @@
 // Valkyrie v2 (/m/*) end-to-end suite. Rerun before every ship.
 //
 //   node e2e/run.mjs [--base http://127.0.0.1:5197] [--only name[,name]] [--shots dir]
-//                    [--concurrency 3] [--list] [--force]
+//                    [--concurrency 3] [--list]
 //
 // Drives the shared headless Edge on 127.0.0.1:9333 (e2e/browser.ps1 starts it
 // on a private desktop when it is down; nothing ever opens a visible window).
@@ -13,7 +13,6 @@
 //
 // Prints a pass/fail table, writes e2e/report.json, exits 1 on any failure.
 
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,19 +29,23 @@ import { gapTests } from './tests/gaps.mjs'
 import { accountTests } from './tests/accounts.mjs'
 import { desktopTests } from './tests/desktop.mjs'
 import { parityTests } from './tests/parity.mjs'
+import { dashboardTests } from './tests/dashboard.mjs'
+import { sessionTests } from './tests/sessions.mjs'
+import { windowTests } from './tests/windows.mjs'
+import { hostTests } from './tests/hosts.mjs'
+import { unitTests } from './tests/unit.mjs'
 import { killLeftovers } from './lib/odin.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 const argv = process.argv.slice(2)
-const opt = { base: 'http://127.0.0.1:5197', only: '', shots: '', concurrency: '3', list: false, force: false, gameWait: '30' }
+const opt = { base: 'http://127.0.0.1:5197', only: '', group: '', shots: '', concurrency: '3', list: false }
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i].replace(/^--/, '')
-  if (k === 'list' || k === 'force') opt[k] = true
-  else if (k === 'game-wait') opt.gameWait = argv[++i]
+  if (k === 'list') opt[k] = true
   else if (k in opt) opt[k] = argv[++i]
   else if (k === 'help' || k === 'h') {
-    console.log('node e2e/run.mjs [--base url] [--only name[,name]] [--shots dir] [--concurrency n] [--list] [--force]')
+    console.log('node e2e/run.mjs [--base url] [--only name[,name]] [--group g[,g]] [--shots dir] [--concurrency n] [--list]')
     process.exit(0)
   } else {
     console.error(`unknown option ${argv[i]}`)
@@ -52,9 +55,10 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- the tests ----------
 
-const all = [...freshnessTests(), ...terminalTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests()]
+const all = [...freshnessTests(), ...terminalTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...unitTests()]
 const wanted = opt.only ? opt.only.split(',').map((s) => s.trim()).filter(Boolean) : []
-const tests = wanted.length ? all.filter((t) => wanted.some((w) => t.name.includes(w) || t.group === w)) : all
+const groups = opt.group ? opt.group.split(',').map((s) => s.trim()).filter(Boolean) : []
+const tests = all.filter((t) => (!wanted.length || wanted.some((w) => t.name.includes(w) || t.group === w)) && (!groups.length || groups.includes(t.group)))
 
 if (opt.list) {
   for (const t of all) console.log(`${t.group.padEnd(10)} ${t.name}`)
@@ -63,40 +67,6 @@ if (opt.list) {
 if (!tests.length) {
   console.error(`no test matches --only ${opt.only} (try --list)`)
   process.exit(2)
-}
-
-// ---------- Brendon may be gaming: wait while a game runs ----------
-
-const GAMES = ['deadlock.exe', 'vrserver.exe', ...(process.env.E2E_GAMES ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)]
-
-function gameRunning() {
-  if (process.platform !== 'win32') return null
-  try {
-    const out = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true })
-    const names = new Set(out.split(/\r?\n/).map((l) => l.split('","')[0].replace(/^"/, '').toLowerCase()))
-    return GAMES.find((g) => names.has(g)) ?? null
-  } catch {
-    return null
-  }
-}
-
-let lastGameCheck = 0
-async function waitForGame() {
-  if (opt.force || Date.now() - lastGameCheck < 20_000) return
-  lastGameCheck = Date.now()
-  let g = gameRunning()
-  if (!g) return
-  const until = Date.now() + Number(opt.gameWait) * 60_000
-  console.log(`${g} is running: pausing the suite until it exits (up to ${opt.gameWait} min, --force skips this)`)
-  while (g && Date.now() < until) {
-    await sleep(30_000)
-    g = gameRunning()
-  }
-  if (g) {
-    console.error(`${g} is still running after ${opt.gameWait} min: stopping`)
-    process.exit(4)
-  }
-  console.log('game closed, going on')
 }
 
 // ---------- the probe: reads only ----------
@@ -125,7 +95,6 @@ async function main() {
     trade = await (await fetch(`${base}/api/tradebot/status`, { signal: AbortSignal.timeout(10_000) })).json()
   } catch { /* the tests fall back to a made-up status */ }
 
-  await waitForGame()
   const browser = await Browser.connect((m) => console.log(m))
   console.log(`browser ${browser.version} on :9333 (private desktop), ${tests.length} test(s), ${opt.concurrency} at a time`)
   const shots = opt.shots ? resolve(opt.shots) : ''
@@ -135,7 +104,6 @@ async function main() {
   let done = 0
   const results = await runAll(tests, env, {
     concurrency: Number(opt.concurrency) || 3,
-    gate: waitForGame,
     onDone: (r) => {
       done++
       const mark = r.status === 'pass' ? 'pass' : 'FAIL'

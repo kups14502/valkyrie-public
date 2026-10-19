@@ -5,9 +5,11 @@ import {
 import { createPortal, flushSync } from 'react-dom'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { ChevronDown, PanelRightOpen, SquareArrowOutUpRight, type LucideIcon } from 'lucide-react'
 import { useIntent, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
-import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
+import { Icon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
+import { canDetach, openDetached } from '../kit/windows'
 import {
   ago, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useTick, useUsage,
   type Live, type ProjectVM, type SessionIndex, type SessionVM, type TargetVM,
@@ -24,7 +26,7 @@ import {
 } from '../../lib/projectsApi'
 import { v2TermPath } from '../../lib/term'
 import { shortName } from '../../lib/quickSessions'
-import { readOpenMode, seedTerminal } from '../../lib/sessionLaunch'
+import { seedTerminal } from '../../lib/sessionLaunch'
 import { UploadButton } from '../kit/upload'
 import {
   LinkSessionPicker, NewProjectFlow, PIcon, ProjectNotes, ProjectSettings, SessionActions, type NoteTab, type ProjMeta,
@@ -46,18 +48,25 @@ import './claude.css'
 // shell intent 'claude:new-session', or open /m/ai/sessions?new=1 (the param
 // is removed once the picker opens).
 //
-// The picker offers three places: thor in the page (the default, a tmux pane
-// on odin running Claude on thor over SSH), thor's own screen (Windows Terminal
-// on thor's desk, so the session lives on thor and survives a dropped
-// connection), and odin (Claude on odin itself, the backup when thor is down).
+// The picker offers these places on every device, the desktop app included:
+// inside Valkyrie (the default, a tmux pane on odin running Claude on thor
+// over SSH), thor's own screen (Windows Terminal on thor's desk, so the
+// session lives on thor and survives a dropped connection), this screen (the
+// desktop app off thor: a terminal here over SSH), and odin (Claude on odin
+// itself, the backup when thor is down). A row's Open follows the same rule:
+// inside Valkyrie first, the screens as second ways in.
 //
 // Sessions also carries the classic board's tools: every open tmux pane (Open
 // terminals: reattach by its own name, close with two taps), Stop all (two
 // taps, panes first, then sessions, one at a time), a long press to pick many
-// rows for Mark done or Undo, the done list folded under Recent with Undo per
-// row, search over title, project and folder, and a link to the classic page
-// for host health, snapshots, restore and closed history. A terminal is only
-// ever opened by an explicit pane name; nothing here picks "the latest one".
+// rows for Mark done or Undo, Recent grouped by area in the classic board's
+// order (each group folds, the folds are remembered), the done list folded
+// under it with Undo per row, search over title, project and folder, and a
+// link to the classic page for host health, snapshots, restore and closed
+// history. A terminal is only ever opened by an explicit pane name; nothing
+// here picks "the latest one". Where windows exist (the desktop app, a mouse),
+// a session or a pane also opens in its own window (kit/windows.ts), and a
+// project opens in its own window by default, "Open here" beside it.
 // Projects: New project (a desk session sets it up, "Set up by hand" is the
 // fallback form; ProjectPage.tsx), Show archived, and a project's detail that
 // starts and opens its sessions, acts on them (move here, stop, done, unlink)
@@ -91,6 +100,21 @@ const areaRank = (a: string, order: readonly string[]) => {
 /** personal work is home, server work is odin's box, client work is a project folder */
 const areaIcon = (a: string): IconName => (a === 'personal' ? 'home' : a === 'server' ? 'odin' : 'projects')
 
+// The classic board's area order for sessions (components/SessionBoard.tsx
+// groupByArea): work first, the host-defined areas right after it (by name),
+// then server and personal, and a session with no area last. With no work
+// area, the host-defined ones lead.
+const CLASSIC_AREAS = ['work', 'server', 'personal']
+const isNoArea = (a: string) => a === '' || a === 'other'
+
+function sessionAreaOrder(present: Iterable<string>): string[] {
+  const set = new Set(present)
+  const known = CLASSIC_AREAS.filter((a) => set.has(a))
+  const extra = [...set].filter((a) => !CLASSIC_AREAS.includes(a) && !isNoArea(a)).sort()
+  const at = known[0] === 'work' ? 1 : 0
+  return [...known.slice(0, at), ...extra, ...known.slice(at), ...[...set].filter(isNoArea)]
+}
+
 type AreaItem = { id: string; label: string; count: number }
 
 function areaItems(values: string[], order: readonly string[]): AreaItem[] {
@@ -103,6 +127,23 @@ function areaItems(values: string[], order: readonly string[]): AreaItem[] {
 }
 
 // ---------- small helpers ----------
+
+// Line icons kit/icons.tsx does not carry, drawn in its look (tone classes, stroke by size).
+const XICONS = { popout: SquareArrowOutUpRight, fold: ChevronDown, here: PanelRightOpen } satisfies Record<string, LucideIcon>
+type XIconName = keyof typeof XICONS
+type AnyIconName = IconName | XIconName
+
+function AnyIcon({ name, size = 16, tone = 'fg', glow = false, className }: {
+  name: AnyIconName
+  size?: number
+  tone?: IconTone
+  glow?: boolean
+  className?: string
+}) {
+  if (isIconName(name)) return <Icon name={name} size={size} tone={tone} glow={glow} className={className} />
+  const C = XICONS[name as XIconName]
+  return <C size={size} strokeWidth={size <= 12 ? 1.8 : size <= 14 ? 1.6 : 1.4} className={cx('vl-icon', `vl-icon-${tone}`, glow && 'vl-icon-glow', className)} aria-hidden />
+}
 
 function useMedia(query: string): boolean {
   const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
@@ -213,18 +254,20 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 /** What a row is waiting on while its write is in flight. */
 type Busy = 'open' | 'stop' | 'done'
 
-/** Where "open" and "new" put a session. */
-type Where = { inPage: boolean; remote: boolean }
-
 /**
- * The session board's rules: a browser (the phone) opens the in-page terminal;
- * the desktop app follows the board's in page / on screen toggle, and off thor
- * it opens the terminal itself over SSH.
+ * Where "open" and "new" can put a session from this device. Inside Valkyrie
+ * (the in-page terminal) is the default everywhere, the desktop app included;
+ * thor's screen is the second way in. `remote`: the desktop app on another
+ * machine, which can also open a terminal on its own screen over SSH.
+ * `windows`: the target can open in its own window (the desktop app, or a
+ * browser driven by a mouse), so the pop-out actions show.
  */
+type Where = { remote: boolean; here: string | null; windows: boolean }
+
 function useWhere(): Where {
   const [here, setHere] = useState<string | null>(null)
   useEffect(() => { void localHostname().then(setHere) }, [])
-  return { inPage: readOpenMode() === 'page', remote: here !== null && here !== HOME_HOST }
+  return { remote: here !== null && here !== HOME_HOST, here, windows: canDetach() }
 }
 
 // In-page terminals (tmux panes on odin running Claude on thor). Same key and
@@ -403,13 +446,29 @@ function useFitToScroller(gap = 18): (el: HTMLElement | null) => void {
 type UndoItem = { key: number; rows: Row[]; title: string; pending: boolean }
 type Tab = 'sessions' | 'projects' | 'usage'
 type Recover = { done: number; total: number }
-const RECENT_SHOWN = 8
+/** an area group of Recent shows this many rows before "Show N more": the list is the page, not a teaser */
+const AREA_SHOWN = 60
 /** the done fold and search results grow by this many rows a press */
 const DONE_STEP = 30
 const RESULTS_STEP = 40
 
+/** One area of Recent: every row, the rows drawn (none while folded), and whether it is open. */
+type AreaGroup = { area: string; rows: Row[]; shown: Row[]; open: boolean }
 /** What the session list shows, by group, for the picked area. */
-type Layout = { asking: Row[]; live: Row[]; recent: Row[]; recentShown: Row[]; done: Row[]; doneShown: Row[] }
+type Layout = { asking: Row[]; live: Row[]; recent: Row[]; areas: AreaGroup[]; done: Row[]; doneShown: Row[] }
+
+// Folded groups (an area of Recent, Live, Open terminals), remembered on this
+// device: a group he folds stays folded on the next visit.
+const FOLD_KEY = 'v2.claude.folded'
+const readFolded = (): ReadonlySet<string> => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+const areaFold = (a: string) => `area:${a || 'other'}`
 
 export default function Claude({ active, sub, setSub }: ScreenProps) {
   const sessions = useSessions()
@@ -444,7 +503,9 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const [startErr, setStartErr] = useState<string | null>(null)
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [expRow, setExpRow] = useState<string | null>(null)
-  const [recentAll, setRecentAll] = useState(false)
+  // the areas of Recent showing past AREA_SHOWN, and the folded groups (remembered)
+  const [moreAreas, setMoreAreas] = useState<ReadonlySet<string>>(() => new Set())
+  const [folded, setFolded] = useState<ReadonlySet<string>>(readFolded)
   const [undo, setUndo] = useState<UndoItem | null>(null)
   // the done fold under Recent, and how many of its rows show
   const [doneOpen, setDoneOpen] = useState(false)
@@ -622,9 +683,11 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   }, [projList])
 
   const areaOrder = useQuery(projAreasQuery).data ?? BASE_AREAS
+  // Sessions keep the classic board's area order, so the filter and the groups read the same way down
+  const sessOrder = useMemo(() => sessionAreaOrder(openRows.map((s) => s.area)), [openRows])
   const areas = useMemo(
-    () => areaItems(tab === 'sessions' ? openRows.map((s) => s.area) : projList.map((p) => p.area), areaOrder),
-    [tab, openRows, projList, areaOrder],
+    () => (tab === 'sessions' ? areaItems(openRows.map((s) => s.area), sessOrder) : areaItems(projList.map((p) => p.area), areaOrder)),
+    [tab, openRows, projList, areaOrder, sessOrder],
   )
   // a filter that empties out (the last session of an area marked done) falls back to All
   const shownArea = areas.some((a) => a.id === area) ? area : 'all'
@@ -638,15 +701,27 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       .sort((a, b) => ACTIVITY_RANK[a.activity] - ACTIVITY_RANK[b.activity] || b.last - a.last)
     const recent = openRows.filter((s) => !isLive(s) && inArea(s)).sort((a, b) => b.last - a.last)
     const done = doneRows.filter(inArea)
+    // Recent by area, the classic board's grouping and order; newest first inside each
+    const byArea = new Map<string, Row[]>()
+    for (const s of recent) {
+      const held = byArea.get(s.area)
+      if (held) held.push(s)
+      else byArea.set(s.area, [s])
+    }
+    const areaGroups = sessionAreaOrder(byArea.keys()).map((a): AreaGroup => {
+      const rows = byArea.get(a) ?? []
+      const open = !folded.has(areaFold(a))
+      return { area: a, rows, open, shown: !open ? [] : moreAreas.has(a) ? rows : rows.slice(0, AREA_SHOWN) }
+    })
     return {
       asking: liveRows.filter((s) => s.activity === 'asking'),
       live: liveRows.filter((s) => s.activity !== 'asking'),
       recent,
-      recentShown: recentAll ? recent : recent.slice(0, RECENT_SHOWN),
+      areas: areaGroups,
       done,
       doneShown: doneOpen ? done.slice(0, doneMax) : [],
     }
-  }, [openRows, doneRows, shownArea, recentAll, doneOpen, doneMax])
+  }, [openRows, doneRows, shownArea, folded, moreAreas, doneOpen, doneMax])
 
   // Search: title, project and folder, across every session the board knows
   // (done ones too) and every area. The folder (cwd) is only in the board's
@@ -669,9 +744,12 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const resultsShown = useMemo(() => results.slice(0, resultsMax), [results, resultsMax])
 
   // Every row drawn right now: what "All N" picks, and what a pick can act on.
+  const liveOpen = !folded.has('live')
   const onScreen = useMemo(
-    () => (searching ? resultsShown : [...layout.asking, ...layout.live, ...layout.recentShown, ...layout.doneShown]),
-    [searching, resultsShown, layout],
+    () => (searching
+      ? resultsShown
+      : [...layout.asking, ...(liveOpen ? layout.live : []), ...layout.areas.flatMap((g) => g.shown), ...layout.doneShown]),
+    [searching, resultsShown, layout, liveOpen],
   )
   const pickedRows = picked ? onScreen.filter((s) => picked.has(s.id)) : []
   const pickedOpen = pickedRows.filter((s) => !s.done)
@@ -872,15 +950,21 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
 
   // Open, the board's way: back into its pane if one runs it, never a second
   // Claude on a running session, otherwise resume on the machine that holds
-  // the transcript (in the page, here over SSH, or on the host's screen).
-  const openSession = async (s: Row) => {
+  // the transcript: thor's sessions inside Valkyrie (on every device, the
+  // desktop app included), any other host's on that host's screen. `how`:
+  // this page, or the pane in its own window (kit/windows.ts).
+  const openSession = async (s: Row, how: 'page' | 'window' = 'page') => {
     if (busyRef.current.has(s.id)) return
     const title = nameOf(s)
+    const land = (name: string) => {
+      if (how === 'window') openDetached({ kind: 'session', name, title: s.title || undefined })
+      else navigate(termTo(name))
+    }
     setRowBusy([s.id], 'open')
     try {
       const pane = paneFor(await freshPanes(qc), s.id)
       if (pane) {
-        navigate(termTo(pane))
+        land(pane)
         return
       }
       if (s.live) {
@@ -890,19 +974,34 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
       if (s.host !== HOME_HOST) {
         await launchOn(s.id, s.host)
         toast(`Opened ${title} on ${hostLabel(s.host)}`)
-      } else if (where.inPage) {
-        const r = await openTermSession({ mode: 'resume', sessionId: s.id, label: s.title })
-        seedTerminal(qc, r)
-        navigate(termTo(r.name))
-      } else if (where.remote) {
-        await openSessionHere(s.id, undefined, (await launchGroups(qc)).get(s.id) ?? null)
-        toast(`Opened ${title} here`)
-      } else {
-        await launchOn(s.id, HOME_HOST)
-        toast(`Opened ${title} on ${hostLabel(HOME_HOST)}`)
+        return
       }
+      const r = await openTermSession({ mode: 'resume', sessionId: s.id, label: s.title })
+      seedTerminal(qc, r)
+      land(r.name)
     } catch (e) {
       toast(`Could not open ${title}: ${errText(e)}`, { ms: 5000 })
+    } finally {
+      setRowBusy([s.id], null)
+      refreshBoard()
+    }
+  }
+
+  // The desktop app off thor: a terminal on this machine's own screen,
+  // resuming over SSH to thor, in the session's own Windows Terminal window.
+  const openLocal = async (s: Row) => {
+    if (busyRef.current.has(s.id)) return
+    const title = nameOf(s)
+    setRowBusy([s.id], 'open')
+    try {
+      if (paneFor(await freshPanes(qc), s.id)) {
+        toast(`${title} is open in a terminal in Valkyrie. Close it first.`, { ms: 4000 })
+        return
+      }
+      await openSessionHere(s.id, undefined, (await launchGroups(qc)).get(s.id) ?? null)
+      toast(`Opened ${title} on this screen`)
+    } catch (e) {
+      toast(`Could not open ${title} on this screen: ${errText(e)}`, { ms: 5000 })
     } finally {
       setRowBusy([s.id], null)
       refreshBoard()
@@ -918,7 +1017,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     setRowBusy([s.id], 'open')
     try {
       if (paneFor(await freshPanes(qc), s.id)) {
-        toast(`${title} is open in a terminal here. Close it first.`, { ms: 4000 })
+        toast(`${title} is open in a terminal in Valkyrie. Close it first.`, { ms: 4000 })
         return
       }
       await launchOn(s.id, HOME_HOST)
@@ -989,39 +1088,35 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     }
   }
 
-  // New session, NewSession's rules: in the page where the host can page and
-  // the board opens in the page; here over SSH for thor from the desktop app
-  // elsewhere; otherwise the host's own agent opens it on its screen.
-  const startNew = (t: TargetVM, h: SessionHost) => launch(`${h.host}:${t.key}`, `Could not start ${t.label} on ${hostLabel(h.host)}`, async () => {
-    if (where.inPage && h.canPage) {
-      const r = await openTermSession({ mode: 'new', target: t.key, label: t.label })
-      seedTerminal(qc, r)
+  // New session in the way picked (TargetPicker): inside Valkyrie, a pane the
+  // page attaches to (the default on every device, the desktop app included);
+  // this screen over SSH (the desktop app off thor); otherwise the host's own
+  // launcher agent opens it on its screen (thor's screen, or another host's).
+  const startNew = (t: TargetVM, h: SessionHost, way: Way, slot: string) => {
+    const name = hostLabel(h.host)
+    const thorScreen = way === 'screen' && h.host === HOME_HOST
+    const fail = thorScreen ? `Could not open ${t.label} on ${name}'s screen` : `Could not start ${t.label} on ${name}`
+    return launch(`${slot}:${t.key}`, fail, async () => {
+      if (way === 'page') {
+        const r = await openTermSession({ mode: 'new', target: t.key, label: t.label })
+        seedTerminal(qc, r)
+        setPicker(false)
+        navigate(termTo(r.name))
+        return
+      }
+      if (way === 'here') {
+        await openNewSessionHere(t.key, undefined, t.group)
+        toast(`${t.label} opened on this screen`)
+      } else {
+        const r = await startSessionOnHost(h.host, t.key)
+        if (!r.ok) throw new Error(r.detail ?? 'could not start it')
+        toast(thorScreen ? `${t.label} opened on ${name}'s screen` : `${t.label} started on ${name}`)
+      }
       setPicker(false)
-      navigate(termTo(r.name))
-      return
-    }
-    if (where.remote && h.host === HOME_HOST) {
-      await openNewSessionHere(t.key, undefined, t.group)
-      toast(`${t.label} opened here`)
-    } else {
-      const r = await startSessionOnHost(h.host, t.key)
-      if (!r.ok) throw new Error(r.detail ?? 'could not start it')
-      toast(`${t.label} started on ${hostLabel(h.host)}`)
-    }
-    setPicker(false)
-    // Claude takes a moment to register, so give the board something to find
-    setTimeout(refreshBoard, 2_500)
-  })
-
-  // Thor's own screen: Windows Terminal on thor's desk through its launcher
-  // agent, so the session lives on thor and a dropped connection cannot end it.
-  const startOnScreen = (t: TargetVM) => launch(`${SCREEN_SLOT}:${t.key}`, `Could not open ${t.label} on ${hostLabel(HOME_HOST)}'s screen`, async () => {
-    const r = await startSessionOnHost(HOME_HOST, t.key)
-    if (!r.ok) throw new Error(r.detail ?? 'could not start it')
-    toast(`${t.label} opened on ${hostLabel(HOME_HOST)}'s screen`)
-    setPicker(false)
-    setTimeout(refreshBoard, 2_500)
-  })
+      // Claude takes a moment to register, so give the board something to find
+      setTimeout(refreshBoard, 2_500)
+    })
+  }
 
   // Odin, the backup: Claude runs on odin itself, in a pane the terminal page
   // attaches to like any other.
@@ -1036,9 +1131,27 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     setOpenRow(null)
     setExpRow((cur) => (cur === id ? null : id))
   }, [captureFlip])
-  const toggleRecent = () => {
+  // fold or unfold a group; the folds persist on this device
+  const toggleFold = (key: string) => {
     captureFlip()
-    setRecentAll((v) => !v)
+    setOpenRow(null)
+    setExpRow(null)
+    setFolded((cur) => {
+      const n = new Set(cur)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify([...n])) } catch { /* storage full or off */ }
+      return n
+    })
+  }
+  const toggleMore = (area: string) => {
+    captureFlip()
+    setMoreAreas((cur) => {
+      const n = new Set(cur)
+      if (n.has(area)) n.delete(area)
+      else n.add(area)
+      return n
+    })
   }
   const toggleDone = () => {
     captureFlip()
@@ -1116,14 +1229,16 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
     onPick: pickToggle,
     onPickStart: pickStart,
     onOpen: (s) => void openSession(s),
+    onWindow: (s) => void openSession(s, 'window'),
     onScreen: (s) => void openOnScreen(s),
+    onLocal: (s) => void openLocal(s),
     onDone: (s) => markDone([s]),
     onUndo: (s) => putBack([s]),
     onStop: stop,
   }
 
-  // desktop shows a third column: a projects glance beside Sessions, the open
-  // project beside Projects (the most urgent one until he picks another)
+  // desktop shows a third column beside Projects: the project opened here (the
+  // most urgent one until he picks another). Sessions has no projects at all.
   const areaProjects = useMemo(
     () => (shownArea === 'all' ? projList : projList.filter((p) => p.area === shownArea)).slice().sort(byUrgency),
     [projList, shownArea],
@@ -1132,10 +1247,13 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const inlineDetail = desk && tab === 'projects'
   const inArea = (p: ProjectVM) => shownArea === 'all' || p.area === shownArea
   const detail = inlineDetail ? (pickedProj && inArea(pickedProj) ? pickedProj : areaProjects[0] ?? null) : null
-  const openProject = (p: ProjectVM) => {
-    setProjId(p.id)
-    setSub('projects')
-  }
+  // Where windows exist a project opens in its own window, "Open here" beside
+  // it shows it in this page (the column on desktop, a sheet elsewhere); a
+  // touch screen opens it here.
+  // An archived project opens here (it is opened to restore it).
+  const openProjHere = (p: ProjectVM) => setProjId(p.id)
+  const openProj = (p: ProjectVM) => (where.windows ? openDetached({ kind: 'project', id: p.id }) : openProjHere(p))
+  const projHere = where.windows ? openProjHere : undefined
   // a project made by hand opens at once (the list refetch brings its row)
   const projCreated = (id: string) => {
     setNewProj(false)
@@ -1177,7 +1295,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   return (
     <div className="vc-root">
       {tab === 'usage' ? <UsageView now={now} /> : (
-        <div className="vc" data-detail={desk || undefined} data-fab={!wide || undefined} data-proj={tab === 'projects' || undefined}>
+        <div className="vc" data-detail={inlineDetail || undefined} data-fab={!wide || undefined} data-proj={tab === 'projects' || undefined}>
           <aside className="vc-side">
             <Summary
               tab={tab}
@@ -1210,8 +1328,10 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                   terms={panes.data ?? []}
                   titles={titles}
                   stopAll={stopAllVM}
-                  recentAll={recentAll}
-                  onToggleRecent={toggleRecent}
+                  folded={folded}
+                  onFold={toggleFold}
+                  moreAreas={moreAreas}
+                  onToggleMore={toggleMore}
                   doneOpen={doneOpen}
                   onToggleDone={toggleDone}
                   onMoreDone={() => setDoneMax((m) => m + DONE_STEP)}
@@ -1219,6 +1339,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                   sweeping={sweep !== null}
                   onRecover={(rows) => void recoverDesk(rows)}
                   onReattach={(name) => navigate(termTo(name))}
+                  onTermWindow={where.windows ? (t, label) => openDetached({ kind: 'session', name: t.name, title: label }) : undefined}
                   onTermClosed={() => {
                     void qc.invalidateQueries({ queryKey: TERMS_KEY })
                     refreshBoard()
@@ -1236,7 +1357,6 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                       <span><Icon name="thor" size={15} tone="dim" className="vl-pulse" />Reading the board from {hostLabel(HOME_HOST)}</span>
                     )}
                   </div>
-                  {!desk && <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />}
                 </>
               )
             ) : (
@@ -1248,8 +1368,9 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                   failed={projects.failed}
                   error={projects.error}
                   now={now}
-                  selected={detail?.id ?? null}
-                  onOpen={(p) => setProjId(p.id)}
+                  selected={desk ? detail?.id ?? null : null}
+                  onOpen={openProj}
+                  onHere={projHere}
                 />
                 {projects.data && (
                   <ArchivedFold
@@ -1261,35 +1382,32 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
                     area={shownArea}
                     now={now}
                     selected={desk ? detail?.id ?? null : pickedProj?.id ?? null}
-                    onOpen={(p) => setProjId(p.id)}
+                    onOpen={openProjHere}
                   />
                 )}
               </>
             )}
           </main>
 
-          {desk && (
+          {inlineDetail && detail && (
             <aside className="vc-detail">
-              {tab === 'sessions' ? (
-                <ProjectGlance list={areaProjects} now={now} onOpen={openProject} />
-              ) : detail ? (
-                <div className="vc-detail-card vl-panel vl-build-on" key={detail.id} ref={fitDetail}>
-                  <div className="vc-detail-head vl-build" style={iv(0)}>
-                    <Icon name="projects" size={18} tone="fg" glow />
-                    <span className="vc-detail-name">{detail.name}</span>
-                  </div>
-                  <ProjectDetail
-                    p={detail}
-                    index={index}
-                    lookup={lookup}
-                    now={now}
-                    hostLabel={hostLabel}
-                    acts={sessActs}
-                    onArchived={() => { if (!showArchived) setProjId(null) }}
-                    showArea
-                  />
+              <div className="vc-detail-card vl-panel vl-build-on" key={detail.id} ref={fitDetail}>
+                <div className="vc-detail-head vl-build" style={iv(0)}>
+                  <Icon name="projects" size={18} tone="fg" glow />
+                  <span className="vc-detail-name">{detail.name}</span>
                 </div>
-              ) : null}
+                <ProjectDetail
+                  p={detail}
+                  index={index}
+                  lookup={lookup}
+                  now={now}
+                  hostLabel={hostLabel}
+                  acts={sessActs}
+                  onArchived={() => { if (!showArchived) setProjId(null) }}
+                  onWindow={where.windows ? () => openDetached({ kind: 'project', id: detail.id }) : undefined}
+                  showArea
+                />
+              </div>
             </aside>
           )}
         </div>
@@ -1332,10 +1450,10 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
           area={shownArea}
           hostLabel={hostLabel}
           where={where}
+          roomy={wide}
           starting={starting}
           error={startErr}
-          onPick={(t, h) => void startNew(t, h)}
-          onScreen={(t) => void startOnScreen(t)}
+          onPick={(t, h, way, slot) => void startNew(t, h, way, slot)}
           onOdin={(t) => void startOnOdin(t)}
         />
       </Sheet>
@@ -1356,6 +1474,10 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
             hostLabel={hostLabel}
             acts={sessActs}
             onArchived={() => { if (!showArchived) setProjId(null) }}
+            onWindow={where.windows ? () => {
+              openDetached({ kind: 'project', id: pickedProj.id })
+              setProjId(null)
+            } : undefined}
           />
         )}
       </Sheet>
@@ -1787,23 +1909,43 @@ function StateIcon({ a, size = 17 }: { a: SessionVM['activity']; size?: number }
   )
 }
 
-/** A section header: icon, label and count on a hairline; an optional action on the right. */
-function GroupHead({ icon, tone = 'dim', glow = false, label, n, i, children }: {
+/**
+ * A section header: icon, label and count on a hairline; an optional action
+ * on the right. With `fold`, the label side is a button that folds the group
+ * (a chevron leads it, turned while folded).
+ */
+function GroupHead({ icon, tone = 'dim', glow = false, label, n, i, fold, children }: {
   icon: IconName
   tone?: IconTone
   glow?: boolean
   label: ReactNode
   n: ReactNode
   i?: number
+  fold?: { open: boolean; onToggle: () => void }
   children?: ReactNode
 }) {
+  const inner = (
+    <>
+      {fold && <AnyIcon name="fold" size={13} tone="dim" className="vc-ghead-chev" />}
+      <Icon name={icon} size={14} tone={tone} glow={glow} />
+      <span className="vc-ghead-t">{label}</span>
+      <span className="vc-ghead-n">{n}</span>
+    </>
+  )
   return (
-    <header className={cx('vc-ghead', i !== undefined && 'vl-build')} style={i !== undefined ? iv(i) : undefined}>
-      <span className="vc-ghead-l">
-        <Icon name={icon} size={14} tone={tone} glow={glow} />
-        <span className="vc-ghead-t">{label}</span>
-        <span className="vc-ghead-n">{n}</span>
-      </span>
+    <header className={cx('vc-ghead', i !== undefined && 'vl-build')} style={i !== undefined ? iv(i) : undefined} data-folded={(fold && !fold.open) || undefined}>
+      {fold ? (
+        <Press
+          className="vc-ghead-l vc-ghead-fold"
+          aria-expanded={fold.open}
+          title={fold.open ? 'Fold this group' : 'Show this group'}
+          onPress={fold.onToggle}
+        >
+          {inner}
+        </Press>
+      ) : (
+        <span className="vc-ghead-l">{inner}</span>
+      )}
       {children}
     </header>
   )
@@ -1833,8 +1975,14 @@ type RowCtx = {
   picked: ReadonlySet<string> | null
   onPick: (id: string) => void
   onPickStart: (id: string) => void
+  /** inside Valkyrie, this page */
   onOpen: (s: Row) => void
+  /** inside Valkyrie, in its own window */
+  onWindow: (s: Row) => void
+  /** thor's own screen */
   onScreen: (s: Row) => void
+  /** this machine's screen over SSH (the desktop app off thor) */
+  onLocal: (s: Row) => void
   onDone: (s: Row) => void
   onUndo: (s: Row) => void
   onStop: (s: Row) => void
@@ -1864,8 +2012,8 @@ function StopAllButton({ vm }: { vm: StopAllVM }) {
 }
 
 function SessionBoard({
-  layout, results, onMoreResults, area, ctx, terms, titles, stopAll, recentAll, onToggleRecent,
-  doneOpen, onToggleDone, onMoreDone, recover, sweeping, onRecover, onReattach, onTermClosed,
+  layout, results, onMoreResults, area, ctx, terms, titles, stopAll, folded, onFold, moreAreas, onToggleMore,
+  doneOpen, onToggleDone, onMoreDone, recover, sweeping, onRecover, onReattach, onTermWindow, onTermClosed,
 }: {
   layout: Layout
   /** a search is on: its matches replace the groups */
@@ -1877,8 +2025,12 @@ function SessionBoard({
   terms: TermSession[]
   titles: Map<string, string>
   stopAll: StopAllVM
-  recentAll: boolean
-  onToggleRecent: () => void
+  /** the folded groups: 'terms', 'live', and areaFold(area) for each area of Recent */
+  folded: ReadonlySet<string>
+  onFold: (key: string) => void
+  /** the areas of Recent showing past AREA_SHOWN */
+  moreAreas: ReadonlySet<string>
+  onToggleMore: (area: string) => void
   doneOpen: boolean
   onToggleDone: () => void
   onMoreDone: () => void
@@ -1886,20 +2038,21 @@ function SessionBoard({
   sweeping: boolean
   onRecover: (rows: SessionVM[]) => void
   onReattach: (name: string) => void
+  /** where windows exist: a pane in its own window */
+  onTermWindow?: (t: TermSession, label: string) => void
   onTermClosed: () => void
 }) {
   const { openRow, setOpenRow, rowEls, busy, hostLabel, where } = ctx
-  const { asking, live, recent, recentShown, done, doneShown } = layout
+  const { asking, live, recent, areas, done, doneShown } = layout
   // recover my desk: open, not running, on thor, and no write of its own in flight
   const desk = recent.filter((s) => !s.live && s.host === HOME_HOST && !busy.has(s.id))
-  const groups = [
-    { key: 'asking', label: 'Asking', rows: asking, total: asking.length },
-    { key: 'live', label: 'Live', rows: live, total: live.length },
-    { key: 'recent', label: 'Recent', rows: recentShown, total: recent.length },
-  ].filter((g) => g.rows.length)
+  // one area's Recover sits on its header only when the desk spans more than one area (the classic split button's rule)
+  const splitDesk = new Set(desk.map((s) => s.area)).size > 1
   // Stop all sits on Live, else Asking, else on the open terminals
   const stopOn = live.length ? 'live' : asking.length ? 'asking' : 'terms'
+  const liveOpen = !folded.has('live')
   const navigate = useNavigate()
+  const dest = where.remote ? 'here' : `on ${hostLabel(HOME_HOST)}`
 
   // close a swiped-open row when a finger lands anywhere else
   useEffect(() => {
@@ -1914,7 +2067,8 @@ function SessionBoard({
   }, [openRow, rowEls, setOpenRow])
 
   let k = 4
-  const item = (s: Row) => <SessionItem key={s.id} s={s} i={Math.min(k++, 16)} ctx={ctx} />
+  // rows inside an area group do not repeat the area their header names
+  const item = (s: Row, noArea = false) => <SessionItem key={s.id} s={s} i={Math.min(k++, 16)} ctx={ctx} noArea={noArea} />
   const foot = (
     <div className="vc-foot vl-build" style={iv(Math.min(k++, 16))}>
       <Press className="vl-link" onPress={() => navigate('/sessions')}>
@@ -1922,6 +2076,19 @@ function SessionBoard({
       </Press>
       <span>host health, snapshots, restore, closed history</span>
     </div>
+  )
+  const recoverBtn = (rows: Row[], label: string, what: string, quiet = false) => (
+    <Press
+      className="vc-ghead-act"
+      data-quiet={quiet || undefined}
+      data-busy={recover ? '' : undefined}
+      disabled={recover !== null || sweeping}
+      title={`Reopen the ${rows.length} ${what}session${rows.length === 1 ? '' : 's'} still open and not running, ${dest}`}
+      onPress={() => onRecover(rows)}
+    >
+      <Icon name={recover ? 'refresh' : hostIcon(HOME_HOST)} size={13} tone={recover ? 'fg' : 'dim'} className={recover ? 'vl-pulse' : undefined} />
+      {label}
+    </Press>
   )
 
   if (results) {
@@ -1932,7 +2099,7 @@ function SessionBoard({
             {results.folders && <span className="vc-ghead-note"><Icon name="refresh" size={12} tone="dim" className="vl-pulse" />folders</span>}
           </GroupHead>
           {results.shown.length ? (
-            <div className="vc-rows">{results.shown.map(item)}</div>
+            <div className="vc-rows">{results.shown.map((s) => item(s))}</div>
           ) : (
             <p className="vc-pd-none">No session matches. Search covers every area and the done list.</p>
           )}
@@ -1947,6 +2114,8 @@ function SessionBoard({
     )
   }
 
+  // the Live header is lit only while something in it is working
+  const liveLit = live.some((s) => s.activity === 'working')
   return (
     <>
       {terms.length > 0 && (
@@ -1957,52 +2126,90 @@ function SessionBoard({
           hostLabel={hostLabel}
           k0={k++}
           stopAll={stopOn === 'terms' ? <StopAllButton vm={stopAll} /> : null}
+          open={!folded.has('terms')}
+          onFold={() => onFold('terms')}
           onReattach={onReattach}
+          onWindow={onTermWindow}
           onClosed={onTermClosed}
         />
       )}
-      {!groups.length && (
+      {!asking.length && !live.length && !recent.length && (
         <div className="vc-empty vl-build" style={iv(k++)}><span>Nothing open{area === 'all' ? '' : ` in ${areaName(area)}`}</span></div>
       )}
-      {groups.map((g) => {
-        // the Live header is lit only while something in it is working
-        const gi = g.key === 'live' && !g.rows.some((s) => s.activity === 'working')
-          ? { icon: 'idle' as IconName, tone: 'dim' as IconTone, glow: false }
-          : GROUP_ICON[g.key]
-        return (
-          <section key={g.key} className="vc-group vl-panel" data-g={g.key}>
-            <GroupHead icon={gi.icon} tone={gi.tone} glow={gi.glow} label={g.label} n={g.total} i={k++}>
-              {g.key === stopOn && <StopAllButton vm={stopAll} />}
-              {g.key === 'recent' && (desk.length > 0 || recover) && (
-                <Press
-                  className="vc-ghead-act"
-                  data-busy={recover ? '' : undefined}
-                  disabled={recover !== null || sweeping}
-                  title={`Reopen the ${desk.length} ${area === 'all' ? '' : `${areaName(area)} `}session${desk.length === 1 ? '' : 's'} still open and not running, ${where.remote ? 'here' : `on ${hostLabel(HOME_HOST)}`}`}
-                  onPress={() => onRecover(desk)}
-                >
-                  <Icon name={recover ? 'refresh' : hostIcon(HOME_HOST)} size={13} tone={recover ? 'fg' : 'dim'} className={recover ? 'vl-pulse' : undefined} />
-                  {recover ? `Recovering ${recover.done}/${recover.total}` : `Recover desk (${desk.length})`}
-                </Press>
-              )}
-            </GroupHead>
-            <div className="vc-rows">{g.rows.map(item)}</div>
-            {g.key === 'recent' && recent.length > RECENT_SHOWN && (
-              <Press className="vc-showmore" onPress={onToggleRecent}>
-                {!recentAll && <Icon name="add" size={14} tone="dim" />}
-                {recentAll ? 'Show fewer' : `Show ${recent.length - RECENT_SHOWN} more`}
-              </Press>
+      {asking.length > 0 && (
+        <section className="vc-group vl-panel" data-g="asking">
+          <GroupHead icon={GROUP_ICON.asking.icon} tone={GROUP_ICON.asking.tone} glow label="Asking" n={asking.length} i={k++}>
+            {stopOn === 'asking' && <StopAllButton vm={stopAll} />}
+          </GroupHead>
+          <div className="vc-rows">{asking.map((s) => item(s))}</div>
+        </section>
+      )}
+      {live.length > 0 && (
+        <section className="vc-group vl-panel" data-g="live" data-folded={!liveOpen || undefined}>
+          <GroupHead
+            icon={liveLit ? GROUP_ICON.live.icon : 'idle'}
+            tone={liveLit ? GROUP_ICON.live.tone : 'dim'}
+            glow={liveLit}
+            label="Live"
+            n={live.length}
+            i={k++}
+            fold={{ open: liveOpen, onToggle: () => onFold('live') }}
+          >
+            {stopOn === 'live' && <StopAllButton vm={stopAll} />}
+          </GroupHead>
+          {liveOpen && <div className="vc-rows">{live.map((s) => item(s))}</div>}
+        </section>
+      )}
+      {recent.length > 0 && (
+        <>
+          {/* Recent: a caption over one panel per area, the classic board's grouping and order */}
+          <header className="vc-sec vl-build" style={iv(k++)}>
+            <span className="vc-sec-l">
+              <Icon name={GROUP_ICON.recent.icon} size={14} tone="dim" />
+              <span className="vc-ghead-t">Recent</span>
+              <span className="vc-ghead-n">{recent.length}</span>
+            </span>
+            {(desk.length > 0 || recover) && recoverBtn(
+              desk,
+              recover ? `Recovering ${recover.done}/${recover.total}` : `Recover desk (${desk.length})`,
+              area === 'all' ? '' : `${areaName(area)} `,
             )}
-          </section>
-        )
-      })}
+          </header>
+          <div className="vc-areas">
+            {areas.map((g) => {
+              const areaDesk = splitDesk ? desk.filter((s) => s.area === g.area) : []
+              const more = moreAreas.has(g.area)
+              return (
+                <section key={g.area || 'other'} className="vc-group vl-panel" data-g="recent" data-area={g.area || 'other'} data-folded={!g.open || undefined}>
+                  <GroupHead
+                    icon={areaIcon(g.area)}
+                    label={areaName(g.area)}
+                    n={g.rows.length}
+                    i={k++}
+                    fold={{ open: g.open, onToggle: () => onFold(areaFold(g.area)) }}
+                  >
+                    {areaDesk.length > 0 && !recover && recoverBtn(areaDesk, `Recover ${areaDesk.length}`, `${areaName(g.area)} `, true)}
+                  </GroupHead>
+                  {g.open && <div className="vc-rows">{g.shown.map((s) => item(s, true))}</div>}
+                  {g.open && g.rows.length > AREA_SHOWN && (
+                    <Press className="vc-showmore" onPress={() => onToggleMore(g.area)}>
+                      {!more && <Icon name="add" size={14} tone="dim" />}
+                      {more ? 'Show fewer' : `Show ${g.rows.length - AREA_SHOWN} more`}
+                    </Press>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        </>
+      )}
       {done.length > 0 && (
         doneOpen ? (
           <section className="vc-group vl-panel" data-g="done">
             <GroupHead icon="done" label="Done" n={done.length} i={k++}>
               <Press className="vc-ghead-act" onPress={onToggleDone}>Hide done</Press>
             </GroupHead>
-            <div className="vc-rows">{doneShown.map(item)}</div>
+            <div className="vc-rows">{doneShown.map((s) => item(s))}</div>
             {done.length > doneShown.length && (
               <Press className="vc-showmore" onPress={onMoreDone}>
                 <Icon name="add" size={14} tone="dim" />Show {Math.min(DONE_STEP, done.length - doneShown.length)} more
@@ -2020,22 +2227,27 @@ function SessionBoard({
   )
 }
 
-const TERMS_SHOWN = 4
+const TERMS_SHOWN = 10
 
 /**
  * Every tmux pane on odin (Claude on thor, Claude on odin, shells, new
  * sessions the board has not picked up yet), oldest first so a busy one never
- * jumps under a finger. A tap reattaches by that pane's own name; the X closes
- * it with two taps, which ends its Claude and leaves the conversation resumable.
+ * jumps under a finger. A tap reattaches by that pane's own name; where
+ * windows exist a second button opens it in its own window; the X closes it
+ * with two taps, which ends its Claude and leaves the conversation resumable.
+ * The header folds the group.
  */
-function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, onClosed }: {
+function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, open, onFold, onReattach, onWindow, onClosed }: {
   list: TermSession[]
   titles: Map<string, string>
   now: number
   hostLabel: (id: string) => string
   k0: number
   stopAll: ReactNode
+  open: boolean
+  onFold: () => void
   onReattach: (name: string) => void
+  onWindow?: (t: TermSession, label: string) => void
   onClosed: () => void
 }) {
   const [all, setAll] = useState(false)
@@ -2063,9 +2275,9 @@ function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, 
   }
   let k = k0
   return (
-    <section className="vc-group vl-panel" data-g="terms">
-      <GroupHead icon="claude" label="Open terminals" n={list.length} i={k++}>{stopAll}</GroupHead>
-      <div className="vc-rows">
+    <section className="vc-group vl-panel" data-g="terms" data-folded={!open || undefined}>
+      <GroupHead icon="claude" label="Open terminals" n={list.length} i={k++} fold={{ open, onToggle: onFold }}>{stopAll}</GroupHead>
+      {open && <div className="vc-rows">
         {shown.map((t) => {
           const label = termLabel(t, titles)
           const on = armed === t.name
@@ -2095,6 +2307,17 @@ function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, 
                   </span>
                 </span>
               </Press>
+              {onWindow && !t.dead && (
+                <Press
+                  className="vc-term-pop"
+                  disabled={closing === t.name}
+                  aria-label={`Open ${label} in a new window`}
+                  title="Open in a new window"
+                  onPress={() => onWindow(t, label)}
+                >
+                  <AnyIcon name="popout" size={15} tone="dim" />
+                </Press>
+              )}
               <Press
                 className="vc-term-x"
                 data-armed={on || undefined}
@@ -2109,8 +2332,8 @@ function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, 
             </div>
           )
         })}
-      </div>
-      {sorted.length > TERMS_SHOWN && (
+      </div>}
+      {open && sorted.length > TERMS_SHOWN && (
         <Press className="vc-showmore" onPress={() => setAll((v) => !v)}>
           {!all && <Icon name="add" size={14} tone="dim" />}
           {all ? 'Show fewer' : `Show ${sorted.length - TERMS_SHOWN} more`}
@@ -2123,16 +2346,14 @@ function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, onReattach, 
 /** The row's way back in, as its button says it: what Open will do for this session from this device. */
 type OpenState = { label: string; hint: string; can: boolean; busy: boolean }
 
-function openState(s: SessionVM, pane: string | null, where: Where, busy: Busy | undefined, hostLabel: (id: string) => string): OpenState {
+function openState(s: SessionVM, pane: string | null, busy: Busy | undefined, hostLabel: (id: string) => string): OpenState {
   const home = hostLabel(HOME_HOST)
   if (busy === 'open') return { label: 'Opening', hint: 'Opening', can: false, busy: true }
   if (busy) return { label: 'Open', hint: busy === 'stop' ? 'Stopping' : 'Saving', can: false, busy: false }
   if (pane) return { label: 'Reattach', hint: 'Go to the terminal already running this session', can: true, busy: false }
   if (s.live) return { label: `Running on ${hostLabel(s.host)}`, hint: `Running on ${hostLabel(s.host)}'s screen. Stop it to open it here.`, can: false, busy: false }
   if (s.host !== HOME_HOST) return { label: `Open on ${hostLabel(s.host)}`, hint: `Open a terminal on ${hostLabel(s.host)}, where this session lives`, can: true, busy: false }
-  if (where.inPage) return { label: 'Open', hint: `Open it here, running on ${home}`, can: true, busy: false }
-  if (where.remote) return { label: 'Open here', hint: `Open a terminal here, resuming over SSH to ${home}`, can: true, busy: false }
-  return { label: `Open on ${home}`, hint: `Open a terminal on ${home}`, can: true, busy: false }
+  return { label: 'Open', hint: `Open it inside Valkyrie, running on ${home}`, can: true, busy: false }
 }
 
 /** Select mode's check box, in the state icon's place. */
@@ -2144,7 +2365,7 @@ function PickBox({ on }: { on: boolean }) {
   )
 }
 
-function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
+function SessionItem({ s, i, ctx, noArea = false }: { s: Row; i: number; ctx: RowCtx; noArea?: boolean }) {
   const liveRow = isLive(s)
   const busy = ctx.busy.get(s.id)
   const locked = busy !== undefined
@@ -2158,9 +2379,14 @@ function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
   const actions: RowAction[] = liveRow
     ? [{ id: 'stop', label: 'Stop', icon: 'stop', tone: 'acc2', run: () => ctx.onStop(s), disabled: locked }, finish]
     : [finish]
-  // thor's own screen, beside Open: only where Open goes somewhere else (the page, or here
-  // over SSH), and only while nothing runs the session (a second Claude on one transcript)
-  const screen = s.host === HOME_HOST && !s.live && !pane && (ctx.where.inPage || ctx.where.remote)
+  // the screens, beside Open (which is inside Valkyrie): only for thor's sessions and only
+  // while nothing runs the session (a second Claude on one transcript)
+  const free = s.host === HOME_HOST && !s.live && !pane
+  // its own window: the pane it runs in, or a new pane for a thor session nothing runs
+  const pop = ctx.where.windows && !locked && (!!pane || free)
+  const hoverExtra: RowAction[] = pop
+    ? [{ id: 'window', label: 'New window', icon: 'popout', tone: 'fg', run: () => ctx.onWindow(s) }]
+    : []
   return (
     <div
       className="vc-item"
@@ -2178,6 +2404,7 @@ function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
         onFull={() => ctx.onDone(s)}
         onTap={() => (selecting ? ctx.onPick(s.id) : ctx.onToggle(s.id))}
         onLong={() => (selecting ? ctx.onPick(s.id) : ctx.onPickStart(s.id))}
+        hoverExtra={hoverExtra}
         selecting={selecting}
         picked={picked}
         expanded={expanded}
@@ -2198,7 +2425,7 @@ function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
             <span className="vc-state" data-a={s.activity}>{STATE_WORD[s.activity]}{s.done ? ' · done' : ''}</span>
           ) : s.done ? (
             <span className="vc-area" data-done>done</span>
-          ) : ctx.showArea && s.area ? (
+          ) : ctx.showArea && !noArea && s.area ? (
             <span className="vc-area">{areaName(s.area)}</span>
           ) : null}
         </span>
@@ -2208,10 +2435,15 @@ function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
           s={s}
           live={liveRow}
           locked={locked}
-          way={openState(s, pane, ctx.where, busy, ctx.hostLabel)}
-          screen={screen ? `On ${ctx.hostLabel(HOME_HOST)}'s screen` : null}
+          way={openState(s, pane, busy, ctx.hostLabel)}
+          home={ctx.hostLabel(HOME_HOST)}
+          screen={free}
+          local={free && ctx.where.remote}
+          pop={pop}
           onOpen={() => ctx.onOpen(s)}
+          onWindow={() => ctx.onWindow(s)}
           onScreen={() => ctx.onScreen(s)}
+          onLocal={() => ctx.onLocal(s)}
           onDone={() => (s.done ? ctx.onUndo(s) : ctx.onDone(s))}
           onStop={() => ctx.onStop(s)}
         />
@@ -2220,17 +2452,29 @@ function SessionItem({ s, i, ctx }: { s: Row; i: number; ctx: RowCtx }) {
   )
 }
 
-/** Under a tapped row: getting back into the session is the point of the page, so Open leads. */
-function RowStrip({ s, live, locked, way, screen, onOpen, onScreen, onDone, onStop }: {
+/**
+ * Under a tapped row: getting back into the session is the point of the page,
+ * so Open (inside Valkyrie) leads, then its own window, thor's screen and this
+ * screen where those are ways in, then copy, done and stop.
+ */
+function RowStrip({ s, live, locked, way, home, screen, local, pop, onOpen, onWindow, onScreen, onLocal, onDone, onStop }: {
   s: Row
   live: boolean
   /** a write for this row is in flight */
   locked: boolean
   way: OpenState
-  /** the "resume on thor's screen" label, when that is a second way in */
-  screen: string | null
+  /** thor's name, for the screen button */
+  home: string
+  /** resume on thor's own screen is a second way in */
+  screen: boolean
+  /** the desktop app off thor: resume on this screen over SSH */
+  local: boolean
+  /** open it in its own window */
+  pop: boolean
   onOpen: () => void
+  onWindow: () => void
   onScreen: () => void
+  onLocal: () => void
   /** Done, or Undo on a done row */
   onDone: () => void
   onStop: () => void
@@ -2257,12 +2501,24 @@ function RowStrip({ s, live, locked, way, screen, onOpen, onScreen, onDone, onSt
           <Icon name={way.busy ? 'refresh' : 'claude'} size={15} tone="fg" glow={way.can} className={way.busy ? 'vl-pulse' : undefined} />
           <span>{way.label}</span>
         </Press>
+        {pop && (
+          <Press className="vc-sact" disabled={locked} title="Open it inside Valkyrie, in a window of its own" onPress={onWindow}>
+            <AnyIcon name="popout" size={15} tone="dim" />
+            <span>New window</span>
+          </Press>
+        )}
         {screen && (
-          <Press className="vc-sact" disabled={locked} title={`Resume it in a terminal window on ${screen.slice(3)}, so it lives there and outlasts this connection`} onPress={onScreen}>
+          <Press className="vc-sact" disabled={locked} title={`Resume it in a terminal window on ${home}'s screen, so it lives there and outlasts this connection`} onPress={onScreen}>
             <Icon name={hostIcon(HOME_HOST)} size={15} tone="dim" />
             {/* the picker's word on the phone, the whole place where there is room */}
             <span className="vc-iact-s">On screen</span>
-            <span className="vc-iact-l">{screen}</span>
+            <span className="vc-iact-l">{`On ${home}'s screen`}</span>
+          </Press>
+        )}
+        {local && (
+          <Press className="vc-sact" disabled={locked} title={`Resume it in a terminal on this screen, over SSH to ${home}`} onPress={onLocal}>
+            <Icon name="mimir" size={15} tone="dim" />
+            <span>On this screen</span>
           </Press>
         )}
         <Press
@@ -2299,15 +2555,17 @@ function RowStrip({ s, live, locked, way, screen, onOpen, onScreen, onDone, onSt
 // still for LONG_MS (or a right click) picks the row instead; in select mode
 // nothing slides and a tap toggles the pick.
 
-type RowAction = { id: string; label: string; icon: IconName; tone: 'fg' | 'acc2'; run: () => void; disabled?: boolean }
+type RowAction = { id: string; label: string; icon: AnyIconName; tone: 'fg' | 'acc2'; run: () => void; disabled?: boolean }
 const ACT_W = 78
 const SWIPE_ZONE = 72
 
-function SwipeRow({ i, open, setOpen, actions, onFull, onTap, onLong, selecting, picked, expanded, children }: {
+function SwipeRow({ i, open, setOpen, actions, hoverExtra = [], onFull, onTap, onLong, selecting, picked, expanded, children }: {
   i: number
   open: boolean
   setOpen: (open: boolean) => void
   actions: RowAction[]
+  /** mouse only: more actions ahead of `actions` on hover (its own window); never in the swipe */
+  hoverExtra?: RowAction[]
   onFull: () => void
   onTap: () => void
   /** a long press (or right click) */
@@ -2475,7 +2733,7 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, onLong, selecting,
       <div className="vc-acts" style={{ width: actions.length * ACT_W }} aria-hidden={!open}>
         {actions.map((a) => (
           <Press key={a.id} className="vc-act" data-tone={a.tone} tabIndex={open ? 0 : -1} disabled={a.disabled} onPress={a.run}>
-            <Icon name={a.icon} size={18} tone={a.tone === 'acc2' ? 'acc2' : 'ink'} />
+            <AnyIcon name={a.icon} size={18} tone={a.tone === 'acc2' ? 'acc2' : 'ink'} />
             <span>{a.label}</span>
           </Press>
         ))}
@@ -2496,9 +2754,9 @@ function SwipeRow({ i, open, setOpen, actions, onFull, onTap, onLong, selecting,
       </Press>
       {/* mouse: the same actions on hover, so desktop does not need a drag */}
       <div className="vc-hover-acts">
-        {actions.map((a) => (
+        {[...hoverExtra, ...actions].map((a) => (
           <Press key={a.id} className="vc-hact" data-tone={a.tone} tabIndex={-1} disabled={a.disabled} onPress={a.run}>
-            <Icon name={a.icon} size={14} tone={a.tone === 'acc2' ? 'acc2' : 'dim'} />
+            <AnyIcon name={a.icon} size={14} tone={a.tone === 'acc2' ? 'acc2' : 'dim'} />
             {a.label}
           </Press>
         ))}
@@ -2535,7 +2793,43 @@ function ProjIcon({ p, on, size = 16 }: { p: Counted; on?: boolean; size?: numbe
   return <Icon name="projects" size={size} tone={p.asking > 0 ? 'acc2' : lit ? 'fg' : 'dim'} glow={lit} className="vc-picon" />
 }
 
-function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpen }: {
+/**
+ * One project row: a press opens it (its own window where windows exist,
+ * here on a touch screen); `onHere`, where given, is the plain "Open here"
+ * beside it (the column on desktop, a sheet elsewhere).
+ */
+function ProjRowItem({ p, k, selected, archived = false, onOpen, onHere, children }: {
+  p: Counted
+  k: number
+  selected: boolean
+  archived?: boolean
+  onOpen: (p: ProjectVM) => void
+  onHere?: (p: ProjectVM) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="vc-pline vl-build" style={iv(k)} data-on={selected || undefined} data-archived={archived || undefined}>
+      <Press
+        className="vc-prow"
+        data-on={selected || undefined}
+        data-archived={archived || undefined}
+        title={onHere ? `Open ${p.name} in its own window` : undefined}
+        onPress={() => onOpen(p)}
+      >
+        <ProjIcon p={p} on={selected} />
+        {children}
+      </Press>
+      {onHere && (
+        <Press className="vc-phere" aria-label={`Open ${p.name} here`} title="Open here, in this page" onPress={() => onHere(p)}>
+          <AnyIcon name="here" size={14} tone={selected ? 'fg' : 'dim'} />
+          <span>Open here</span>
+        </Press>
+      )}
+    </div>
+  )
+}
+
+function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpen, onHere }: {
   list: Counted[]
   area: string
   loading: boolean
@@ -2544,6 +2838,7 @@ function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpe
   now: number
   selected: string | null
   onOpen: (p: ProjectVM) => void
+  onHere?: (p: ProjectVM) => void
 }) {
   if (loading) {
     return (
@@ -2575,20 +2870,13 @@ function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpe
           <GroupHead icon={areaIcon(a)} label={areaName(a)} n={rows.length} i={k++} />
           <div className="vc-rows">
             {rows.map((p) => (
-              <Press
-                key={p.id}
-                className="vc-prow vl-build"
-                style={iv(Math.min(k++, 16))}
-                data-on={selected === p.id || undefined}
-                onPress={() => onOpen(p)}
-              >
-                <ProjIcon p={p} on={selected === p.id} />
+              <ProjRowItem key={p.id} p={p} k={Math.min(k++, 16)} selected={selected === p.id} onOpen={onOpen} onHere={onHere}>
                 <span className="vc-row-main">
                   <span className="vc-row-title">{p.name}</span>
                   <span className="vc-prow-next">{p.nextAction || 'No next action set'}</span>
                 </span>
                 <ProjMeta p={p} now={now} />
-              </Press>
+              </ProjRowItem>
             ))}
           </div>
         </section>
@@ -2600,7 +2888,7 @@ function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpe
 /**
  * Show archived, under the list: a quiet text toggle, and while it is on the
  * archived projects of the picked area as one more group. A tap opens one
- * (its detail offers Restore).
+ * here, never in its own window (its detail offers Restore).
  */
 function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected, onOpen }: {
   on: boolean
@@ -2634,15 +2922,7 @@ function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected,
             </header>
             <div className="vc-rows">
               {shown.map((p, n) => (
-                <Press
-                  key={p.id}
-                  className="vc-prow vl-build"
-                  style={iv(Math.min(n + 1, 12))}
-                  data-on={selected === p.id || undefined}
-                  data-archived
-                  onPress={() => onOpen(p)}
-                >
-                  <ProjIcon p={p} on={selected === p.id} />
+                <ProjRowItem key={p.id} p={p} k={Math.min(n + 1, 12)} selected={selected === p.id} archived onOpen={onOpen}>
                   <span className="vc-row-main">
                     <span className="vc-row-title">{p.name}</span>
                     <span className="vc-prow-next">{p.nextAction || p.summary || 'No next action set'}</span>
@@ -2651,7 +2931,7 @@ function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected,
                     <span className="vc-ago" data-a="closed">{ago(p.updated, now)}</span>
                     {area === 'all' && <span className="vc-area">{areaName(p.area)}</span>}
                   </span>
-                </Press>
+                </ProjRowItem>
               ))}
             </div>
           </section>
@@ -2760,7 +3040,7 @@ function useSessionBriefs(ids: string[], index: SessionIndex): Record<string, Br
 /** a project's open sessions shown before "Show N more" */
 const PROJ_SESS_SHOWN = 8
 
-function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, showArea }: {
+function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, onWindow, showArea }: {
   p: ProjectVM
   index: SessionIndex
   lookup: Lookup
@@ -2770,6 +3050,8 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, sho
   acts: SessActs
   /** the project left the list (archived while the archived fold is closed) */
   onArchived: () => void
+  /** where windows exist: this project in its own window */
+  onWindow?: () => void
   /** the sheet already names the area in its header */
   showArea?: boolean
 }) {
@@ -3050,6 +3332,11 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, sho
         )}
         {note && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{note}</p>}
         <div className="vc-pd-links">
+          {onWindow && (
+            <Press className="vl-link" title="This project in a window of its own" onPress={onWindow}>
+              <AnyIcon name="popout" size={13} tone="dim" />New window
+            </Press>
+          )}
           {/* the classic page keeps files, activity and undo, agents and automations, and note editing */}
           <Press
             className="vl-link"
@@ -3391,28 +3678,6 @@ function ProjReminders({ projectId, list, now, k, onChanged }: {
   )
 }
 
-/** Beside Sessions on desktop (and under the loading line on the phone): the projects at a glance. */
-function ProjectGlance({ list, now, onOpen }: { list: Counted[]; now: number; onOpen: (p: ProjectVM) => void }) {
-  if (!list.length) return null
-  return (
-    <section className="vc-glance vl-panel">
-      <GroupHead icon="projects" label="Projects" n={list.length} i={5} />
-      <div className="vc-rows">
-        {list.slice(0, 9).map((p, n) => (
-          <Press key={p.id} className="vc-grow vl-build" style={iv(Math.min(6 + n, 16))} onPress={() => onOpen(p)}>
-            <ProjIcon p={p} size={15} />
-            <span className="vc-row-main">
-              <span className="vc-grow-name">{p.name}</span>
-              <span className="vc-grow-next">{p.nextAction || 'No next action set'}</span>
-            </span>
-            <ProjMeta p={p} now={now} />
-          </Press>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 // ---------- new session: machines, then their launch targets as glass plates ----------
 
 const THOR_ONLY: SessionHost[] = [{ host: HOME_HOST, configured: true, reachable: true, canLaunch: true, canPage: true, detail: null }]
@@ -3452,72 +3717,87 @@ function useOdinTargets(): Live<OdinTargets> {
   }, 5 * 60_000)
 }
 
-type ThorWay = 'page' | 'screen'
+/**
+ * Where a new session in a host's target opens: inside Valkyrie (a pane the
+ * page attaches to; it reaches thor only), on the host's own screen (its
+ * launcher agent), or here (the desktop app off thor: a terminal on this
+ * screen over SSH to thor).
+ */
+type Way = 'page' | 'screen' | 'here'
+/** the busy key of a start from this device's screen; '@' never starts a host name */
+const HERE_SLOT = '@here'
 
-function TargetPicker({ area, hostLabel, where, starting, error, onPick, onScreen, onOdin }: {
+function TargetPicker({ area, hostLabel, where, roomy, starting, error, onPick, onOdin }: {
   area: string
   hostLabel: (id: string) => string
   where: Where
-  /** the in-flight start's busy key: `${host}:${target}`, or a slot's */
+  /** a wide screen: inside Valkyrie offers every target, not only the phone's short list */
+  roomy: boolean
+  /** the in-flight start's busy key: `${slot}:${target}` */
   starting: string | null
   /** the last start the host refused */
   error: string | null
-  onPick: (t: TargetVM, h: SessionHost) => void
-  /** thor's own screen: Windows Terminal on its desk, so the session lives on thor */
-  onScreen: (t: TargetVM) => void
+  /** a start in `way`; `slot` is the plate's busy key prefix */
+  onPick: (t: TargetVM, h: SessionHost, way: Way, slot: string) => void
   /** the backup host: Claude on odin itself, in a pane the page attaches to */
   onOdin: (t: TargetVM) => void
 }) {
   // /api/session-hosts: which machines can start a session (falls back to thor on an older backend)
   const hosts = useLive<SessionHost[]>('claude.sessionHosts', fetchSessionHosts, 5 * 60_000)
-  const [way, setWay] = useState<ThorWay>('page')
+  // inside Valkyrie by default on every device, the desktop app included
+  const [way, setWay] = useState<Way>('page')
   const list = (hosts.data?.length ? hosts.data : THOR_ONLY)
     .slice()
     .sort((a, b) => Number(b.host === HOME_HOST) - Number(a.host === HOME_HOST) || Number(b.canLaunch) - Number(a.canLaunch) || a.host.localeCompare(b.host))
   // Odin sits right under thor, and leads while thor is not answering: that is when the backup is the point.
   const thorAt = list.findIndex((h) => h.host === HOME_HOST)
-  const odinAt = thorAt >= 0 && !list[thorAt].canLaunch ? 0 : thorAt + 1
+  const odinAt = thorAt >= 0 && !list[thorAt].canLaunch && !list[thorAt].canPage ? 0 : thorAt + 1
   const rows: (SessionHost | null)[] = [...list.slice(0, odinAt), null, ...list.slice(odinAt)]
+  const thor = hostLabel(HOME_HOST)
   return (
     <div className="vc-targets vl-build-on">
       {error && <p className="vc-act-err" role="alert"><Icon name="alert" size={13} tone="acc2" />{error}</p>}
       {rows.map((h, n) => {
         if (!h) return <OdinSection key={ODIN_SLOT} k0={n * 6} starting={starting} hostLabel={hostLabel} onPick={onOdin} />
-        // the in-page terminal is a pane on odin that reaches thor only, and offers the phone targets
-        const inPage = where.inPage && h.canPage
-        const here = !inPage && where.remote && h.host === HOME_HOST
-        // From the page, thor can also open on its own screen through its launcher agent.
-        const canScreen = inPage && h.host === HOME_HOST && h.canLaunch
-        const screen = canScreen && way === 'screen'
-        const props: TargetListProps = screen
-          ? { host: h.host, slot: SCREEN_SLOT, area, k0: n * 6 + 2, phoneOnly: false, starting, onPick: onScreen }
-          : { host: h.host, area, k0: n * 6 + (canScreen ? 2 : 1), phoneOnly: inPage, starting, onPick: (t: TargetVM) => onPick(t, h) }
+        const home = h.host === HOME_HOST
+        // the ways this host offers from this device, inside Valkyrie first
+        const ways: Way[] = home
+          ? [...(h.canPage ? ['page' as const] : []), ...(h.canLaunch ? ['screen' as const] : []), ...(where.remote ? ['here' as const] : [])]
+          : h.canLaunch ? ['screen'] : []
+        const on = ways.includes(way) ? way : ways[0]
+        const slot = on === 'page' ? h.host : on === 'here' ? HERE_SLOT : home ? SCREEN_SLOT : h.host
+        const how = on === 'page' ? 'opens inside Valkyrie' : on === 'here' ? 'opens on this screen' : home ? `opens on ${thor}'s screen` : 'opens on its screen'
+        const props: TargetListProps | null = on
+          ? { host: h.host, slot, area, k0: n * 6 + (ways.length > 1 ? 2 : 1), phoneOnly: on === 'page' && !roomy, starting, onPick: (t: TargetVM) => onPick(t, h, on, slot) }
+          : null
         return (
-          <section key={h.host} className="vc-host" data-off={!h.canLaunch || undefined}>
+          <section key={h.host} className="vc-host" data-off={!on || undefined}>
             <header className="vc-host-head vl-build" style={iv(n * 6)}>
-              <Icon name={hostIcon(h.host)} size={17} tone={h.canLaunch ? 'fg' : 'faint'} glow={h.canLaunch} />
+              <Icon name={hostIcon(h.host)} size={17} tone={on ? 'fg' : 'faint'} glow={!!on} />
               <span className="vc-host-name">{hostLabel(h.host)}</span>
               <span className="vc-host-how">
-                {!h.canLaunch && <Icon name={!h.reachable ? 'offline' : 'alert'} size={12} tone="acc2" />}
-                {h.canLaunch
-                  ? screen ? `opens on ${hostLabel(h.host)}'s screen` : inPage ? 'opens in the page' : here ? 'opens on this screen' : 'opens on its screen'
-                  : !h.reachable ? 'not answering' : 'cannot start sessions'}
+                {!on && <Icon name={!h.reachable ? 'offline' : 'alert'} size={12} tone="acc2" />}
+                {on ? how : !h.reachable ? 'not answering' : 'cannot start sessions'}
               </span>
             </header>
-            {canScreen && (
+            {ways.length > 1 && on && (
               <div className="vc-way vl-build" style={iv(n * 6 + 1)}>
-                <Segmented<ThorWay>
-                  options={[{ value: 'page', label: 'In page', icon: 'phone' }, { value: 'screen', label: 'On screen', icon: 'thor' }]}
-                  value={way}
+                <Segmented<Way>
+                  options={ways.map((w) => (w === 'page'
+                    ? { value: w, label: 'In Valkyrie', icon: 'claude' as IconName }
+                    : w === 'screen'
+                      ? { value: w, label: `On ${thor}'s screen`, icon: hostIcon(HOME_HOST) }
+                      : { value: w, label: 'On this screen', icon: 'mimir' as IconName }))}
+                  value={on}
                   onChange={setWay}
                 />
               </div>
             )}
-            {!h.canLaunch ? (
+            {!props ? (
               <p className="vc-pd-none vl-build" style={iv(n * 6 + 1)}>
                 {!h.reachable ? `${hostLabel(h.host)} did not answer${h.detail ? ` (${h.detail})` : ''}. Try again in a minute.` : h.detail ?? 'no launcher agent'}
               </p>
-            ) : h.host === HOME_HOST ? (
+            ) : home ? (
               <ThorTargets {...props} />
             ) : (
               <RemoteTargets {...props} />

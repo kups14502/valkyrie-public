@@ -320,7 +320,8 @@ export function writeTests() {
       fail: [403],
       ready: async (page) => {
         await openPicker(page, /^\s*Alpha\s*$/)
-        await page.tap({ sel: '.vc-sheet .vc-way [role="radio"]', text: /On screen/ })
+        // the picker's ways read "In Valkyrie" and "On <thor>'s screen" since round 5
+        await page.tap({ sel: '.vc-sheet .vc-way [role="radio"]', text: /^\s*On .+'s screen\s*$/ })
         await page.waitFor(() => [...document.querySelectorAll('.vc-sheet .vc-plate')].some((e) => /^\s*Gamma\s*$/.test(e.textContent || '')), { message: 'On screen did not list every thor target' })
       },
       act: (t, page) => page.tap({ sel: '.vc-sheet .vc-plate', text: /^\s*Alpha\s*$/ }),

@@ -17,8 +17,9 @@ import {
 import { readText as readClipboard } from '../../lib/clipboard'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { uploadLine, useThorUpload } from '../../lib/useThorUpload'
-import { BASE, StatusStrip } from '../kit/shell'
+import { BASE, StatusStrip, desktopWindow } from '../kit/shell'
 import { Button, Glyph, IconButton, Press, ToastHost, cx, toast } from '../kit/ui'
+import { closeDetached, openDetached, setDetachedTitle } from '../kit/windows'
 import { Icon, hostIcon } from '../kit/icons'
 import { applyPalette, useFont, usePalette, useStoredMode } from '../kit/theme'
 import { ActivityStrip, Choices, StateGlyph } from '../kit/termskin'
@@ -81,14 +82,21 @@ const ANSWER_KEYS = new Set<KeyId>(['esc', 'y', 'n', '1', '2', '3'])
 const MODE_LABEL: Record<CliMode, string> = { default: '', accept: '⏵⏵ accept edits', plan: '⏸ plan mode', bypass: 'bypass on' }
 const CONN_WORD = { idle: 'idle', connecting: 'connecting', live: 'live', closed: 'offline' } as const
 
-/** /m/ai/term/:name. One page per session: a switch remounts it, so nothing read off one pane lingers on the next. */
-export default function TermScreen() {
+/**
+ * /m/ai/term/:name. One page per session: a switch remounts it, so nothing read off one pane lingers on the next.
+ *
+ * `standalone`: the pop-out window (/m/w/term/:name, kit/windows.ts). It shows
+ * one session for its whole life, because its window is labeled by that
+ * session: no Back and no Settings, another session (picked, started or
+ * reopened) opens in a window of its own, and closing the session closes the window.
+ */
+export default function TermScreen({ standalone = false }: { standalone?: boolean }) {
   const { name = '' } = useParams()
   if (!TERM_NAME_RE.test(name)) return <Navigate to={`${BASE}/ai/sessions`} replace />
-  return <Term key={name} name={name} />
+  return <Term key={name} name={name} standalone={standalone} />
 }
 
-function Term({ name }: { name: string }) {
+function Term({ name, standalone }: { name: string; standalone: boolean }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [params] = useSearchParams()
@@ -474,9 +482,15 @@ function Term({ name }: { name: string }) {
 
   // ---------- sessions ----------
 
-  const go = useCallback((n: string) => {
-    navigate(v2TermPath(n, fromProject ? backParam : null), { replace: true })
-  }, [navigate, fromProject, backParam])
+  const go = useCallback((n: string, label?: string) => {
+    if (standalone) openDetached({ kind: 'session', name: n, title: label })
+    else navigate(v2TermPath(n, fromProject ? backParam : null), { replace: true })
+  }, [navigate, fromProject, backParam, standalone])
+  // where the page goes once its session is over: the list, or (a pop-out) nowhere, the window closes
+  const leave = useCallback(() => {
+    if (standalone) closeDetached(backTo)
+    else navigate(backTo, { replace: true })
+  }, [navigate, backTo, standalone])
 
   const back = () => {
     const st = window.history.state as { idx?: number } | null
@@ -496,7 +510,7 @@ function Term({ name }: { name: string }) {
 
   // fallback is tried once on a 404, the answer for a project archived since
   // its pane opened, so a reopen does not end with no pane at all.
-  const openSession = async (body: TermOpen, fallback?: TermOpen) => {
+  const openSession = async (body: TermOpen, fallback?: TermOpen): Promise<string | null> => {
     setBusy(true)
     setError(null)
     try {
@@ -513,9 +527,11 @@ function Term({ name }: { name: string }) {
       seedTerminal(qc, data)
       setPicker(false)
       setSheet(false)
-      if (data.name) go(data.name)
+      if (data.name) go(data.name, body.label)
+      return data.name || null
     } catch (e) {
       setError(errText(e))
+      return null
     } finally {
       setBusy(false)
     }
@@ -523,15 +539,18 @@ function Term({ name }: { name: string }) {
 
   const closeSession = async (n: string) => {
     setError(null)
+    let killed = true
     try {
       await killTermSession(n)
     } catch (e) {
+      killed = false
       setError(errText(e))
     }
     await qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
     // Closing a Claude session here ends it on thor too, so the board's live set just changed.
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
-    if (n === name) navigate(backTo, { replace: true })
+    // a pop-out that could not close its pane stays open, showing why
+    if (n === name && (killed || !standalone)) leave()
   }
 
   // Open the same thing again in place of a dead pane, the classic page's rules:
@@ -547,8 +566,9 @@ function Term({ name }: { name: string }) {
         : s.target ? { mode: s.mode, target: s.target, label, ...(s.host === 'odin' ? { host: 'odin' as const } : {}) } : null
     if (!body) return
     await killTermSession(s.name).catch(() => {})
-    if (s.projectId) await openSession({ ...body, project: s.projectId }, body)
-    else await openSession(body)
+    const opened = s.projectId ? await openSession({ ...body, project: s.projectId }, body) : await openSession(body)
+    // a pop-out: the reopened pane has its own window now, and this one's pane is gone
+    if (standalone && opened) closeDetached(backTo)
   }
 
   // Close from the More panel: two presses, because it ends Claude on thor.
@@ -568,16 +588,24 @@ function Term({ name }: { name: string }) {
 
   const choices = q && <Choices q={q} onPick={answer} />
 
+  // a pop-out names its window (and taskbar entry) after the session
+  useEffect(() => {
+    if (standalone) setDetachedTitle(`${title} · Valkyrie`)
+  }, [standalone, title])
+
   return (
-    <div className="vsk vtm" data-term-root data-phase={phase} data-direct={direct || undefined}>
+    <div className="vsk vtm" data-term-root data-phase={phase} data-direct={direct || undefined} data-standalone={standalone || undefined}>
       {up.inputs}
       <header className="vsk-head">
-        <StatusStrip onSettings={() => navigate(`${BASE}/settings`)} />
-        <div className="vsk-bar">
-          <Press className="vsk-back" aria-label={`Back to ${backWord}`} onPress={back}>
-            <Glyph name="left" size={11} />
-            <span>{backWord}</span>
-          </Press>
+        <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />
+        {/* in a pop-out the bar is title bar too: its empty parts drag the window as the strip's do */}
+        <div className="vsk-bar" data-tauri-drag-region={standalone && desktopWindow() ? 'deep' : undefined}>
+          {!standalone && (
+            <Press className="vsk-back" aria-label={`Back to ${backWord}`} onPress={back}>
+              <Glyph name="left" size={11} />
+              <span>{backWord}</span>
+            </Press>
+          )}
           <Press
             className="vsk-title vtm-switch"
             aria-expanded={sheet}
@@ -626,7 +654,7 @@ function Term({ name }: { name: string }) {
                 <header className="vtm-panel-k">Not open</header>
                 <p>This session is not running any more. It ended, or it was closed somewhere else.</p>
                 <div className="vtm-panel-acts">
-                  <Button kind="line" onPress={() => navigate(backTo, { replace: true })}>{backWord}</Button>
+                  <Button kind="line" onPress={leave}>{standalone ? 'Close window' : backWord}</Button>
                   <Button kind="line" onPress={() => setSheet(true)}>Open sessions</Button>
                 </div>
               </section>
@@ -683,7 +711,7 @@ function Term({ name }: { name: string }) {
                   const label = termLabel(s, titles)
                   return (
                     <li key={s.name} className="vtm-row" data-on={on || undefined}>
-                      <Press className="vtm-row-main" onPress={() => { setSheet(false); if (!on) go(s.name) }}>
+                      <Press className="vtm-row-main" onPress={() => { setSheet(false); if (!on) go(s.name, label) }}>
                         <Icon name={hostIcon(s.host)} size={13} tone={on ? 'fg' : 'dim'} glow={on} />
                         <span className="vtm-row-t vl-ellipsis">{label}</span>
                         <span className="vtm-row-s" data-dead={s.dead || undefined}>
@@ -774,7 +802,9 @@ function Term({ name }: { name: string }) {
                 >
                   {closeArmed ? 'Press again to close' : 'Close session'}
                 </Button>
-                <Button kind="link" onPress={() => navigate(`/sessions/terminal?s=${encodeURIComponent(name)}&classic=1`)}>Classic terminal</Button>
+                {!standalone && (
+                  <Button kind="link" onPress={() => navigate(`/sessions/terminal?s=${encodeURIComponent(name)}&classic=1`)}>Classic terminal</Button>
+                )}
               </div>
             </div>
           )}

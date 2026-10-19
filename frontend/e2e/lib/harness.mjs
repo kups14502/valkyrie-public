@@ -87,7 +87,20 @@ export async function runAll(tests, env, { concurrency = 3, onDone, gate } = {})
   const queue = tests.filter((t) => !t.background)
   const side = tests.filter((t) => t.background)
   const results = []
+  // Tests sharing a `lock` name run one at a time: a worker skips a test whose
+  // lock is held and takes the next one, so the pool keeps working meanwhile.
+  // thor's agent answers its reads one after another, so three pages reading
+  // the 390 KB session board at once wait past the 8 s the route checks allow.
+  const held = new Set()
   const one = async (test) => {
+    if (test.lock) held.add(test.lock)
+    try {
+      await runOne(test)
+    } finally {
+      if (test.lock) held.delete(test.lock)
+    }
+  }
+  const runOne = async (test) => {
     if (gate) await gate(test)
     const t = new Ctx(test, env)
     const t0 = Date.now()
@@ -112,8 +125,15 @@ export async function runAll(tests, env, { concurrency = 3, onDone, gate } = {})
     results.push(r)
     onDone?.(r)
   }
+  // the next test whose lock (if any) is free, taken off the queue; null while every one left waits on a lock
+  const next = () => {
+    const k = queue.findIndex((t) => !t.lock || !held.has(t.lock))
+    return k < 0 ? null : queue.splice(k, 1)[0]
+  }
   const worker = async () => {
-    for (let test = queue.shift(); test; test = queue.shift()) {
+    while (queue.length) {
+      const test = next()
+      if (!test) { await sleep(200); continue }
       await one(test)
       // a breath between tests, so a closing context's work does not land on the next one
       await sleep(150)

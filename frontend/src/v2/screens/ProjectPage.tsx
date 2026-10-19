@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { flushSync } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Archive, ArchiveRestore, ArrowDownToLine, Ellipsis, FileText, Link2, Unlink, type LucideIcon } from 'lucide-react'
@@ -8,8 +9,9 @@ import { ago, useLaunchTargets } from '../kit/data'
 import { apiErrorText, fetchSessionList, openTermSession } from '../../lib/api'
 import { copyText } from '../../lib/clipboard'
 import {
-  BASE_AREAS, LIMITS, MIXABLE_AREAS, PROJ_KEYS, archiveProj, createProj, fetchProjDoc, isClientArea, linkProjSession,
-  projAreasQuery, updateProj, type Exposure, type LinkItem, type ProjectPatch, type ProjStatus,
+  BASE_AREAS, LIMITS, MIXABLE_AREAS, PROJ_KEYS, addProjReminder, addProjTab, archiveProj, cancelProjReminder, createProj,
+  fetchProjDoc, isClientArea, linkProjSession, projAreasQuery, projTabItem, updateProj,
+  type Exposure, type LinkItem, type ProjectPatch, type ProjStatus,
 } from '../../lib/projectsApi'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { v2TermPath } from '../../lib/term'
@@ -31,6 +33,9 @@ import './projectpage.css'
 // - Notes: the project's markdown and links tabs, read here (edits stay on the
 //   classic page, with files, activity and agents).
 // - Session actions: the strip under a linked session (move here, stop, done, unlink).
+// - Tasks and reminders: the checklist (tick, untick, add) and the pending
+//   reminders (add, two-tap cancel). The project window (ProjectWindow.tsx)
+//   uses these; Claude.tsx still carries its own copies (ProjTasks, ProjReminders).
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
@@ -674,5 +679,307 @@ function LinkList({ items }: { items: LinkItem[] }) {
         )
       })}
     </ul>
+  )
+}
+
+// ---------- tasks and reminders ----------
+
+/**
+ * Render an input now and focus it inside the tap, or iOS keeps the keyboard
+ * down. The tap's own click lands afterwards on whatever now sits under the
+ * finger and would blur it, so focus once more on that click.
+ */
+function openAndFocus(open: () => void, ref: RefObject<HTMLInputElement | null>) {
+  flushSync(open)
+  const focus = () => ref.current?.focus({ preventScroll: true })
+  focus()
+  const done = () => {
+    window.removeEventListener('click', onClick, true)
+    window.clearTimeout(t)
+  }
+  const onClick = () => {
+    focus()
+    done()
+  }
+  window.addEventListener('click', onClick, true)
+  const t = window.setTimeout(done, 600)
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+/** "2:00 AM" today, "Sun 9:00 AM" within a week, else "Oct 24 9:00 AM" */
+const dayClock = (ms: number, now = Date.now()) => {
+  const d = new Date(ms)
+  if (d.toDateString() === new Date(now).toDateString()) return clock(ms)
+  if (Math.abs(ms - now) < 6.5 * 86_400_000) return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${clock(ms)}`
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${clock(ms)}`
+}
+/** "in 3h", "in 20m", "due now" */
+const until = (ms: number, now: number) => {
+  const d = ms - now
+  if (d < 60_000) return 'due now'
+  if (d < 3_600_000) return `in ${Math.round(d / 60_000)}m`
+  if (d < 86_400_000) return `in ${Math.round(d / 3_600_000)}h`
+  return `in ${Math.round(d / 86_400_000)}d`
+}
+
+const ARM_MS = 4000
+
+export type ProjTask = { id: string; tabId: string; text: string; done: boolean }
+export type ProjReminder = { id: string; at: number; message: string }
+
+/**
+ * The project's checklist: every open item, a tap ticks it (or unticks one
+ * ticked here, which stays in place until the view closes so a mis-tap is one
+ * more tap), and a line that adds an item to the first checklist (or makes
+ * one, named Tasks, when the project has none). Same writes as the classic
+ * checklist tab.
+ */
+export function ProjectTasks({ projectId, tasks, listTab, k, onChanged }: {
+  projectId: string
+  tasks: ProjTask[]
+  listTab: string | null
+  /** the build-in stagger index */
+  k: number
+  onChanged: () => void
+}) {
+  // the state a tap set, over the doc's state at the time: once the doc moves (it agrees, or a
+  // session changed it) the doc wins again. The ids ticked here stay listed.
+  const [over, setOver] = useState<ReadonlyMap<string, { from: boolean; to: boolean }>>(() => new Map())
+  const [kept, setKept] = useState<ReadonlySet<string>>(() => new Set())
+  const [inflight, setInflight] = useState<ReadonlySet<string>>(() => new Set())
+  const [draft, setDraft] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const doneOf = (t: ProjTask) => {
+    const o = over.get(t.id)
+    return o && o.from === t.done ? o.to : t.done
+  }
+
+  const shown = tasks.filter((t) => !t.done || kept.has(t.id))
+  const open = tasks.filter((t) => !doneOf(t)).length
+  const full = !!listTab && tasks.filter((t) => t.tabId === listTab).length >= LIMITS.itemsPerTab
+
+  const toggle = (t: ProjTask) => {
+    if (inflight.has(t.id)) return
+    const next = !doneOf(t)
+    setErr(null)
+    setOver((m) => new Map(m).set(t.id, { from: t.done, to: next }))
+    setKept((s) => new Set(s).add(t.id))
+    setInflight((s) => new Set(s).add(t.id))
+    projTabItem(projectId, t.tabId, { op: 'set', itemId: t.id, done: next })
+      .then(() => onChanged())
+      .catch((e: unknown) => {
+        setOver((m) => {
+          const n = new Map(m)
+          n.delete(t.id)
+          return n
+        })
+        setErr(`Could not ${next ? 'tick' : 'reopen'} "${t.text}": ${errText(e)}`)
+      })
+      .finally(() => setInflight((s) => {
+        const n = new Set(s)
+        n.delete(t.id)
+        return n
+      }))
+  }
+  const add = () => {
+    const text = draft.trim()
+    if (!text || adding || full) return
+    setAdding(true)
+    setErr(null)
+    const write = listTab
+      ? projTabItem(projectId, listTab, { op: 'add', text })
+      : addProjTab(projectId, { kind: 'checklist', title: 'Tasks', items: [text] })
+    write
+      .then(() => {
+        setDraft('')
+        onChanged()
+      })
+      .catch((e: unknown) => setErr(`Could not add "${text}": ${errText(e)}`))
+      .finally(() => setAdding(false))
+  }
+
+  return (
+    <section className="vc-pd-sec vl-build" style={iv(k)}>
+      <SecHead icon={<Icon name="done" size={14} tone="dim" />} label="Open tasks" n={tasks.length && open !== tasks.length ? `${open} of ${tasks.length}` : open} />
+      {shown.length > 0 && (
+        <ul className="vc-pd-tasks">
+          {shown.map((t) => {
+            const done = doneOf(t)
+            return (
+              <li key={t.id}>
+                <Press
+                  className="vc-task"
+                  role="checkbox"
+                  aria-checked={done}
+                  data-done={done || undefined}
+                  data-busy={inflight.has(t.id) || undefined}
+                  title={done ? 'Tap to reopen it' : 'Tap to tick it'}
+                  onPress={() => toggle(t)}
+                >
+                  <i className="vc-task-box">{done && <Icon name="done" size={11} tone="ink" />}</i>
+                  <span>{t.text}</span>
+                </Press>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+        <Icon name="add" size={14} tone={draft.trim() ? 'fg' : 'dim'} />
+        <input
+          className="vc-field"
+          value={draft}
+          maxLength={LIMITS.checklistText}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={full ? `Full at ${LIMITS.itemsPerTab} items` : 'Add item'}
+          aria-label="New task"
+          enterKeyHint="done"
+          autoComplete="off"
+          disabled={full}
+        />
+        {draft.trim() !== '' && (
+          <Press className="vc-sact" data-main data-busy={adding || undefined} disabled={adding || full} onPress={add}>
+            {adding ? 'Adding' : 'Add'}
+          </Press>
+        )}
+      </form>
+      <Err msg={err} />
+    </section>
+  )
+}
+
+/**
+ * Pending reminders, each with a two-tap Cancel, and a form for a new one:
+ * the text and a local date and time, sent as ISO with the Z the backend wants
+ * (the classic reminders tab's writes).
+ */
+export function ProjectReminders({ projectId, list, now, k, onChanged }: {
+  projectId: string
+  list: ProjReminder[]
+  now: number
+  k: number
+  onChanged: () => void
+}) {
+  const [form, setForm] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [at, setAt] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [armed, setArmed] = useState<string | null>(null)
+  const [canceling, setCanceling] = useState<string | null>(null)
+  // canceled here, hidden until the doc stops listing them
+  const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set())
+  const msgRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(null), ARM_MS)
+    return () => clearTimeout(t)
+  }, [armed])
+
+  const shown = list.filter((r) => !gone.has(r.id))
+  const full = shown.length >= LIMITS.pendingReminders
+  // datetime-local has no zone: Date reads it as this device's local time
+  const atMs = at ? new Date(at).getTime() : NaN
+  const ready = Number.isFinite(atMs) && msg.trim() !== '' && !full
+
+  const add = () => {
+    if (!ready || saving) return
+    if (atMs <= Date.now()) {
+      setErr('Pick a time in the future')
+      return
+    }
+    setSaving(true)
+    setErr(null)
+    addProjReminder(projectId, { at: new Date(atMs).toISOString(), message: msg.trim() })
+      .then(() => {
+        setMsg('')
+        setAt('')
+        setForm(false)
+        onChanged()
+        toast(`Reminder set for ${dayClock(atMs)}`)
+      })
+      .catch((e: unknown) => setErr(`Could not add the reminder: ${errText(e)}`))
+      .finally(() => setSaving(false))
+  }
+  const cancel = (r: ProjReminder) => {
+    setArmed(null)
+    setCanceling(r.id)
+    setErr(null)
+    cancelProjReminder(projectId, r.id)
+      .then(() => {
+        setGone((s) => new Set(s).add(r.id))
+        onChanged()
+      })
+      .catch((e: unknown) => setErr(`Could not cancel it: ${errText(e)}`))
+      .finally(() => setCanceling(null))
+  }
+
+  return (
+    <section className="vc-pd-sec vl-build" style={iv(k)}>
+      <SecHead icon={<Icon name="timer" size={14} tone="dim" />} label="Reminders" n={shown.length}>
+        {!form && (
+          <Press className="vc-ghead-act" disabled={full} onPress={() => openAndFocus(() => { setForm(true); setErr(null) }, msgRef)}>
+            <Icon name="add" size={13} tone="dim" />Add reminder
+          </Press>
+        )}
+      </SecHead>
+      {form && (
+        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+          <input
+            className="vc-field"
+            value={msg}
+            maxLength={LIMITS.reminderMessage}
+            onChange={(e) => setMsg(e.target.value)}
+            placeholder="What to remember"
+            ref={msgRef}
+            aria-label="Reminder text"
+            autoComplete="off"
+          />
+          <div className="vc-remform-row">
+            <input
+              className="vc-field vc-field-when"
+              type="datetime-local"
+              value={at}
+              onChange={(e) => setAt(e.target.value)}
+              aria-label="When"
+            />
+            <Press className="vc-sact" data-main data-busy={saving || undefined} disabled={!ready || saving} onPress={add}>
+              <Icon name={saving ? 'refresh' : 'timer'} size={14} tone="fg" className={saving ? 'vl-pulse' : undefined} />{saving ? 'Adding' : 'Add'}
+            </Press>
+            <Press className="vc-sact vc-iact" aria-label="Close the form" title="Close the form" onPress={() => { setForm(false); setErr(null) }}>
+              <Icon name="stop" size={15} tone="dim" />
+            </Press>
+          </div>
+        </form>
+      )}
+      {shown.length > 0 ? (
+        <div className="vc-rows">
+          {shown.map((r) => {
+            const on = armed === r.id
+            return (
+              <div key={r.id} className="vc-remrow" data-busy={canceling === r.id || undefined}>
+                <span className="vc-row-main">
+                  <span className="vc-remrow-when"><b>{dayClock(r.at, now)}</b><em>{until(r.at, now)}</em></span>
+                  <span className="vc-remrow-msg">{r.message}</span>
+                </span>
+                <Press
+                  className="vc-term-x"
+                  data-armed={on || undefined}
+                  disabled={canceling !== null}
+                  aria-label={on ? 'Cancel this reminder now' : 'Cancel this reminder'}
+                  title={on ? 'Tap again to cancel it' : 'Cancel this reminder'}
+                  onPress={() => (on ? cancel(r) : setArmed(r.id))}
+                >
+                  <Icon name="stop" size={15} tone={on ? 'acc2' : 'dim'} />
+                  {on && <span>Cancel?</span>}
+                </Press>
+              </div>
+            )
+          })}
+        </div>
+      ) : !form ? <p className="vc-pd-none">Nothing scheduled</p> : null}
+      <Err msg={err} />
+    </section>
   )
 }

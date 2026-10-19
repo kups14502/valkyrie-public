@@ -213,9 +213,20 @@ fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder
   // fail with ERR_FAILED ("can't reach this page") on the first try; because
   // the window is hidden and we only reveal on a real mount, that error is
   // never seen — and the retry in desktop_setup recovers it off-screen.
+  // Pop-out windows (session-<name>, project-<id>) share one remembered
+  // geometry per kind, so the state file does not grow a row per session.
   builder.plugin(
     tauri_plugin_window_state::Builder::default()
       .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+      .map_label(|label| {
+        if label.starts_with("session-") {
+          "session"
+        } else if label.starts_with("project-") {
+          "project"
+        } else {
+          label
+        }
+      })
       .build(),
   )
 }

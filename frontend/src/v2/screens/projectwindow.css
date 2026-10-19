@@ -1,0 +1,115 @@
+/* A project in its own window (ProjectWindow.tsx, /m/w/project/<id>). The page
+   sits outside the shell like the terminal does: the status strip (the
+   frameless window's title bar), the project's name on a bar under it, a
+   hairline, then the body scrolls. The panels, rows, fields and plates are
+   claude.css's and projectpage.css's; this file only lays them out for a
+   window: two columns from 900 px, capped and centered. */
+
+.vpw {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+  color: var(--text);
+}
+.vpw-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.vpw > :not(.vpw-backdrop) { position: relative; z-index: 1; }
+.vpw > .vpw-head { z-index: 3; }
+
+.vpw-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  /* the floor fades in under the header's last few px, as under the shell's */
+  background: linear-gradient(180deg, #000 calc(100% - 8px), rgba(0, 0, 0, 0));
+}
+
+/* ---- the bar: icon, name, caps, the classic page ---- */
+.vpw-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 calc(18px + env(safe-area-inset-right)) 0 calc(18px + env(safe-area-inset-left));
+}
+.vpw[data-win] .vpw-bar { cursor: default; }
+.vpw-bar > .vl-icon { flex: none; }
+.vpw-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+}
+/* one line of caps that gives way first in a narrow window */
+.vc-pd-caps.vpw-caps { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; padding-top: 2px; }
+.vpw-full { flex: none; margin-left: auto; }
+.vpw-line { align-self: stretch; margin: 0 calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left)); }
+
+/* ---- the body ---- */
+.vpw-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px calc(18px + env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 30%, transparent) transparent;
+}
+.vpw-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+@media (min-width: 900px) {
+  .vpw-grid { grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 0 40px; align-items: start; }
+}
+.vpw-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* the start plate keeps a plate's width in a window instead of the sheet's full row */
+.vc-pd-actions.vpw-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; }
+.vpw-actions .vc-glass { width: auto; flex: 0 1 420px; min-width: 0; justify-content: flex-start; }
+
+/* what a person reads at length can be selected and copied */
+.vpw-summary, .vpw .vc-pd-next p, .vpw .vp-md { -webkit-user-select: text; user-select: text; }
+.vc-pd-summary.vpw-summary { font-size: 13px; line-height: 19px; }
+
+/* ---- pinned files and agent runs: one line each, read only ---- */
+.vpw-list { list-style: none; margin: 0; padding: 0; }
+.vpw-list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+.vpw-list li > .vl-icon { flex: none; }
+.vpw-list-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.vpw-list-main b { font-size: 12.5px; line-height: 16px; font-weight: 600; color: var(--text); }
+.vpw-list-main a { font-size: 12.5px; line-height: 16px; font-weight: 600; color: var(--fg); text-decoration: none; overflow-wrap: anywhere; }
+.vpw-list-main a:hover { text-shadow: var(--text-glow); }
+.vpw-list-main small { font-size: 11px; line-height: 14px; color: var(--dim); }
+.vpw-list-meta { flex: none; font-size: 11px; line-height: 14px; color: var(--dim); white-space: nowrap; }
+.vpw-list-meta.vpw-lit { color: var(--fg); }
+.vpw-list-meta.vpw-bad { color: var(--acc2); }
+
+/* ---- loading, and a project that is not there ---- */
+.vpw-loading { display: flex; align-items: center; gap: 8px; max-width: 1240px; margin: 8px auto; font-size: 12.5px; color: var(--dim); }
+.vpw-gone { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; max-width: 560px; margin: 40px auto; }
+.vpw-gone p { margin: 0; font-size: 13px; line-height: 19px; color: var(--text); }
+
+.vpw > .vpw-toasts { top: calc(var(--strip-h) + env(safe-area-inset-top) + 56px); z-index: 6; }

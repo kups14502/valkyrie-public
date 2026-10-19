@@ -24,6 +24,10 @@ const Skin = lazy(() => import('./screens/Skin'))
 // v2 entry point still asks for /sessions/terminal?s=<name>; src/App.tsx sends
 // a v2 user (or the iPhone profile) here. Its own chunk, like the preview.
 const Term = lazy(() => import('./screens/Term'))
+// Pop-out windows (kit/windows.ts openDetached): one project or one session in
+// a window of its own, no tab bar, the status strip as its title bar. The
+// session one is the terminal above in its standalone mode.
+const ProjectWindow = lazy(() => import('./screens/ProjectWindow'))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside
 // the classic Shell (no classic header, menu or player bar). URLs are
@@ -159,6 +163,8 @@ export default function V2App() {
         {/* never a terminal without a name: no session is ever picked for you */}
         <Route path="ai/term" element={<Navigate to="/m/ai/sessions" replace />} />
         <Route path="ai/open" element={<OpenFromAlert />} />
+        <Route path="w/project/:id" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><ProjectWindow /></Suspense>} />
+        <Route path="w/term/:name" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Term standalone /></Suspense>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="meals" element={<MealsPage />} />
         <Route path=":screen/:sub?" element={<V2 />} />

@@ -8,9 +8,16 @@
 // the screen's re-read shows what was written. The rest of AI > Usage reads
 // live through the probe.
 //
+//   setup         Set up in plain words: how many accounts are set up, why a
+//                 person has to sign in (one a year; claude.ai's captcha stops the
+//                 automated browser), Set up N accounts, one account at a time with
+//                 the code box in the panel, the next account, Stop setup; after a
+//                 finished setup "All N set up" and Resume on a host never taken over
+//   copy          Copy to thor for a token on odin only: done, and thor not answering
 //   view          both hosts' accounts, per-host auto, the next picks, the threshold,
-//                 auto on, sign-in states, the last switches in ET (a UTC time
-//                 converted, config entries left out), inside the viewport (phone, desktop)
+//                 auto on, sign-in states (Renew by, Token expired: sign in again),
+//                 the last switches in ET (a UTC time converted, config entries left
+//                 out), inside the viewport (phone, desktop)
 //   switch        Switch now, pick, Confirm: 200 (the card moves, panes continued),
 //                 500, and a 200 whose result says the host refused (the confirm stays)
 //   cancel        Switch now then Cancel, and an armed Re-sign in left alone: no write
@@ -39,7 +46,13 @@ const OLD_SWITCH_ET = 'Oct 14 11:03 AM ET'
 const CODE = 'e2e-code#e2e-state'
 
 /** "3:04 PM ET" for a time today in New York, as the screen writes it */
-const etClock = (ms) => `${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(ms)} ET`
+// The page's rule: "3:04 PM ET" today, "Oct 17 3:04 PM ET" another day (a fixture 40 min old
+// is yesterday's for the first 40 minutes after midnight).
+const etDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+const etClock = (ms) => {
+  const t = `${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(ms)} ET`
+  return etDay.format(ms) === etDay.format(Date.now()) ? t : `${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' }).format(ms)} ${t}`
+}
 
 /** GET /api/account-switch (generic names only: this repo is public). */
 function switchState(over = {}) {
@@ -170,6 +183,8 @@ function viewTest(device) {
           b: tx('.va-acct[data-acct="acct-b"] .va-on'),
           cOn: !!q('.va-acct[data-acct="acct-c"] .va-on'),
           resign: [...document.querySelectorAll('.va-resign')].map((b) => b.textContent.trim()),
+          setup: { head: tx('.va-setup .va-setup-head'), text: tx('.va-setup'), go: tx('.va-setup .va-setup-go'), note: tx('.va-setup .va-setup-note') },
+          signinsNote: tx('.va-signins .va-signins-note'),
           hist: [...document.querySelectorAll('.va-hist-row')].map((e) => ({ t: e.textContent.replace(/\s+/g, ' ').trim(), failed: e.hasAttribute('data-failed') })),
         }
       })
@@ -182,11 +197,17 @@ function viewTest(device) {
       t.check(r.thorAuto === 'true' && r.odinAuto === 'false', `per-host auto reads thor ${r.thorAuto}, odin ${r.odinAuto}, want on and off`)
       t.check(r.thr === '98%', `the threshold reads "${r.thr}", want 98%`)
       t.check(r.auto === 'true' && r.autoText === 'On', `auto-switch reads ${r.auto} "${r.autoText}", want on`)
-      t.check(r.d === 'Sign-in expired' && r.dBad, `Account D reads "${r.d}" (flagged ${r.dBad}), want a flagged "Sign-in expired"`)
-      t.check(/^Expires [A-Z][a-z]{2} \d+, \d{4}$/.test(r.c), `Account C reads "${r.c}", want "Expires <date>"`)
+      t.check(r.d === 'Token expired: sign in again' && r.dBad, `Account D reads "${r.d}" (flagged ${r.dBad}), want a flagged "Token expired: sign in again"`)
+      t.check(/^Renew by [A-Z][a-z]{2} \d+, \d{4}$/.test(r.c), `Account C reads "${r.c}", want "Renew by <date>" (its token ends inside 14 days)`)
       t.check(r.a === 'thor' && r.b === 'odin' && !r.cOn, `the sign-in rows' host marks read "${r.a}" / "${r.b}"${r.cOn ? ' and Account C has one' : ''}, want thor on A and odin on B only`)
       t.check(r.aMsg === 'Not picked now: session at 96%', `Account A's note reads "${r.aMsg}"`)
-      t.check(r.resign.length === 4 && r.resign.every((x) => x === 'Re-sign in'), `Re-sign in buttons: ${JSON.stringify(r.resign)}`)
+      t.check(JSON.stringify(r.resign) === JSON.stringify(['Renew', 'Renew', 'Renew', 'Sign in']), `the sign-in buttons read ${JSON.stringify(r.resign)}, want Renew for the three working tokens and Sign in for the expired one`)
+      // Set up: what switching still needs, in plain words, and its one action
+      t.check(r.setup.head === '3 of 4 accounts are set up for switching', `the Set up heading reads "${r.setup.head}"`)
+      t.check(/Each account needs one sign-in a year\. Valkyrie DMs you a link for each account, one at a time/.test(r.setup.text), `Set up does not explain the yearly sign-in ("${r.setup.text.slice(0, 160)}")`)
+      t.check(/Valkyrie cannot finish this alone: claude\.ai shows a captcha to the automated browser/.test(r.setup.text), 'Set up does not say why Valkyrie cannot sign in on its own')
+      t.check(r.setup.go === 'Set up 1 account' && r.setup.note === '1 to sign in', `the Set up button reads "${r.setup.go}" / "${r.setup.note}"`)
+      t.check(/Needs a sign-in: the switcher has no year-long token for this account yet, so it cannot switch to it\./.test(r.signinsNote), `the sign-ins list does not explain "Needs a sign-in" ("${r.signinsNote}")`)
       t.check(r.hist.length === 2, `${r.hist.length} history rows, want 2 (the config entry left out)`)
       const recent = etClock(Date.parse(st.recent[1].at))
       t.check(r.hist[0]?.t.startsWith(recent) && /thor Account C → Account A/.test(r.hist[0].t) && /session at 98% · 5h 98% → 2% · 2 panes continued/.test(r.hist[0].t),
@@ -284,11 +305,11 @@ function cancelTest() {
         await page.tap(`${host('odin')} .va-cancel`)
         await page.waitFor(`!document.querySelector('${host('odin')} .va-confirm') && !!document.querySelector('${host('odin')} .va-switch')`, { message: 'Cancel did not close the confirm' })
       })
-      await t.step('an armed Re-sign in goes back on its own', async () => {
+      await t.step('an armed Renew goes back on its own', async () => {
         await page.tap(`${acctRow('acct-c')} .va-resign`)
         const armed = await page.eval(text(`${acctRow('acct-c')} .va-resign`))
-        t.check(armed === 'Start?', `one tap on Re-sign in reads "${armed}", want Start?`)
-        await page.waitFor(`(${text(`${acctRow('acct-c')} .va-resign`)}) === 'Re-sign in'`, { timeout: 6000, message: 'the armed Re-sign in did not go back' })
+        t.check(armed === 'Renew?', `one tap on Renew reads "${armed}", want Renew? (a working token is replaced only on a second tap)`)
+        await page.waitFor(`(${text(`${acctRow('acct-c')} .va-resign`)}) === 'Renew'`, { timeout: 6000, message: 'the armed Renew did not go back' })
       })
       await sleep(300)
       t.check(page.writes.length === 0, `${page.writes.length} write(s) sent, want none`)
@@ -428,7 +449,7 @@ function signinTest(kind) {
             Object.assign(r, { stage: 'canceled', needsCode: false, ok: false, updatedAt: iso(Date.now()), finishedAt: iso(Date.now()) })
             return ok({ request: r })
           }
-          Object.assign(r, { stage: 'done', needsCode: false, ok: true, detail: 'token stored', updatedAt: iso(Date.now()), finishedAt: iso(Date.now()) })
+          Object.assign(r, { stage: 'done', needsCode: false, ok: true, detail: 'token stored', vault: { odin: true, thor: true }, updatedAt: iso(Date.now()), finishedAt: iso(Date.now()) })
           findAcct(s, r.accountId).token = { present: true, dead: false, expiresAt: iso(Date.now() + 365 * DAY) }
           return ok({ request: r })
         },
@@ -438,50 +459,58 @@ function signinTest(kind) {
       if (kind === 'cancel') {
         await page.waitFor(`document.querySelector('${acctRow('acct-c')} .va-code input')`, { message: 'a waiting sign-in did not show its code box' })
         const others = await page.eval(() => [...document.querySelectorAll('.va-resign')].filter((b) => b.disabled).length)
-        t.check(others === 4, `${others} Re-sign in buttons are disabled while a sign-in waits, want all 4`)
+        t.check(others === 4, `${others} sign-in buttons are disabled while a sign-in waits, want all 4`)
+        const setupNote = await page.eval(text('.va-setup .va-setup-note'))
+        t.check(setupNote === 'Finish the sign-in below first.', `Set up's note reads "${setupNote}" while a sign-in waits`)
         const since = Date.now()
-        await page.tap(`${acctRow('acct-c')} .va-run-cancel`)
+        await page.tap(`${acctRow('acct-c')} [aria-label="Cancel the sign-in for Account C"]`)
         const w = await waitW(page, 1)
         t.check(w.path === '/api/account-switch/signin/e2e-req-2/cancel', `Cancel went to ${w.method} ${w.path}`)
         await t.step('canceled', async () => {
           await page.waitToast(/Sign-in canceled for Account C/, { since })
-          await page.waitFor(`!document.querySelector('${acctRow('acct-c')} .va-code') && /Sign-in canceled/.test(${text(`${acctRow('acct-c')} .va-run`)} || '')`, { message: 'the row did not show the canceled sign-in' })
+          await page.waitFor(`!document.querySelector('${acctRow('acct-c')} .va-code') && /Canceled/.test(${text(`${acctRow('acct-c')} .va-run`)} || '')`, { message: 'the row did not show the canceled sign-in' })
           const enabled = await page.eval(() => [...document.querySelectorAll('.va-resign')].filter((b) => !b.disabled).length)
-          t.check(enabled === 4, `${enabled} Re-sign in buttons are back, want 4`)
+          t.check(enabled === 4, `${enabled} sign-in buttons are back, want 4`)
         })
         await sleep(300)
         t.check(page.writes.length === 1, `${page.writes.length} write(s) sent, want 1`)
         return
       }
 
-      await page.tap(`${acctRow('acct-d')} .va-resign`)
-      t.check(page.writes.length === 0, 'the first tap on Re-sign in sent a write')
+      // an account with no working token needs one tap (Sign in); a working one asks twice (Renew, see cancel)
+      const label0 = await page.eval(text(`${acctRow('acct-d')} .va-resign`))
+      t.check(label0 === 'Sign in', `the expired account's button reads "${label0}", want Sign in`)
       const since = Date.now()
       await page.tap(`${acctRow('acct-d')} .va-resign`)
       const w = await waitW(page, 1)
-      t.check(w.path === '/api/account-switch/signin' && w.json?.accountId === 'acct-d' && Object.keys(w.json ?? {}).length === 1, `Re-sign in sent ${w.method} ${w.path} ${w.body}, want {"accountId":"acct-d"}`)
+      t.check(w.path === '/api/account-switch/signin' && w.json?.accountId === 'acct-d' && Object.keys(w.json ?? {}).length === 1, `Sign in sent ${w.method} ${w.path} ${w.body}, want {"accountId":"acct-d"}`)
       if (kind === 'fail429') {
         await t.step('refused with 429', async () => {
           await page.waitToast(/Sign-in not started for Account D: 429 3 sign-ins for this account in 24 hours already/, { since })
           const label = await page.eval(text(`${acctRow('acct-d')} .va-resign`))
-          t.check(label === 'Re-sign in', `after the refusal the button reads "${label}"`)
+          t.check(label === 'Sign in', `after the refusal the button reads "${label}"`)
         })
         await sleep(300)
         t.check(page.writes.length === 1, `${page.writes.length} write(s) sent, want 1`)
         return
       }
       await t.step('the steps show', async () => {
-        await page.waitToast(/Signing in Account D/, { since })
+        await page.waitToast(/Sign-in link for Account D is on its way in Lil kups/, { since })
         await page.waitFor(`/Signing in on thor/.test(${text(`${acctRow('acct-d')} .va-run`)} || '')`, { message: 'the sign-in step did not show' })
         const others = await page.eval(() => [...document.querySelectorAll('.va-resign')].filter((b) => b.disabled).length)
-        t.check(others === 4, `${others} Re-sign in buttons are disabled during the sign-in, want all 4`)
+        t.check(others === 4, `${others} sign-in buttons are disabled during the sign-in, want all 4`)
       })
       // thor could not finish: the next 3 s read shows the code box
-      Object.assign(sg.requests[0], { stage: 'needs-code', needsCode: true, dmSent: true, fallbackReason: 'bot check on the login page', updatedAt: iso(Date.now()) })
+      const until = Date.now() + 60 * MIN
+      Object.assign(sg.requests[0], { stage: 'needs-code', needsCode: true, dmSent: true, dmAt: iso(Date.now()), waitUntil: iso(until), fallbackReason: 'bot check on the login page', updatedAt: iso(Date.now()) })
       await t.step('the code box', async () => {
         await page.waitFor(`document.querySelector('${acctRow('acct-d')} .va-code input')`, { timeout: 8000, message: 'the code box did not show for needs-code' })
         const line = await page.eval(text(`${acctRow('acct-d')} .va-run-line`))
-        t.check(/Lil kups DM/.test(line ?? '') && /bot check on the login page/.test(line ?? ''), `the waiting line reads "${line}"`)
+        t.check(line === `Waiting for your code until ${etClock(until)}`, `the waiting line reads "${line}", want "Waiting for your code until ${etClock(until)}"`)
+        const steps = await page.eval(text(`${acctRow('acct-d')} .va-steps`))
+        t.check(/Open the link in the Lil kups DM in a private window/.test(steps ?? '') && /Sign in as d@example\.invalid and press Authorize/.test(steps ?? ''), `the steps read "${steps}"`)
+        const dm = await page.eval(() => [...document.querySelectorAll('.va-acct[data-acct="acct-d"] .va-body-act .vl-link')].map((b) => ({ t: b.textContent.trim(), off: b.disabled })))
+        t.check(dm.some((b) => b.t === 'DM sent' && b.off), `a DM sent a moment ago still offers to send it again: ${JSON.stringify(dm)}`)
         await page.eval(setValue, `${acctRow('acct-d')} .va-code input`, 'no-hash-here')
         await page.tap(`${acctRow('acct-d')} .va-code-send`)
         await page.waitFor(`/has a # in the middle/.test(${text(`${acctRow('acct-d')} .va-run`)} || '')`, { message: 'a code without # was not refused in the page' })
@@ -498,7 +527,7 @@ function signinTest(kind) {
         await page.waitFor(`!document.querySelector('${acctRow('acct-d')} .va-code')`, { message: 'the code box stayed after the code was taken' })
         await page.waitFor(`!document.querySelector('${acctRow('acct-d')}').hasAttribute('data-bad')`, { message: 'Account D is still flagged after the sign-in' })
         const row = await page.eval(text(acctRow('acct-d')))
-        t.check(/Signed in until/.test(row ?? '') && /Signed in: token stored/.test(row ?? ''), `Account D reads "${row}"`)
+        t.check(/Set up until/.test(row ?? '') && /Set up: token saved on odin and thor/.test(row ?? ''), `Account D reads "${row}"`)
         const left = await page.eval((c) => document.body.innerHTML.includes(c), CODE)
         t.check(!left, 'the code is still in the page after it was sent')
       })
@@ -537,13 +566,19 @@ function edgeTest() {
           odin: tx('.va-host[data-host="odin"]'),
           odinNow: tx('.va-host[data-host="odin"] .va-now'),
           bad: tx('.va-signins header'),
+          setup: tx('.va-setup .va-setup-head'),
+          setupGo: tx('.va-setup .va-setup-go'),
+          setupNote: tx('.va-setup .va-setup-note'),
         }
       })
       t.check(/Dry run: automatic switches are only logged\. Switch now is real\./.test(r.dry), `the dry-run note is missing ("${r.dry}")`)
       t.check(/Auto-switch paused here: live file holds a \/login sign-in/.test(r.thor), `thor's pause is not shown ("${r.thor}")`)
-      t.check(/Not on a switcher account/.test(r.odinNow) && /odin holds a \/login sign-in/.test(r.odinNow), `odin's /login sign-in is not explained ("${r.odinNow}")`)
-      t.check(/None: no pool token/.test(r.odin), `odin's empty next pick does not give the switcher's reason ("${r.odin}")`)
-      t.check(/1 working · 3 need a sign-in/.test(r.bad), `the sign-ins count reads "${r.bad}"`)
+      // "not on a switcher account" was a riddle: the card now says whose sign-in it is and what Resume does
+      t.check(/^Its own sign-in/.test(r.odinNow) && /odin still uses its normal \/login sign-in, so the switcher has not taken over\. Resume hands odin to the switcher\./.test(r.odinNow), `odin's /login sign-in is not explained ("${r.odinNow}")`)
+      t.check(!/Not on a switcher account/i.test(r.odin), 'odin still says "Not on a switcher account"')
+      t.check(/None: no account is set up yet/.test(r.odin), `odin's empty next pick does not say why in plain words ("${r.odin}")`)
+      t.check(/1 of 4 set up/.test(r.bad), `the sign-ins count reads "${r.bad}"`)
+      t.check(r.setup === '1 of 4 accounts are set up for switching' && r.setupGo === 'Set up 3 accounts' && r.setupNote === '3 to sign in', `Set up reads "${r.setup}" / "${r.setupGo}" / "${r.setupNote}"`)
       await t.step('Switch now in dry run says it is real', async () => {
         await page.tap(`${host('thor')} .va-switch`)
         const q = await page.eval(text(`${host('thor')} .va-confirm-q`))
@@ -618,8 +653,191 @@ function missingTest() {
   }
 }
 
+// ---------- Set up: one sign-in per account per year, one at a time ----------
+
+/** The status with A set up on both hosts, B on odin only, C never signed in, D expired. */
+function setupState() {
+  const s = switchState()
+  findAcct(s, 'acct-a').onThor = true
+  findAcct(s, 'acct-b').onThor = false
+  findAcct(s, 'acct-c').token = { present: false, dead: false, expiresAt: null }
+  findAcct(s, 'acct-c').onThor = false
+  findAcct(s, 'acct-d').onThor = false
+  return s
+}
+
+function queueOf(items, over = {}) {
+  const now = iso(Date.now())
+  return { id: 'e2e-q1', state: 'running', reason: null, already: 1, items, startedAt: now, updatedAt: now, finishedAt: null, ...over }
+}
+const qItem = (accountId, kind, status, requestId = null) => ({ accountId, label: `Account ${accountId.slice(-1).toUpperCase()}`, kind, status, detail: null, requestId })
+
+function setupRunTest() {
+  return {
+    name: 'accounts:setup:run',
+    group: 'accounts',
+    timeout: 60_000,
+    async run(t) {
+      const until = Date.now() + 60 * MIN
+      const { page, st } = await openSwitcher(t, {
+        state: setupState(),
+        signins: { requests: [], vault: [], queue: null, plan: { signin: ['acct-c', 'acct-d'], copy: ['acct-b'], already: 1 } },
+        onWrite: (w, s, g) => {
+          if (w.method !== 'POST') return undefined
+          if (w.path === '/api/account-switch/signin/queue') {
+            g.queue = queueOf([qItem('acct-c', 'signin', 'running', 'e2e-req-q1'), qItem('acct-d', 'signin', 'waiting'), qItem('acct-b', 'copy', 'waiting')])
+            g.requests.unshift(request('e2e-req-q1', 'acct-c', 'needs-code', { dmSent: true, dmAt: iso(Date.now()), waitUntil: iso(until), queue: { n: 1, of: 2 } }))
+            return ok({ queue: g.queue }, 202)
+          }
+          if (w.path === '/api/account-switch/signin/e2e-req-q1/code') {
+            Object.assign(g.requests[0], { stage: 'done', needsCode: false, ok: true, vault: { odin: true, thor: true }, updatedAt: iso(Date.now()), finishedAt: iso(Date.now()) })
+            Object.assign(findAcct(s, 'acct-c'), { token: { present: true, dead: false, expiresAt: iso(Date.now() + 365 * DAY) }, onThor: true })
+            g.queue.items[0].status = 'done'
+            g.queue.items[1] = { ...g.queue.items[1], status: 'running', requestId: 'e2e-req-q2' }
+            g.requests.unshift(request('e2e-req-q2', 'acct-d', 'needs-code', { dmSent: true, dmAt: iso(Date.now()), waitUntil: iso(until), queue: { n: 2, of: 2 } }))
+            g.plan = { signin: ['acct-d'], copy: ['acct-b'], already: 2 }
+            return ok({ request: g.requests[1] })
+          }
+          if (w.path === '/api/account-switch/signin/queue/cancel') {
+            Object.assign(g.queue, { state: 'canceled', reason: 'stopped by hand', finishedAt: iso(Date.now()) })
+            g.queue.items[1].status = 'failed'
+            Object.assign(g.requests[0], { stage: 'canceled', needsCode: false, ok: false, updatedAt: iso(Date.now()), finishedAt: iso(Date.now()) })
+            return ok({ queue: g.queue })
+          }
+          return undefined
+        },
+      })
+      await switcherUp(page)
+      const before = await page.eval(() => {
+        const tx = (s) => (document.querySelector(s)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+        return { head: tx('.va-setup .va-setup-head'), go: tx('.va-setup .va-setup-go'), note: tx('.va-setup .va-setup-note'), b: tx('.va-acct[data-acct="acct-b"] .va-acct-state'), copy: !!document.querySelector('.va-acct[data-acct="acct-b"] .va-copy') }
+      })
+      t.check(before.head === '2 of 4 accounts are set up for switching', `the Set up heading reads "${before.head}"`)
+      t.check(before.go === 'Set up 3 accounts' && before.note === '2 to sign in · 1 to copy to thor', `the Set up button reads "${before.go}" / "${before.note}"`)
+      t.check(/· odin only$/.test(before.b) && before.copy, `Account B (on odin only) reads "${before.b}"${before.copy ? '' : ' with no Copy to thor'}`)
+
+      const since = Date.now()
+      await page.tap('.va-setup .va-setup-go')
+      const w = await waitW(page, 1)
+      t.check(w.path === '/api/account-switch/signin/queue' && JSON.stringify(w.json ?? {}) === '{}', `Set up sent ${w.method} ${w.path} ${w.body}`)
+      await t.step('running: one account at a time, the code box in Set up', async () => {
+        await page.waitToast(/Setup started: watch for the Lil kups DM/, { since })
+        await page.waitFor(() => document.querySelector('.va-setup .va-q-item[data-status="running"] .va-code input'), { timeout: 8000, message: 'Set up did not show the code box for the running account' })
+        const r = await page.eval(() => ({
+          items: [...document.querySelectorAll('.va-setup .va-q-item')].map((li) => `${li.querySelector('.va-q-name')?.textContent?.trim()}: ${li.querySelector('.va-q-state')?.textContent?.trim()}`),
+          sub: document.querySelector('.va-setup .va-sub')?.textContent?.trim() ?? '',
+          rowBox: !!document.querySelector('.va-acct[data-acct="acct-c"] .va-code'),
+          disabled: [...document.querySelectorAll('.va-resign')].filter((b) => b.disabled).length,
+          stop: !!document.querySelector('.va-setup .va-setup-stop'),
+        }))
+        t.check(r.sub === 'running', `Set up's header says "${r.sub}", want running`)
+        t.check(JSON.stringify(r.items) === JSON.stringify([`Account C: Waiting for your code until ${etClock(until)}`, 'Account D: Next', 'Account B: Copy to thor next']), `the setup rows read ${JSON.stringify(r.items)}`)
+        t.check(!r.rowBox, 'the account row shows a second code box beside the one in Set up')
+        t.check(r.disabled === 4, `${r.disabled} sign-in buttons are disabled while setup runs, want 4`)
+        t.check(r.stop, 'no Stop setup while it runs')
+      })
+      const since2 = Date.now()
+      await page.eval(setValue, '.va-setup .va-code input', CODE)
+      await page.tap('.va-setup .va-code-send')
+      const w2 = await waitW(page, 2)
+      t.check(w2.path === '/api/account-switch/signin/e2e-req-q1/code' && w2.json?.code === CODE, `the code went as ${w2.method} ${w2.path}`)
+      await t.step('the next account', async () => {
+        await page.waitToast(/Code sent for Account C/, { since: since2 })
+        await page.waitFor(() => /Account C: Set up/.test([...document.querySelectorAll('.va-setup .va-q-item')].map((li) => `${li.querySelector('.va-q-name')?.textContent?.trim()}: ${li.querySelector('.va-q-state')?.textContent?.trim()}`).join('|')), { timeout: 8000, message: 'Account C did not show Set up in the setup rows' })
+        await page.waitFor(() => document.querySelector('.va-setup .va-q-item[data-status="running"] .va-q-name')?.textContent?.trim() === 'Account D', { timeout: 8000, message: 'Set up did not move on to Account D' })
+      })
+      const since3 = Date.now()
+      await page.tap('.va-setup .va-setup-stop')
+      const w3 = await waitW(page, 3)
+      t.check(w3.path === '/api/account-switch/signin/queue/cancel', `Stop setup sent ${w3.method} ${w3.path}`)
+      await t.step('stopped', async () => {
+        await page.waitToast(/Setup stopped/, { since: since3 })
+        await page.waitFor(() => !document.querySelector('.va-setup .va-setup-stop') && /Set up 2 accounts/.test(document.querySelector('.va-setup .va-setup-go')?.textContent ?? ''), { timeout: 8000, message: 'after Stop setup the button did not come back as "Set up 2 accounts"' })
+      })
+      t.check(findAcct(st, 'acct-c').token.present, 'the fake switcher lost the new token')
+      await sleep(300)
+      t.check(page.writes.length === 3, `${page.writes.length} write(s) sent, want 3`)
+      await t.shot(page)
+    },
+  }
+}
+
+function setupDoneTest() {
+  return {
+    name: 'accounts:setup:done',
+    group: 'accounts',
+    timeout: 45_000,
+    async run(t) {
+      const s = switchState()
+      for (const a of s.accounts) Object.assign(a, { onThor: true, token: { present: true, dead: false, expiresAt: iso(Date.now() + 300 * DAY) } })
+      Object.assign(findHost(s, 'thor'), { active: null, owner: 'grant', adopted: false, paused: true, pausedReason: 'not adopted yet: thor still uses its own sign-in' })
+      const done = iso(Date.now() - 2 * MIN)
+      const { page } = await openSwitcher(t, {
+        state: s,
+        signins: { requests: [], vault: [], queue: queueOf(['acct-a', 'acct-b', 'acct-c', 'acct-d'].map((id) => qItem(id, 'signin', 'done')), { state: 'finished', finishedAt: done, updatedAt: done }), plan: { signin: [], copy: [], already: 4 } },
+        onWrite: (w) => (w.method === 'POST' && w.path === '/api/account-switch/resume' ? ok({ ok: true, switchedTo: 'acct-b' }) : undefined),
+      })
+      await page.waitFor(text('.va-setup .va-setup-head'), { timeout: 12_000, message: 'Set up did not show after a finished setup' })
+      const r = await page.eval(() => {
+        const tx = (s) => (document.querySelector(s)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+        return {
+          head: tx('.va-setup .va-setup-head'), text: tx('.va-setup'), go: !!document.querySelector('.va-setup .va-setup-go'),
+          thor: tx('.va-host[data-host="thor"]'), take: tx('.va-host[data-host="thor"] .va-take'),
+          lit: document.querySelector('.va-host[data-host="thor"] .va-take .va-resume')?.hasAttribute('data-lit') ?? false,
+        }
+      })
+      t.check(r.head === 'All 4 accounts are set up for switching', `the Set up heading reads "${r.head}"`)
+      t.check(/Next: press Resume on thor below, so its terminals use these accounts and switch when one runs low\./.test(r.text), `Set up does not say what to do next ("${r.text.slice(0, 200)}")`)
+      t.check(!r.go, 'a finished setup still offers its button')
+      t.check(/Takes thor over with the account that has the most room\./.test(r.take) && r.lit, `thor's card does not offer a lit Resume to take it over ("${r.take}")`)
+      t.check(!/Auto-switch paused here/.test(r.thor), 'a host never taken over reads as "paused"')
+      const since = Date.now()
+      await page.tap('.va-host[data-host="thor"] .va-take .va-resume')
+      const w = await waitW(page, 1)
+      t.check(w.json?.host === 'thor' && Object.keys(w.json ?? {}).length === 1, `Resume sent ${w.body}`)
+      await page.waitToast(/thor now uses Account B/, { since })
+      await t.shot(page)
+    },
+  }
+}
+
+function copyTest(kind) {
+  return {
+    name: `accounts:copy:${kind}`,
+    group: 'accounts',
+    timeout: 45_000,
+    async run(t) {
+      const { page } = await openSwitcher(t, {
+        state: setupState(),
+        signins: { requests: [], vault: [], queue: null, plan: { signin: ['acct-c', 'acct-d'], copy: ['acct-b'], already: 1 } },
+        onWrite: (w, s) => {
+          if (w.method !== 'POST' || w.path !== '/api/account-switch/signin/sync-thor') return undefined
+          if (kind === 'ok') findAcct(s, w.json?.accountId).onThor = true
+          return ok({ ok: kind === 'ok' })
+        },
+      })
+      await switcherUp(page)
+      const since = Date.now()
+      await page.tap(`${acctRow('acct-b')} .va-copy`)
+      const w = await waitW(page, 1)
+      t.check(w.json?.accountId === 'acct-b' && Object.keys(w.json ?? {}).length === 1, `Copy to thor sent ${w.body}`)
+      if (kind === 'ok') {
+        await page.waitToast(/Account B copied to thor/, { since })
+        await page.waitFor(`!document.querySelector('${acctRow('acct-b')} .va-copy')`, { message: 'Copy to thor stayed after the copy' })
+      } else {
+        await page.waitToast(/thor did not answer; Account B is still on odin only/, { since })
+        t.check(await page.eval(`!!document.querySelector('${acctRow('acct-b')} .va-copy')`), 'Copy to thor went away although thor did not answer')
+      }
+    },
+  }
+}
+
 export function accountTests() {
   return [
+    setupRunTest(),
+    setupDoneTest(),
+    copyTest('ok'),
+    copyTest('thor-down'),
     viewTest('phone'),
     viewTest('desktop'),
     switchTest('ok'),

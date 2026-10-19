@@ -313,3 +313,8 @@ html[data-motion='reduced'] .vtm-more { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .vtm-sheet, .vtm-more { animation: none; }
 }
+
+/* ---- the pop-out window (/m/w/term/<name>, Term standalone) ----
+   No Back in the bar, so the title takes its inset; the bar's empty parts drag
+   the window (data-tauri-drag-region), so they show the default arrow. */
+.vtm[data-standalone] .vsk-bar { padding-left: calc(14px + env(safe-area-inset-left)); cursor: default; }

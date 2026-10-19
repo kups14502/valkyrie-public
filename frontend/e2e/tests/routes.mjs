@@ -35,7 +35,10 @@ export const ROUTES = [
   { path: '/m/meals', page: true, ready: { sel: '.ml-totals[data-ready]', text: /calories/i } },
 ]
 
-export const ROUTE_DEVICES = ['phone', 'landscape', 'ipad', 'ipadland', 'desktop', 'desk1080', 'desk1440']
+/** The routes whose screen shows thor's session board (the Dashboard's AI block, AI > Sessions, Projects, Usage). */
+const THOR_BOARD = /^\/m\/(dashboard|ai\/(sessions|projects|usage))$/
+
+export const ROUTE_DEVICES =['phone', 'landscape', 'ipad', 'ipadland', 'desktop', 'desk1080', 'desk1440']
 
 function readyIn(spec) {
   const area = document.querySelector('.vl-page[data-active]') || document.querySelector('.vl-set') || document.querySelector('#root')
@@ -127,9 +130,18 @@ export function routeTests() {
         name: `route:${route.path.replace(/^\/m\//, '')}:${device}`,
         group: 'routes',
         device,
+        // the Dashboard and the AI tabs show thor's session board live: one such page at a time (lib/harness.mjs)
+        ...(THOR_BOARD.test(route.path) ? { lock: 'thor-board' } : {}),
         timeout: 45_000,
         async run(t) {
           const page = await t.page()
+          // Every tab is mounted at once, so every route reads thor's 390 KB session board, which
+          // thor's agent serves one read at a time. A route that does not show it gets an empty
+          // board (its own screen's reads stay live); the routes that show it read it live, in turn.
+          if (!THOR_BOARD.test(route.path)) {
+            page.mock('/api/session-board', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
+            page.mock('/api/hosts/thor/sessions', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
+          }
           const t0 = Date.now()
           await page.goto(route.path)
           const spec = { sel: route.ready.sel, min: route.ready.min, text: route.ready.text ? { re: route.ready.text.source, flags: route.ready.text.flags } : null }

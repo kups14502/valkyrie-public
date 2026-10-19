@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Press, cx, toast } from '../kit/ui'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
-import { ago, equityAge, useHosts, useLive, useTick, useTrade, type HostVM, type Live, type TradeVM } from '../kit/data'
+import { ago, equityAge, tradeAllCash, useHosts, useLive, useTick, useTrade, type HostVM, type Live, type TradeVM } from '../kit/data'
 import {
   fetchLauncher, fetchServices, fetchTradeBotPage, restartService,
   type LauncherEntry, type ListeningPort, type ServiceContainer, type ServicesStatus, type ServiceTimer, type ServiceUnit,
@@ -692,10 +692,17 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
   const state = hostState(host)
   const spots = useMemo(() => new Map(model ? heroModel(model).hotspots.map((s) => [s.id, s.label] as const) : []), [model])
 
+  // the phone and tablet report a battery and storage, never CPU or memory: no empty plates for those,
+  // and the battery leads where the CPU would
+  const noLoad = host.mobile || (host.cpu == null && host.mem == null && !!host.battery)
   const metrics: Metric[] = [
-    { id: 'cpu', icon: 'cpu', label: 'CPU', value: host.cpu, tone: loadTone(host.cpu), sizes: host.cores ? `${host.cores} cores` : null },
-    { id: 'mem', icon: 'mem', label: 'Memory', value: host.mem, tone: loadTone(host.mem), sizes: memSizes(host) },
-    { id: 'disk', icon: 'disk', label: spots.get('disk') ?? 'Disk', value: host.disk, tone: loadTone(host.disk), sizes: diskSizes(host) },
+    ...(noLoad ? [] : [
+      { id: 'cpu', icon: 'cpu', label: 'CPU', value: host.cpu, tone: loadTone(host.cpu), sizes: host.cores ? `${host.cores} cores` : null } satisfies Metric,
+      { id: 'mem', icon: 'mem', label: 'Memory', value: host.mem, tone: loadTone(host.mem), sizes: memSizes(host) } satisfies Metric,
+    ]),
+    ...(host.mobile && host.disk == null ? [] : [
+      { id: 'disk', icon: 'disk', label: spots.get('disk') ?? 'Disk', value: host.disk, tone: loadTone(host.disk), sizes: diskSizes(host) } satisfies Metric,
+    ]),
   ]
   if (host.battery) {
     metrics.push({ id: 'battery', icon: host.battery.charging ? 'charging' : 'battery', label: 'Battery', value: host.battery.percent, tone: batteryTone(host.battery.percent), sizes: host.battery.charging ? 'charging' : null })
@@ -709,7 +716,8 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
     }
     setFocus((cur) => (cur === id ? null : id))
   }
-  const lit = focus && byId.has(focus) ? focus : 'cpu'
+  const home = noLoad ? 'battery' : 'cpu'
+  const lit = focus && byId.has(focus) ? focus : home
   const up = uptime(host.uptime)
 
   // the last hour, x by clock: a host that restarted fills only the newest part
@@ -733,7 +741,12 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
         {host.online && up && <span className="sys-detail-up"><Ico name="uptime" size={12} />up {up}</span>}
       </header>
       <div className="sys-detail-body">
-        {host.online ? (
+        {host.online && !metrics.length ? (
+          <div className="sys-detail-off vl-build" style={iv(i + 1)}>
+            <b><Icon name="battery" size={16} tone="dim" />No battery report yet</b>
+            <span>Set up the Valkyrie battery Shortcut on this device</span>
+          </div>
+        ) : host.online ? (
           <div className="sys-gauges">
             {metrics.map((m, k) => (
               <Press
@@ -743,7 +756,7 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
                 data-lit={m.id === lit || undefined}
                 aria-pressed={m.id === lit}
                 aria-label={`${m.label} ${m.value ?? 'unknown'}%: highlight on the model`}
-                onPress={() => setFocus(m.id === 'cpu' ? null : m.id === focus ? null : m.id)}
+                onPress={() => setFocus(m.id === home ? null : m.id === focus ? null : m.id)}
               >
                 <span className="sys-gauge-head">
                   <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
@@ -758,7 +771,7 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
         ) : (
           <div className="sys-detail-off vl-build" style={iv(i + 1)}>
             <b><Icon name="offline" size={16} tone="dim" />Offline</b>
-            <span>No stats published</span>
+            <span>{host.mobile && host.seen ? `Last seen ${when(host.seen, t1)} ET` : 'No stats published'}</span>
           </div>
         )}
         {model && (
@@ -879,7 +892,11 @@ function HostRow({ h, k, t1, selected, onPick }: { h: HostVM; k: number; t1: num
           )}
         </span>
       </span>
-      {h.online ? (
+      {h.mobile ? (
+        <span className="sys-host-offline">
+          {!h.online && h.seen ? `Last seen ${when(h.seen, t1)} ET` : h.battery ? (h.disk != null ? `Storage ${h.disk}%` : 'Battery only') : 'No battery report yet'}
+        </span>
+      ) : h.online ? (
         <>
           <Spark h={h} t1={t1} />
           <Cell value={h.cpu} tone={loadTone(h.cpu)} c="cpu" />
@@ -1649,15 +1666,8 @@ function TradesView({ on }: { on: boolean }) {
     return age.kind === 'live' && age.at != null && (!last || age.at > last.t) ? [...base, { t: age.at, v: t.equity }] : base
   }, [t, fetchedAt])
   const dayOpen = t?.equitySource === 'day_open'
-
-  // the trailing run of identical totals: the bot repeating one figure, not new readings
-  const flatFrom = useMemo(() => {
-    if (pts.length < 3) return null
-    const last = pts[pts.length - 1].v
-    let i = pts.length - 1
-    while (i > 0 && pts[i - 1].v === last) i--
-    return i <= pts.length - 2 ? i : null
-  }, [pts])
+  // a flat line from an all-cash account is a run of real reads, not a repeated figure
+  const allCash = !!t && tradeAllCash(t)
 
   const chart = useMemo(() => {
     if (pts.length < 2) return null
@@ -1719,10 +1729,17 @@ function TradesView({ on }: { on: boolean }) {
         {t?.changePct != null && <span>{sign}{Math.abs(t.changePct).toFixed(2)}%</span>}
         <em>{windowLabel}</em>
       </div>
-      {dayOpen && (
+      {dayOpen ? (
         <div className="sys-trade-warn">
           <Icon name="alert" size={15} tone="dim" />
-          Not a live reading.{flatFrom != null ? ` Unchanged since ${fmtWeekday.format(pts[flatFrom].t)} ${fmtTime.format(pts[flatFrom].t)}.` : ' The bot shows its 9:40 AM day-open total.'}
+          {t?.lastReadAt != null
+            ? `Not a live reading. Last broker read ${fmtWeekday.format(t.lastReadAt)} ${fmtTime.format(t.lastReadAt)}; this is the bot's day-open total.`
+            : 'Not a live reading. This is the bot\'s day-open total.'}
+        </div>
+      ) : allCash && (
+        <div className="sys-trade-warn">
+          <Icon name="done" size={15} tone="dim" />
+          All cash, no open positions
         </div>
       )}
     </div>
@@ -1774,9 +1791,7 @@ function TradesView({ on }: { on: boolean }) {
               hi={chart.hi}
               ticks={chart.ticks}
               days={chart.days}
-              tailFrom={dayOpen && flatFrom != null ? flatFrom : undefined}
               lastLabel={usd(chart.last)}
-              lastNote={dayOpen && flatFrom != null ? 'not live' : undefined}
               ariaLabel={chart.aria}
               palette={palette}
               paused={!on}
@@ -1786,7 +1801,6 @@ function TradesView({ on }: { on: boolean }) {
           </div>
           <div className="sys-chart-cap sys-trade-legend">
             <span><i className="sys-key" data-c="eq" />Total value, trading days only (includes transfers)</span>
-            {dayOpen && flatFrom != null && <span><i className="sys-key" data-c="dash" />repeated figure, not live</span>}
           </div>
         </>
       ) : (

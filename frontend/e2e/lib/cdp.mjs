@@ -246,10 +246,25 @@ export class Page {
     return p
   }
 
-  constructor(browser, { base, device = 'phone', storage = {}, name = '', term = '', scripts = [] }) {
+  constructor(browser, { base, device = 'phone', storage = {}, name = '', term = '', scripts = [], apiHosts = [], patch = [] }) {
     this.b = browser
+    /**
+     * Source edits to a dev-server module as it loads: [{ path, from, to }]
+     * (the probe serves each module as its own file, so one line can be
+     * swapped, the way a production build bakes in its .env). A `from` that is
+     * not in the module fails the test.
+     */
+    this.patch = patch
     /** the throwaway pane this page may attach to ('' = none: every terminal is refused) */
     this.term = term
+    /**
+     * Absolute API bases answered here as if they were the API (the desktop
+     * app's odin base, a remote base that needs the image token): see
+     * onApiHost. Each: { origin, healthz?: boolean, imgToken?: string }.
+     */
+    this.apiHosts = apiHosts.map((h) => ({ ...h, origin: new URL(h.origin).origin }))
+    /** /api requests that went to an apiHosts origin: { method, path, search, origin, status } */
+    this.hostApi = []
     this.base = base.replace(/\/+$/, '')
     this.device = device
     this.dev = DEVICES[device]
@@ -315,8 +330,33 @@ export class Page {
         { urlPattern: '*:8420/*', requestStage: 'Request' },
         { urlPattern: 'http://odin/*', requestStage: 'Request' },
         { urlPattern: 'http://100.*', requestStage: 'Request' },
+        ...this.apiHosts.map((h) => ({ urlPattern: `${h.origin}/*`, requestStage: 'Request' })),
+        ...this.patch.map((m) => ({ urlPattern: `*${m.path}*`, requestStage: 'Response' })),
       ],
     })
+  }
+
+  /** A patched module's response: its source with `from` swapped for `to`. */
+  async onPatch(p, mods) {
+    const { requestId } = p
+    try {
+      const r = await this.send('Fetch.getResponseBody', { requestId })
+      let src = r.base64Encoded ? Buffer.from(r.body, 'base64').toString('utf8') : r.body
+      for (const m of mods) {
+        if (!src.includes(m.from)) this.problems.push(`the module ${m.path} no longer holds "${m.from.slice(0, 80)}": the test's patch did not apply`)
+        else src = src.split(m.from).join(m.to)
+      }
+      this.notes.push(`patched ${mods.map((m) => m.path).join(', ')}`)
+      await this.send('Fetch.fulfillRequest', {
+        requestId,
+        responseCode: p.responseStatusCode ?? 200,
+        responseHeaders: (p.responseHeaders ?? []).filter((h) => !/^content-length$/i.test(h.name)),
+        body: b64(src),
+      }).catch(() => {})
+    } catch (e) {
+      this.problems.push(`patching ${p.request.url}: ${e.message}`)
+      await this.send('Fetch.continueResponse', { requestId }).catch(() => this.send('Fetch.continueRequest', { requestId }).catch(() => {}))
+    }
   }
 
   send(method, params = {}) {
@@ -416,6 +456,18 @@ export class Page {
       body: b64(typeof body === 'string' ? body : JSON.stringify(body ?? null)),
     }).catch(() => {})
     try {
+      // the response stage is only ever asked for the modules in `patch`
+      if (p.responseStatusCode != null || p.responseErrorReason != null) {
+        const mods = this.patch.filter((m) => path === m.path || path.startsWith(`${m.path}`))
+        if (mods.length && p.responseStatusCode === 200) await this.onPatch(p, mods)
+        else await this.send('Fetch.continueResponse', { requestId }).catch(() => this.send('Fetch.continueRequest', { requestId }).catch(() => {}))
+        return
+      }
+      const host = this.apiHosts.find((h) => h.origin === url.origin)
+      if (host) {
+        await this.onApiHost(p, url, host)
+        return
+      }
       if (isOdinDirect(url) && url.origin !== new URL(this.base).origin) {
         // a read with no proxy and no read-only guard between it and odin: refused, so the app falls back to the probe
         this.notes.push(`refused a direct request to odin: ${request.method} ${url.origin}${path}`)
@@ -468,6 +520,97 @@ export class Page {
     } catch (e) {
       this.problems.push(`interceptor error on ${request.method} ${path}: ${e.message}`)
       await fulfill(599, { error: 'e2e interceptor error' })
+    }
+  }
+
+  /**
+   * A request to one of `apiHosts`: an absolute API base the page was moved to
+   * (the desktop app's odin base, found by its healthz probe, or a remote base
+   * set by a test). Answered in the browser like the probe's same-origin /api:
+   * a write goes to the test's handler (never sent), a GET to the test's mocks
+   * or on to the probe (read-only) from Node. CORS headers on every answer,
+   * because the page's own origin is the probe. With `imgToken`, an image
+   * without that token gets the 401 a remote API gives it.
+   */
+  async onApiHost(p, url, host) {
+    const { requestId, request } = p
+    const path = url.pathname
+    const method = request.method.toUpperCase()
+    const origin = new URL(this.base).origin
+    const headers = (type) => [
+      { name: 'content-type', value: type },
+      { name: 'cache-control', value: 'no-store' },
+      { name: 'access-control-allow-origin', value: origin },
+      { name: 'access-control-allow-credentials', value: 'true' },
+      { name: 'access-control-allow-headers', value: 'authorization, content-type, accept, cache-control' },
+      { name: 'access-control-allow-methods', value: 'GET, HEAD, POST, PUT, PATCH, DELETE' },
+    ]
+    const answer = (status, body, type = 'application/json') => this.send('Fetch.fulfillRequest', {
+      requestId,
+      responseCode: status,
+      responseHeaders: headers(type),
+      body: Buffer.isBuffer(body) ? body.toString('base64') : b64(typeof body === 'string' ? body : JSON.stringify(body ?? null)),
+    }).catch(() => {})
+    const log = { method, path, search: url.search, origin: url.origin, status: 0 }
+    if (method === 'OPTIONS') { await answer(204, ''); return }
+    if (path === '/healthz') {
+      if (host.healthz) await answer(200, { ok: true })
+      else await this.send('Fetch.failRequest', { requestId, errorReason: 'ConnectionRefused' }).catch(() => {})
+      return
+    }
+    if (!path.startsWith('/api/')) {
+      this.notes.push(`refused ${method} ${url.origin}${path} (not the API)`)
+      await this.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }).catch(() => {})
+      return
+    }
+    this.hostApi.push(log)
+    const rec = { method, path, url: request.url, at: Date.now(), mocked: false, host: url.origin }
+    this.api.push(rec)
+    if (method !== 'GET' && method !== 'HEAD') {
+      const body = postBody(request)
+      let parsed
+      try { parsed = body ? JSON.parse(body) : undefined } catch { parsed = undefined }
+      const w = { method, path, url: request.url, body, json: parsed, at: Date.now(), host: url.origin }
+      this.writes.push(w)
+      rec.mocked = true
+      const out = this.writeHandler ? await this.writeHandler(w) : undefined
+      if (!out) {
+        this.problems.push(`unexpected write ${method} ${url.origin}${path} ${body.slice(0, 200)} (answered 418 in the browser)`)
+        log.status = 418
+        await answer(418, { error: 'the e2e suite answered this write in the browser' })
+        return
+      }
+      log.status = out.status
+      await answer(out.status, out.body)
+      return
+    }
+    if (host.imgToken && path === '/api/plex/img' && url.searchParams.get('token') !== host.imgToken) {
+      log.status = 401
+      await answer(401, { error: 'image token missing or wrong (e2e remote base)' })
+      return
+    }
+    for (const m of this.mocks) {
+      const hit = typeof m.match === 'string' ? m.match === path : m.match instanceof RegExp ? m.match.test(path) : m.match(path, url)
+      if (!hit) continue
+      const out = await m.handler({ path, url, query: Object.fromEntries(url.searchParams) })
+      if (!out) continue
+      rec.mocked = true
+      log.status = out.status
+      await answer(out.status, out.body)
+      return
+    }
+    // on to the probe, a GET, without the remote's token
+    const fwd = new URL(url.href)
+    fwd.searchParams.delete('token')
+    try {
+      const r = await fetch(`${this.base}${path}${fwd.search}`, { headers: { accept: request.headers.Accept ?? request.headers.accept ?? '*/*' }, signal: AbortSignal.timeout(20_000) })
+      const buf = Buffer.from(await r.arrayBuffer())
+      log.status = r.status
+      await answer(r.status, buf, r.headers.get('content-type') ?? 'application/octet-stream')
+    } catch (e) {
+      log.status = 599
+      this.notes.push(`the probe did not answer ${path}: ${e.message}`)
+      await answer(502, { error: 'the probe did not answer' })
     }
   }
 

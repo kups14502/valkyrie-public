@@ -1,39 +1,45 @@
 import {
-  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
+  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, nyDayKey, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick,
+  ago, equityAge, nyDayKey, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useTick,
   useTrade, useTracker, useUsage,
-  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession,
+  type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession, type TradeVM,
 } from '../kit/data'
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
-import { useSetting } from '../kit/theme'
-import { apiErrorText } from '../../lib/api'
+import { usePalette, useSetting } from '../kit/theme'
+import { useReducedMotion } from '../kit/motion'
+import { POSES, WireScene, room, type CameraPose, type Light } from '../kit/three'
+import { EquityChart } from '../kit/three/EquityChart'
+import { apiErrorText, type LightState, type LightUpdate } from '../../lib/api'
 import { dateLabel, fetchTrackerSkips, parseDateKey, shiftDateKey } from '../../lib/supplementsApi'
 import { useDailyTracker, useTrackerDays, workoutFor } from '../../lib/dailyTracker'
-import { lightColor, useLightsControl } from '../../lib/lights'
+import { PRESETS, brightnessFromPct, lightColor, pctFromBrightness, presetSwatchStyle, useLightsControl, type LightPatch } from '../../lib/lights'
 import { useQuickSessions } from '../../lib/quickSessions'
 import { UpIcon, UploadRows } from '../kit/upload'
 import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } from '../kit/uploads'
-import { useNavigate } from 'react-router-dom'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
 import './dashboard.css'
 
 // Dashboard: one page with everything Valkyrie does, in the order Brendon
-// uses it. A trade ticker line on top (the newest session, bot online, 7 days),
-// quick start, upload (pictures to thor, for the session just started),
-// lights (a plate that switches them all), the daily tracker (day stepping,
+// uses it. Phone (one column, in this order): the trade ticker line (the
+// newest session, bot online, 7 days), quick start, upload (pictures to thor,
+// for the session just started), lights (every bulb, a tap switches one, the
+// presets, a plate that switches them all), the daily tracker (day stepping,
 // the other day's line, hold Exercise to skip), the calendar (today first,
-// then the next six days; a tap opens the calendar sheet), AI
-// (live and asking sessions, usage meters), media (playing or newest added,
-// downloads) and every host at the bottom (CPU / Mem / Disk, battery where
-// the host has one). Phone: one column in that order. From 640 px: the
-// ticker over two columns. Desktop: three (AI in the middle, media and the
-// hosts on the right).
+// then the next six days; a tap opens the calendar sheet), AI (live and asking
+// sessions, usage meters), media (playing or newest added, downloads) and
+// every host (CPU / Mem / Disk, battery where the host has one).
+// From 600 px: two columns, the ticker becomes the head of a Trade box (equity,
+// the 3D equity chart) and every bulb gets its brightness bar.
+// Desktop: three columns that reach the bottom of the page: [quick start,
+// upload, tracker, media with the newest backdrop and a poster grid] [trade,
+// AI, calendar] [lights with the room, hosts]. The equity chart, the room and
+// the poster grid take the height that is left, so no box stretches empty.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -93,6 +99,59 @@ const THREE_COLS = 1140
 const XL = 1800
 
 /**
+ * The height the desktop layout fills, in layout px: the page's scroll box
+ * minus its own padding (the lights button's clearance). The layout is
+ * border-box, so its own padding sits inside this. 0 while off or not
+ * measured yet. Content taller than this scrolls as before: the elastic
+ * parts only shrink to their minimum.
+ */
+function useFillHeight(ref: RefObject<HTMLElement | null>, on: boolean): number {
+  const [h, setH] = useState(0)
+  useLayoutEffect(() => {
+    if (!on) return
+    const el = ref.current
+    const page = el?.closest('.vl-page') as HTMLElement | null
+    if (!el || !page) return
+    const px = (v: string) => parseFloat(v) || 0
+    const set = () => {
+      if (page.clientHeight <= 0) return
+      const ps = getComputedStyle(page)
+      const inner = page.clientHeight - px(ps.paddingTop) - px(ps.paddingBottom)
+      setH((cur) => (Math.abs(cur - inner) < 1 ? cur : Math.max(0, Math.floor(inner))))
+    }
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(page)
+    return () => ro.disconnect()
+  }, [ref, on])
+  return on ? h : 0
+}
+
+/**
+ * Width and height of an element in layout px, from a ResizeObserver (null
+ * until measured). Layout size, not getBoundingClientRect: the build-in tilt
+ * and the app's UI zoom would skew that.
+ */
+function useSize(ref: RefObject<HTMLElement | null>, on = true): { w: number; h: number } | null {
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!on || !el) return
+    const set = () => {
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w <= 0) return
+      setSize((cur) => (cur && Math.abs(cur.w - w) < 1 && Math.abs(cur.h - h) < 1 ? cur : { w, h }))
+    }
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref, on])
+  return size
+}
+
+/**
  * "5m" when the data on screen is not current: the newest fetch failed (data
  * is the last good result), or a cold paint from a cache older than `maxMs`
  * while the first fetch is still out. null when the data is current.
@@ -117,6 +176,8 @@ export default function Dashboard({ active }: ScreenProps) {
   const cols = width >= THREE_COLS ? 3 : width >= TWO_COLS ? 2 : 1
   const wide = cols === 3
   const xl = wide && width >= XL
+  const fillH = useFillHeight(box, wide)
+  const fill = fillH > 0
   // the calendar sheet (src/v2/screens/Calendar.tsx): opened from the Calendar block, closed when the tab is left
   const [cal, setCal] = useState<CalendarOpen | null>(null)
   const calSeed = useCalendar(7).data
@@ -125,40 +186,69 @@ export default function Dashboard({ active }: ScreenProps) {
   }, [active])
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
-  // this order. Two columns: the first wrapper is the left column, the rest
-  // the right. Three (desktop, iPad landscape): the doing column (quick start,
-  // upload, lights, tracker), then AI over the calendar, then media and the
-  // hosts, so the three end near the same height.
+  // the order above (Upload right under Quick Start, Lights right under it).
+  // Two columns: the doing column left; trade, AI, media and the hosts right.
+  // Three: see the header; each column has one elastic part, so the three end
+  // at the bottom of the page together.
   return (
     <div className="hm" ref={box}>
-      <div className="vl-screen hm-layout" data-cols={cols} data-xl={xl || undefined}>
-        <TradeTicker active={active} i={0} />
-        <div className="hm-col hm-a">
-          <QuickStart />
-          <UploadBlock wide={wide} />
-          <LightsBlock i={3} />
-          <Tracker />
-          {!wide && <Calendar onOpen={setCal} />}
-          {!wide && <MealsLink />}
-        </div>
-        {wide ? (
+      <div
+        className="vl-screen hm-layout"
+        data-cols={cols}
+        data-xl={xl || undefined}
+        data-fill={fill || undefined}
+        style={fill ? ({ '--hm-h': `${fillH}px` } as Vars) : undefined}
+      >
+        {cols === 1 ? (
           <>
-            <div className="hm-col hm-b">
-              <AiBlock wide i={8} />
+            <TradeTicker active={active} i={0} />
+            <div className="hm-col hm-a">
+              <QuickStart />
+              <UploadBlock wide={false} />
+              <LightsBox i={3} active={active} variant="chips" />
+              <Tracker />
               <Calendar onOpen={setCal} />
-              <MealsLink />
             </div>
-            <div className="hm-col hm-c">
-              <Panel className="hm-glance" i={10} dense><MediaGlance posters={xl ? 10 : 8} /></Panel>
+            <div className="hm-col hm-b">
+              <AiBlock wide={false} i={9} />
+              <MediaBox i={10} />
+              <Systems i={11} />
+            </div>
+          </>
+        ) : cols === 2 ? (
+          <>
+            <div className="hm-col hm-a">
+              <QuickStart />
+              <UploadBlock wide={false} />
+              <LightsBox i={3} active={active} variant="rows" />
+              <Tracker />
+              <Calendar onOpen={setCal} />
+            </div>
+            <div className="hm-col hm-b">
+              <TradeBox active={active} i={1} />
+              <AiBlock wide={false} i={9} />
+              <MediaBox i={10} />
               <Systems i={11} />
             </div>
           </>
         ) : (
-          <div className="hm-col hm-b">
-            <AiBlock wide={false} i={9} />
-            <Panel className="hm-glance" i={10} dense><MediaGlance posters={6} /></Panel>
-            <Systems i={11} />
-          </div>
+          <>
+            <div className="hm-col hm-a">
+              <QuickStart />
+              <UploadBlock wide />
+              <Tracker />
+              <MediaBox i={10} banner fill={fill} />
+            </div>
+            <div className="hm-col hm-b">
+              <TradeBox active={active} i={1} fill={fill} />
+              <AiBlock wide i={8} />
+              <Calendar onOpen={setCal} />
+            </div>
+            <div className="hm-col hm-c">
+              <LightsBox i={3} active={active} variant="rows" room fill={fill} />
+              <Systems i={11} />
+            </div>
+          </>
         )}
       </div>
       <CalendarSheet open={cal} onClose={() => setCal(null)} seed={calSeed} />
@@ -169,20 +259,6 @@ export default function Dashboard({ active }: ScreenProps) {
 // ---------- small pieces ----------
 
 /** A header or row icon: lit = full color with the glow (on, live, asking); otherwise dim and flat. */
-// Meals lives on its own page (/m/meals); this is its way in from the Dashboard.
-function MealsLink() {
-  const navigate = useNavigate()
-  return (
-    <Panel className="hm-glance" dense>
-      <Press className="hm-g-head hm-g-press" onPress={() => navigate('/m/meals')} aria-label="Meals, open today's log">
-        <span className="hm-g-label"><HIcon name="meals" />Meals</span>
-        <span className="hm-g-value">log and macros</span>
-        <Chevron />
-      </Press>
-    </Panel>
-  )
-}
-
 function HIcon({ name, lit, size = 14, tone, className }: { name: IconName; lit?: boolean; size?: number; tone?: IconTone; className?: string }) {
   return <Icon name={name} size={size} tone={tone ?? (lit ? 'fg' : 'dim')} glow={!!lit} className={cx('hm-ic', className)} />
 }
@@ -289,8 +365,9 @@ function sessionDay(s: TradeSession, now: number): string | null {
  * trading session (arrow and amount; the day when it is not today), whether
  * the bot is online (up and not stale), and the 7-day change. A tap opens
  * System > Trades. Reads every 60 s while the dashboard is the visible tab.
+ * `boxed`: the same line as the head of the Trade box (two columns and up).
  */
-function TradeTicker({ active, i }: { active: boolean; i: number }) {
+function TradeTicker({ active, i, boxed }: { active: boolean; i?: number; boxed?: boolean }) {
   const { go } = useShell()
   const trade = useTrade(active)
   const now = useTick(30_000)
@@ -342,8 +419,8 @@ function TradeTicker({ active, i }: { active: boolean; i: number }) {
 
   return (
     <Press
-      className={cx('hm-tk vl-build', age && 'hm-old')}
-      style={bi(i)}
+      className={cx('hm-tk', boxed ? 'hm-tk-boxed' : 'vl-build', age && 'hm-old')}
+      style={!boxed && i !== undefined ? bi(i) : undefined}
       onPress={() => go(SYSTEM, 'trades')}
       aria-label={`Trade bot${t ? `: ${said.join(', ')}` : trade.failed ? ', not answering' : ''}. Open Trades`}
     >
@@ -354,6 +431,163 @@ function TradeTicker({ active, i }: { active: boolean; i: number }) {
       <span className="hm-tk-cells" aria-hidden>{cells}</span>
       <Chevron />
     </Press>
+  )
+}
+
+// ---------- trade box: the ticker as its head, the equity, the 3D chart ----------
+
+const NY_HM = new Intl.DateTimeFormat('en-US', { timeZone: NY, hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+/** minutes since midnight, New York */
+const nyMinutes = (ms: number) => {
+  const p = NY_HM.formatToParts(ms)
+  const n = (k: string) => Number(p.find((x) => x.type === k)?.value ?? 0)
+  return (n('hour') % 24) * 60 + n('minute')
+}
+/** "$7,554.15" */
+const usd = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+type EquityChartVM = {
+  points: { x: number; v: number }[]
+  days: { x0: number; x1: number; label: string; long: string }[]
+  ticks: { v: number; label: string }[]
+  lo: number
+  hi: number
+  last: number
+  /** the index the trailing run of one repeated figure starts at, null when the line moves to the end */
+  flatFrom: number | null
+  aria: string
+}
+
+/**
+ * The equity history as System > Trades draws it: one equal slot per trading
+ * day (market hours only, no nights or weekends), the live read as the newest
+ * point while the market is open and the read is newer than the history, the
+ * value range at least 2% of equity tall (a small move draws small), and the
+ * trailing run of one repeated figure (the bot repeating its day-open total).
+ */
+function useEquityChart(t: TradeVM | undefined, fetchedAt: number): EquityChartVM | null {
+  return useMemo(() => {
+    if (!t) return null
+    let pts = t.points
+    if (t.marketOpen && t.equity != null) {
+      const age = equityAge(t, fetchedAt)
+      const last = pts[pts.length - 1]
+      if (age.kind === 'live' && age.at != null && (!last || age.at > last.t)) pts = [...pts, { t: age.at, v: t.equity }]
+    }
+    if (pts.length < 2) return null
+    let flatFrom: number | null = null
+    if (pts.length >= 3) {
+      const lastV = pts[pts.length - 1].v
+      let k = pts.length - 1
+      while (k > 0 && pts[k - 1].v === lastV) k--
+      flatFrom = k <= pts.length - 2 ? k : null
+    }
+    const vals = pts.map((x) => x.v)
+    const min = Math.min(...vals), max = Math.max(...vals)
+    const mid = (min + max) / 2
+    const half = Math.max(((max - min) / 2) * 1.15, Math.abs(t.equity ?? mid) * 0.01, 0.5)
+    const ticks = max > min ? [{ v: max, label: usd(max) }, { v: min, label: usd(min) }] : [{ v: max, label: usd(max) }]
+    const keys = pts.map((x) => nyDayKey(x.t))
+    const mins = pts.map((x) => nyMinutes(x.t))
+    const open = Math.floor(Math.min(9.5 * 60, ...mins) / 30) * 30
+    const close = Math.ceil(Math.max(16 * 60, ...mins) / 30) * 30
+    const order = new Map<string, number>()
+    keys.forEach((k) => { if (!order.has(k)) order.set(k, order.size) })
+    const nd = order.size
+    const points = pts.map((x, k) => ({ x: (order.get(keys[k])! + Math.max(0, Math.min(1, (mins[k] - open) / (close - open)))) / nd, v: x.v }))
+    const days = [...order.keys()].map((key, d) => {
+      const at = pts[keys.indexOf(key)].t
+      return { x0: d / nd, x1: (d + 1) / nd, label: nyWeekday.format(at), long: `${nyWeekday.format(at)} ${nyDate.format(at)}` }
+    })
+    const last = vals[vals.length - 1]
+    return {
+      points, days, ticks, lo: mid - half, hi: mid + half, last, flatFrom,
+      aria: `Equity from ${usd(vals[0])} to ${usd(last)}, high ${usd(max)}, low ${usd(min)}, over ${nd} trading day${nd === 1 ? '' : 's'}`,
+    }
+  }, [t, fetchedAt])
+}
+
+/**
+ * The trade bot's own box: the ticker line as its head (the day's move,
+ * online, 7 days; opens Trades), the equity big with what it really is (a live
+ * broker read and its age, an older read, or the day-open figure, never
+ * dressed up as live), the market and the last trade, and the 3D equity chart
+ * (drag turns it). `fill`: the chart takes the height the column has left.
+ */
+function TradeBox({ active, i, fill }: { active: boolean; i: number; fill?: boolean }) {
+  const trade = useTrade(active)
+  const palette = usePalette()
+  const reduced = useReducedMotion()
+  const now = useTick(30_000)
+  const t = trade.data
+  const chart = useEquityChart(t, trade.updatedAt)
+  const readAge = oldAge(trade, now, 10 * 60_000)
+  const online = !!t && t.up && !t.stale
+  const age = t ? equityAge(t, now) : null
+  const kind = age?.kind ?? 'unknown'
+  const eq = t?.equity
+  const dollars = eq != null ? `${eq < 0 ? '-' : ''}$${Math.trunc(Math.abs(eq)).toLocaleString('en-US')}` : null
+  const cents = eq != null ? (Math.abs(eq) % 1).toFixed(2).slice(1) : ''
+  const dayOpen = t?.equitySource === 'day_open'
+  const flatNote = dayOpen && chart?.flatFrom != null
+  const lastTrade = t?.lastTrade ? (/^(buy|sell)\s+(\S+)/i.exec(t.lastTrade)?.slice(1, 3).join(' ') ?? t.lastTrade) : null
+
+  const what: ReactNode = kind === 'live'
+    ? <><b>Live</b> · {age?.at != null ? `${ago(age.at, now)} ago` : 'just now'}</>
+    : kind === 'read' ? <>Last read{age?.at != null ? ` ${ago(age.at, now)} ago` : ' at the broker'}</>
+      : kind === 'day_open' ? <><HIcon name="alert" size={12} />Day-open figure, not live</>
+        : 'Equity'
+
+  return (
+    <Panel className={cx('hm-glance hm-trade', fill && 'hm-grow')} i={i} dense lit={online && !readAge}>
+      <TradeTicker active={active} boxed />
+      <div className="hm-trade-top">
+        <div className="hm-trade-main">
+          <span className={cx('hm-trade-eq', (readAge || kind === 'day_open') && 'hm-old')}>
+            {dollars != null ? <>{dollars}<small>{cents}</small></> : '--'}
+          </span>
+          <span className="hm-trade-what" data-kind={kind}>
+            {what}
+            {readAge && <span className="hm-old-tag"> · bot not answering, {readAge} old</span>}
+          </span>
+        </div>
+        {t && (
+          <span className="hm-trade-kv">
+            <span className="hm-trade-k" data-on={t.marketOpen || undefined}>
+              <HIcon name="clock" size={12} lit={t.marketOpen} />
+              {t.marketOpen ? 'Market open' : `Market closed${t.marketReason ? `, ${t.marketReason}` : ''}`}
+            </span>
+            {lastTrade && (
+              <span className="hm-trade-k" title={t.lastTrade ?? undefined}>
+                <HIcon name="trades" size={12} />
+                <span className="vl-ellipsis">{cap(lastTrade)}{t.lastTradeAt != null ? ` · ${nyWeekday.format(t.lastTradeAt)} ${nyDate.format(t.lastTradeAt)}` : ''}</span>
+              </span>
+            )}
+          </span>
+        )}
+      </div>
+      {chart ? (
+        <div className="hm-trade-chart">
+          <EquityChart
+            points={chart.points}
+            lo={chart.lo}
+            hi={chart.hi}
+            ticks={chart.ticks}
+            days={chart.days}
+            tailFrom={flatNote ? chart.flatFrom ?? undefined : undefined}
+            lastLabel={usd(chart.last)}
+            lastNote={flatNote ? 'not live' : undefined}
+            ariaLabel={chart.aria}
+            palette={palette}
+            paused={!active}
+            motion={reduced ? 'reduced' : 'full'}
+            style={{ position: 'absolute', inset: 0 }}
+          />
+        </div>
+      ) : (
+        <p className="hm-quiet hm-g-quiet">{!t ? (trade.failed ? 'Trade bot not answering' : 'Reading the trade bot') : 'No equity history yet'}</p>
+      )}
+    </Panel>
   )
 }
 
@@ -1254,86 +1488,241 @@ function Systems({ i }: { i: number }) {
   )
 }
 
-// ---------- lights ----------
+// ---------- lights: every bulb, the presets, all on / off ----------
 
-/** more bulbs than this and the color pips are left out (the count says it) */
-const MAX_PIPS = 10
+type BulbV = {
+  id: string
+  name: string
+  on: boolean
+  unavailable: boolean
+  /** 0-100, null when the bulb does not report it */
+  pct: number | null
+  /** CSS color of what the bulb shows */
+  color: string
+  /** a command for this bulb is on its way or waiting its turn */
+  busy: boolean
+}
+
+type LightCmd = { update: LightUpdate; fail: string; onFail?: () => void }
+
+const targetsOf = (u: LightUpdate): string[] => (Array.isArray(u.entity_id) ? u.entity_id : [u.entity_id])
+
+function patchOf(u: LightUpdate): LightPatch {
+  const p: LightPatch = { state: u.state }
+  if (u.brightness !== undefined) p.brightness = u.brightness
+  if (u.rgb_color !== undefined) p.rgb_color = u.rgb_color
+  if (u.color_temp_kelvin !== undefined) p.color_temp_kelvin = u.color_temp_kelvin
+  return p
+}
+
+/** A bulb's read with a waiting command laid over (src/lib/lights.ts lays the one on its way over it). */
+function overlayRow(row: LightState, p: LightPatch): LightState {
+  if (p.state === 'off') return { ...row, on: false }
+  const toCt = p.color_temp_kelvin != null
+  const toRgb = !!p.rgb_color
+  return {
+    ...row,
+    on: true,
+    brightness: p.brightness ?? row.brightness,
+    rgb_color: toRgb ? p.rgb_color! : toCt ? null : row.rgb_color,
+    color_temp_kelvin: toCt ? p.color_temp_kelvin! : toRgb ? null : row.color_temp_kelvin,
+    color_mode: toRgb ? 'rgb' : toCt ? 'color_temp' : row.color_mode,
+  }
+}
 
 /**
- * "Lights 2 of 5 on" (opens Lights) with a pip per bulb in its real color,
- * and one glass plate that switches them all.
+ * Light commands in the order they were asked, the newest one winning. A
+ * command waits while one for any of its bulbs is still on its way (two calls
+ * for one bulb in flight at once can land in either order, which is how fast
+ * switching ended up somewhere it was never set), and a newer command in the
+ * same lane (one bulb, or the room) replaces the one still waiting: on, off,
+ * on in a second sends on, then on, never a stray off at the end. A waiting
+ * command shows at once (`queued`, laid over the read; the one on its way is
+ * src/lib/lights.ts's desire). A failed call says why in a toast, and the
+ * bulb falls back to its real state.
  */
-function LightsBlock({ i }: { i: number }) {
+function useLightQueue(send: (u: LightUpdate) => Promise<unknown>, landed: () => void) {
+  const flying = useRef(new Map<string, number>())
+  const waiting = useRef(new Map<string, LightCmd>())
+  const [queued, setQueued] = useState<Record<string, LightPatch>>({})
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set())
+  const fns = useRef({ send, landed })
+  useLayoutEffect(() => {
+    fns.current = { send, landed }
+  })
+
+  const sync = () => {
+    const q: Record<string, LightPatch> = {}
+    const b = new Set(flying.current.keys())
+    for (const c of waiting.current.values()) {
+      for (const id of targetsOf(c.update)) {
+        q[id] = patchOf(c.update)
+        b.add(id)
+      }
+    }
+    setQueued(q)
+    setBusyIds(b)
+  }
+  const fire = (c: LightCmd) => {
+    const ids = targetsOf(c.update)
+    for (const id of ids) flying.current.set(id, (flying.current.get(id) ?? 0) + 1)
+    fns.current.send(c.update)
+      .then(() => fns.current.landed())
+      .catch((e: unknown) => {
+        c.onFail?.()
+        toast(`${c.fail}: ${why(e)}`)
+      })
+      .finally(() => {
+        for (const id of ids) {
+          const n = (flying.current.get(id) ?? 1) - 1
+          if (n > 0) flying.current.set(id, n)
+          else flying.current.delete(id)
+        }
+        pump()
+      })
+  }
+  // in order: a command also waits while an earlier waiting one shares a bulb with it
+  function pump() {
+    const blocked = new Set(flying.current.keys())
+    for (const [lane, c] of waiting.current) {
+      const ids = targetsOf(c.update)
+      const free = !ids.some((id) => blocked.has(id))
+      ids.forEach((id) => blocked.add(id))
+      if (!free) continue
+      waiting.current.delete(lane)
+      fire(c)
+    }
+    sync()
+  }
+  /** lane: 'room' for the presets and all on / off, the bulb's id for its own switch and bar */
+  const run = (lane: string, c: LightCmd) => {
+    if (!targetsOf(c.update).length) return
+    // a newer command in a lane replaces the waiting one and takes its turn at the back
+    waiting.current.delete(lane)
+    waiting.current.set(lane, c)
+    pump()
+  }
+  return { run, queued, busyIds }
+}
+
+const SWATCHES = PRESETS.map((p) => ({ ...p, swatch: presetSwatchStyle(p) }))
+type Swatch = (typeof SWATCHES)[number]
+/** a preset as the color half of a light command: rgb, or a white by kelvin, never both */
+const colorOf = (p: Swatch): Pick<LightUpdate, 'rgb_color' | 'color_temp_kelvin'> =>
+  p.rgb ? { rgb_color: p.rgb } : p.kelvin ? { color_temp_kelvin: p.kelvin } : {}
+
+/**
+ * The preset a lit bulb is showing, by its mode and its real figures, else
+ * null. Bulbs quantize and some report a red of 224 for 255, so a color is
+ * compared at full scale (its strongest channel taken to 255), loosely.
+ */
+function presetOf(l: LightState): string | null {
+  const c = l.rgb_color
+  const top = c ? Math.max(c[0], c[1], c[2], 1) : 1
+  const full = c ? c.map((v) => (v * 255) / top) : null
+  for (const p of PRESETS) {
+    if (p.rgb) {
+      if (l.color_mode !== 'color_temp' && full && p.rgb.every((v, k) => Math.abs(v - full[k]) <= 20)) return p.label
+    } else if (p.kelvin != null && l.color_mode === 'color_temp' && l.color_temp_kelvin != null && Math.abs(l.color_temp_kelvin - p.kelvin) <= 200) {
+      return p.label
+    }
+  }
+  return null
+}
+
+/**
+ * Lights: the count (the head opens Lights), the plate that switches them all
+ * (with Undo), the presets (they color the bulbs that are on, each keeps its
+ * own level), and every bulb in its real color. `rows` (two columns and up):
+ * a row per bulb with its brightness bar (sent once, on release) and its
+ * switch. `chips` (phone): a chip per bulb, a tap switches it. `room`
+ * (desktop): the room model under the list, each bulb glowing in its color.
+ * Every write goes through useLightsControl's mutation, in order (useLightQueue).
+ */
+function LightsBox({ i, active, variant, room: withRoom, fill }: {
+  i: number
+  active: boolean
+  variant: 'chips' | 'rows'
+  room?: boolean
+  fill?: boolean
+}) {
   const { go } = useShell()
   const qc = useQueryClient()
   // the persisted view model paints the first frame; the real control (shared
-  // with the classic Lights page) is server truth with the commands still on
-  // their way laid over it, so a switch shows at once and a failed one falls back
+  // with the Lights tab and the lights button) is server truth with the
+  // commands on their way laid over it, and owns every write
   const cached = useLights()
   const ctl = useLightsControl()
   const now = useTick(30_000)
-  const real = ctl.lights.data ? ctl.all : null
-  const list = real
-    ? real.map((l) => ({ id: l.entity_id, name: l.name, on: l.on, unavailable: l.unavailable, color: lightColor(l) }))
-    : cached.data ?? []
-  const avail = list.filter((l) => !l.unavailable)
-  const on = avail.filter((l) => l.on).length
-  const offline = list.length - avail.length
-  const age = real
-    ? oldAge({ data: real, updatedAt: ctl.lights.dataUpdatedAt, fromCache: false, isFetching: ctl.lights.isFetching, error: ctl.lights.error, failed: ctl.lights.isError }, now)
+  const q = useLightQueue(ctl.mutation.mutateAsync, () => { void qc.invalidateQueries({ queryKey: ['v2', 'lights'] }) })
+  const server = ctl.lights.data
+  const { queued } = q
+  const rows = useMemo(() => (server ? ctl.all.map((l) => (queued[l.entity_id] ? overlayRow(l, queued[l.entity_id]) : l)) : null), [server, ctl.all, queued])
+  const bulbs: BulbV[] = rows
+    ? rows.map((l) => ({ id: l.entity_id, name: l.name, on: l.on, unavailable: l.unavailable, pct: pctFromBrightness(l.brightness), color: lightColor(l), busy: q.busyIds.has(l.entity_id) }))
+    : (cached.data ?? []).map((l) => ({ ...l, busy: false }))
+  const avail = bulbs.filter((b) => !b.unavailable)
+  const lit = avail.filter((b) => b.on)
+  const anyOn = lit.length > 0
+  const offline = bulbs.length - avail.length
+  const ordered = [...avail, ...bulbs.filter((b) => b.unavailable)]
+  // one bulb of unknown brightness makes the room's reading unknown, never an invented average
+  const avg = anyOn && lit.every((b) => b.pct != null) ? Math.round(lit.reduce((a, b) => a + (b.pct as number), 0) / lit.length) : null
+  const litRows = (rows ?? []).filter((l) => l.on && !l.unavailable)
+  const preset = litRows.length && litRows.every((l) => presetOf(l) === presetOf(litRows[0])) ? presetOf(litRows[0]) : null
+  const age = rows
+    ? oldAge({ data: rows, updatedAt: ctl.lights.dataUpdatedAt, fromCache: false, isFetching: ctl.lights.isFetching, error: ctl.lights.error, failed: ctl.lights.isError }, now)
     : oldAge(cached, now)
+  const ready = !!server
+  const roomBusy = avail.length > 0 && avail.some((b) => b.busy)
 
-  // one switch at a time; the toast's Undo waits for the switch it undoes
-  const [busy, setBusy] = useState(false)
-  const inflight = useRef<Promise<boolean> | null>(null)
-  const send = (fire: () => void, msg: string, undo?: () => void) => {
-    if (inflight.current) return
-    setBusy(true)
-    const shown = toast(msg, undo ? { action: { label: 'Undo', run: undo } } : undefined)
-    const run = settled(qc, fire)
-      .then(() => true, (e: unknown) => {
-        dismissToast(shown)
-        toast(`Lights not switched: ${why(e)}`)
-        return false
-      })
-      .finally(() => {
-        inflight.current = null
-        setBusy(false)
-      })
-    inflight.current = run
+  const need = () => {
+    if (ready) return true
+    toast('Lights: still reading Home Assistant')
+    return false
   }
-  const toggle = () => {
-    const next = on === 0
-    const wasOn = avail.filter((l) => l.on).map((l) => l.id)
-    send(() => ctl.bulk(next ? 'on' : 'off'), next ? 'All lights on' : 'All lights off', () => void undoToggle(next, wasOn))
+  const toggle = (b: BulbV) => {
+    if (!need()) return
+    q.run(b.id, { update: { entity_id: b.id, state: b.on ? 'off' : 'on' }, fail: `Could not turn ${b.name} ${b.on ? 'off' : 'on'}` })
   }
+  const setPct = (b: BulbV, v: number) => {
+    if (!need()) return
+    q.run(b.id, {
+      update: v <= 0 ? { entity_id: b.id, state: 'off' } : { entity_id: b.id, state: 'on', brightness: brightnessFromPct(v) },
+      fail: v <= 0 ? `Could not turn ${b.name} off` : `Could not set ${b.name} to ${v}%`,
+    })
+  }
+  // presets color the bulbs that are on, never a dark one, and carry no brightness (the backend pins each bulb's own)
+  const applyPreset = (p: Swatch) => {
+    if (!need()) return
+    if (!lit.length) { toast('Turn a light on first'); return }
+    q.run('room', { update: { entity_id: lit.map((b) => b.id), state: 'on', ...colorOf(p) }, fail: `Could not apply ${p.label}` })
+  }
+  const allIds = avail.map((b) => b.id)
   // Undo of "all on" switches them all off; of "all off", only the bulbs that were on come back
-  const undoToggle = async (didOn: boolean, wasOn: string[]) => {
-    if ((await inflight.current) === false) return
-    if (didOn) send(() => ctl.bulk('off'), 'All lights off')
-    else if (wasOn.length) send(() => ctl.mutation.mutate({ entity_id: wasOn, state: 'on' }), `${wasOn.length} ${wasOn.length === 1 ? 'light' : 'lights'} back on`)
+  const switchAll = () => {
+    if (!need() || !allIds.length) return
+    const next = anyOn ? 'off' : 'on'
+    const wasOn = lit.map((b) => b.id)
+    const undo = () => {
+      if (next === 'on') q.run('room', { update: { entity_id: allIds, state: 'off' }, fail: 'Could not turn the lights off' })
+      else if (wasOn.length) q.run('room', { update: { entity_id: wasOn, state: 'on' }, fail: 'Could not turn the lights back on' })
+    }
+    const shown = toast(next === 'on' ? 'All lights on' : 'All lights off', { action: { label: 'Undo', run: undo } })
+    q.run('room', { update: { entity_id: allIds, state: next }, fail: `Could not turn the lights ${next}`, onFail: () => dismissToast(shown) })
   }
+
+  const empty = !rows && !cached.data
+    ? (cached.failed || ctl.lights.isError ? 'Lights not answering' : 'Reading the lights')
+    : !bulbs.length ? 'No bulbs reported' : null
 
   return (
-    <Panel className="hm-glance hm-lights" i={i} dense lit={on > 0}>
+    <Panel className={cx('hm-glance hm-lights', `hm-lights-${variant}`, fill && 'hm-grow')} i={i} dense lit={anyOn}>
       <div className="hm-g hm-g-split">
         <Press className="hm-g-main" onPress={() => go(LIGHTS)} aria-label="Lights, open Lights">
-          <span className="hm-g-label" data-lit={on > 0 || undefined}><HIcon name={on > 0 ? 'bulb' : 'bulbOff'} lit={on > 0} />Lights</span>
-          {list.length > 0 && list.length <= MAX_PIPS && (
-            <span className="hm-pips" aria-hidden>
-              {list.map((l) => (
-                <i
-                  key={l.id}
-                  title={l.name}
-                  data-on={(l.on && !l.unavailable) || undefined}
-                  data-off={l.unavailable || undefined}
-                  style={l.on && !l.unavailable ? ({ '--c': l.color } as Vars) : undefined}
-                />
-              ))}
-            </span>
-          )}
+          <span className="hm-g-label" data-lit={anyOn || undefined}><HIcon name={anyOn ? 'bulb' : 'bulbOff'} lit={anyOn} />Lights</span>
           <span className={cx('hm-g-value', age && 'hm-old')}>
-            {real || cached.data ? <><b>{on}</b> of {avail.length} on</> : cached.failed || ctl.lights.isError ? 'not answering' : '--'}
+            {rows || cached.data ? <><b>{lit.length}</b> of {avail.length} on{avg != null && <span className="hm-dim"> · {avg}%</span>}</> : cached.failed || ctl.lights.isError ? 'not answering' : '--'}
             {offline > 0 && <span className="hm-faint"> · {offline} offline</span>}
             <Old age={age} />
           </span>
@@ -1341,61 +1730,454 @@ function LightsBlock({ i }: { i: number }) {
         </Press>
         <Press
           className="hm-plate"
-          data-on={on > 0 || undefined}
-          data-busy={busy || undefined}
-          aria-pressed={on > 0}
-          aria-busy={busy || undefined}
-          aria-label={on > 0 ? 'Turn all lights off' : 'Turn all lights on'}
+          data-on={anyOn || undefined}
+          data-busy={roomBusy || undefined}
+          aria-pressed={anyOn}
+          aria-label={anyOn ? 'Turn all lights off' : 'Turn all lights on'}
           // the switch needs the control's own read: it sends to the bulbs that read reachable
-          disabled={!real || !avail.length || busy}
-          onPress={toggle}
+          disabled={!ready || !allIds.length}
+          onPress={switchAll}
         >
           <span className="hm-plate-in">
-            <Icon name="power" size={12} tone={on > 0 ? 'ink' : 'dim'} />
-            {on > 0 ? 'On' : 'Off'}
+            <Icon name="power" size={12} tone={anyOn ? 'ink' : 'dim'} />
+            {anyOn ? 'On' : 'Off'}
           </span>
         </Press>
       </div>
+      {empty ? (
+        <p className="hm-quiet hm-g-quiet">{empty}</p>
+      ) : variant === 'rows' ? (
+        <>
+          <Presets active={preset} idle={!anyOn} names onPick={applyPreset} />
+          <div className="hm-bulbs" role="group" aria-label="Bulbs">
+            {ordered.map((b) => <BulbLine key={b.id} b={b} onToggle={() => toggle(b)} onPct={(v) => setPct(b, v)} />)}
+          </div>
+          {withRoom && <LightsRoom bulbs={bulbs} active={active} />}
+        </>
+      ) : (
+        <>
+          <div className="hm-chips" role="group" aria-label="Bulbs">
+            {ordered.map((b) => <BulbChip key={b.id} b={b} onToggle={() => toggle(b)} />)}
+          </div>
+          <Presets active={preset} idle={!anyOn} onPick={applyPreset} />
+        </>
+      )}
     </Panel>
   )
 }
 
-// ---------- media glance ----------
-
-const NEW_MS = 7 * 86_400_000
-
-/** A poster that fades in when its image lands; a hairline frame while it waits or when it has none. */
-function Poster({ item, onPress }: { item: PlexRichVM; onPress: () => void }) {
-  const [state, setState] = useState<'wait' | 'ok' | 'err'>('wait')
-  const ref = useRef<HTMLImageElement>(null)
-  useLayoutEffect(() => {
-    setState('wait')
-    const img = ref.current
-    if (img?.complete && img.naturalWidth > 0) setState('ok')
-  }, [item.img])
+/** The presets as glass plates, each with its swatch; the one every lit bulb shows is lit. `names`: the label beside the swatch. */
+function Presets({ active, idle, names, onPick }: { active: string | null; idle: boolean; names?: boolean; onPick: (p: Swatch) => void }) {
   return (
-    <Press className="hm-poster" data-state={item.img ? state : 'err'} onPress={onPress} title={`${item.title} · ${item.subtitle}`} aria-label={`${item.title}, open Media`}>
-      {item.img && (
-        <img ref={ref} src={item.img} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setState('ok')} onError={() => setState('err')} />
+    <div className="hm-pres" role="group" aria-label="Presets for the lights that are on" data-idle={idle || undefined} data-names={names || undefined}>
+      {SWATCHES.map((p) => {
+        const on = active === p.label
+        return (
+          <Press
+            key={p.label}
+            className="hm-pre"
+            data-on={on || undefined}
+            style={{ '--sw': p.swatch } as Vars}
+            aria-pressed={on}
+            aria-label={`${p.label}, for the lights that are on`}
+            title={p.label}
+            onPress={() => onPick(p)}
+          >
+            <i className="hm-pre-sw" aria-hidden />
+            {names && <span className="hm-pre-name">{p.label}</span>}
+          </Press>
+        )
+      })}
+    </div>
+  )
+}
+
+/** One bulb as a row: its icon in its real color, the name, the brightness bar, the figure, the switch. */
+function BulbLine({ b, onToggle, onPct }: { b: BulbV; onToggle: () => void; onPct: (v: number) => void }) {
+  const lit = b.on && !b.unavailable
+  // the value under the pointer while the bar moves (the bulb is told on release)
+  const [preview, setPreview] = useState<number | null>(null)
+  const shown = preview !== null ? (preview > 0 ? preview : null) : lit ? b.pct : null
+  return (
+    <div className="hm-bulb" data-on={lit || undefined} data-na={b.unavailable || undefined} data-busy={b.busy || undefined} style={{ '--c': b.color } as Vars}>
+      <span className="hm-bulb-id">
+        <Icon name={lit ? 'bulb' : 'bulbOff'} size={15} tone={lit ? 'fg' : b.unavailable ? 'faint' : 'dim'} glow={lit} className="hm-bulb-ic" />
+        <span className="hm-bulb-name vl-ellipsis" title={b.name}>{b.name}</span>
+      </span>
+      {b.unavailable ? (
+        <span className="hm-bulb-na"><Icon name="offline" size={12} tone="dim" />Unavailable</span>
+      ) : (
+        <>
+          <BulbSlider value={b.on ? b.pct : 0} on={preview !== null ? preview > 0 : b.on} label={`${b.name} brightness`} onPreview={setPreview} onCommit={onPct} />
+          <span className="hm-bulb-pct">{shown != null ? <>{shown}<small>%</small></> : b.on && preview === null ? '--' : 'Off'}</span>
+          <Press
+            className="hm-bulb-pw"
+            data-on={b.on || undefined}
+            aria-pressed={b.on}
+            aria-label={b.on ? `Turn ${b.name} off` : `Turn ${b.name} on`}
+            onPress={onToggle}
+          >
+            <Icon name="power" size={14} tone={b.on ? 'fg' : 'dim'} glow={b.on} />
+          </Press>
+        </>
       )}
-      {(!item.img || state === 'err') && <span className="hm-poster-t">{item.title}</span>}
+    </div>
+  )
+}
+
+/** One bulb as a chip (phone): icon in its real color, name, level, a bar in its color along the foot. A tap switches it. */
+function BulbChip({ b, onToggle }: { b: BulbV; onToggle: () => void }) {
+  const lit = b.on && !b.unavailable
+  return (
+    <Press
+      className="hm-chip"
+      data-on={lit || undefined}
+      data-na={b.unavailable || undefined}
+      data-busy={b.busy || undefined}
+      style={{ '--c': b.color, '--v': lit ? b.pct ?? 100 : 0 } as Vars}
+      disabled={b.unavailable}
+      aria-pressed={b.on}
+      aria-label={b.unavailable ? `${b.name}, unavailable` : b.on ? `Turn ${b.name} off` : `Turn ${b.name} on`}
+      onPress={onToggle}
+    >
+      <Icon name={lit ? 'bulb' : 'bulbOff'} size={14} tone={lit ? 'fg' : b.unavailable ? 'faint' : 'dim'} glow={lit} className="hm-chip-ic" />
+      <span className="hm-chip-name vl-ellipsis">{b.name}</span>
+      <span className="hm-chip-v">{b.unavailable ? 'n/a' : lit ? (b.pct != null ? `${b.pct}%` : 'On') : 'Off'}</span>
+      <i className="hm-chip-bar" aria-hidden />
     </Press>
   )
 }
 
+/** how long a released bar keeps its value while the bulb has not reported it yet */
+const SL_HOLD_MS = 4_000
+
+/**
+ * A bulb's brightness bar, filled in the bulb's color. A mouse sets the value
+ * at once and drags it; a finger sets it on a sideways drag or on lift (a
+ * vertical move hands the gesture back to the page scroll). It commits ONCE
+ * per gesture (release, tap, or key up after the arrows): a command per move
+ * sent a cloud integration values the pointer had already left. The value
+ * owns the bar from the first move until the bulb reports it, or SL_HOLD_MS
+ * for one that never does, so the bar never jumps back mid-change.
+ */
+function BulbSlider({ value, on, label, onCommit, onPreview }: {
+  value: number | null
+  on: boolean
+  label: string
+  onCommit: (v: number) => void
+  onPreview?: (v: number | null) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const cb = useRef({ onCommit, onPreview })
+  useLayoutEffect(() => {
+    cb.current = { onCommit, onPreview }
+  })
+  const [drag, setDrag] = useState(false)
+  const [held, setHeld] = useState<number | null>(null)
+  const last = useRef(0)
+  const keying = useRef(false)
+  const ceiling = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const shown = held ?? value
+  const unknown = shown === null
+  const v = unknown ? 0 : Math.max(0, Math.min(100, Math.round(shown)))
+
+  const clearCeiling = () => {
+    if (ceiling.current !== null) { clearTimeout(ceiling.current); ceiling.current = null }
+  }
+  useEffect(() => clearCeiling, [])
+  // the bulb agreed (bulbs round, so within a point): it drives the bar again
+  useEffect(() => {
+    if (drag || keying.current || held === null || value === null || Math.abs(value - held) > 1) return
+    clearCeiling()
+    setHeld(null)
+  }, [value, held, drag])
+
+  const hold = (n: number) => {
+    last.current = n
+    setHeld(n)
+    cb.current.onPreview?.(n)
+  }
+  const commit = () => {
+    cb.current.onPreview?.(null)
+    clearCeiling()
+    ceiling.current = setTimeout(() => { ceiling.current = null; setHeld(null) }, SL_HOLD_MS)
+    cb.current.onCommit(last.current)
+  }
+  const at = (clientX: number) => {
+    const r = ref.current!.getBoundingClientRect()
+    return Math.max(0, Math.min(100, Math.round(((clientX - r.left) / Math.max(1, r.width)) * 100)))
+  }
+
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const el = ref.current
+    if (!el) return
+    const id = e.pointerId
+    const x0 = e.clientX
+    const y0 = e.clientY
+    let mode: 'wait' | 'drag' = 'wait'
+    el.dataset.pressed = ''
+    const begin = (x: number) => {
+      mode = 'drag'
+      clearCeiling()
+      setDrag(true)
+      try { el.setPointerCapture(id) } catch { /* pointer gone */ }
+      hold(at(x))
+    }
+    if (e.pointerType === 'mouse') begin(x0)
+    const end = () => {
+      delete el.dataset.pressed
+      setDrag(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+    }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      if (mode === 'wait') {
+        const dx = Math.abs(ev.clientX - x0)
+        const dy = Math.abs(ev.clientY - y0)
+        if (dy > 8 && dy > dx) { end(); return }
+        if (dx > 5 && dx >= dy) begin(ev.clientX)
+        return
+      }
+      hold(at(ev.clientX))
+    }
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      if (mode === 'wait') clearCeiling()
+      hold(at(ev.clientX))
+      end()
+      commit()
+    }
+    // the OS took a drag away: keep what the pointer chose; a scroll takeover sends nothing
+    const cancel = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      end()
+      if (mode === 'drag') commit()
+    }
+    window.addEventListener('pointermove', move, { passive: true })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+  }
+  // arrows move the held value; the key up sends it, so a held key is one command
+  const key = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 5 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -5 : 0
+    if (!step) return
+    e.preventDefault()
+    if (!keying.current) {
+      keying.current = true
+      clearCeiling()
+    }
+    hold(Math.max(0, Math.min(100, (unknown ? 50 : v) + step)))
+  }
+  const keyUp = () => {
+    if (!keying.current) return
+    keying.current = false
+    commit()
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="hm-sl"
+      data-on={on || undefined}
+      data-unknown={unknown || undefined}
+      data-drag={drag || undefined}
+      data-no-swipe
+      role="slider"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={unknown ? undefined : v}
+      aria-valuetext={unknown ? 'brightness unknown' : undefined}
+      style={{ '--v': v } as Vars}
+      onPointerDown={down}
+      onKeyDown={key}
+      onKeyUp={keyUp}
+      onBlur={keyUp}
+    >
+      <i className="hm-sl-track" aria-hidden />
+      <i className="hm-sl-fill" aria-hidden />
+      <i className="hm-sl-head" aria-hidden />
+    </div>
+  )
+}
+
+/**
+ * The room as an x-ray model, each bulb a pool of light in its real color and
+ * strength (no diamonds: the list above names them). Fits its box; drag turns
+ * it; paused while the Dashboard is not the visible tab.
+ */
+function LightsRoom({ bulbs, active }: { bulbs: BulbV[]; active: boolean }) {
+  const palette = usePalette()
+  const reduced = useReducedMotion()
+  const boxRef = useRef<HTMLDivElement>(null)
+  const size = useSize(boxRef)
+  const roomKey = bulbs.map((b) => `${b.id}\u0001${b.name}`).join('\u0002')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const model = useMemo(() => room(bulbs.map((b) => ({ id: b.id, name: b.name }))), [roomKey])
+  // From the 'lights' pose the room draws about 2.75 times as wide and 1.65 times as tall as the
+  // projected radius of its bounding sphere, its middle 0.14 radius below center (Lights.tsx useBoxFit).
+  const pose = useMemo<CameraPose | null>(() => {
+    if (!size || size.w < 60 || size.h < 60) return null
+    const p = POSES.lights
+    const fov = p.fov ?? 38
+    const focal = (Math.min(size.w, size.h) * 0.5) / Math.tan((fov * Math.PI) / 360)
+    const R = Math.min((size.w * 0.9) / 2.75, (size.h * 0.9) / 1.65)
+    const dist = Math.round(Math.max(6, Math.min(40, (focal * model.radius) / R)) * 100) / 100
+    const sy = Math.round((-(0.14 * R) / size.h) * 1000) / 1000
+    return { ...p, dist, shift: [0, sy] }
+  }, [size, model.radius])
+  const lightKey = bulbs.map((b) => `${b.id}|${b.on ? 1 : 0}|${b.pct ?? ''}|${b.color}|${b.unavailable ? 1 : 0}`).join(';')
+  // a lit bulb of unknown brightness glows at 0.7 (drawing only, never shown as a number)
+  const glowOf = (b: BulbV) => (b.pct == null ? 0.7 : b.pct / 100)
+  const lights = useMemo<Light[]>(() => model.hotspots.flatMap((h) => {
+    const b = bulbs.find((x) => x.id === h.id)
+    if (!b || !b.on || b.unavailable) return []
+    return [{ at: h.at, color: b.color, intensity: 0.22 + 0.78 * glowOf(b) }]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [model, lightKey])
+  const heat = useMemo(() => {
+    const h: Record<string, number> = { screens: 0.3, fans: 0.3 }
+    for (const b of bulbs) h[`bulb.${b.id}`] = b.on && !b.unavailable ? 0.35 + 0.65 * glowOf(b) : 0.04
+    return h
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightKey])
+  const lit = bulbs.filter((b) => b.on && !b.unavailable).length
+  return (
+    <div ref={boxRef} className="hm-room" role="img" aria-label={`The room, ${lit} of ${bulbs.length} bulbs lit`}>
+      {pose && (
+        <WireScene
+          style={{ position: 'absolute', inset: 0 }}
+          model={model}
+          pose={pose}
+          palette={palette}
+          heat={heat}
+          lights={lights}
+          orbit
+          orbitArea="model"
+          paused={!active}
+          motion={reduced ? 'reduced' : 'full'}
+          showHotspots={false}
+        />
+      )}
+      <span className="hm-room-cap" aria-hidden><Icon name="home" size={12} tone="dim" />Room</span>
+    </div>
+  )
+}
+
+// ---------- media: the newest backdrop, the posters, downloads ----------
+
+const NEW_MS = 7 * 86_400_000
+/** posters in the strip (phone, two columns) */
+const STRIP = 6
+/** gap between posters, layout px (dashboard.css .hm-posters) */
+const POSTER_GAP = 6
+/** the poster width the desktop grid aims for, layout px */
+const POSTER_W = 84
+
+type ImgState = 'wait' | 'ok' | 'err'
+
+/** An image's load state, per source: 'wait' until it loads, 'ok' once it did, 'err' when it failed or there is none. */
+function useImg(src: string | null): [ImgState, (s: ImgState) => void] {
+  const [st, setSt] = useState<{ src: string | null; state: ImgState }>({ src, state: 'wait' })
+  const state: ImgState = !src ? 'err' : st.src === src ? st.state : 'wait'
+  return [state, (next: ImgState) => setSt({ src, state: next })]
+}
+
+/** A poster that fades in when its image lands; a hairline frame with the title while it waits or when it has none. */
+function Poster({ item, onPress }: { item: PlexRichVM; onPress: () => void }) {
+  const [state, setState] = useImg(item.img)
+  return (
+    <Press className="hm-poster" data-state={state} onPress={onPress} title={`${item.title} · ${item.subtitle}`} aria-label={`${item.title}, open Media`}>
+      {item.img && (
+        <img src={item.img} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setState('ok')} onError={() => setState('err')} />
+      )}
+      {state !== 'ok' && <span className="hm-poster-t">{item.title}</span>}
+    </Press>
+  )
+}
+
+const kindWord = (k: PlexRichVM['kind']) => (k === 'movie' ? 'movie' : k === 'other' ? 'addition' : 'show')
+
+/**
+ * The newest addition as a wide banner: its backdrop (the poster, blurred,
+ * when Plex has no backdrop), then what it is, its title, its season or year,
+ * episodes, rating and when it came, and two lines of its summary. Opens Media.
+ */
+function Banner({ item, now, onPress }: { item: PlexRichVM; now: number; onPress: () => void }) {
+  const bg = item.art ?? item.img
+  const [state, setState] = useImg(bg)
+  const meta = [
+    item.subtitle,
+    item.episodes && item.kind !== 'movie' ? plural(item.episodes, 'episode') : null,
+    item.contentRating,
+    item.added ? `added ${ago(item.added, now)} ago` : null,
+  ].filter(Boolean).join(' · ')
+  return (
+    <Press className="hm-ban" data-state={state} data-blur={!item.art || undefined} onPress={onPress} aria-label={`Newest ${kindWord(item.kind)}: ${item.title}, ${meta}. Open Media`}>
+      {bg && <img className="hm-ban-bg" src={bg} alt="" decoding="async" draggable={false} onLoad={() => setState('ok')} onError={() => setState('err')} />}
+      {!item.art && item.img && <img className="hm-ban-poster" src={item.img} alt="" decoding="async" draggable={false} />}
+      <span className="hm-ban-text">
+        <span className="hm-ban-k">Newest {kindWord(item.kind)}</span>
+        <span className="hm-ban-t">{item.title}</span>
+        <span className="hm-ban-m">{meta}</span>
+        {item.summary && <span className="hm-ban-s">{item.summary}</span>}
+      </span>
+    </Press>
+  )
+}
+
+/**
+ * How the desktop poster grid fills its box exactly: rows as tall as the box
+ * allows, as many across as keep each poster within a few percent of 2:3 (the
+ * cover crops the rest), at least four across. Of those, the one whose rows
+ * the posters on hand fill completely, then the one nearest POSTER_W wide, so
+ * the box never ends in an empty row. `count`: the posters on hand.
+ */
+function posterGrid(w: number, h: number, count: number): { n: number; rows: number; ph: number } | null {
+  let best: { n: number; rows: number; ph: number; score: number } | null = null
+  for (let rows = 1; rows <= 6; rows++) {
+    const ph = (h - (rows - 1) * POSTER_GAP) / rows
+    const pw = ph / 1.5
+    if (pw < 40) break
+    const n = Math.round((w + POSTER_GAP) / (pw + POSTER_GAP))
+    if (n < 4) continue
+    const cw = (w - (n - 1) * POSTER_GAP) / n
+    const empty = Math.max(0, n * rows - count)
+    const score = empty * 50 + Math.abs(cw - POSTER_W) + Math.abs(cw / pw - 1) * 100
+    if (!best || score < best.score) best = { n, rows, ph, score }
+  }
+  return best
+}
+
 const dlOrder = (a: DownloadVM, b: DownloadVM) => Number(b.stuck) - Number(a.stuck) || b.progress - a.progress
+
+/** Media in its panel. `banner` (desktop): the newest as a backdrop banner; `fill`: the poster grid takes the height left. */
+function MediaBox({ i, banner, fill }: { i: number; banner?: boolean; fill?: boolean }) {
+  return (
+    <Panel className={cx('hm-glance hm-mediabox', fill && 'hm-grow')} i={i} dense>
+      <MediaGlance banner={banner} fill={fill} />
+    </Panel>
+  )
+}
 
 /**
  * Media at a glance: what plays in the page (with play / pause), the newest
- * additions as a poster strip, and every running download (only while one
- * runs). The head opens Media.
+ * additions (a strip of posters with the newest named under it; on the
+ * desktop the newest as a backdrop banner over a grid of the rest), and every
+ * running download (only while one runs). The head opens Media.
  */
-function MediaGlance({ posters }: { posters: number }) {
+function MediaGlance({ banner, fill }: { banner?: boolean; fill?: boolean }) {
   const { go } = useShell()
   const recent = usePlexRecentRich({ grouped: true })
   const queue = useMediaQueue()
   const p = usePlayerNow()
   const now = useTick(30_000)
+  const area = useRef<HTMLDivElement>(null)
+  const size = useSize(area, !!fill)
 
   const items = recent.data ?? []
   const newest = items[0] ?? null
@@ -1413,8 +2195,28 @@ function MediaGlance({ posters }: { posters: number }) {
       ? <span className={cx(rAge && 'hm-old')}>{fresh ? <><b>{fresh >= items.length ? `${fresh}+` : fresh}</b> new this week</> : 'Recently added'}<Old age={rAge} /></span>
       : recent.failed ? 'Plex not answering' : '--'
 
+  // the desktop grid: sized from its box once measured, else the strip
+  const rest = banner ? items.slice(1) : items
+  const grid = fill && size && size.h > 40 ? posterGrid(size.w, size.h, recent.data ? rest.length : 99) : null
+  const count = grid ? Math.min(rest.length, grid.n * grid.rows) : STRIP
+  const gridStyle: Vars = grid ? { '--n': grid.n, gridAutoRows: `${grid.ph.toFixed(2)}px` } : { '--n': STRIP }
+
+  const posters = recent.data ? (
+    items.length ? (
+      <span className="hm-posters" data-grid={grid ? '' : undefined} style={gridStyle} data-old={rAge ? '' : undefined}>
+        {rest.slice(0, count).map((x) => <Poster key={x.key} item={x} onPress={open} />)}
+      </span>
+    ) : <span className="hm-quiet hm-media-quiet">Nothing added lately</span>
+  ) : recent.failed ? (
+    <span className="hm-quiet hm-media-quiet">Plex not answering</span>
+  ) : (
+    <span className="hm-posters" style={gridStyle} aria-hidden>
+      {Array.from({ length: grid ? grid.n * grid.rows : STRIP }, (_, k) => <span key={k} className="hm-poster" data-state="wait" />)}
+    </span>
+  )
+
   return (
-    <div className="hm-g hm-media">
+    <div className="hm-g hm-media" data-banner={banner || undefined}>
       <Press className="hm-g-head hm-media-head" onPress={open} aria-label="Media, open Media">
         <span className="hm-g-label"><HIcon name="media" lit={p.playing || moving > 0} />Media</span>
         <span className="hm-g-value">{value}</span>
@@ -1436,24 +2238,13 @@ function MediaGlance({ posters }: { posters: number }) {
         </div>
       )}
 
-      {recent.data ? (
-        items.length ? (
-          <>
-            <span className="hm-posters" style={{ '--n': posters } as Vars} data-old={rAge ? '' : undefined}>
-              {items.slice(0, posters).map((x) => <Poster key={x.key} item={x} onPress={open} />)}
-            </span>
-            {newest && (
-              <span className="hm-media-cap vl-ellipsis">
-                <span className="hm-dim">Newest </span>{newest.title}<span className="hm-dim"> · {newest.subtitle}{newest.added ? ` · ${ago(newest.added, now)} ago` : ''}</span>
-              </span>
-            )}
-          </>
-        ) : <span className="hm-quiet hm-media-quiet">Nothing added lately</span>
-      ) : recent.failed ? (
-        <span className="hm-quiet hm-media-quiet">Plex not answering</span>
-      ) : (
-        <span className="hm-posters" style={{ '--n': posters } as Vars} aria-hidden>
-          {Array.from({ length: posters }, (_, k) => <span key={k} className="hm-poster" data-state="wait" />)}
+      {banner && newest && <Banner item={newest} now={now} onPress={open} />}
+
+      {fill ? <div ref={area} className="hm-mp-area">{posters}</div> : posters}
+
+      {!banner && newest && (
+        <span className="hm-media-cap vl-ellipsis">
+          <span className="hm-dim">Newest </span>{newest.title}<span className="hm-dim"> · {newest.subtitle}{newest.added ? ` · ${ago(newest.added, now)} ago` : ''}</span>
         </span>
       )}
 

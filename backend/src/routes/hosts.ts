@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { deviceHosts } from './devices.js'
 
 // GET /api/hosts: health for every machine in the fleet on one panel.
 //
@@ -13,6 +14,9 @@ import path from 'node:path'
 //     (Publish-HostStats.ps1). odin reads those files off its OWN local disk
 //     (/home/brendon/bifrost/...), so there is NO network listener, NO token on
 //     the wire, and nothing here ever executes anything a remote host sent.
+//
+//   * the phone and tablet come from routes/devices.ts: presence from odin's
+//     tailscale status, battery from an iOS Shortcut. No history for them.
 //
 //   * the Steam Frame sleeps, so it cannot publish on a timer. odin pulls it
 //     instead (pollFrame below), with a key the Frame accepts only as a forced
@@ -318,7 +322,7 @@ router.get('/hosts', async (_req, res) => {
     measureOdin(),
     ...REMOTE_HOSTS.map(readRemote),
   ])
-  res.json({ hosts: [odin, ...remotes, frameStat].map((h) => ({ ...h, history: history.get(h.host) ?? [] })) })
+  res.json({ hosts: [...[odin, ...remotes, frameStat].map((h) => ({ ...h, history: history.get(h.host) ?? [] })), ...deviceHosts().map((d) => ({ ...d, history: [] }))] })
 })
 
 export default router

@@ -332,9 +332,8 @@
     var(--glow);
 }
 .lt-tg[data-pressed] { transform: scale(.92); filter: brightness(1.25); }
-/* a command in flight: the control already shows what was asked, so it waits at full strength, not dimmed */
-.lt-tg[data-busy]:disabled, .lt-mpwr[data-busy]:disabled,
-.lt-pres[data-busy] .lt-pre:disabled, .lt-sws[data-busy] .lt-sw:disabled { opacity: 1; cursor: progress; }
+/* a command in flight: the control already shows what was asked and still takes a newer press */
+.lt-tg[data-busy], .lt-mpwr[data-busy] { cursor: progress; }
 
 /* a lit bulb's own colors, under its row while it is selected */
 .lt-strip { position: relative; padding: 2px 0 8px; }
