@@ -976,13 +976,27 @@ function AccountRow({ a, s, run, inSetup, busy, now }: { a: AcctVM; s: SwitchVM;
       .finally(() => setSending(null))
   }
   const state = signInText(a, now) + (good && a.onThor === false ? ' · odin only' : '')
+  const [toggling, setToggling] = useState(false)
+  // Disable keeps the token but takes the account out of the rotation (config exclude); a host on
+  // it moves to another account on the switcher's next check.
+  const togglePool = () => {
+    if (toggling) return
+    setToggling(true)
+    const others = s.accounts.filter((x) => !x.inPool && x.id !== a.id).map((x) => x.id)
+    write('/config', { exclude: a.inPool ? [...others, a.id] : others })
+      .then(() => toast(a.inPool
+        ? `${a.label} disabled: the switcher will not use it${where.length ? `; ${where.join(' and ')} moves off it` : ''}`
+        : `${a.label} enabled: back in the rotation`))
+      .catch((e: unknown) => toast(`${a.label} not changed: ${why(e)}`))
+      .finally(() => setToggling(false))
+  }
 
   return (
     <div className="va-acct" data-acct={a.id} data-bad={(need && a.inPool) || undefined} data-out={!a.inPool || undefined}>
       <div className="va-acct-row">
         <span className="va-acct-name">
           <span className="vl-ellipsis">{a.label}{where.length ? <i className="va-on">{where.join(' + ')}</i> : null}</span>
-          <em className="vl-ellipsis">{[a.email, !a.inPool && 'not in the rotation'].filter(Boolean).join(' · ')}</em>
+          <em className="vl-ellipsis">{[a.email, !a.inPool && 'disabled: never switched to'].filter(Boolean).join(' · ')}</em>
         </span>
         <span className="va-acct-state" data-s={a.signIn}>
           {need && <Icon name="alert" size={13} tone="acc2" glow />}
@@ -995,6 +1009,16 @@ function AccountRow({ a, s, run, inSetup, busy, now }: { a: AcctVM; s: SwitchVM;
               {sending === 'copy' ? 'Copying' : 'Copy to thor'}
             </Press>
           )}
+          <Press
+            className="va-pool vl-btn-line"
+            data-off={!a.inPool || undefined}
+            disabled={toggling}
+            aria-pressed={!a.inPool}
+            aria-label={a.inPool ? `Disable ${a.label}: the switcher stops using it` : `Enable ${a.label}: back in the rotation`}
+            onPress={togglePool}
+          >
+            {toggling ? 'Saving' : a.inPool ? 'Disable' : 'Enable'}
+          </Press>
           <Press
             className="va-resign vl-btn-line"
             data-armed={armed || undefined}

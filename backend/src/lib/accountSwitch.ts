@@ -157,6 +157,12 @@ function loadState(): State {
   }
 }
 
+/** The newest pool-token probe for an account: the usage card's reading when the account's own sign-in is dead. */
+export function poolProbe(id: string): { quota: Quota; at: number } | null {
+  const p = loadState().probes[id]
+  return p?.quota ? { quota: p.quota, at: p.at } : null
+}
+
 function saveState(s: State): void {
   const now = Date.now()
   for (const h of HOSTS) s.hosts[h].switches = s.hosts[h].switches.filter((t) => now - t < 7 * 86_400_000).slice(-100)

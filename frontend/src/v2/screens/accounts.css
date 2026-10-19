@@ -191,6 +191,8 @@
 .va-acct-btns { grid-area: btn; display: flex; align-items: center; gap: 12px; }
 .va-copy { min-height: 32px; }
 .va-resign { min-width: 92px; }
+.va-pool { min-width: 92px; }
+.va-pool[data-off] { color: var(--acc2, currentColor); border-color: currentColor; }
 .va-resign[data-armed] {
   color: var(--plate-ink);
   background: var(--acc2);

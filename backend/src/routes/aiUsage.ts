@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import { writeFileSync, readFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { CLAUDE_ACCOUNTS, DEFAULT_CLAUDE_DIR } from '../lib/claudeAccounts.js'
+import { poolProbe } from '../lib/accountSwitch.js'
 
 const exec = promisify(execFile)
 const router = Router()
@@ -295,6 +296,22 @@ async function readClaudeOAuthQuota(configDir: string, label: string): Promise<Q
   }
 }
 
+// An account whose own sign-in is dead can still be read through its switcher (pool) token: the
+// switcher probes every pool token and keeps the reading. Used only while it is under 30 minutes
+// old, and marked so the card can say where the numbers came from.
+const POOL_READ_MAX_MS = 30 * 60_000
+function withPoolFallback(id: string, read: QuotaRead): QuotaRead & { quotaSource: 'own' | 'switcher' | null } {
+  if (read.quota || !read.authError) return { ...read, quotaSource: read.quota ? 'own' : null }
+  const p = poolProbe(id)
+  if (!p || Date.now() - p.at > POOL_READ_MAX_MS) return { ...read, quotaSource: null }
+  const q = p.quota
+  return {
+    quota: { sessionPct: q.sessionPct, weeklyPct: q.weeklyPct, sessionResetsAt: q.sessionResetsAt, weeklyResetsAt: q.weeklyResetsAt, status: q.status },
+    authError: null,
+    quotaSource: 'switcher',
+  }
+}
+
 async function readClaudeAIQuota(): Promise<ClaudeQuota | null> {
   const sessionKey = process.env.CLAUDE_SESSION_KEY
   if (!sessionKey) return null
@@ -398,14 +415,14 @@ async function refreshAIUsage(): Promise<void> {
         const [blocks, usage, quota] = await Promise.all([
           readClaudeBlocks(env),
           readClaudeUsage(env),
-          readClaudeOAuthQuota(acct.configDir, acct.label),
+          readClaudeOAuthQuota(acct.configDir, acct.label).then((r) => withPoolFallback(acct.id, r)),
         ])
-        return { acct, blocks, usage, quota: quota.quota, authError: quota.authError }
+        return { acct, blocks, usage, quota: quota.quota, authError: quota.authError, quotaSource: quota.quotaSource }
       }))
 
-      const claudeClients = claudeResults.map(({ acct, blocks, usage, quota, authError }) => ({
+      const claudeClients = claudeResults.map(({ acct, blocks, usage, quota, authError, quotaSource }) => ({
         id: acct.id, kind: 'claude', label: acct.label, email: acct.email, subscription: acct.subscription,
-        ...usage, session: blocks.activeBlock, quota, authError,
+        ...usage, session: blocks.activeBlock, quota, authError, quotaSource,
       }))
 
       // legacy `claude` field kept for alerts / older deployed frontends: first listed account
@@ -439,11 +456,11 @@ async function refreshQuotasOnly(): Promise<void> {
     try {
       const current = cache?.data
       if (!current?.aiClients) return
-      const reads = await Promise.all(CLAUDE_ACCOUNTS.map((acct) => readClaudeOAuthQuota(acct.configDir, acct.label)))
+      const reads = await Promise.all(CLAUDE_ACCOUNTS.map((acct) => readClaudeOAuthQuota(acct.configDir, acct.label).then((r) => withPoolFallback(acct.id, r))))
       const byId = new Map(CLAUDE_ACCOUNTS.map((acct, i) => [acct.id, reads[i]]))
       const aiClients = current.aiClients.map((c: { id: string }) => {
         const read = byId.get(c.id)
-        return read ? { ...c, quota: read.quota, authError: read.authError } : c
+        return read ? { ...c, quota: read.quota, authError: read.authError, quotaSource: read.quotaSource } : c
       })
       const primary = byId.get(CLAUDE_ACCOUNTS[0].id)
       const claude = primary ? { ...current.claude, quota: primary.quota } : current.claude

@@ -335,6 +335,9 @@ export function decide(i: DecideInput): Decision {
   let trigger: Trigger | null = null
   if (!host.active || host.owner === 'missing') {
     trigger = { hard: true, why: 'no live sign-in on the host' }
+  } else if (cfg.exclude.includes(host.active)) {
+    // disabled in the sign-ins list while a host was on it: move the host off it
+    trigger = { hard: true, why: 'account disabled' }
   } else if (i.event) {
     const q = active?.quota
     // A reading taken after the event that shows room means the event came
