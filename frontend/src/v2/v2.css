@@ -1055,6 +1055,9 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   .vl-strip .vl-host b { display: none; }
   .vl-strip .vl-strip-hosts { gap: 7px; }
 }
+/* any width: the names would run into the center text or the clock (StatusStrip measures it) */
+.vl-strip[data-compact] .vl-host b { display: none; }
+.vl-strip[data-compact] .vl-strip-hosts { gap: 7px; }
 .vl-strip-right b { font-weight: 600; color: var(--faint); margin: 0 5px; }
 /* the Settings gear: dim at rest, lit with the glow while Settings is open; a 44 px target */
 .vl-strip-gear {

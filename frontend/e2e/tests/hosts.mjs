@@ -571,8 +571,49 @@ function carTests() {
   return out
 }
 
+/**
+ * The status strip's host names give way to icons once they would run into the center text or the
+ * clock (Brendon, 2026-10-19: "when window is smaller the hosts at the top and stuff start to
+ * overlap"), and keep their names when they fit.
+ */
+function stripTests() {
+  const strip = () => {
+    const s = document.querySelector('.vl-strip')
+    const hosts = s?.querySelector('.vl-strip-hosts')
+    const next = s?.querySelector('.vl-strip-center') ?? s?.querySelector('.vl-strip-right')
+    if (!s || !hosts || !next) return null
+    const named = [...hosts.querySelectorAll('.vl-host b')].filter((b) => b.getBoundingClientRect().width > 0).length
+    return { compact: s.hasAttribute('data-compact'), named, gap: Math.round(next.getBoundingClientRect().left - hosts.getBoundingClientRect().right) }
+  }
+  const doc = (n) => ({
+    hosts: Array.from({ length: n }, (_, i) => ({
+      host: `h${i}`, label: n > 4 ? `long-hostname-${i}` : `h${i}`, os: 'linux', online: true, stale: false, ts: Date.now(), uptime: 3600,
+      cpu: { usage: 10, cores: 8 }, memory: { percent: 30, used: 1e9, total: 4e9 }, disk: { percent: 20, used: 1e10, total: 5e10 }, history: [],
+    })),
+  })
+  return [
+    { name: 'strip:compact:many', n: 9, compact: true },
+    { name: 'strip:compact:few', n: 3, compact: false },
+  ].map((c) => ({
+    name: c.name,
+    group: 'hosts',
+    device: 'desktop',
+    timeout: 45_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      page.mock('/api/hosts', () => ok(doc(c.n)))
+      await page.goto('/m/system/hosts')
+      const r = await page.waitFor(strip, { timeout: 8000, message: 'no status strip with hosts' }).then(async () => { await sleep(400); return page.eval(strip) })
+      t.check(r.gap >= 0, `the hosts run into the next part of the strip by ${-r.gap}px (${JSON.stringify(r)})`)
+      t.check(r.compact === c.compact, `${c.n} hosts at 1600px: compact is ${r.compact}, want ${c.compact} (${JSON.stringify(r)})`)
+      t.check(c.compact ? r.named === 0 : r.named === c.n, `${c.n} hosts: ${r.named} names showing (${JSON.stringify(r)})`)
+    },
+  }))
+}
+
 export function hostTests() {
-  return [...hotspotTests(), ...roomTests(), ...deviceTests(), ...carTests()]
+  return [...hotspotTests(), ...roomTests(), ...deviceTests(), ...carTests(), ...stripTests()]
 }
 
 export { hostsDoc, carHost }

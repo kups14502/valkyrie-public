@@ -287,8 +287,44 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
   const date = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`
   const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   const win = desktopWindow()
+
+  // Host names give way to icons when they would run into the center text or the clock (a narrow
+  // desktop window, many hosts), and come back once there is room for them again.
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [compact, setCompact] = useState(false)
+  const compactRef = useRef(false)
+  const namedWidth = useRef(0)
+  useLayoutEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const check = () => {
+      const hostsEl = strip.querySelector<HTMLElement>('.vl-strip-hosts')
+      const next = strip.querySelector<HTMLElement>('.vl-strip-center') ?? strip.querySelector<HTMLElement>('.vl-strip-right')
+      if (!hostsEl || !next) return
+      const box = hostsEl.getBoundingClientRect()
+      const limit = next.getBoundingClientRect().left - 14
+      if (!compactRef.current) {
+        if (box.right > limit) {
+          namedWidth.current = box.width
+          compactRef.current = true
+          setCompact(true)
+        }
+      } else if (namedWidth.current && box.left + namedWidth.current < limit - 24) {
+        compactRef.current = false
+        setCompact(false)
+      }
+    }
+    // a new host list or center text is measured with its names first
+    compactRef.current = false
+    setCompact(false)
+    const ro = new ResizeObserver(check)
+    ro.observe(strip)
+    requestAnimationFrame(check)
+    return () => ro.disconnect()
+  }, [list.length, center])
+
   return (
-    <div className="vl-strip" data-center={center ? '' : undefined} data-win={win || undefined} data-tauri-drag-region={win ? 'deep' : undefined}>
+    <div ref={stripRef} className="vl-strip" data-center={center ? '' : undefined} data-compact={compact || undefined} data-win={win || undefined} data-tauri-drag-region={win ? 'deep' : undefined}>
       <div className="vl-strip-left">
         {/* Valkyrie's wordmark (src/App.tsx header): accent with its glow, the slashes dim, a blinking cursor */}
         <span className="vl-strip-name" role="img" aria-label="Valkyrie">
