@@ -318,3 +318,54 @@ html[data-motion='reduced'] .vtm-more { animation: none; }
    No Back in the bar, so the title takes its inset; the bar's empty parts drag
    the window (data-tauri-drag-region), so they show the default arrow. */
 .vtm[data-standalone] .vsk-bar { padding-left: calc(14px + env(safe-area-inset-left)); cursor: default; }
+
+/* ---- Chat and Terminal (kit/chat/ChatView.tsx) ----
+   Chat lies over the stage. The terminal under it keeps its box, so the pane is
+   never resized by a switch, and stays attached (the composer, the plates and
+   the working state read it); it is only not painted. */
+.vtm[data-view='chat'] .vsk-term { visibility: hidden; }
+@media (min-width: 760px) {
+  /* no frame around the conversation: it reads as the page, not as a panel */
+  .vtm[data-view='chat'] .vsk-termbox { border-color: transparent; clip-path: none; }
+  .vtm[data-view='chat'] .vsk-termbox::before,
+  .vtm[data-view='chat'] .vsk-termbox::after { content: none; }
+  .vtm .vsk-side > .vch-todos { flex: 0 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+}
+@media (max-width: 759px) {
+  /* the keyboard up on a phone: the conversation keeps every row */
+  html[data-kb] .vtm .vch-todos[data-v='strip'] { display: none; }
+  /* a phone in Chat: the activity row keeps its place, hidden, and the conversation covers it
+     (Term.tsx `cover`), so a switch never resizes the pane */
+  .vtm[data-view='chat'] .vsk-act { visibility: hidden; }
+  .vtm[data-view='chat'] .vsk-termbox { overflow: visible; }
+  .vtm .vch[data-cover] { border-top: 1px solid var(--line); }
+}
+
+/* the view tabs: underlined text at the end of the meta row */
+.vtm .vsk-meta { overflow: hidden; }
+.vtm .vsk-meta > .vsk-m { flex: 0 1 auto; overflow: hidden; }
+.vtm .vsk-meta > .vsk-m-host { flex: none; }
+.vtm-mode { overflow: hidden; text-overflow: ellipsis; }
+.vtm-views { flex: none; display: flex; align-self: stretch; margin-left: auto; }
+.vtm-views + .vsk-replay { margin-left: 0; }
+.vsk-bar > .vtm-views { margin: 0 6px 0 0; }
+.vsk-bar .vtm-view { padding: 0 10px; }
+.vtm-view {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid transparent;
+}
+.vtm-view[data-on] { color: var(--fg); text-shadow: var(--text-glow); border-bottom-color: var(--fg); }
+.vtm-view[data-pressed] { color: var(--fg); }
+@media (hover: hover) { .vtm-view:not([data-on]):hover { color: var(--text); } }
+/* a phone in Chat: the kind of pane is plain from the page, the tabs need the room */
+@media (max-width: 420px) {
+  .vtm[data-view='chat'] .vsk-meta > .vsk-m:not(.vsk-m-host):not(.vtm-mode):not(.vtm-conn) { display: none; }
+}

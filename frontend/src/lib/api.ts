@@ -875,6 +875,83 @@ export const openTermSession = async (body: TermOpen): Promise<TermOpenResult> =
 export const killTermSession = async (name: string) =>
   (await api.post<{ killed: boolean }>(`/terminal/sessions/${encodeURIComponent(name)}/kill`)).data
 
+// The conversation in a pane, read from the transcript Claude Code writes for
+// it and parsed on the server (backend/src/routes/terminal.ts): the session
+// page's Chat view draws it (v2/kit/chat). The first read has no cursor and
+// answers the newest entries; each later read passes the cursor back and gets
+// only what was appended since. reset is the server saying the pane's
+// transcript is another file now (/clear, a new session id): drop what you have.
+export type TranscriptKind = 'user' | 'assistant' | 'thinking' | 'tool' | 'result' | 'todo' | 'system'
+export type TranscriptTodo = { content: string; status: string }
+export type TranscriptEntry = {
+  id: string
+  at: number
+  kind: TranscriptKind
+  text?: string
+  tool?: { name: string; input: unknown; id: string }
+  result?: { toolId: string; text: string; isError: boolean; truncated: boolean }
+  todos?: TranscriptTodo[]
+  model?: string
+}
+export type TranscriptPage = {
+  sessionId: string | null
+  file: string | null
+  cursor: string
+  entries: TranscriptEntry[]
+  more: boolean
+  reset: boolean
+}
+
+const TRANSCRIPT_KINDS: TranscriptKind[] = ['user', 'assistant', 'thinking', 'tool', 'result', 'todo', 'system']
+
+const parseTranscriptEntry = (raw: unknown): TranscriptEntry | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = wsStr(r.id)
+  const kind = r.kind as TranscriptKind
+  if (!id || !TRANSCRIPT_KINDS.includes(kind)) return null
+  const e: TranscriptEntry = { id, at: wsNum(r.at) ?? 0, kind }
+  if (typeof r.text === 'string') e.text = r.text
+  const model = wsStr(r.model)
+  if (model) e.model = model
+  const t = r.tool as Record<string, unknown> | null | undefined
+  if (t && typeof t === 'object' && typeof t.name === 'string') {
+    e.tool = { name: t.name, input: t.input ?? null, id: typeof t.id === 'string' ? t.id : '' }
+  }
+  const res = r.result as Record<string, unknown> | null | undefined
+  if (res && typeof res === 'object') {
+    e.result = {
+      toolId: typeof res.toolId === 'string' ? res.toolId : '',
+      text: typeof res.text === 'string' ? res.text : '',
+      isError: res.isError === true,
+      truncated: res.truncated === true,
+    }
+  }
+  if (Array.isArray(r.todos)) {
+    e.todos = r.todos
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+      .map((x) => ({ content: typeof x.content === 'string' ? x.content : '', status: typeof x.status === 'string' ? x.status : 'pending' }))
+  }
+  return e
+}
+
+export const fetchTermTranscript = async (name: string, after?: string | null, signal?: AbortSignal): Promise<TranscriptPage> => {
+  const d = (await api.get<unknown>(`/terminal/sessions/${encodeURIComponent(name)}/transcript`, {
+    params: after ? { after } : undefined,
+    signal,
+  })).data
+  if (!d || typeof d !== 'object') throw new Error('Invalid transcript response')
+  const r = d as Record<string, unknown>
+  return {
+    sessionId: wsStr(r.sessionId),
+    file: wsStr(r.file),
+    cursor: typeof r.cursor === 'string' ? r.cursor : '',
+    entries: Array.isArray(r.entries) ? r.entries.map(parseTranscriptEntry).filter((x): x is TranscriptEntry => x !== null) : [],
+    more: r.more === true,
+    reset: r.reset === true,
+  }
+}
+
 // The only place the terminal page's back buttons may lead besides the board.
 // ?back= is a URL anyone can hand the phone, so it is a project path or nothing.
 export const PROJECT_BACK_RE = /^\/projects(\/[a-z0-9][a-z0-9-]{0,31})?$/

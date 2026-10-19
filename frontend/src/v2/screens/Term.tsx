@@ -21,12 +21,15 @@ import { BASE, StatusStrip, desktopWindow } from '../kit/shell'
 import { Button, Glyph, IconButton, Press, ToastHost, cx, toast } from '../kit/ui'
 import { closeDetached, openDetached, setDetachedTitle } from '../kit/windows'
 import { Icon, hostIcon } from '../kit/icons'
-import { applyPalette, useFont, usePalette, useStoredMode } from '../kit/theme'
+import { applyPalette, useFont, usePalette, useSetting, useStoredMode } from '../kit/theme'
 import { ActivityStrip, Choices, StateGlyph } from '../kit/termskin'
 import {
-  ActivityLog, NO_SCREEN, PHASE, sameScreen, scanTerm, termFont, termTheme, useCliGlyphs, useMedia,
+  ActivityLog, NO_SCREEN, PHASE, sameScreen, scanTerm, screenLines, termFont, termTheme, useCliGlyphs, useMedia,
   type Act, type CliMode, type Phase, type ScreenState, type TodoSnap,
 } from '../kit/termscreen'
+import { ChatView, TodoChecklist } from '../kit/chat/ChatView'
+import { NO_FOOT, readFoot, sameFoot, type Foot } from '../kit/chat/foot'
+import { liveTodos, useTranscript } from '../kit/chat/transcript'
 import './skin.css'
 import './term.css'
 
@@ -39,6 +42,11 @@ import './term.css'
 // submits it, the quick keys send the CLI's keys, a permission question on the
 // screen becomes plates, and the tool lines on the screen become the activity
 // strip.
+//
+// A Claude pane opens in Chat (kit/chat): the conversation drawn from the
+// pane's transcript, over the terminal, which stays attached and sized under
+// it. The tab beside the title (the meta row on a phone) flips to the raw
+// Terminal; the pick is kept per device.
 //
 // This page attaches to the session named in its URL and to nothing else. It
 // never picks "the latest session": a name that is not open shows a panel, and
@@ -55,6 +63,12 @@ const EMPTY: TermSession[] = []
 const ENTER_DELAY_MS = 120
 
 const SLASH = ['/clear', '/compact', '/context', '/cost', '/model', '/resume', '/review']
+
+// Chat draws the conversation from the pane's transcript (kit/chat); Terminal
+// is the pane's own screen. The pick is kept per device; a shell pane has no
+// conversation and is always Terminal.
+type View = 'chat' | 'term'
+const VIEWS: readonly View[] = ['chat', 'term']
 
 type KeyId = 'esc' | 'ctrlc' | 'tab' | 'stab' | 'up' | 'down' | 'slash' | 'y' | 'n' | '1' | '2' | '3' | 'left' | 'right' | 'ctrl' | 'kbd'
 // The approved row first (Esc ^C Tab shift-Tab up down / y n 1 2 3), then the
@@ -128,6 +142,9 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   const directRef = useRef(false)
   const coarseRef = useRef(coarse)
   const focusBack = useRef<HTMLElement | null>(null)
+  const chatRef = useRef(false)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [direct, setDirect] = useState(false)
@@ -187,6 +204,37 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   useLayoutEffect(() => { askRef.current = !shell }, [shell])
   useLayoutEffect(() => { coarseRef.current = coarse }, [coarse])
 
+  // Chat or Terminal. Chat lies over the terminal, which keeps its size, its
+  // socket and its screen reading underneath: the composer, the plates and the
+  // working state all still come from the real pane.
+  const [viewPick, setViewPick] = useSetting<View>('termView', 'chat', VIEWS)
+  const chat = !shell && viewPick === 'chat'
+  useLayoutEffect(() => { chatRef.current = chat }, [chat])
+  const tx = useTranscript(name, chat && !!session && !session.dead)
+  const chatTodos = useMemo(() => (chat ? liveTodos(tx.entries) : null), [chat, tx.entries])
+  const [foot, setFoot] = useState<Foot>(NO_FOOT)
+  // On a phone the activity row sits right over the stage. In Chat it stays in
+  // the grid, hidden, so the stage and the pane keep their size across a
+  // switch (no resize, no repaint); the conversation reaches up over it.
+  const [coverPx, setCover] = useState(0)
+  const cover = chat && !wide ? coverPx : 0
+  useLayoutEffect(() => {
+    if (!chat || wide) return
+    const root = rootRef.current
+    const act = root?.querySelector<HTMLElement>('.vsk-act')
+    const box = root?.querySelector<HTMLElement>('.vsk-termbox')
+    if (!act || !box) return
+    const read = () => {
+      const h = Math.max(0, Math.round(box.getBoundingClientRect().top + box.clientTop - act.getBoundingClientRect().top))
+      setCover((c) => (c === h ? c : h))
+    }
+    read()
+    const ro = new ResizeObserver(read)
+    ro.observe(act)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [chat, wide])
+
   const theme = useMemo(() => termTheme(palette), [palette.fg]) // eslint-disable-line react-hooks/exhaustive-deps
   const themeRef = useRef(theme)
   useLayoutEffect(() => { themeRef.current = theme }, [theme])
@@ -237,7 +285,10 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
       if (coarseRef.current) return
       const ae = document.activeElement as HTMLElement | null
       const typing = !!ae && ae !== term.textarea && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))
-      if (!typing && document.hasFocus()) term.focus()
+      if (typing || !document.hasFocus()) return
+      // in Chat the keyboard belongs to the composer: the grid under it is not on screen
+      if (chatRef.current) taRef.current?.focus({ preventScroll: true })
+      else term.focus()
     },
     onWrite: () => {
       if (!scanRaf.current) scanRaf.current = requestAnimationFrame(() => scanRef.current())
@@ -258,9 +309,16 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
         const t = r.todos
         setTodos((cur) => (cur && cur.done === t.done && cur.total === t.total && cur.current === t.current ? cur : t))
       }
+      // Chat's footer: the spinner's words, the context left and the usage meters
+      if (chatRef.current) {
+        const f = readFoot(screenLines(term, 0))
+        setFoot((cur) => (sameFoot(cur, f) ? cur : f))
+      }
     }
   })
   useEffect(() => () => cancelAnimationFrame(scanRaf.current), [])
+  // a switch to Chat reads the footer off the screen as it stands, not at the next output
+  useEffect(() => { if (chat) scanRef.current() }, [chat])
 
   useTermViewport(hostRef, probeRef, (h) => {
     setCramped(isCramped(h))
@@ -455,6 +513,9 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
       } else if (q && /^[123yn]$/.test(e.key)) {
         e.preventDefault()
         sendKey(e.key)
+      } else if (chatRef.current && !coarseRef.current && e.key.length === 1 && !t?.closest('button, a, [role="tab"]')) {
+        // typing anywhere in Chat types into the composer (the key lands there once it has the focus)
+        taRef.current?.focus({ preventScroll: true })
       }
     }
   })
@@ -470,13 +531,16 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   // with no Enter: the message about it is still Brendon's to write. Only into
   // the session the picker was opened from (a switch remounts this page, and a
   // path for the old one is dropped with it); a closed socket holds the path
-  // for the reconnect.
+  // for the reconnect. In Chat the pane's prompt is not on screen, so the
+  // path goes into the composer instead, where he can see it and write around it.
   const hold = sock.hold
   const up = useThorUpload<string>({
     clearAfterMs: 8_000,
     onDone: (done, tag) => {
       if (tag !== name) return
-      hold(done.map((d) => d.path).join(' ') + ' ')
+      const paths = done.map((d) => d.path).join(' ') + ' '
+      if (chatRef.current) setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + paths)
+      else hold(paths)
     },
   })
 
@@ -579,6 +643,22 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   }, [closeArmed])
 
   const halfScreen = () => Math.max(1, Math.floor((termRef.current?.rows ?? 24) / 2))
+  /** Page up (1) or down (-1): the conversation in Chat, the scrollback in Terminal. */
+  const page = (dir: 1 | -1) => {
+    const el = chat ? chatScrollRef.current : null
+    if (el) el.scrollBy({ top: -dir * Math.round(el.clientHeight * 0.8), behavior: 'smooth' })
+    else scrollBy(dir * halfScreen())
+  }
+
+  const pickView = (v: View) => {
+    setViewPick(v)
+    if (coarse) return
+    // a mouse and a keyboard: the keys follow the view
+    requestAnimationFrame(() => {
+      if (v === 'chat') taRef.current?.focus({ preventScroll: true })
+      else termRef.current?.focus()
+    })
+  }
 
   const title = shown ? termLabel(shown, titles) : sessions.isLoading ? 'Opening' : 'Not open'
   const pos = session ? ordered.findIndex((s) => s.name === name) + 1 : 0
@@ -587,6 +667,13 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   const showBanners = Boolean(error) || Boolean(status.data && !status.data.ok) || up.items.length > 0
 
   const choices = q && <Choices q={q} onPick={answer} />
+  // Chat or Terminal: in the bar where it has room (a wide screen), at the end of the meta row on a phone
+  const viewTabs = !shell && (
+    <div className="vtm-views" role="tablist" aria-label="View">
+      <Press role="tab" className="vtm-view" aria-selected={chat} data-on={chat || undefined} onPress={() => pickView('chat')}>Chat</Press>
+      <Press role="tab" className="vtm-view" aria-selected={!chat} data-on={!chat || undefined} onPress={() => pickView('term')}>Terminal</Press>
+    </div>
+  )
 
   // a pop-out names its window (and taskbar entry) after the session
   useEffect(() => {
@@ -594,7 +681,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   }, [standalone, title])
 
   return (
-    <div className="vsk vtm" data-term-root data-phase={phase} data-direct={direct || undefined} data-standalone={standalone || undefined}>
+    <div ref={rootRef} className="vsk vtm" data-term-root data-phase={phase} data-view={chat ? 'chat' : 'term'} data-direct={direct || undefined} data-standalone={standalone || undefined}>
       {up.inputs}
       <header className="vsk-head">
         <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />
@@ -617,6 +704,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
             {ordered.length > 0 && <span className="vtm-count">{pos > 0 ? `${pos}/${ordered.length}` : ordered.length}</span>}
             <ChevronDown size={13} strokeWidth={1.6} className="vl-icon vl-icon-dim vtm-chev" aria-hidden />
           </Press>
+          {wide && viewTabs}
           <IconButton
             className="vtm-bar-btn"
             icon={<Camera size={16} strokeWidth={1.6} className={cx('vl-icon', up.busy ? 'vl-icon-fg vl-icon-glow' : 'vl-icon-dim')} aria-hidden />}
@@ -647,6 +735,21 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
           />
           {/* The height reference the geometry measures: fixed, invisible, 100dvh. */}
           <div ref={probeRef} aria-hidden className="vtm-probe" />
+
+          {/* Chat: the conversation over the terminal, which keeps its box and its socket under it */}
+          {chat && (
+            <ChatView
+              tx={tx}
+              phase={phase}
+              foot={foot}
+              conn={conn}
+              plates={choices}
+              todos={wide ? null : chatTodos}
+              cover={cover}
+              scrollRef={chatScrollRef}
+              onTerminal={() => pickView('term')}
+            />
+          )}
 
           {gone && (
             <div className="vtm-panel-wrap">
@@ -696,7 +799,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
           )}
 
           {/* the question, as plates over the bottom of the screen where the CLI draws it (phone) */}
-          {!wide && choices && <div className="vtm-askdock">{choices}</div>}
+          {!wide && !chat && choices && <div className="vtm-askdock">{choices}</div>}
 
           {sheet && (
             <div className="vtm-sheet" data-term-scroll role="dialog" aria-label="Open sessions">
@@ -777,8 +880,8 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
               <div className="vtm-more-row">
                 <Button kind="line" onPress={() => void doPaste()}>Paste</Button>
                 <Button kind="line" onPress={() => sendKey('\\\r')}>\⏎ New line</Button>
-                <Button kind="line" onPress={() => scrollBy(halfScreen())}>Page up</Button>
-                <Button kind="line" onPress={() => scrollBy(-halfScreen())}>Page down</Button>
+                <Button kind="line" onPress={() => page(1)}>Page up</Button>
+                <Button kind="line" onPress={() => page(-1)}>Page down</Button>
               </div>
               <div className="vtm-more-row">
                 <span className="vtm-more-k">Text</span>
@@ -886,6 +989,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
             )}
             <span className="vsk-m vsk-m-word" data-p={phase}>{PHASE[phase].word}</span>
             <span className="vsk-m vtm-conn" data-conn={conn}>{CONN_WORD[conn]}</span>
+            {!wide && viewTabs}
             <IconButton
               className="vsk-replay"
               lit={more}
@@ -896,9 +1000,13 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
             />
           </div>
 
-          {wide && choices}
+          {wide && !chat && choices}
 
-          <ActivityStrip acts={acts} open={actOpen} onToggle={() => setActPick(!actOpen)} />
+          {/* Chat lists every step itself: a wide screen's side column keeps the live todo list instead,
+              and a phone keeps the activity row hidden under the conversation (see `cover`) */}
+          {chat && wide
+            ? chatTodos && <TodoChecklist todos={chatTodos} variant="side" />
+            : <ActivityStrip acts={acts} open={actOpen && !chat} onToggle={() => setActPick(!actOpen)} />}
 
           <div className="vsk-keys" role="toolbar" aria-label="Keys">
             {KEYS.map((k) => {

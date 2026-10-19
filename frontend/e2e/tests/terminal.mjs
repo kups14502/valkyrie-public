@@ -24,7 +24,7 @@ const LANDSCAPE = { width: 844, height: 390, deviceScaleFactor: 3, mobile: true,
 // Shell lines. Octal escapes keep the typed line ASCII; only the output carries Claude Code's glyphs.
 const RULE = '\\342\\224\\200'.repeat(12)
 const TOOL_LINES = String.raw`printf '\342\227\217 Read(src/e2e/sample.ts)\n  \342\216\277  Read 12 lines\n\342\227\217 Bash(ls -la /tmp)\n  \342\216\277  (No content)\n'`
-const PROMPT = `printf '${RULE}\\n Bash command\\n   ls /tmp/e2e-sample\\n\\n Do you want to proceed?\\n \\342\\235\\257 1. Yes\\n   2. Yes, and do not ask again for ls here\\n   3. No, and tell Claude what to do differently (esc)\\n'`
+export const PROMPT = `printf '${RULE}\\n Bash command\\n   ls /tmp/e2e-sample\\n\\n Do you want to proceed?\\n \\342\\235\\257 1. Yes\\n   2. Yes, and do not ask again for ls here\\n   3. No, and tell Claude what to do differently (esc)\\n'`
 
 // The quick keys in their row order, then Ctrl folding the next key: what each must send.
 const KEY_BYTES = [
@@ -40,7 +40,7 @@ const CAT_LINE = '^[^I^[[Z^[[A^[[B/yn123^[[D^[[C^Y'
  * its mode rewritten when `mode` is given (a shell pane shown as a Claude pane,
  * so the question plates can be driven from a shell).
  */
-function fence(page, base, name, mode) {
+export function fence(page, base, name, mode) {
   const ok = (body) => ({ status: 200, body })
   page.mock('/api/session-board', () => ok({ sessions: [], hookRunsSkipped: 0 }))
   page.mock('/api/hosts/thor/sessions', () => ok({ sessions: [], hookRunsSkipped: 0 }))
@@ -53,7 +53,7 @@ function fence(page, base, name, mode) {
 }
 
 /** The page is attached: its socket for `name` is open and the dot reads live. */
-async function attached(page, name, timeout = 15_000) {
+export async function attached(page, name, timeout = 15_000) {
   await page.waitFor(() => document.querySelector('.vtm-dot')?.getAttribute('data-conn') === 'live', { timeout, message: 'the terminal never read live (is the probe missing its /ws proxy?)' })
   const opened = await page.eval(() => window.__e2e.wsOpened.map((x) => x.url))
   if (!opened.length || !opened.every((u) => new URL(u).searchParams.get('s') === name)) throw new Error(`sockets opened: ${opened.join(', ')}`)
@@ -65,7 +65,7 @@ async function attached(page, name, timeout = 15_000) {
 const screenOf = (sel) => (document.querySelector(sel)?.innerText ?? '').replace(/\u00a0/g, ' ')
 
 /** Waits for `re` on the screen; `flat` reads it with the rows run together (a line the grid wrapped). */
-async function waitScreen(page, re, { sel = '.vsk-term .xterm-rows', timeout = 8000, flat = false } = {}) {
+export async function waitScreen(page, re, { sel = '.vsk-term .xterm-rows', timeout = 8000, flat = false } = {}) {
   const spec = { re: re.source, flags: re.flags, flat }
   try {
     await page.waitFor((s, q) => {
@@ -79,16 +79,16 @@ async function waitScreen(page, re, { sel = '.vsk-term .xterm-rows', timeout = 8
 }
 
 /** Input frames ({t:'i'}) the page sent after frame `from`, as { d, at }. */
-async function inputs(page, from = 0) {
+export async function inputs(page, from = 0) {
   const sent = await page.eval(() => window.__e2e.wsSent)
   return sent.slice(from).map((x) => {
     try { return { ...JSON.parse(x.d), at: x.at } } catch { return { t: '?', at: x.at } }
   }).filter((m) => m.t === 'i')
 }
-const sentCount = (page) => page.eval(() => window.__e2e.wsSent.length)
+export const sentCount = (page) => page.eval(() => window.__e2e.wsSent.length)
 
 /** Types a line in the composer and presses Send. */
-async function compose(page, text) {
+export async function compose(page, text) {
   await page.tap('.vsk-input')
   await page.eval(() => document.querySelector('.vsk-input')?.focus())
   await page.type(text)
@@ -112,7 +112,7 @@ async function lastResize(page) {
 }
 
 /** Makes a throwaway pane, runs body(name), and kills the pane whatever happened. */
-async function withPane(t, body) {
+export async function withPane(t, body) {
   let name = null
   try {
     name = await openThrowawayPane()

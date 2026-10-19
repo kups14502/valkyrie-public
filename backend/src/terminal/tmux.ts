@@ -434,6 +434,36 @@ export async function listSessions(): Promise<TermSession[]> {
   return rows.sort((a, b) => b.activityAt - a.activityAt)
 }
 
+// What the transcript view needs about one pane (terminal/transcriptFeed.ts):
+// where its program runs, the conversation it was opened with, and the pid of
+// the pane's own process, whose child is an odin pane's Claude. One tmux call,
+// cheaper than listSessions, since the view asks about once a second.
+export type PaneFacts = { host: TermHost; mode: string; sessionId: string; panePid: number; dead: boolean }
+
+export async function paneFacts(name: string): Promise<PaneFacts | null> {
+  if (!SESSION_NAME_RE.test(name) || !serverUp()) return null
+  // '|', not SEP: none of these fields can hold one, and tmux 3.7 prints a
+  // control character as '_' when the client's locale is not UTF-8 (measured
+  // on odin from an ssh shell with no LANG; the API's unit sets en_US.UTF-8).
+  const fmt = ['#{session_name}', '#{@vk_host}', '#{@vk_mode}', '#{@vk_sid}', '#{pane_pid}', '#{pane_dead}'].join('|')
+  try {
+    // Bare name: display-message takes a target-PANE, and answers an empty
+    // line rather than an error for a name it cannot find. The name check
+    // below throws out that and anything resolved to some other session.
+    const f = (await tmux(['display-message', '-p', '-t', name, fmt], 5_000)).replace(/\n$/, '').split('|')
+    if (f[0] !== name) return null
+    return {
+      host: f[1] === 'odin' ? 'odin' : 'thor',
+      mode: f[2] || 'shell',
+      sessionId: UUID_RE.test(f[3] ?? '') ? f[3] : '',
+      panePid: Number(f[4]) || 0,
+      dead: f[5] === '1',
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function hasSession(name: string): Promise<boolean> {
   if (!SESSION_NAME_RE.test(name)) return false
   try {

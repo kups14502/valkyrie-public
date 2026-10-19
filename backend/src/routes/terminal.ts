@@ -16,6 +16,7 @@ import {
 import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
 import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
+import { paneTranscript } from '../terminal/transcriptFeed.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
@@ -26,7 +27,8 @@ import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDe
 // What to open comes from elsewhere: the launch targets from thor's launcher
 // agent (GET /hosts/thor/launch-targets, filtered to the ones flagged for the
 // phone) and the conversations to resume from the session board
-// (GET /hosts/thor/sessions). This file never reads a transcript.
+// (GET /hosts/thor/sessions). Transcripts are read only for the session view,
+// through terminal/transcriptFeed.ts.
 //
 // Every route in here is behind requireStrongAuth, NOT the app-wide requireAuth,
 // so the media-scoped query token that opens a poster can never open a shell.
@@ -241,6 +243,27 @@ router.post('/terminal/sessions', async (req, res) => {
     // A run whose brief changed since the sheet opened answers 409 with the
     // current rev, which the sheet uses to show the new text.
     res.status(status).json({ error: (err as Error).message, ...(err instanceof ProjError ? err.body : undefined) })
+  }
+})
+
+// The session view: the pane's conversation as Claude Code wrote it, parsed
+// and trimmed here (terminal/transcript.ts, terminal/transcriptFeed.ts). The
+// page polls about once a second while it is visible. No cursor answers the
+// newest entries; a cursor answers what was appended since, or the newest
+// entries with reset when the pane is on another transcript now (/clear).
+// Read-only: the pane is never attached to, typed into or resized from here.
+router.get('/terminal/sessions/:name/transcript', async (req, res) => {
+  const name = String(req.params.name)
+  if (!SESSION_NAME_RE.test(name)) return res.status(400).json({ error: 'not a session name' })
+  const after = typeof req.query.after === 'string' ? req.query.after.slice(0, 80) : ''
+  try {
+    const page = await paneTranscript(name, after)
+    if (!page) return res.status(404).json({ error: 'no such session' })
+    res.set('Cache-Control', 'no-store').json(page)
+  } catch (err) {
+    const status = (err as { status?: number }).status ?? 500
+    if (status === 500) console.error('[terminal] transcript failed', err)
+    res.status(status).json({ error: (err as Error).message })
   }
 })
 
