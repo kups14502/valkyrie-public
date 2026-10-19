@@ -343,7 +343,7 @@ async function probeInto(s: State, t: PoolToken): Promise<ProbeRec> {
   return r
 }
 
-type UsageClient = { id: string; quota: Quota | null; authError?: string | null }
+type UsageClient = { id: string; quota: Quota | null; authError?: string | null; quotaSource?: 'own' | 'switcher' | null }
 let usageCache: { at: number; dataAt: number; clients: UsageClient[] } | null = null
 
 // The backend's own per-account readings (its grants, polled every 5 min),
@@ -377,7 +377,11 @@ function readingFor(s: State, id: string): QuotaRead | null {
   const p = s.probes[id]
   const own: QuotaRead | null = p?.quota ? { quota: p.quota, at: p.at, source: 'probe' } : null
   const u = usageCache?.clients.find((c) => c.id === id)
-  const theirs: QuotaRead | null = u?.quota && !u.authError
+  // A card whose own sign-in is dead shows this switcher's probe (quotaSource 'switcher'). Taking
+  // that back as a fresh 'usage' reading skipped the probe it came from, so the probe aged past
+  // the card's 30-minute limit and the card flapped dead/restored, alerting each time (Extra
+  // Claude 2, 2026-10-19).
+  const theirs: QuotaRead | null = u?.quota && !u.authError && u.quotaSource !== 'switcher'
     ? { quota: { ...u.quota, status: u.quota.status ?? null }, at: usageCache!.dataAt, source: 'usage' }
     : null
   if (own && theirs) return own.at >= theirs.at ? own : theirs
