@@ -1,15 +1,15 @@
 {
-  "version": "0.3.146",
-  "notes": "Hosts: the Model Y as a host, battery and charging from Home Assistant",
-  "pub_date": "2026-10-19T20:04:32Z",
+  "version": "0.3.147",
+  "notes": "e2e on odin: a declared mouse, waits instead of fixed sleeps, swipe test off live data",
+  "pub_date": "2026-10-19T20:57:58Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWI4OTl1Wml2djZrZGhYZWdKNWYrV0gvdkI2bUg0b1ZMakN2MEk4UVFEWlIyT3ZRcnVOVTJUR3N6ZGo1SEtjVEJrY3hSbnpkZll0RWNUTnQzWU82bGdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQwMTQwCWZpbGU6VmFsa3lyaWVfMC4zLjE0Nl94NjQtc2V0dXAuZXhlClNjYkJkMmpyQTFsZGYwSEZ6VkJDVHZJWVBhaGFQSStmQ0p2NWpzUFNKWjY4K1ZFL1ZxYTZ1WXZCOFMyb0J2MHNVT3FZVStEMHVWaGpLMU5ielkvZkF3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.146/Valkyrie_0.3.146_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVEzZHJZcjZzdlNmQ1J6NUp1ckpIRHliZ1N4bW1lYzIrUjRkZVRpNk5tLzBoNWs4Skg0SUpqbmdNUGg0eEtzYWxaUFNRQ3o5aDNtSGllZG1xQnZNeFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQzMzc3CWZpbGU6VmFsa3lyaWVfMC4zLjE0N194NjQtc2V0dXAuZXhlCkxaVEY4eVBLUmoveURzYXF5VDdTeVJLZnJSNzFTdUcySU1zN1AvUEs3Y3FTcDFIQTZyNXh0SWs4RmE3SHZRRmJTS0RBT1RBelc0WHhISGQ0b2N3VEFBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.147/Valkyrie_0.3.147_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVQckN1TGlJeHNlK2VOUm1lUzUzQTJ3d2Z5YVNWUGFINVlYZ3JtUEpOYzZjWW5pVkUxQjBpUExRZjhNYW1CSHg5R1Nka1ZCbVgzNGtuUnJPb2p3VndVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQwMDgwCWZpbGU6VmFsa3lyaWVfMC4zLjE0Nl9hbWQ2NC5BcHBJbWFnZQo4NGNmZjF6L1ZEVlQxdy9iaDFwS2NEUnp3TTluNXhibXkvdUxqeUJEYVZQNlNrRUJPaFZRemhteGgyMHY1MnI5em1jbHlKUURZM1kyMGNqWTlRQ2lEQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.146/Valkyrie_0.3.146_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVpMMDZqT1lrKzJUbmw3S0wvekcrczZnY3FKcWRKR2dPemc2Um5rK0JGS3d0cEkxU3h0Q3VOVjBYUENrNVd4NStkNUxoc3ZrZStOZzQ3bWViMmFFR0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQzMzE1CWZpbGU6VmFsa3lyaWVfMC4zLjE0N19hbWQ2NC5BcHBJbWFnZQpxYUdqYWtBRVQ5YlNTR0tkTndQQklGaFRDZTlVaDl6VFFJaXM5UFEzK1ZNTFBVZDlqM3ZyWmF4cm43cW1oRWRmc1ZNdDZzR3paQ0xteGRzRDhKVzlEZz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.147/Valkyrie_0.3.147_amd64.AppImage"
     }
   }
 }
