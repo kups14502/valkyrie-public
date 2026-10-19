@@ -18,7 +18,7 @@ import { Press, cx, toast } from '../ui'
 import { StateGlyph } from '../termskin'
 import type { Phase } from '../termscreen'
 import type { Foot } from './foot'
-import { latestModel, todosOfInput, type Transcript } from './transcript'
+import { latestContext, latestModel, todosOfInput, type Transcript } from './transcript'
 import { resultWords, str, toolDiff, toolKind, toolLine, type Diff, type ToolKind } from './tools'
 import { stripAnsi, userPart, type UserPart } from './user'
 import './chat.css'
@@ -27,7 +27,8 @@ import './chat.css'
 // the pane's transcript instead of from its screen. Prompts, Claude's answers
 // as markdown, thinking folded to a line, every tool call as one line with its
 // key argument and its result folded under it, the live todo list, and a
-// footer with what the screen says (working, context, usage). The CLI stays the
+// footer with what the screen says (working, usage) and how full the context
+// is (from the transcript, else the screen's warning). The CLI stays the
 // engine: the composer, the keys and the question plates all still talk to the
 // real pane, and the raw terminal is one tap away.
 
@@ -531,10 +532,15 @@ const ChatList = memo(function ChatList({ entries, live }: { entries: Transcript
 
 const CONN_WORD: Record<TermConnState, string> = { idle: 'Starting', connecting: 'Connecting', live: '', closed: 'Offline' }
 
-export function ChatFoot({ phase, foot, model, conn, retrying }: {
+/** Context used at or past this many percent shows hot. */
+const CTX_HOT = 85
+
+export function ChatFoot({ phase, foot, model, ctx, conn, retrying }: {
   phase: Phase
   foot: Foot
   model: string | null
+  /** context used, in percent: from the transcript, else off the screen's warning */
+  ctx: number | null
   conn: TermConnState
   retrying: boolean
 }) {
@@ -547,7 +553,7 @@ export function ChatFoot({ phase, foot, model, conn, retrying }: {
       <span className="vch-foot-meta">
         {retrying && <span className="vch-foot-m" data-hot>transcript retrying</span>}
         {model && <span className="vch-foot-m vch-foot-model">{model}</span>}
-        {foot.ctx !== null && <span className="vch-foot-m" data-hot={foot.ctx <= 15 || undefined}>ctx <b>{foot.ctx}%</b></span>}
+        {ctx !== null && <span className="vch-foot-m vch-foot-ctx" data-hot={ctx >= CTX_HOT || undefined}>ctx <b>{ctx}%</b> used</span>}
         {foot.five !== null && <span className="vch-foot-m" data-hot={foot.five >= 80 || undefined}>5h <b>{foot.five}%</b></span>}
         {foot.week !== null && <span className="vch-foot-m" data-hot={foot.week >= 80 || undefined}>wk <b>{foot.week}%</b></span>}
       </span>
@@ -586,6 +592,9 @@ export function ChatView({ tx, phase, foot, conn, plates, todos, cover = 0, scro
   const genRef = useRef(tx.gen)
   const [away, setAway] = useState<{ last: string; gen: number } | null>(null)
   const model = useMemo(() => latestModel(tx.entries), [tx.entries])
+  const used = useMemo(() => latestContext(tx.entries), [tx.entries])
+  // the screen says how much is left before auto-compact, and only when it runs low
+  const ctx = used ?? (foot.ctx !== null ? 100 - foot.ctx : null)
   const live = phase === 'working'
 
   const setScroller = useCallback((el: HTMLDivElement | null) => {
@@ -673,7 +682,7 @@ export function ChatView({ tx, phase, foot, conn, plates, todos, cover = 0, scro
         </Press>
       )}
       {plates && <div className="vtm-askdock vch-ask">{plates}</div>}
-      <ChatFoot phase={phase} foot={foot} model={model} conn={conn} retrying={tx.status === 'error' && !empty} />
+      <ChatFoot phase={phase} foot={foot} model={model} ctx={ctx} conn={conn} retrying={tx.status === 'error' && !empty} />
     </div>
   )
 }

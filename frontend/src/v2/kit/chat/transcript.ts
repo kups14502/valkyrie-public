@@ -263,6 +263,19 @@ export function todosOfInput(input: unknown): TranscriptTodo[] | null {
     .map((x) => ({ content: typeof x.content === 'string' ? x.content : '', status: typeof x.status === 'string' ? x.status : 'pending' }))
 }
 
+/**
+ * How full the context is, in percent used: the newest assistant entry's
+ * input tokens against its model's window (the server sends both). null
+ * before Claude has answered, or from a server that predates usage.
+ */
+export function latestContext(entries: TranscriptEntry[]): number | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const u = entries[i].usage
+    if (u && u.window > 0) return Math.min(100, Math.max(0, Math.round((u.tokens / u.window) * 100)))
+  }
+  return null
+}
+
 /** The model of the newest assistant entry, as a short name ("Opus 5.5"). */
 export function latestModel(entries: TranscriptEntry[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {

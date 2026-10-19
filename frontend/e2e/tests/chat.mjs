@@ -9,9 +9,14 @@
 // session id answers the newest entries with reset. The entries are the shape
 // backend/src/terminal/transcript.ts writes, with generic text only.
 //
-// Two kinds of test:
+// Three kinds of test:
 //   - chat:view and chat:live on a made-up pane (vk-e2e00000b2, a Claude pane
 //     on thor): its socket is refused by the fence, nothing reaches a pane.
+//   - chat:server on the same made-up pane, answered with pages the backend's
+//     own code made (lib/transcript-pages.mts): the live branch only, a rewind
+//     that drops a turn the page holds, the task list whole on the first page
+//     though its window starts after the tasks were made, the context meter
+//     from the transcript's usage.
 //   - chat:pane on a THROWAWAY odin shell pane the test makes and kills
 //     (lib/odin.mjs, tests/terminal.mjs), shown as a Claude pane: the composer
 //     typing into the real pane, the footer read off its screen, a permission
@@ -35,6 +40,7 @@ const SID_C = '0e2e0000-0000-4000-8000-0000000cc001'
 const MODEL = 'claude-opus-5-5'
 const TRANSCRIPT = /^\/api\/terminal\/sessions\/([^/]+)\/transcript$/
 const BACKEND = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend')
+const PAGES = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'transcript-pages.mts')
 
 // ---------- the fixture conversation ----------
 
@@ -322,6 +328,7 @@ function viewTest(device) {
         }
         // the footer: the model from the transcript; this pane has no socket, so the state reads Offline
         t.check(r.foot.model === 'Opus 5.5', `the footer model reads "${r.foot.model}"`)
+        t.check(!r.foot.meta.some((m) => m.t.startsWith('ctx')), `a context meter shows with no usage in the transcript and no screen: ${JSON.stringify(r.foot.meta)}`)
         t.check(r.overflowX <= 1 && r.docSW <= r.W + 1, `the conversation is wider than the screen (${r.overflowX} px, page ${r.docSW} > ${r.W})`)
         const b = r.boxes
         if (wide) t.check(b.vch && b.stage && Math.abs(b.vch.t - b.stage.t) <= 2 && Math.abs(b.vch.b - b.stage.b) <= 2, `the conversation does not fill the stage: ${JSON.stringify({ vch: b.vch, stage: b.stage })}`)
@@ -549,7 +556,8 @@ function paneTest(device) {
           const meta = Object.fromEntries(r.foot.meta.map((m) => [m.t.split(' ')[0], m]))
           t.check(r.foot.word === 'Cogitating…', `the footer word is "${r.foot.word}"`)
           t.check(r.foot.d === '23s · ↓ 1.2k tok', `the footer detail is "${r.foot.d}"`)
-          t.check(meta.ctx?.t === 'ctx 12%' && meta.ctx.hot, `the context meter: ${JSON.stringify(meta.ctx)}`)
+          // the fixture carries no usage, so the meter falls back to the screen's warning: 12% left is 88% used
+          t.check(meta.ctx?.t === 'ctx 88% used' && meta.ctx.hot, `the context meter: ${JSON.stringify(meta.ctx)}`)
           t.check(meta['5h']?.t === '5h 23%' && !meta['5h'].hot && meta.wk?.t === 'wk 41%', `the usage meters: ${JSON.stringify(r.foot.meta)}`)
           t.check((await page.eval(() => document.querySelector('[data-term-root]')?.getAttribute('data-phase'))) === 'working', 'the page phase is not working')
           await t.shot(page, 'working')
@@ -660,6 +668,7 @@ function contractProblems(entries) {
     if (e.kind === 'tool' && !(e.tool && typeof e.tool.name === 'string' && typeof e.tool.id === 'string' && 'input' in e.tool)) why.push('tool')
     if (e.kind === 'result' && !(e.result && typeof e.result.toolId === 'string' && typeof e.result.text === 'string' && typeof e.result.isError === 'boolean' && typeof e.result.truncated === 'boolean')) why.push('result')
     if (e.kind === 'todo' && !(Array.isArray(e.todos) && e.todos.every((x) => typeof x.content === 'string' && typeof x.status === 'string'))) why.push('todos')
+    if ('usage' in e && !(e.usage && Number.isFinite(e.usage.tokens) && e.usage.tokens >= 0 && Number.isFinite(e.usage.window) && e.usage.window > 0)) why.push('usage')
     if ((e.kind === 'user' || e.kind === 'assistant' || e.kind === 'system' || e.kind === 'thinking') && typeof e.text !== 'string') why.push('no text')
     if (why.length) bad.push(`${e.id}: ${why.join(', ')}`)
   }
@@ -706,6 +715,102 @@ function contractTest() {
   }
 }
 
+// ---------- the server's own pages: rewinds, the task list, the context meter ----------
+
+/** lib/transcript-pages.mts run on the backend's code: { first, rewound, quiet }. */
+function serverPages() {
+  return new Promise((res, rej) => {
+    execFile(process.execPath, ['--import', 'tsx', PAGES], { cwd: BACKEND, windowsHide: true, timeout: 60_000, maxBuffer: 32 << 20, encoding: 'utf8' }, (err, out, errOut) => {
+      if (err) return rej(new Error(`the backend pages did not build (${(errOut || err.message).trim().slice(0, 300)})`))
+      try { res(JSON.parse(out)) } catch (e) { rej(new Error(`the backend pages printed no JSON: ${e.message}`)) }
+    })
+  })
+}
+
+const TASKS = [['Write the outline', 'completed'], ['Draft section one', 'in_progress'], ['Check the numbers', 'pending']]
+
+function serverTest(device) {
+  const wide = device !== 'phone'
+  return {
+    name: `chat:server:${device}`,
+    group: 'chat',
+    device,
+    timeout: 90_000,
+    async run(t) {
+      const pages = await serverPages()
+      const bad = [...contractProblems(pages.first.entries), ...contractProblems(pages.rewound.entries)]
+      t.check(!bad.length, `the server's pages break the page's contract: ${bad.slice(0, 6).join(' | ')}`)
+      t.check(pages.first.cursor.split(':').length === 3 && !pages.first.reset && pages.rewound.reset, `the server's pages: cursor ${pages.first.cursor}, reset ${pages.first.reset}/${pages.rewound.reset}`)
+      const page = await t.page()
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e00000b[12]&/)
+      quietThor(page)
+      page.mock('/api/terminal/sessions', () => ok(panesState()))
+      // first read: the first page; its cursor: nothing new until the rewind, then the rewound page
+      const st = { log: [], rewind: false }
+      page.mock(TRANSCRIPT, ({ query }) => {
+        const after = typeof query.after === 'string' ? query.after : ''
+        st.log.push(after)
+        if (!after) return ok(pages.first)
+        if (after === pages.first.cursor) return ok(st.rewind ? pages.rewound : { ...pages.quiet, cursor: pages.first.cursor })
+        return ok(pages.quiet)
+      })
+      await page.goto(`/m/ai/term/${PANE}`)
+      await page.waitFor(() => document.querySelector('[data-term-root]'), { timeout: 12_000, message: 'the session page did not render' })
+
+      const todoRows = async () => {
+        if (wide) return (await report(page)).side
+        const open = await page.eval(() => document.querySelector('.vch-todos[data-v="strip"]')?.hasAttribute('data-open'))
+        if (!open) {
+          await page.tap('.vch-todos[data-v="strip"] .vch-todos-head')
+          await page.waitFor(() => document.querySelectorAll('.vch-todos[data-v="strip"] .vch-todo').length > 0, { timeout: 3000, message: 'the todo strip did not open' })
+        }
+        return (await report(page)).strip
+      }
+      const checkTodos = async (when) => {
+        const list = await todoRows()
+        const rows = (list?.rows ?? []).map((x) => [x.t, x.s])
+        t.check(list?.shown && /Todos\s*1\/3/.test(list.head) && JSON.stringify(rows) === JSON.stringify(TASKS), `${when}: the todo list reads ${JSON.stringify(list)}, want every task by name: ${JSON.stringify(TASKS)}`)
+        t.check(!rows.some(([x]) => /^Task \d+$/.test(x)), `${when}: a task shows by number only`)
+      }
+      const ctxMeter = (r) => r.foot.meta.find((m) => m.t.startsWith('ctx'))
+
+      await t.step('first page: the live branch, every task by name, the context from usage', async () => {
+        await waitChat(page, 'Abandoned summary of the files.', 12_000)
+        await sleep(600)
+        const r = await report(page)
+        t.check(r.users.includes('Read both sample files.') && r.users.includes('Summarize them in one line'), `the prompts: ${JSON.stringify(r.users.slice(-3))}`)
+        t.check(!r.users.includes('Summarize them, sent too soon'), 'the send that was canceled and sent again still shows')
+        const reads = r.tools.filter((x) => x.k === 'read')
+        t.check(reads.map((x) => `${x.main}:${x.s}:${x.d}`).join(',') === 'a.txt:ok:1 line,b.txt:ok:1 line', `the two parallel reads and their results: ${JSON.stringify(reads)}`)
+        const ctx = ctxMeter(r)
+        t.check(ctx?.t === 'ctx 17% used' && !ctx.hot, `the context meter reads ${JSON.stringify(ctx)}, want "ctx 17% used" (170k of the 1M window the model attachment before the window names)`)
+        t.check(r.foot.model === 'Test 1', `the footer model reads "${r.foot.model}"`)
+        t.check(st.log[0] === '' && st.log.slice(1).every((x) => x === pages.first.cursor), `the reads after the first did not hand the cursor back as it came: ${JSON.stringify([...new Set(st.log)])}`)
+        await checkTodos('first page')
+        await t.shot(page, 'server')
+      })
+
+      await t.step('a rewind: the dropped turn leaves, the new branch shows', async () => {
+        st.rewind = true
+        await waitChat(page, 'Compared on the new branch.')
+        await waitGone(page, 'Abandoned summary of the files.')
+        await sleep(600)
+        const r = await report(page)
+        t.check(!r.users.includes('Summarize them in one line') && r.users.includes('Compare them instead'), `after the rewind the prompts read ${JSON.stringify(r.users.slice(-3))}`)
+        t.check(r.said.includes('Both sample files are read.'), 'the turn before the rewind point left with the dropped one')
+        const ctx = ctxMeter(r)
+        t.check(ctx?.t === 'ctx 9% used', `after the rewind the context meter reads ${JSON.stringify(ctx)}, want "ctx 9% used"`)
+        // the page polls once a second: the read after the rewound page carries its cursor
+        for (let i = 0; i < 40 && !st.log.includes(pages.rewound.cursor); i++) await sleep(100)
+        t.check(st.log.includes(pages.rewound.cursor), `no read carried the cursor the rewound page gave (reads: ${JSON.stringify([...new Set(st.log.map((x) => x.slice(-12)))])})`)
+        await atBottom(page)
+        await checkTodos('after the rewind')
+        await t.shot(page, 'server-rewound')
+      })
+    },
+  }
+}
+
 export function chatTests() {
-  return [...DEVICES.flatMap((d) => [viewTest(d), liveTest(d), paneTest(d)]), contractTest()]
+  return [...DEVICES.flatMap((d) => [viewTest(d), liveTest(d), paneTest(d), serverTest(d)]), contractTest()]
 }

@@ -250,12 +250,14 @@ router.post('/terminal/sessions', async (req, res) => {
 // and trimmed here (terminal/transcript.ts, terminal/transcriptFeed.ts). The
 // page polls about once a second while it is visible. No cursor answers the
 // newest entries; a cursor answers what was appended since, or the newest
-// entries with reset when the pane is on another transcript now (/clear).
-// Read-only: the pane is never attached to, typed into or resized from here.
+// entries with reset when the pane is on another transcript now (/clear) or
+// the conversation was rewound (Esc Esc, /rewind), so what the page holds is
+// off the live branch. Read-only: the pane is never attached to, typed into
+// or resized from here.
 router.get('/terminal/sessions/:name/transcript', async (req, res) => {
   const name = String(req.params.name)
   if (!SESSION_NAME_RE.test(name)) return res.status(400).json({ error: 'not a session name' })
-  const after = typeof req.query.after === 'string' ? req.query.after.slice(0, 80) : ''
+  const after = typeof req.query.after === 'string' ? req.query.after.slice(0, 128) : ''
   try {
     const page = await paneTranscript(name, after)
     if (!page) return res.status(404).json({ error: 'no such session' })

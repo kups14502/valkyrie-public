@@ -32,6 +32,11 @@ export type TranscriptKind = 'user' | 'assistant' | 'thinking' | 'tool' | 'resul
 
 export type TranscriptTodo = { content: string; status: string }
 
+// How full the context was when Claude wrote an assistant line: the request's
+// input tokens (input_tokens + cache_read_input_tokens +
+// cache_creation_input_tokens) against the model's context window.
+export type TranscriptUsage = { tokens: number; window: number }
+
 export type TranscriptEntry = {
   // Stable for the life of the transcript: the line's uuid plus the block's
   // index, so the page can merge pages by id and a re-read never duplicates.
@@ -43,6 +48,7 @@ export type TranscriptEntry = {
   result?: { toolId: string; text: string; isError: boolean; truncated: boolean }
   todos?: TranscriptTodo[]
   model?: string
+  usage?: TranscriptUsage
 }
 
 export type TranscriptPage = {
@@ -70,14 +76,41 @@ const INPUT_ARRAY_MAX = 50
 // The state is carried between reads of the same transcript (transcriptFeed.ts
 // keeps one per session) because a create and its updates can land in
 // different reads. Every operation is a set by id, so reading a line twice
-// changes nothing.
+// changes nothing. The same state carries the model the session last said it
+// runs (a `model` attachment, "claude-opus-5-5[1m]"), which sets the context
+// window: assistant lines name the API model only, never the [1m].
 export type TodoState = {
   tasks: Map<string, TranscriptTodo>
   // tool_use id -> what the call asked for, until its result says it worked
   pending: Map<string, { name: string; input: Record<string, unknown> }>
+  modelId: string
 }
 
-export const newTodoState = (): TodoState => ({ tasks: new Map(), pending: new Map() })
+export const newTodoState = (): TodoState => ({ tasks: new Map(), pending: new Map(), modelId: '' })
+
+export const CONTEXT_WINDOW = 200_000
+export const CONTEXT_WINDOW_1M = 1_000_000
+
+const ONE_M = /\[1m\]$/i
+
+// The window an assistant line ran in: 1M when its model id ends in [1m], when
+// the session's model attachment says [1m] for the same model, or when the
+// line used more than 200k (only a 1M window holds that); else 200k.
+export function contextWindow(lineModel: string, sessionModel: string, tokens: number): number {
+  if (ONE_M.test(lineModel)) return CONTEXT_WINDOW_1M
+  const base = sessionModel.replace(ONE_M, '')
+  if (base !== sessionModel && lineModel && (base === lineModel || base.startsWith(lineModel) || lineModel.startsWith(base))) return CONTEXT_WINDOW_1M
+  return tokens > CONTEXT_WINDOW ? CONTEXT_WINDOW_1M : CONTEXT_WINDOW
+}
+
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0)
+
+function usageOf(msg: Json, model: string, st: TodoState): TranscriptUsage | null {
+  const u = isObj(msg.usage) ? msg.usage : null
+  if (!u) return null
+  const tokens = count(u.input_tokens) + count(u.cache_read_input_tokens) + count(u.cache_creation_input_tokens)
+  return tokens ? { tokens, window: contextWindow(model, st.modelId, tokens) } : null
+}
 
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate'])
 
@@ -238,8 +271,10 @@ function applyTask(st: TodoState, call: { name: string; input: Json }, line: Jso
   return true
 }
 
-// The entries for a run of complete transcript lines, in file order.
-export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState()): TranscriptEntry[] {
+// The entries for a run of complete transcript lines, in file order. `chain`,
+// when given, collects each line's place in the conversation tree (see
+// abandoned below).
+export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState(), chain?: ChainNode[]): TranscriptEntry[] {
   const out: TranscriptEntry[] = []
   const seen = new Set<string>()
   const push = (e: TranscriptEntry) => {
@@ -266,6 +301,7 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
     const id = lineId(o, line)
     const msg = isObj(o.message) ? o.message : {}
     const content = msg.content
+    if (chain && typeof o.uuid === 'string' && o.uuid && 'parentUuid' in o) chain.push(chainNode(o, type, content))
 
     if (type === 'user') {
       if (o.isCompactSummary === true) {
@@ -313,12 +349,15 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
       if (!Array.isArray(content)) continue
       const model = str(msg.model)
       const synthetic = model === '<synthetic>' || !model
-      const m = synthetic ? {} : { model }
       if (o.isApiErrorMessage === true) {
         const text = clean(blocksText(content, { imageNote: false }))
         if (text) push({ id, at, kind: 'system', text: cut(text, SYSTEM_MAX).text })
         continue
       }
+      // Every line of one API message carries that request's usage, so each
+      // entry an assistant line makes says how full the context was.
+      const usage = synthetic ? null : usageOf(msg, model, st)
+      const m = synthetic ? {} : usage ? { model, usage } : { model }
       content.forEach((b, i) => {
         if (!isObj(b)) return
         const bid = content.length === 1 ? id : `${id}:${i}`
@@ -345,7 +384,7 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
         } else if (typeof b.type === 'string' && b.type.endsWith('_tool_result')) {
           // Server tools (web search) answer inside the assistant message.
           const n = Array.isArray(b.content) ? b.content.length : 0
-          push({ id: bid, at, kind: 'result', result: { toolId: str(b.tool_use_id), text: n ? `${n} results` : '', isError: false, truncated: false } })
+          push({ id: bid, at, kind: 'result', result: { toolId: str(b.tool_use_id), text: n ? `${n} results` : '', isError: false, truncated: false }, ...(usage ? { usage } : {}) })
         }
       })
       continue
@@ -366,6 +405,11 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
 
     if (type === 'attachment') {
       const a = isObj(o.attachment) ? o.attachment : {}
+      // The model the session runs, at its start and after /model.
+      if (a.type === 'model' && isObj(a.identity) && str(a.identity.modelId)) {
+        st.modelId = cut(str(a.identity.modelId), 120).text
+        continue
+      }
       // A message typed while Claude was busy. It reaches the model as a
       // reminder, so this is the only record of it in Brendon's words.
       if (a.type === 'queued_command' && (a.humanTurn === true || (isObj(a.origin) && a.origin.kind === 'human'))) {
@@ -382,3 +426,102 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
 // Bytes of complete lines into lines. The reader only ever hands over whole
 // lines, so a trailing newline is the only thing to drop.
 export const splitLines = (text: string): string[] => text.split('\n').filter((l) => l.length > 0)
+
+// ------------------------------------------------------------ branches ----
+//
+// Esc Esc, /rewind, and a prompt sent and then canceled before Claude answered
+// all leave the dropped turn in the file. The transcript is append-only and a
+// tree: every line names its parent (parentUuid), and the new prompt names
+// the line before the turn it replaces. What Claude Code shows is the chain
+// from the newest line back through the parents. Measured on 200 of thor's
+// transcripts (2.1.28x):
+//   - 93 rewinds and canceled sends. Each dropped branch starts with a user
+//     line (a prompt, a slash command); the new prompt names the same parent.
+//   - Parallel tool calls branch too, without dropping anything: a result
+//     names its own call, so all but one result of a batch hang off the chain.
+//     They must stay.
+//   - A compact boundary has no parent. Its logicalParentUuid names the line
+//     before the compaction, or, when the compaction kept a segment, a line
+//     after the boundary (followed, that would loop).
+//   - 2633 prompts: 2539 name the line just before them as their parent, 93
+//     are the rewinds above, and 1 follows a stray tool call hanging off the
+//     chain (a forward read treats it as a rewind: one harmless reset).
+// So a line is off the conversation only when its branch leaves the chain at
+// a user line. A line whose ancestors leave the window (a tail window starts
+// mid-file) without meeting the chain stays: nothing says it was dropped.
+
+export type ChainNode = { uuid: string; parent: string | null; logical: string | null; boundary: boolean; prompt: boolean }
+
+function chainNode(o: Json, type: string, content: unknown): ChainNode {
+  const prompt = type === 'user' && o.isMeta !== true && o.isCompactSummary !== true &&
+    !(Array.isArray(content) && content.some((b) => isObj(b) && b.type === 'tool_result'))
+  return {
+    uuid: str(o.uuid),
+    parent: str(o.parentUuid) || null,
+    logical: str(o.logicalParentUuid) || null,
+    boundary: type === 'system' && o.subtype === 'compact_boundary',
+    prompt,
+  }
+}
+
+/** The line an entry came from: its id up to the first ':' (a uuid has none). */
+export const lineOf = (entryId: string): string => {
+  const i = entryId.indexOf(':')
+  return i < 0 ? entryId : entryId.slice(0, i)
+}
+
+/** The uuids of the lines in `chain` (one window, file order) that a rewind left behind. */
+export function abandoned(chain: ChainNode[]): Set<string> {
+  const out = new Set<string>()
+  if (chain.length < 2) return out
+  const at = new Map<string, number>()
+  chain.forEach((n, i) => { if (!at.has(n.uuid)) at.set(n.uuid, i) })
+  // the live chain, from the newest line back
+  const live = new Set<string>()
+  let i: number | undefined = chain.length - 1
+  while (i !== undefined && !live.has(chain[i].uuid)) {
+    const n: ChainNode = chain[i]
+    live.add(n.uuid)
+    let next = n.parent
+    if (!next && n.boundary) {
+      const l = n.logical ? at.get(n.logical) : undefined
+      next = l !== undefined && l < i ? n.logical : i > 0 ? chain[i - 1].uuid : null
+    }
+    i = next ? at.get(next) : undefined
+  }
+  // every other line: the first line of its branch, when the branch starts on
+  // the chain (parents come before children in the file)
+  const branch = new Map<string, ChainNode | null>()
+  for (const n of chain) {
+    if (live.has(n.uuid)) continue
+    let root: ChainNode | null = null
+    if (n.parent && at.has(n.parent)) root = live.has(n.parent) ? n : branch.get(n.parent) ?? null
+    branch.set(n.uuid, root)
+    if (root?.prompt) out.add(n.uuid)
+  }
+  return out
+}
+
+/**
+ * Whether the lines after `leaf` (the newest line the page has seen) rewind:
+ * a user line whose parent is not the line just before it.
+ */
+export function rewound(chain: ChainNode[], leaf: string | null): boolean {
+  let prev = leaf
+  for (const n of chain) {
+    if (n.prompt && n.parent && prev && n.parent !== prev) return true
+    prev = n.uuid
+  }
+  return false
+}
+
+/** A window of lines as the page should see it: the live branch only, and the newest line's uuid. */
+export function parseLive(lines: Iterable<string>, st: TodoState = newTodoState()): { entries: TranscriptEntry[]; leaf: string | null } {
+  const chain: ChainNode[] = []
+  const all = parseLines(lines, st, chain)
+  const drop = abandoned(chain)
+  return {
+    entries: drop.size ? all.filter((e) => !drop.has(lineOf(e.id))) : all,
+    leaf: chain.length ? chain[chain.length - 1].uuid : null,
+  }
+}

@@ -170,24 +170,25 @@ export function resultWords(name: string, text: string, isError: boolean, trunca
     return l ? `error: ${l}` : 'error'
   }
   const plus = truncated ? '+' : ''
+  const lines = (n: number) => `${n}${plus} ${n === 1 && !plus ? 'line' : 'lines'}`
   switch (KIND[name]) {
     case 'read': {
       // the server drops an image a Read returned to a placeholder
       if (/^\[(\d+ )?images?\]$/.test(t)) return 'image'
       const n = lineCount(t)
-      return n ? `${n}${plus} lines` : 'empty'
+      return n ? lines(n) : 'empty'
     }
     case 'search': {
       const m = /Found (\d+) (\w+)/.exec(t)
       if (m) return `${m[1]} ${m[2]}`
       if (/^No (files|matches) found/i.test(t)) return 'none'
       const n = lineCount(t)
-      return n ? `${n}${plus} lines` : 'none'
+      return n ? lines(n) : 'none'
     }
     case 'run': {
       if (!t || t === '(No content)') return 'ok'
       const n = lineCount(t)
-      return n > 1 ? `${n}${plus} lines` : firstLine(t)
+      return n > 1 ? lines(n) : firstLine(t)
     }
     case 'edit':
     case 'write':
@@ -197,7 +198,7 @@ export function resultWords(name: string, text: string, isError: boolean, trunca
       return 'done'
     case 'web': {
       const n = lineCount(t)
-      return n ? `${n}${plus} lines` : 'ok'
+      return n ? lines(n) : 'ok'
     }
     default:
       return firstLine(t)

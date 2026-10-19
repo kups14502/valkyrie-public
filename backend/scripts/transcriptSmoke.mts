@@ -6,21 +6,31 @@
  *      shapes of a real 2.1.28x transcript, generic text): every kind, the
  *      noise that must be skipped, the task list across TaskCreate/TaskUpdate
  *      and TodoWrite, trimming, stable ids, the same entries when the lines
- *      arrive in pieces.
+ *      arrive in pieces. Then the live branch (parseLive) on a generated
+ *      tree: a canceled send, a rewind, parallel tool results that must stay,
+ *      both kinds of compact boundary, a window whose ancestors are outside
+ *      it; rewind detection for a forward read; the context meter's usage.
  *   2. readChunk: complete lines only, forward and tail, a line still being
  *      written, a window opening mid-line, a line longer than the cap, a line
  *      past the 16 MB ceiling, and long lines cut down (screenshots, the
- *      system prompt snapshot).
+ *      system prompt snapshot) keeping usage, the model id and the tree.
+ *      scanLines: only the task and model lines before an offset, prose
+ *      about the tools skipped, the 2 MB cap.
  *   3. The odin reader through readerFor/pageFrom, with a sandboxed Claude
  *      config dir: the registry's tmux field, /clear (reset to the new file),
  *      a cursor past the end, a garbage cursor, widening tail windows, `more`,
  *      a pane whose Claude has exited, no transcript yet, and (Linux) a
- *      registry entry found by pid ancestry.
+ *      registry entry found by pid ancestry. A first page whose window starts
+ *      after the tasks were made, a rewind appended after a read (reset, the
+ *      dropped turn gone), a cursor from before the leaf was added, and a
+ *      forward read with no task state (a restarted server).
  *   4. thor's project-files service (when project-files.mjs is on this
  *      machine): started on a free loopback port with a sandboxed Claude dir,
  *      token and log. The registry chain across /clear, an exited process,
  *      hint, the session_id fallback for a change made before the service
- *      started, auth, and byte-for-byte parity with the odin reader.
+ *      started, auth, and byte-for-byte parity with the odin reader (reads,
+ *      the new cut-down rules, todos=1 against scanLines), and the task list
+ *      and a rewind through the thor reader.
  *
  * Self-contained: one temp dir for everything, removed at the end. Never
  * touches tmux, the real ~/.claude or the running services.
@@ -189,6 +199,106 @@ const wi = bigInput[0].tool?.input as { content: string }
 assert.ok(wi.content.length <= 2001 && JSON.stringify(bigInput).length < 10_000)
 ok('parser: a large tool input is cut down (one Write cannot make a page megabytes long)')
 
+// The conversation as a tree, the way Claude Code writes it: every line names
+// its parent. Numbers are the lines' uuids.
+const SR = uuid(3000)
+let tick = 0
+const node = (n: number, parent: number | null, o: Record<string, unknown>) =>
+  line({ parentUuid: parent === null ? null : uuid(parent), isSidechain: false, uuid: uuid(n), timestamp: new Date(Date.parse('2026-10-02T11:00:00.000Z') + 1000 * tick++).toISOString(), sessionId: SR, ...o })
+const USAGE = { input_tokens: 5, cache_creation_input_tokens: 5000, cache_read_input_tokens: 40_000, output_tokens: 80, service_tier: 'standard' }
+const prompt = (n: number, parent: number | null, text: string) => node(n, parent, { type: 'user', message: { role: 'user', content: text } })
+const said = (n: number, parent: number | null, text: string, usage: Record<string, unknown> = USAGE) =>
+  node(n, parent, { type: 'assistant', message: { model: 'claude-test-1', role: 'assistant', type: 'message', content: [{ type: 'text', text }], usage } })
+const call = (n: number, parent: number | null, id: string, name: string, input: Record<string, unknown>) =>
+  node(n, parent, { type: 'assistant', message: { model: 'claude-test-1', role: 'assistant', type: 'message', content: [{ type: 'tool_use', id, name, input }], usage: USAGE } })
+const answer = (n: number, parent: number | null, id: string, text: string, toolUseResult?: Record<string, unknown>) =>
+  node(n, parent, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }, ...(toolUseResult ? { toolUseResult } : {}) })
+const turnEnd = (n: number, parent: number) => node(n, parent, { type: 'system', subtype: 'turn_duration', durationMs: 1000, isMeta: false })
+const attach = (n: number, parent: number | null, attachment: Record<string, unknown>) => node(n, parent, { type: 'attachment', attachment })
+const modelAttach = (n: number, parent: number | null, modelId: string) =>
+  attach(n, parent, { type: 'model', identity: { modelId, marketingName: 'Test model', knowledgeCutoff: 'June 2026' }, text: 'You are powered by a test model.' })
+
+const treeA = [
+  attach(3001, null, { type: 'hook_success', hookName: 'SessionStart' }),
+  modelAttach(3002, 3001, 'claude-test-1[1m]'),
+  prompt(3003, 3002, 'First question'),
+  said(3004, 3003, 'First answer.'),
+  turnEnd(3005, 3004),
+  // sent, then canceled before Claude answered
+  prompt(3006, 3005, 'Second question, sent too soon'),
+  attach(3007, 3006, { type: 'total_tokens_reminder', text: 'ignored' }),
+  // sent again: the same parent
+  prompt(3008, 3005, 'Second question, sent again'),
+  call(3009, 3008, 'toolu_rw_a', 'Read', { file_path: '/srv/demo/a.txt' }),
+  call(3010, 3009, 'toolu_rw_b', 'Read', { file_path: '/srv/demo/b.txt' }),
+  // parallel calls: each result names its own call, so this one hangs off the chain
+  answer(3011, 3009, 'toolu_rw_a', 'a.txt contents'),
+  answer(3012, 3010, 'toolu_rw_b', 'b.txt contents'),
+  said(3013, 3012, 'Both files read.'),
+  turnEnd(3014, 3013),
+].map((l) => l.trimEnd())
+const rewindB = [
+  // Esc Esc back to after the first answer, and a new question
+  prompt(3015, 3005, 'A different second question'),
+  said(3016, 3015, 'Answer on the new branch.'),
+].map((l) => l.trimEnd())
+const ids = (es: Entry[]) => es.map((e) => P.lineOf(e.id)).map((u) => Number(u.slice(-4)))
+
+let live = P.parseLive(treeA)
+assert.deepEqual(ids(live.entries), [3003, 3004, 3008, 3009, 3010, 3011, 3012, 3013], JSON.stringify(live.entries.map(brief)))
+assert.equal(live.leaf, uuid(3014))
+assert.equal(P.parseLines(treeA).filter((e) => e.text === 'Second question, sent too soon').length, 1)
+live = P.parseLive([...treeA, ...rewindB])
+assert.deepEqual(ids(live.entries), [3003, 3004, 3015, 3016], JSON.stringify(live.entries.map(brief)))
+ok('parser: the live branch only: a canceled send and a rewound turn drop out, parallel tool results stay')
+
+const treeC = (logical: number) => [
+  prompt(3101, null, 'Before compaction'),
+  said(3102, 3101, 'Reply before.'),
+  turnEnd(3103, 3102),
+  prompt(3104, 3103, 'Canceled before compaction'),
+  prompt(3105, 3103, 'Kept before compaction'),
+  said(3106, 3105, 'Reply kept.'),
+  node(3107, null, { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', logicalParentUuid: uuid(logical), compactMetadata: { trigger: 'auto' } }),
+  node(3108, 3107, { type: 'user', isCompactSummary: true, message: { role: 'user', content: 'This session is being continued. Summary: demo.' } }),
+  prompt(3109, 3108, 'After compaction'),
+].map((l) => l.trimEnd())
+for (const logical of [3106, 3108]) {
+  assert.deepEqual(ids(P.parseLive(treeC(logical)).entries), [3101, 3102, 3105, 3106, 3107, 3108, 3109], `logical parent ${logical}`)
+}
+ok('parser: across a compact boundary the walk goes on before it, whether its logical parent is the line before or (a kept segment) a line after')
+
+// a tail window that opens mid-file: what the chain cannot reach stays
+assert.deepEqual(ids(P.parseLive(treeA.slice(8)).entries), [3009, 3010, 3011, 3012, 3013])
+assert.deepEqual(ids(P.parseLive([...treeA.slice(6), ...rewindB]).entries), [3008, 3009, 3010, 3011, 3012, 3013, 3015, 3016])
+assert.deepEqual(P.parseLive(fixtureLines).entries, all)
+ok('parser: lines whose ancestors are outside the window stay (nothing says they were dropped); the fixture, all roots, loses nothing')
+
+const chainOf = (ls: string[]) => {
+  const ch: import('../src/terminal/transcript.js').ChainNode[] = []
+  P.parseLines(ls, P.newTodoState(), ch)
+  return ch
+}
+assert.equal(P.rewound(chainOf(treeA.slice(5, 7)), uuid(3005)), false)
+assert.equal(P.rewound(chainOf(treeA.slice(7)), uuid(3007)), true)
+assert.equal(P.rewound(chainOf(treeA.slice(8)), uuid(3008)), false, 'a parallel result is not a rewind')
+assert.equal(P.rewound(chainOf(rewindB), uuid(3014)), true)
+assert.equal(P.rewound(chainOf(rewindB), null), false, 'no leaf known: nothing to compare the first line with')
+assert.equal(P.rewound(chainOf([prompt(3201, null, 'a new root').trimEnd()]), uuid(3014)), false)
+ok('parser: a forward read rewinds when a user line names a parent other than the line before it (not for parallel results or a new root)')
+
+assert.deepEqual(at(3).usage, { tokens: 2102, window: P.CONTEXT_WINDOW })
+assert.equal(at(34).usage, undefined)
+const withModel = P.parseLive(treeA).entries
+assert.deepEqual(withModel[1].usage, { tokens: 45_005, window: P.CONTEXT_WINDOW_1M })
+assert.deepEqual(P.parseLive(treeA.slice(2)).entries[1].usage, { tokens: 45_005, window: P.CONTEXT_WINDOW })
+assert.equal(P.contextWindow('claude-test-1[1m]', '', 10), P.CONTEXT_WINDOW_1M)
+assert.equal(P.contextWindow('claude-test-1', 'claude-test-1[1m]', 10), P.CONTEXT_WINDOW_1M)
+assert.equal(P.contextWindow('claude-other-2', 'claude-test-1[1m]', 10), P.CONTEXT_WINDOW)
+assert.equal(P.contextWindow('claude-test-1', '', 250_000), P.CONTEXT_WINDOW_1M)
+assert.equal(P.contextWindow('claude-test-1', 'claude-test-1', 1000), P.CONTEXT_WINDOW)
+ok('parser: assistant entries carry usage (input + cache read + cache write) against 200k, or 1M for a [1m] model or over 200k; synthetic lines carry none')
+
 // ------------------------------------------------------------ 2. reader ----
 
 const R = path.join(T, 'reader')
@@ -294,6 +404,67 @@ fs.writeFileSync(empty, '')
 assert.deepEqual(await F.readChunk(empty, { tail: 1000 }), { size: 0, start: 0, end: 0, text: '', capped: false })
 ok('reader: a line past the 16 MB ceiling is skipped with a stub and the read goes on; an empty file reads empty')
 
+// Long lines the new rules touch: a big attachment keeps its place in the
+// tree, a big model attachment its model id, a big assistant line its usage.
+const shapeLines = [
+  modelAttach(3301, null, 'claude-test-1[1m]').replace('You are powered by a test model.', 'm'.repeat(5000)),
+  prompt(3302, 3301, 'Shape question'),
+  attach(3303, 3302, { type: 'prompt_snapshot', systemPrompt: ['p'.repeat(20_000)] }),
+  node(3304, 3303, { type: 'assistant', message: { model: 'claude-test-1', role: 'assistant', content: [{ type: 'thinking', thinking: 'Short thought.', signature: 's'.repeat(9000) }], usage: { ...USAGE, cache_creation: { ephemeral_5m_input_tokens: 5000 }, iterations: [{ input_tokens: 5, note: 'n'.repeat(3000) }] } } }),
+  said(3305, 3304, 'Shape answer.'),
+  prompt(3306, 3301, 'A rewound shape question'),
+  said(3307, 3306, 'Answer after the rewind. ' + 'w'.repeat(3000)),
+].map((l) => l.trimEnd())
+const shapes = path.join(R, 'shapes.jsonl')
+fs.writeFileSync(shapes, shapeLines.join('\n') + '\n')
+const sc = await F.readChunk(shapes, { tail: 4 * 1024 * 1024 })
+assert.ok(sc.text.length < shapeLines.join('\n').length / 2, 'the shape lines were not cut down')
+const cutLines = P.splitLines(sc.text)
+assert.ok(cutLines[0].length < 2000 && cutLines[0].includes('"modelId":"claude-test-1[1m]"'), cutLines[0].slice(0, 300))
+assert.ok(cutLines[2].includes(`"parentUuid":"${uuid(3302)}"`), cutLines[2].slice(0, 300))
+assert.ok(/"usage":\{"input_tokens":5,"cache_read_input_tokens":40000,"cache_creation_input_tokens":5000\}/.test(cutLines[3]), cutLines[3].slice(0, 400))
+const stRaw = P.newTodoState()
+const stCut = P.newTodoState()
+assert.deepEqual(P.parseLive(cutLines, stCut), P.parseLive(shapeLines, stRaw))
+assert.equal(stCut.modelId, 'claude-test-1[1m]')
+const shapeLive = P.parseLive(cutLines).entries
+assert.deepEqual(ids(shapeLive), [3306, 3307], JSON.stringify(shapeLive.map(brief)))
+assert.deepEqual(P.parseLive(cutLines, P.newTodoState()).entries.find((e) => e.usage)?.usage, { tokens: 45_005, window: P.CONTEXT_WINDOW_1M })
+ok('reader: cut down, a model attachment keeps its id, an attachment its parent, an assistant line its input counts; the live branch and usage parse the same as raw')
+
+// scanLines: the task and model lines before an offset, nothing else
+const scanFile = path.join(R, 'scan.jsonl')
+const scanBody = [
+  modelAttach(3401, null, 'claude-test-1[1m]'),
+  prompt(3402, 3401, 'Plan the report'),
+  call(3403, 3402, 'toolu_sc_1', 'TaskCreate', { subject: 'Write the outline', description: 'd' }),
+  answer(3404, 3403, 'toolu_sc_1', 'Task #1 created successfully: Write the outline', { task: { id: '1', subject: 'Write the outline' } }),
+  prompt(3405, 3404, 'What does "TaskCreate" do, and "TodoWrite"?'),
+  said(3406, 3405, 'It makes a task.'),
+  call(3407, 3406, 'toolu_sc_2', 'TaskUpdate', { taskId: '1', status: 'in_progress' }),
+  answer(3408, 3407, 'toolu_sc_2', 'Updated task #1 status', { success: true, taskId: '1' }),
+  said(3409, 3408, 'Working on it. ' + 'x'.repeat(3000)),
+].join('')
+fs.writeFileSync(scanFile, scanBody)
+const scanAll = await F.scanLines(scanFile, Buffer.byteLength(scanBody))
+assert.deepEqual(ids(P.splitLines(scanAll.text).map((l) => ({ id: String(JSON.parse(l).uuid) }) as Entry)), [3401, 3403, 3404, 3407, 3408])
+assert.deepEqual([scanAll.capped, scanAll.end], [false, Buffer.byteLength(scanBody)])
+const upTo = Buffer.byteLength(scanBody.split('\n').slice(0, 4).join('\n') + '\n')
+const scanPart = await F.scanLines(scanFile, upTo)
+assert.equal(P.splitLines(scanPart.text).length, 3)
+const scanned = P.newTodoState()
+const scanEntries = P.parseLines(P.splitLines(scanAll.text), scanned)
+assert.deepEqual(scanEntries.filter((e) => e.kind === 'todo').pop()?.todos, [{ content: 'Write the outline', status: 'in_progress' }])
+assert.equal(scanned.modelId, 'claude-test-1[1m]')
+const capFile = path.join(R, 'scan-cap.jsonl')
+const todoLine = (i: number) => call(5000 + i, null, `toolu_cap_${i}`, 'TodoWrite', { todos: Array.from({ length: 12 }, (_, k) => ({ content: `Step ${k} of list ${i} ${'s'.repeat(150)}`, status: 'pending', activeForm: 'Working' })) })
+fs.writeFileSync(capFile, Array.from({ length: 1200 }, (_, i) => todoLine(i)).join(''))
+const capped = await F.scanLines(capFile, fs.statSync(capFile).size)
+assert.equal(capped.capped, true)
+assert.ok(Buffer.byteLength(capped.text) <= F.SCAN_MAX, `the scan kept ${Buffer.byteLength(capped.text)} bytes`)
+assert.ok(capped.text.includes('toolu_cap_1199') && !capped.text.includes('"toolu_cap_0"'), 'the cap did not keep the newest lines')
+ok(`scan: only the lines naming a task tool or a model id, or answering a task call, up to the offset; prose about the tools skipped; past ${F.SCAN_MAX / 1024 / 1024} MB the newest kept`)
+
 // --------------------------------------------------------- 3. odin feed ----
 
 const S1 = uuid(601)
@@ -319,7 +490,7 @@ fs.copyFileSync(FIXTURE, odinFile(S1))
 page = await F.pageFrom(read1, '', 'smoke:a')
 assert.equal(page.sessionId, S1)
 assert.equal(page.file, `${S1}.jsonl`)
-assert.equal(page.cursor, `${S1}:${fxSize}`)
+assert.equal(page.cursor, `${S1}:${fxSize}:${uuid(47)}`)
 assert.deepEqual(page.entries, all)
 assert.deepEqual([page.reset, page.more], [false, false])
 const cursor1 = page.cursor
@@ -367,7 +538,7 @@ page = await F.pageFrom(read2, '', 'smoke:b')
 assert.equal(page.entries.length, F.FIRST_ENTRIES)
 assert.ok(page.entries[0].text?.startsWith('prompt 101 '))
 assert.ok(page.entries[199].text?.startsWith('prompt 300 '))
-assert.equal(page.cursor, `${S3}:${Buffer.byteLength(many)}`)
+assert.equal(page.cursor, `${S3}:${Buffer.byteLength(many)}:${uuid(1299)}`)
 ok('odin: the first read widens its tail window until it has the newest 200 entries')
 
 const cursorB = page.cursor
@@ -399,6 +570,75 @@ const read4 = F.readerFor('vk-00000000a4', facts(''))
 page = await F.pageFrom(read4, '', 'smoke:d')
 assert.deepEqual([page.sessionId, page.entries.length], [null, 0])
 ok('odin: a shell pane with no Claude in it answers nothing')
+
+// Tasks made, and one finished, long before the newest 200 entries.
+const taskHead = [
+  modelAttach(4001, null, 'claude-test-1[1m]'),
+  prompt(4002, 4001, 'Plan the demo report'),
+  call(4003, 4002, 'toolu_tk_1', 'TaskCreate', { subject: 'Write the outline', description: 'd' }),
+  answer(4004, 4003, 'toolu_tk_1', 'Task #1 created successfully: Write the outline', { task: { id: '1', subject: 'Write the outline' } }),
+  call(4005, 4004, 'toolu_tk_2', 'TaskCreate', { subject: 'Draft section one', description: 'd' }),
+  answer(4006, 4005, 'toolu_tk_2', 'Task #2 created successfully: Draft section one', { task: { id: '2', subject: 'Draft section one' } }),
+  call(4007, 4006, 'toolu_tk_3', 'TaskCreate', { subject: 'Check the numbers', description: 'd' }),
+  answer(4008, 4007, 'toolu_tk_3', 'Task #3 created successfully: Check the numbers', { task: { id: '3', subject: 'Check the numbers' } }),
+  call(4009, 4008, 'toolu_tk_4', 'TaskUpdate', { taskId: '1', status: 'completed' }),
+  answer(4010, 4009, 'toolu_tk_4', 'Updated task #1 status', { success: true, taskId: '1' }),
+].join('')
+let prevLine = 4010
+const fillerLines: string[] = []
+for (let i = 0; i < 260; i++) {
+  const p = 4100 + 2 * i
+  fillerLines.push(prompt(p, prevLine, `Filler question ${i} ${'f'.repeat(2500)}`), said(p + 1, p, `Filler answer ${i}.`))
+  prevLine = p + 1
+}
+const taskTail = [
+  call(4700, prevLine, 'toolu_tk_5', 'TaskUpdate', { taskId: '2', status: 'in_progress' }),
+  answer(4701, 4700, 'toolu_tk_5', 'Updated task #2 status', { success: true, taskId: '2' }),
+  said(4702, 4701, 'Section one is under way.'),
+].join('')
+const TASKS_SEED = [{ content: 'Write the outline', status: 'completed' }, { content: 'Draft section one', status: 'pending' }, { content: 'Check the numbers', status: 'pending' }]
+const TASKS_NOW = [{ content: 'Write the outline', status: 'completed' }, { content: 'Draft section one', status: 'in_progress' }, { content: 'Check the numbers', status: 'pending' }]
+const checkTaskPage = (p: typeof page, where: string) => {
+  assert.equal(p.entries.length, F.FIRST_ENTRIES + 1, where)
+  assert.deepEqual([p.entries[0].kind, p.entries[0].id, p.entries[0].todos], ['todo', `${uuid(4010)}:0:todo`, TASKS_SEED], where)
+  assert.ok(p.entries[0].at === p.entries[1].at, `${where}: the list does not sit at the page start`)
+  assert.ok(!p.entries.slice(1).some((e) => /Plan the demo report|Filler question 0 /.test(e.text ?? '')), `${where}: the window did not start after the tasks`)
+  assert.deepEqual(p.entries.filter((e) => e.kind === 'todo').pop()?.todos, TASKS_NOW, where)
+  assert.deepEqual(p.entries.filter((e) => e.usage).pop()?.usage, { tokens: 45_005, window: P.CONTEXT_WINDOW_1M }, where)
+}
+const S5 = uuid(605)
+fs.writeFileSync(odinFile(S5), taskHead + fillerLines.join('') + taskTail)
+reg(4646, S5, { tmux: 'vk-00000000a5:@5.%5' })
+const read5 = F.readerFor('vk-00000000a5', facts(S5))
+page = await F.pageFrom(read5, '', 'smoke:tasks')
+checkTaskPage(page, 'odin')
+const bare = await F.pageFrom(((w, t) => read5(w, t)) as typeof read5, '', 'smoke:tasks-bare')
+assert.deepEqual(bare.entries.filter((e) => e.kind === 'todo').pop()?.todos.map((x) => x.content), ['Task 2'], 'without the scan the page should only know task 2 by number')
+assert.equal(bare.entries.filter((e) => e.usage).pop()?.usage?.window, P.CONTEXT_WINDOW)
+ok('odin: a first page whose window starts after the tasks were made opens with the whole list by name, and the 1M model from before the window (without the scan: "Task 2" and 200k)')
+
+fs.appendFileSync(odinFile(S5), call(4703, 4702, 'toolu_tk_6', 'TaskUpdate', { taskId: '3', status: 'in_progress' }) + answer(4704, 4703, 'toolu_tk_6', 'Updated task #3 status', { success: true, taskId: '3' }))
+const restarted = await F.pageFrom(read5, page.cursor, 'smoke:tasks-restarted')
+assert.deepEqual([restarted.reset, restarted.entries.filter((e) => e.kind === 'todo').pop()?.todos], [false, [TASKS_NOW[0], TASKS_NOW[1], { content: 'Check the numbers', status: 'in_progress' }]])
+ok('odin: a forward read with no task state (a restarted server) builds it from the file before its cursor')
+
+const S6 = uuid(606)
+fs.writeFileSync(odinFile(S6), treeA.join('\n') + '\n')
+reg(4747, S6, { tmux: 'vk-00000000a6:@6.%6' })
+const read6 = F.readerFor('vk-00000000a6', facts(S6))
+page = await F.pageFrom(read6, '', 'smoke:rewind')
+assert.deepEqual([ids(page.entries), page.cursor], [[3003, 3004, 3008, 3009, 3010, 3011, 3012, 3013], `${S6}:${fs.statSync(odinFile(S6)).size}:${uuid(3014)}`])
+fs.appendFileSync(odinFile(S6), rewindB.join('\n') + '\n')
+page = await F.pageFrom(read6, page.cursor, 'smoke:rewind')
+assert.deepEqual([page.reset, ids(page.entries), page.cursor.endsWith(`:${uuid(3016)}`)], [true, [3003, 3004, 3015, 3016], true])
+fs.appendFileSync(odinFile(S6), prompt(3017, 3016, 'Next question'))
+page = await F.pageFrom(read6, page.cursor, 'smoke:rewind')
+assert.deepEqual([page.reset, ids(page.entries)], [false, [3017]])
+const oldCursor = page.cursor.split(':').slice(0, 2).join(':')
+fs.appendFileSync(odinFile(S6), said(3018, 3017, 'Next answer.'))
+page = await F.pageFrom(read6, oldCursor, 'smoke:rewind')
+assert.deepEqual([page.reset, ids(page.entries), page.cursor.endsWith(`:${uuid(3018)}`)], [false, [3018], true])
+ok('odin: a rewind appended after a read answers reset with the live branch (the dropped turn gone); a plain append after it, and a cursor without a leaf, read forward')
 
 // ---------------------------------------------------- 4. thor's service ----
 
@@ -502,6 +742,40 @@ if (!fs.existsSync(MJS)) {
   const none = (await thor(`/transcript?sid=${uuid(940)}`)).body
   assert.deepEqual([none.sessionId, none.file, none.text], [null, null, ''])
   ok('thor: a session with no transcript yet answers sessionId null')
+
+  fs.copyFileSync(shapes, path.join(TF, `${uuid(952)}.jsonl`))
+  assert.equal((await thor(`/transcript?sid=${uuid(952)}&tail=${4 * 1024 * 1024}`)).body.text, sc.text, 'thor and odin cut the new shapes differently')
+  const TK = uuid(950)
+  const tkFile = path.join(TF, `${TK}.jsonl`)
+  fs.writeFileSync(tkFile, taskHead + fillerLines.join('') + taskTail)
+  const tkEnd = (await F.readChunk(tkFile, { tail: F.TAIL_WINDOWS[0] })).start
+  const scanThor = (await thor(`/transcript?sid=${TK}&todos=1&expect=${TK}&end=${tkEnd}`)).body
+  const scanOdin = await F.scanLines(tkFile, tkEnd)
+  assert.ok(scanOdin.text.length > 1000)
+  assert.deepEqual([scanThor.todos, scanThor.sessionId, scanThor.text, scanThor.end, scanThor.capped], [true, TK, scanOdin.text, scanOdin.end, false])
+  for (const f of [scanFile, capFile]) {
+    const sid = f === scanFile ? uuid(954) : uuid(955)
+    fs.copyFileSync(f, path.join(TF, `${sid}.jsonl`))
+    const size = fs.statSync(f).size
+    const a = (await thor(`/transcript?sid=${sid}&todos=1&expect=${sid}&end=${size}`)).body
+    const b = await F.scanLines(f, size)
+    assert.deepEqual([a.text, a.capped, a.end], [b.text, b.capped, b.end], path.basename(f))
+  }
+  const other = (await thor(`/transcript?sid=${TK}&todos=1&expect=${uuid(951)}&end=${tkEnd}`)).body
+  assert.deepEqual([other.todos, other.text], [true, ''])
+  ok('thor: todos=1 answers byte for byte what odin\'s scanLines reads (tasks, the 2 MB cap), nothing for a file that is not the expected one; the new cut-down rules match too')
+
+  page = await F.pageFrom(F.readerFor('vk-00000000b2', facts(TK, 'thor')), '', 'smoke:thor-tasks')
+  checkTaskPage(page, 'thor')
+  const RW = uuid(953)
+  fs.writeFileSync(path.join(TF, `${RW}.jsonl`), treeA.join('\n') + '\n')
+  const readRW = F.readerFor('vk-00000000b3', facts(RW, 'thor'))
+  page = await F.pageFrom(readRW, '', 'smoke:thor-rewind')
+  assert.deepEqual(ids(page.entries), [3003, 3004, 3008, 3009, 3010, 3011, 3012, 3013])
+  fs.appendFileSync(path.join(TF, `${RW}.jsonl`), rewindB.join('\n') + '\n')
+  page = await F.pageFrom(readRW, page.cursor, 'smoke:thor-rewind')
+  assert.deepEqual([page.reset, ids(page.entries)], [true, [3003, 3004, 3015, 3016]])
+  ok('thor: through the thor reader the first page has the whole task list, and a rewind resets to the live branch')
   svc.kill()
 }
 
@@ -588,7 +862,9 @@ async function liveOdin(): Promise<void> {
   assert.ok(seen.some((e) => e.kind === 'user' && e.text === 'Reply with the single word ok.'), JSON.stringify(seen))
   const reply = seen.find((e) => e.kind === 'assistant')
   assert.ok(reply && /ok/i.test(reply.text ?? ''), JSON.stringify(seen))
-  ok(`live: polled with a cursor, the prompt and the reply ("${reply?.text}", ${reply?.model}) arrived as entries`)
+  assert.ok(reply.usage && reply.usage.tokens > 1000 && [P.CONTEXT_WINDOW, P.CONTEXT_WINDOW_1M].includes(reply.usage.window), `the reply carries no usage: ${JSON.stringify(reply)}`)
+  assert.equal(cursor.split(':').length, 3, `the cursor carries no leaf: ${cursor}`)
+  ok(`live: polled with a cursor, the prompt and the reply ("${reply?.text}", ${reply?.model}, ${reply.usage.tokens} of ${reply.usage.window} tokens) arrived as entries`)
 
   const viaHttp = await (await fetch(`http://127.0.0.1:${port}/api/terminal/sessions/${name}/transcript`)).json() as { sessionId: string; entries: Entry[]; cursor: string }
   assert.equal(viaHttp.sessionId, minted)

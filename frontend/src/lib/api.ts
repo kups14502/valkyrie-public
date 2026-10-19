@@ -879,10 +879,16 @@ export const killTermSession = async (name: string) =>
 // it and parsed on the server (backend/src/routes/terminal.ts): the session
 // page's Chat view draws it (v2/kit/chat). The first read has no cursor and
 // answers the newest entries; each later read passes the cursor back and gets
-// only what was appended since. reset is the server saying the pane's
-// transcript is another file now (/clear, a new session id): drop what you have.
+// only what was appended since. reset is the server saying drop what you have
+// for these entries: the pane's transcript is another file now (/clear, a new
+// session id), or the conversation was rewound (Esc Esc, /rewind) and what
+// the page holds is off the live branch. The server only ever sends the live
+// branch. A first page can open with a todo entry: the task list as it stood
+// where the page starts. usage on an assistant entry is how full the context
+// was: input tokens against the model's window.
 export type TranscriptKind = 'user' | 'assistant' | 'thinking' | 'tool' | 'result' | 'todo' | 'system'
 export type TranscriptTodo = { content: string; status: string }
+export type TranscriptUsage = { tokens: number; window: number }
 export type TranscriptEntry = {
   id: string
   at: number
@@ -892,6 +898,7 @@ export type TranscriptEntry = {
   result?: { toolId: string; text: string; isError: boolean; truncated: boolean }
   todos?: TranscriptTodo[]
   model?: string
+  usage?: TranscriptUsage
 }
 export type TranscriptPage = {
   sessionId: string | null
@@ -931,6 +938,12 @@ const parseTranscriptEntry = (raw: unknown): TranscriptEntry | null => {
     e.todos = r.todos
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
       .map((x) => ({ content: typeof x.content === 'string' ? x.content : '', status: typeof x.status === 'string' ? x.status : 'pending' }))
+  }
+  const u = r.usage as Record<string, unknown> | null | undefined
+  if (u && typeof u === 'object') {
+    const tokens = wsNum(u.tokens)
+    const window = wsNum(u.window)
+    if (tokens !== null && window !== null && tokens >= 0 && window > 0) e.usage = { tokens, window }
   }
   return e
 }
