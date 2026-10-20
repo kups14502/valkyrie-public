@@ -21,7 +21,7 @@ const WH = 0.78
 const TE = 0.16
 const TI = 0.1
 /** plan center, the origin after building */
-const PX = 4.0, PZ = 4.5
+const PX = 4.0, PZ = 4.0
 
 const CAP: Style = { layer: 'fg', w: 0.6 }
 const WALL: Style = { layer: 'shell', w: 0.5 }
@@ -43,13 +43,13 @@ type Gap = [from: number, to: number, kind: 'open' | 'window' | 'slider' | 'clos
 const SPOTS: Record<string, Vec3> = {
   'light.office_lamp': [7.13, 1.43, 0.1],
   'light.tv_strip': [5.6, 0.95, 4.06],
-  'light.kitche_light': [0.22, 2.2, 5.85],
+  'light.kitche_light': [0.22, 2.2, 4.75],
   'light.nightsand': [3.02, 0.97, 0.26],
   'light.dresser': [4.48, 0.8, 5.72],
 }
 
 /** Free spots for lights this file does not know: living room, bedroom, kitchen, dining, hall, bathroom. */
-const SPARE: [number, number][] = [[5.4, 2.9], [5.9, 6.2], [1.7, 5.6], [2.4, 2.2], [3.55, 6.6], [1.6, 7.6], [6.8, 3.3], [4.9, 6.9]]
+const SPARE: [number, number][] = [[5.4, 2.9], [5.9, 6.2], [1.7, 4.5], [2.4, 2.2], [3.55, 6.2], [1.8, 6.6], [6.8, 3.3], [4.9, 6.9]]
 
 /** Hanging bulb positions for n unknown lights (plan meters). */
 function spareSpot(i: number): Vec3 {
@@ -205,28 +205,26 @@ export function apartment(lights: { id: string; name: string }[]): Model {
   // outside: north (front door), east (window over the desk, sliding door, bedroom window), south, west
   wall(0, 0, 8, 0, TE, [[0.85, 1.75, 'open']])
   wall(8, 0, 8, 8, TE, [[0.45, 1.95, 'window'], [2.3, 3.95, 'slider'], [5.6, 7.0, 'window']])
-  wall(8, 8, 4.1, 8, TE)
-  wall(4.1, 8, 4.1, 9, TE)
-  wall(4.1, 9, 0, 9, TE)
-  wall(0, 9, 0, 0, TE)
-  // entry closet (double doors) and the laundry closet (louvered door) beside the kitchen
-  wall(0, 0.55, 0.62, 0.55, TI)
-  wall(0, 2.35, 0.62, 2.35, TI)
-  wall(0.62, 0.55, 0.62, 2.35, TI, [[0, 1.8, 'double']])
-  wall(0, 2.9, 0.95, 2.9, TI)
-  wall(0.95, 2.9, 0.95, 4.2, TI, [[0.2, 1.05, 'louver']])
-  // kitchen: closed behind the laundry, open to the entry up to the pillar and to the hall below it
-  wall(0, 4.2, 0.95, 4.2, TI)
-  box(2.65, 0, 4.2, 3.0, WH, 4.55, CAP, WALL, WALL)
-  wall(0, 6.8, 3.0, 6.8, TI)
+  wall(8, 8, 0, 8, TE)
+  wall(0, 8, 0, 0, TE)
+  // entry closet (double doors) from the front door's corner, then the laundry closet (louvered
+  // door) on the same wall, about 3 m from the front door wall to the kitchen
+  wall(0, 1.75, 0.75, 1.75, TI)
+  wall(0.75, 0, 0.75, 1.75, TI, [[0.12, 1.62, 'double']])
+  wall(0.75, 1.75, 0.75, 3.1, TI, [[0.3, 1.1, 'louver']])
+  // kitchen: closed behind the laundry, open to the entry up to the pillar and, past the pillar, to
+  // the living room; that opening ends where the bedroom door starts across the hall
+  wall(0, 3.1, 0.75, 3.1, TI)
+  box(2.65, 0, 3.1, 3.0, WH, 3.45, CAP, WALL, WALL)
+  wall(0, 5.7, 3.0, 5.7, TI)
   // the hall: kitchen and bathroom on its west side, the bedroom on its east
-  wall(3.0, 5.6, 3.0, 9, TI, [[2.1, 2.9, 'open']])
+  wall(3.0, 4.4, 3.0, 8, TI, [[2.3, 3.1, 'open']])
   wall(4.1, 4.2, 8, 4.2, TI)
   wall(4.1, 4.2, 4.1, 8, TI, [[0.2, 1.05, 'open']])
   // doors that swing: front door into the entry, bedroom door into the bedroom, bathroom door into the bathroom
   swing(1.75, 0.08, Math.PI, Math.PI / 2, 0.9)
   swing(4.15, 4.4, Math.PI / 2, 0, 0.85)
-  swing(2.95, 8.5, Math.PI * 1.5, Math.PI, 0.8)
+  swing(2.95, 7.5, Math.PI * 1.5, Math.PI, 0.8)
 
   // ---------- dining: table against the wall, four chairs, the Table lamp in its corner ----------
 
@@ -295,30 +293,30 @@ export function apartment(lights: { id: string; name: string }[]): Model {
 
   // ---------- kitchen: fridge by the laundry, sink run and dishwasher, range with the microwave above ----------
 
-  box(0.08, 0, 4.28, 0.82, 1.8, 5.0, SH)
-  b.line([0.82, 0.68, 4.28], [0.82, 0.68, 5.0], SHd)
-  b.line([0.82, 0.68, 4.64], [0.82, 1.8, 4.64], SHd)
+  box(0.08, 0, 3.18, 0.82, 1.8, 3.9, SH)
+  b.line([0.82, 0.68, 3.18], [0.82, 0.68, 3.9], SHd)
+  b.line([0.82, 0.68, 3.54], [0.82, 1.8, 3.54], SHd)
   // west run with the sink and the dishwasher next to the fridge
-  box(0.08, 0, 5.0, 0.7, 0.9, 6.74, SH)
-  b.rect([0.42, 0.905, 5.95], X, Z, 0.34, 0.5, SHd, 0.06)
-  b.rect([0.7, 0.45, 5.3], Z, Y, 0.56, 0.78, SHd)
+  box(0.08, 0, 3.9, 0.7, 0.9, 5.64, SH)
+  b.rect([0.42, 0.905, 4.85], X, Z, 0.34, 0.5, SHd, 0.06)
+  b.rect([0.7, 0.45, 4.2], Z, Y, 0.56, 0.78, SHd)
   // south run with the range
-  box(0.7, 0, 6.12, 2.6, 0.9, 6.74, SH)
-  b.rect([1.93, 0.45, 6.12], X, Y, 0.62, 0.5, SHd)
-  for (const [x, z] of [[1.75, 6.28], [2.11, 6.28], [1.75, 6.56], [2.11, 6.56]]) b.circle([x, 0.905, z], X, Z, 0.07, 10, SHd)
-  box(1.55, 1.45, 6.36, 2.31, 1.82, 6.74, SH, SHd, SHd)
+  box(0.7, 0, 5.02, 2.6, 0.9, 5.64, SH)
+  b.rect([1.93, 0.45, 5.02], X, Y, 0.62, 0.5, SHd)
+  for (const [x, z] of [[1.75, 5.18], [2.11, 5.18], [1.75, 5.46], [2.11, 5.46]]) b.circle([x, 0.905, z], X, Z, 0.07, 10, SHd)
+  box(1.55, 1.45, 5.26, 2.31, 1.82, 5.64, SH, SHd, SHd)
   // the upper cabinets over the sink run; the Kitchen Light bar lies on top of them and washes the ceiling
-  box(0.08, 1.45, 5.0, 0.42, 2.15, 6.74, SH, SHd, SHd)
-  for (const z of [5.58, 6.16]) b.line([0.42, 1.45, z], [0.42, 2.15, z], SHd)
-  if (!hasLight.has('light.kitche_light')) box(0.16, 2.15, 5.4, 0.28, 2.19, 6.3, SHd)
+  box(0.08, 1.45, 3.9, 0.42, 2.15, 5.64, SH, SHd, SHd)
+  for (const z of [4.48, 5.06]) b.line([0.42, 1.45, z], [0.42, 2.15, z], SHd)
+  if (!hasLight.has('light.kitche_light')) box(0.16, 2.15, 4.3, 0.28, 2.19, 5.2, SHd)
 
-  // ---------- hall: runner, the basket and the robot vacuum at the end ----------
+  // ---------- hall: runner, the basket by the bathroom door and the robot vacuum at the end ----------
 
   floorRect(3.25, 4.9, 3.85, 7.3, 0.01, MESH)
   floorRect(3.32, 5.0, 3.78, 7.2, 0.01, MESH)
-  box(3.55, 0, 8.55, 4.0, 0.45, 8.9, SHd)
-  b.circle([3.3, 0.02, 8.7], X, Z, 0.17, 14, SHd)
-  b.circle([3.3, 0.09, 8.7], X, Z, 0.17, 14, SHd)
+  box(3.1, 0, 7.5, 3.55, 0.45, 7.88, SHd)
+  b.circle([3.84, 0.02, 7.7], X, Z, 0.17, 14, SHd)
+  b.circle([3.84, 0.09, 7.7], X, Z, 0.17, 14, SHd)
 
   // ---------- bedroom: bed under the window, dresser, the globe lamp on its round table by the door ----------
 
@@ -339,13 +337,13 @@ export function apartment(lights: { id: string; name: string }[]): Model {
 
   // ---------- bathroom: tub along the far wall, vanity, toilet ----------
 
-  box(0.08, 0, 8.18, 1.62, 0.5, 8.92, SH)
-  b.roundRect([0.85, 0.5, 8.55], X, Z, 1.36, 0.56, 0.18, SHd)
-  box(0.08, 0, 7.45, 0.6, 0.85, 8.15, SH)
-  b.roundRect([0.36, 0.86, 7.8], Z, X, 0.4, 0.3, 0.12, SHd)
-  box(0.08, 0.38, 6.95, 0.3, 0.75, 7.35, SH)
-  b.roundRect([0.56, 0.4, 7.15], X, Z, 0.5, 0.36, 0.17, SH)
-  b.line([0.4, 0, 7.15], [0.4, 0.38, 7.15], SHd)
+  box(0.08, 0, 7.18, 1.62, 0.5, 7.92, SH)
+  b.roundRect([0.85, 0.5, 7.55], X, Z, 1.36, 0.56, 0.18, SHd)
+  box(0.08, 0, 6.45, 0.6, 0.85, 7.15, SH)
+  b.roundRect([0.36, 0.86, 6.8], Z, X, 0.4, 0.3, 0.12, SHd)
+  box(0.08, 0.38, 5.95, 0.3, 0.75, 6.35, SH)
+  b.roundRect([0.56, 0.4, 6.15], X, Z, 0.5, 0.36, 0.17, SH)
+  b.line([0.4, 0, 6.15], [0.4, 0.38, 6.15], SHd)
 
   // ---------- the lights ----------
 
@@ -364,8 +362,8 @@ export function apartment(lights: { id: string; name: string }[]): Model {
       b.rect([p[0], p[1], p[2] + 0.004], X, Y, 1.18, 0.56, hot(`bulb.${l.id}`, 0.45))
     } else if (l.id === 'light.kitche_light') {
       // an LED bar on top of the upper cabinets
-      box(p[0] - 0.06, 2.15, 5.4, p[0] + 0.06, 2.19, 6.3, g)
-      b.line([p[0], 2.19, 5.45], [p[0], 2.19, 6.25], g)
+      box(p[0] - 0.06, 2.15, 4.3, p[0] + 0.06, 2.19, 5.2, g)
+      b.line([p[0], 2.19, 4.35], [p[0], 2.19, 5.15], g)
     } else if (l.id === 'light.nightsand') {
       // the table lamp: a small base and its glowing globe
       b.circle([p[0], 0.765, p[2]], X, Z, 0.06, 10, SHd)
