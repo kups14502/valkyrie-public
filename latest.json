@@ -1,15 +1,15 @@
 {
-  "version": "0.3.148",
-  "notes": "Model Y wireframe rebuilt from a 1:25 blueprint and photos",
-  "pub_date": "2026-10-19T22:35:17Z",
+  "version": "0.3.149",
+  "notes": "Car tab: the Model Y's controls through Home Assistant",
+  "pub_date": "2026-10-20T00:45:54Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVp1Ly85QktHOUJJRlY2b2t2QVpnNHM1eW1VUGlVUTFVSkdwMW5adUVBZXgvUGVkM3o3Mlk4c2FhOEJLKzA3ZmEySnNqUFN6TzhIeXNZQWI5aXVCcnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQ5MjA3CWZpbGU6VmFsa3lyaWVfMC4zLjE0OF94NjQtc2V0dXAuZXhlCmcvNlFPZTdURkpRVG1nZDA5UkUwOHdhMlQxazBzOUR2czNheFl6Z1lFajArcys3TmxMVHcxZm9nanl1RUYwMkRvU3lBajQ5TU5LQ2Z1dFJOa2dsRUF3PT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.148/Valkyrie_0.3.148_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVV6cnp5TkppUmRpUXUvY1EwWWZrRUczQnFXQTdQSFBla1Exb0tqQm5qN21UZWpHYnpQZVhPNWxVMXprMTNUdUtKN1VUbm1PcmxaLy9FOEZvU2h1WmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDU3MDIxCWZpbGU6VmFsa3lyaWVfMC4zLjE0OV94NjQtc2V0dXAuZXhlCm1EOEFQTTkvaW9ZYXBRSk1lNWQwd3pKeEI1cDBqeWFSaHQrRGFXWW0yWUtHMThieXFVQnk3WmpCak9oaFFMbU5DRGZueWk2cVREalBOMWZPcThoL0RBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.149/Valkyrie_0.3.149_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVDMTVoa2RvUkhxK3ZYUWszbHEzSkZhSFBmNklRZjNWQzY0NG1MR3hmdHlnVFZubDQ2ZjFMeUJXOEdMMUdVMW12UmpyRlNFUXcrWFlkSS9sYnRCQWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDQ5MTQ2CWZpbGU6VmFsa3lyaWVfMC4zLjE0OF9hbWQ2NC5BcHBJbWFnZQpvQmpuZjFnTUY5ckIxZjFrL0RVQ0hVN2xBYUZRUEplcDdnVkRmUlF4a2ptYWVId1gwUzQ5Y0t3eTZ1eStnN200RnVZazBJd05uazJJRXVOY1FmWUJBQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.148/Valkyrie_0.3.148_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWRScFM1anhLSjVCT2dJeDRrZG0xQXNDZ0M4bEo0QVQvYzBrNkFZaEs2OUdPM0o4eGxHblZVN3lIYVhKZDVhOG5RbklOWDVIbGdFQWtVUVhyZDBJWXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDU2OTU3CWZpbGU6VmFsa3lyaWVfMC4zLjE0OV9hbWQ2NC5BcHBJbWFnZQpBWFZCa1M4UkpMZTFqMXRvZWdRbm54MDNTekExamx3UzhuNmFxQzM0WXZFMFRwWHcvY2FZbE95MkttVDltNkRPWHJnRk1ueWhWTEIwRjFvQ1ZZOXNEdz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.149/Valkyrie_0.3.149_amd64.AppImage"
     }
   }
 }
