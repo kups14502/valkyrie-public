@@ -7,8 +7,9 @@
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
+import { carView } from './car.mjs'
 
-const TABS = ['Dashboard', 'AI', 'Lights', 'Media', 'System']
+const TABS = ['Dashboard', 'AI', 'Lights', 'Car', 'Media', 'System']
 
 /**
  * ready: what live data looks like on the route: `sel` (at least `min`
@@ -21,6 +22,8 @@ export const ROUTES = [
   { path: '/m/ai/usage', tab: 'AI', sub: 'Usage', ready: { text: /\d+\s*%/ } },
   { path: '/m/ai/skin', shell: false, ready: { sel: '.xterm-rows', text: /Claude Code/ } },
   { path: '/m/lights', tab: 'Lights', ready: { text: /\d+\s*of\s*\d+\s*on|No bulbs reported/i } },
+  // the live car from /api/hosts; its controls view is a fixture (tests/car.mjs), answered in the browser
+  { path: '/m/car', tab: 'Car', ready: { sel: '.car-grp', min: 6, text: /\d+\s*%/ }, mockCar: true },
   { path: '/m/media/dashboard', tab: 'Media', sub: 'Dashboard', ready: { text: /\b(new|newest|added)\b/i } },
   { path: '/m/media/movies', tab: 'Media', sub: 'Movies', ready: { text: /\d[\d,]*\s*titles/i } },
   { path: '/m/media/shows', tab: 'Media', sub: 'Shows', ready: { text: /\d[\d,]*\s*titles/i } },
@@ -142,6 +145,8 @@ export function routeTests() {
             page.mock('/api/session-board', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
             page.mock('/api/hosts/thor/sessions', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
           }
+          // the Car tab's controls view: a fixture for the live car (no command is ever sent from a route test)
+          if (route.mockCar) page.mock(/^\/api\/vehicles\/car-[a-z0-9_]+$/, ({ path }) => ({ status: 200, body: carView({ id: path.split('/').pop() }) }))
           const t0 = Date.now()
           await page.goto(route.path)
           const spec = { sel: route.ready.sel, min: route.ready.min, text: route.ready.text ? { re: route.ready.text.source, flags: route.ready.text.flags } : null }

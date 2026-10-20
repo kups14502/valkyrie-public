@@ -355,6 +355,8 @@
   box-shadow: var(--glow);
 }
 .sys-car-climate { margin-left: 4px; color: var(--fg); }
+/* the way to the Car tab's controls, at the row's right end */
+.sys-car-open { margin-left: auto; min-height: 28px; gap: 5px; font-size: inherit; color: var(--fg); white-space: nowrap; }
 @media (min-width: 1100px) {
   .sys-car-range { font-size: 17px; line-height: 20px; }
   .sys-car-charge { font-size: 11px; }

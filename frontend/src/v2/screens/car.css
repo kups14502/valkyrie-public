@@ -1,0 +1,380 @@
+/* Car screen (screens/Car.tsx). Valkyrie's HUD language, compact: the groups
+   are an accent caps label over a hairline with one row per control and thin
+   dividers, no box around each one. Controls are the kit's line buttons, a
+   switch, a stepper and a glass bar. Lit things (on, open, charging) glow;
+   everything else is dim. A command on its way: the control pulses in --hot.
+   A failed one: --acc2 for a moment. Only transform and opacity animate. */
+
+/* ---------- layout ---------- */
+/* phone: one column in this order: the car, its model, then the groups */
+.car { display: flex; flex-direction: column; gap: 12px; }
+.car-col { display: contents; }
+.car-head { order: 0; }
+.car-model { order: 1; }
+.car-grp[data-grp='security'] { order: 2; }
+.car-grp[data-grp='climate'] { order: 3; }
+.car-grp[data-grp='charging'] { order: 4; }
+.car-grp[data-grp='openings'] { order: 5; }
+.car-grp[data-grp='quick'] { order: 6; }
+.car-grp[data-grp='status'] { order: 7; }
+
+/* iPad, landscape phone, a narrow window: the car and its status | the controls */
+@media (min-width: 640px) {
+  .car {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'a b' 'a c';
+    column-gap: 18px;
+    row-gap: 12px;
+    align-items: start;
+  }
+  .car-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .car-col-a { grid-area: a; }
+  .car-col-b { grid-area: b; }
+  .car-col-c { grid-area: c; }
+}
+/* desktop: the car | security and climate | charging, openings and quick */
+@media (min-width: 1100px) {
+  .car {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: 'a b c';
+    column-gap: 26px;
+    max-width: 1680px;
+    margin: 0 auto;
+    padding-top: 14px;
+  }
+  .car-col { gap: 14px; }
+}
+
+.car-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 64px 20px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--dim);
+}
+.car-empty b { font-size: 15px; font-weight: 600; color: var(--text); }
+
+/* ---------- the head: name and state, battery and range, notes ---------- */
+.car-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 2px 2px 0; }
+.car-id { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; min-width: 0; }
+.car-name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+}
+.car-state {
+  padding: 1px 6px;
+  font-size: 9.5px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+}
+.car-state[data-state='asleep'] { color: var(--dim); border-color: var(--line); }
+.car-state[data-state='offline'] { color: var(--acc2); border-color: color-mix(in srgb, var(--acc2) 60%, transparent); }
+.car-when { margin-left: auto; font-size: 11px; line-height: 16px; color: var(--dim); white-space: nowrap; }
+
+.car-big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 20px; min-width: 0; }
+.car-bat, .car-range { display: inline-flex; align-items: baseline; gap: 6px; }
+.car-bat .vl-icon { align-self: center; }
+.car-bat b, .car-range b {
+  font-size: 34px;
+  line-height: 38px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--ink-hi);
+  text-shadow: var(--num-glow);
+}
+.car-bat small, .car-range small { margin-left: 3px; font-size: 13px; font-weight: 500; color: var(--dim); text-shadow: none; letter-spacing: 0; }
+.car-bat[data-low] b { color: var(--acc2); }
+.car-chg { flex-basis: 100%; font-size: 12px; line-height: 16px; color: var(--dim); }
+.car-chg[data-on] { color: var(--fg); text-shadow: var(--text-glow); }
+
+.car-pick { display: flex; flex-wrap: wrap; gap: 2px 16px; }
+.car-pick-tab {
+  min-height: 32px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid transparent;
+}
+.car-pick-tab[data-on] { color: var(--fg); font-weight: 700; border-bottom-color: var(--fg); text-shadow: var(--text-glow); }
+
+.car-note { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--dim); }
+.car-note > span { min-width: 0; overflow-wrap: anywhere; }
+.car-note .vl-icon { flex: none; }
+.car-note[data-tone='hot'] { color: var(--hot); }
+.car-note[data-tone='acc2'] { color: color-mix(in srgb, var(--acc2) 85%, var(--text)); }
+.car-key a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; text-shadow: var(--text-glow); }
+.car-asleep .car-act { margin-left: auto; }
+
+/* ---------- the model: large, as wide as its column (its floor runs to the edges) ---------- */
+.car-model { position: relative; height: 250px; margin: 0 -6px; overflow: hidden; }
+@media (min-width: 640px) { .car-model { height: 330px; } }
+@media (min-width: 640px) and (max-height: 480px) { .car-model { height: 210px; } }
+@media (min-width: 1100px) { .car-model { height: 400px; margin: 0 -8px; } }
+@media (min-width: 1100px) and (min-height: 1300px) { .car-model { height: 480px; } }
+
+/* ---------- a group: accent caps over a hairline, one row per control ---------- */
+.car-grp { min-width: 0; }
+.car-grp-hd {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid var(--line);
+  transition: border-color .3s;
+}
+.car-grp-label {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+.car-grp-val { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 16px; color: var(--dim); }
+/* a diamond on the model opened this group */
+.car-grp[data-focus] .car-grp-hd { border-bottom-color: var(--fg); box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 40%, transparent); }
+.car-grp[data-focus] .car-grp-label { text-shadow: var(--text-glow); }
+.car-grp-foot { padding: 4px 2px 0; font-size: 11px; line-height: 15px; color: var(--faint); }
+
+.car-rows > * + * { border-top: 1px solid color-mix(in srgb, var(--fg) 9%, transparent); }
+.car-row { display: flex; align-items: center; gap: 10px; min-height: 48px; min-width: 0; padding: 3px 2px; }
+.car-row-id { display: flex; align-items: center; gap: 9px; flex: 1 1 auto; min-width: 0; }
+.car-row-id .vl-icon { flex: none; }
+.car-row-text { display: flex; flex-direction: column; min-width: 0; }
+.car-row-text b, .car-row-text em { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.car-row-text b { font-size: 13px; line-height: 17px; font-weight: 600; color: var(--text); }
+.car-row-text em { font-style: normal; font-size: 11px; line-height: 15px; color: var(--dim); }
+.car-row-ctl { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.car-row[data-failed] .car-row-text b { color: var(--acc2); }
+.car-row-bar .car-row-id { flex: none; }
+
+@keyframes car-busy { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* ---------- one action: a line button; armed (the second tap fires) is the danger plate ---------- */
+.car-act { min-height: 34px; padding: 0 12px; font-size: 12px; white-space: nowrap; }
+.car-act-sm { min-height: 28px; padding: 0 10px; font-size: 11.5px; }
+.car-act[data-armed] {
+  color: var(--plate-ink);
+  background: var(--acc2);
+  border-color: var(--acc2);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 45%, transparent);
+}
+.car-act[data-busy] { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 55%, transparent); }
+.car-act[data-busy] > span { animation: car-busy 1.1s ease-in-out infinite; }
+.car-act[data-failed] { color: var(--acc2); border-color: color-mix(in srgb, var(--acc2) 70%, transparent); }
+a.car-act { text-decoration: none; }
+
+/* ---------- a switch: its word, then the track ---------- */
+.car-sw { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: 12px; font-weight: 500; color: var(--dim); }
+.car-sw-word { min-width: 3em; text-align: right; white-space: nowrap; }
+.car-sw[data-on] .car-sw-word { color: var(--fg); text-shadow: var(--text-glow); }
+.car-sw-track { position: relative; flex: none; width: 38px; height: 20px; border: 1px solid var(--line-strong); background: rgba(0, 0, 0, .6); }
+.car-sw-track > i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; background: var(--dim); transition: transform .16s var(--ease); }
+.car-sw[data-on] .car-sw-track { border-color: var(--fg); box-shadow: var(--glow); }
+.car-sw[data-on] .car-sw-track > i { transform: translateX(18px); background: var(--fg); }
+.car-sw[data-pressed] .car-sw-track { transform: scale(.96); }
+.car-sw[data-busy] .car-sw-word { color: var(--hot); text-shadow: none; animation: car-busy 1.1s ease-in-out infinite; }
+.car-sw[data-busy] .car-sw-track { border-color: color-mix(in srgb, var(--hot) 60%, transparent); box-shadow: none; }
+.car-sw[data-busy] .car-sw-track > i { background: var(--hot); }
+.car-sw[data-failed] .car-sw-word { color: var(--acc2); }
+.car-sw[data-failed] .car-sw-track { border-color: var(--acc2); box-shadow: none; }
+
+/* ---------- a stepper: [-] value [+] ---------- */
+.car-step { display: inline-flex; align-items: center; gap: 4px; }
+.car-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--fg);
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, .55);
+  transition: transform .12s var(--ease);
+}
+.car-step-btn[data-pressed] { transform: scale(.94); border-color: var(--fg); }
+.car-step-val {
+  min-width: 4.4em;
+  text-align: center;
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--ink-hi);
+  text-shadow: var(--num-glow);
+  white-space: nowrap;
+}
+.car-step-val small { margin-left: 1px; font-size: 11px; font-weight: 500; color: var(--dim); text-shadow: none; }
+.car-step[data-draft] .car-step-val { color: var(--hot); text-shadow: var(--hot-glow); }
+.car-step[data-busy] .car-step-val { color: var(--hot); text-shadow: none; animation: car-busy 1.1s ease-in-out infinite; }
+.car-step[data-failed] .car-step-val { color: var(--acc2); text-shadow: none; }
+
+/* ---------- the charge limit: a glass bar and its value ---------- */
+.car-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  touch-action: pan-y;
+  cursor: pointer;
+  outline: none;
+}
+.car-bar[data-off] { cursor: default; opacity: .45; }
+.car-bar:focus-visible .car-bar-track { outline: 1px solid var(--line-strong); outline-offset: 2px; }
+.car-bar-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 18px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 15%, transparent), color-mix(in srgb, var(--fg) 6%, transparent)),
+    rgba(0, 0, 0, .62);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 24%, transparent);
+}
+.car-bar-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(calc(var(--v) / 100));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fg) 22%, transparent), color-mix(in srgb, var(--fg) 62%, transparent));
+}
+.car-bar-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  transform: translateX(calc(var(--v) * 1% - 1px));
+  background: var(--fg);
+  box-shadow: 0 0 8px var(--fg);
+}
+.car-bar:not([data-held]) .car-bar-fill { transition: transform .3s var(--ease); }
+.car-bar-val { flex: none; min-width: 3.4em; text-align: right; font-size: 17px; line-height: 22px; font-weight: 600; color: var(--ink-hi); text-shadow: var(--num-glow); white-space: nowrap; }
+.car-bar-val small { margin-left: 1px; font-size: 11px; font-weight: 500; color: var(--dim); text-shadow: none; }
+.car-bar[data-held] .car-bar-val { color: var(--hot); text-shadow: var(--hot-glow); }
+.car-bar[data-busy] .car-bar-val { color: var(--hot); text-shadow: none; animation: car-busy 1.1s ease-in-out infinite; }
+.car-bar[data-failed] .car-bar-val { color: var(--acc2); text-shadow: none; }
+
+/* ---------- the seat map: the cabin from above, driver on the left ---------- */
+.car-seats { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 6px 2px 8px; }
+.car-seats-label { display: flex; align-items: center; gap: 9px; flex: 1 1 auto; min-width: 0; min-height: 40px; font-size: 13px; font-weight: 600; color: var(--text); }
+.car-seatmap {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 22px 22px 8px 8px;
+}
+.car-seatrow { display: flex; justify-content: center; gap: 6px; }
+.car-seat {
+  width: 66px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--fg) 26%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 8%, transparent), color-mix(in srgb, var(--fg) 2%, transparent)), rgba(0, 0, 0, .55);
+  transition: transform .12s var(--ease), border-color .2s, box-shadow .2s;
+}
+.car-seatrow[data-n='3'] .car-seat { width: 44px; }
+.car-seat[data-none] { visibility: hidden; }
+.car-seat[data-pressed] { transform: scale(.95); }
+.car-seat[data-on] { border-color: var(--fg); box-shadow: var(--glow); }
+.car-seat-pips { display: flex; gap: 2px; }
+.car-seat-pips i { width: 8px; height: 3px; background: color-mix(in srgb, var(--fg) 20%, transparent); }
+.car-seat-pips i[data-on] { background: var(--fg); box-shadow: 0 0 5px var(--fg); }
+.car-seat-name { font-size: 9px; line-height: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.car-seat-level { font-size: 11.5px; line-height: 14px; font-weight: 600; color: var(--text); }
+.car-seat[data-on] .car-seat-level { color: var(--fg); text-shadow: var(--text-glow); }
+.car-seat[data-draft] .car-seat-level { color: var(--hot); text-shadow: none; }
+.car-seat[data-busy] { border-color: color-mix(in srgb, var(--hot) 60%, transparent); box-shadow: none; }
+.car-seat[data-busy] .car-seat-level { color: var(--hot); animation: car-busy 1.1s ease-in-out infinite; }
+.car-seat[data-failed] { border-color: var(--acc2); box-shadow: none; }
+.car-seat[data-failed] .car-seat-level { color: var(--acc2); }
+
+/* ---------- the wheel's levels: small plates, the lit one solid ---------- */
+.car-opts { display: inline-flex; align-items: center; gap: 2px; }
+.car-opt {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dim);
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+}
+.car-opt::after { content: ''; position: absolute; inset: -7px -1px; }
+.car-opt[data-on] {
+  color: var(--plate-ink);
+  font-weight: 600;
+  border-color: var(--plate-edge);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--plate), transparent), color-mix(in srgb, var(--fg) calc(var(--plate) - 16%), transparent));
+  box-shadow: var(--glow);
+  text-shadow: var(--plate-shadow);
+}
+.car-opt[data-pressed]:not([data-on]) { color: var(--fg); border-color: var(--line-strong); }
+.car-row[data-busy] .car-opt[data-on] { animation: car-busy 1.1s ease-in-out infinite; }
+.car-row[data-failed] .car-opt[data-on] { border-color: var(--acc2); }
+
+/* ---------- quick actions: one row ---------- */
+.car-quick { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 2px; }
+.car-quick .car-act { flex: 1 1 0; min-width: 0; min-height: 40px; }
+
+/* ---------- status ---------- */
+.car-val { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--ink-hi); white-space: nowrap; }
+.car-val small { margin-left: 2px; font-size: 10.5px; font-weight: 500; color: var(--dim); }
+.car-val-sm { font-size: 12.5px; }
+.car-tires { display: inline-grid; grid-template-columns: repeat(2, 2.2em) auto; column-gap: 6px; align-items: center; font-size: 13px; line-height: 16px; font-weight: 600; color: var(--ink-hi); text-align: right; }
+.car-tires small { grid-column: 3; grid-row: 1 / 3; font-size: 10.5px; font-weight: 500; color: var(--dim); }
+.car-tire[data-warn] { color: var(--acc2); }
+
+@media (hover: hover) and (pointer: fine) {
+  .car-seat:not(:disabled):hover { border-color: color-mix(in srgb, var(--fg) 60%, transparent); }
+  .car-opt:not([data-on]):not(:disabled):hover { color: var(--text); border-color: var(--line); }
+  .car-step-btn:not(:disabled):hover { border-color: var(--line-strong); }
+  .car-pick-tab:not([data-on]):hover { color: var(--text); }
+}
+
+/* reduced motion: nothing pulses */
+html[data-motion='reduced'] .car-act[data-busy] > span,
+html[data-motion='reduced'] .car-sw[data-busy] .car-sw-word,
+html[data-motion='reduced'] .car-step[data-busy] .car-step-val,
+html[data-motion='reduced'] .car-bar[data-busy] .car-bar-val,
+html[data-motion='reduced'] .car-seat[data-busy] .car-seat-level,
+html[data-motion='reduced'] .car-row[data-busy] .car-opt[data-on] { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .car-act[data-busy] > span, .car-sw[data-busy] .car-sw-word, .car-step[data-busy] .car-step-val,
+  .car-bar[data-busy] .car-bar-val, .car-seat[data-busy] .car-seat-level, .car-row[data-busy] .car-opt[data-on] { animation: none; }
+}

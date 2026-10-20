@@ -36,6 +36,7 @@ import mcpRoute from './routes/mcp.js'
 import accountSwitchRoute from './routes/accountSwitch.js'
 import accountSigninRoute from './routes/accountSignin.js'
 import devicesRoute from './routes/devices.js'
+import vehiclesRoute from './routes/vehicles.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
 
@@ -116,6 +117,7 @@ app.use('/api', aiUsageRoute)
 app.use('/api', projectsRoute)
 app.use('/api', vaultRoute)
 app.use('/api', lightsRoute)
+app.use('/api', vehiclesRoute)
 app.use('/api', tradingRoute)
 app.use('/api', tradebotRoute)
 app.use('/api', slopfactoryRoute)

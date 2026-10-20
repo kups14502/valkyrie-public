@@ -10,6 +10,7 @@ import { v2TermPath } from '../lib/term'
 import Dashboard from './screens/Dashboard'
 import Claude from './screens/Claude'
 import Lights from './screens/Lights'
+import Car from './screens/Car'
 import Media from './screens/Media'
 import System from './screens/System'
 import { SettingsScreen } from './screens/Settings'
@@ -43,6 +44,8 @@ const SCREENS: ScreenDef[] = [
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
+  // the car's controls under its Model Y; the model draws its own floor in its box, so the page floor stays faint
+  { id: 'car', label: 'Car', Component: Car, floor: 'faint' },
   {
     id: 'media',
     label: 'Media',

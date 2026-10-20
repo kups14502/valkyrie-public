@@ -993,6 +993,8 @@ type CarPlate = { id: CarFocus; icon: IconName; label: string; value: number | s
  */
 function CarDetail({ host, car: v, on, now, i, ref }: { host: HostVM; car: Car; on: boolean; now: number; i: number; ref: RefObject<HTMLElement | null> }) {
   const model = hostModel(host.id, v.model)
+  const { go } = useShell()
+  const [, setCarPick] = useSetting<string>('carPick', '')
   // keyed by the car (HostsView), so another car starts with nothing picked
   const [focus, setFocus] = useState<CarFocus | null>(null)
   const state = carState(host)
@@ -1096,6 +1098,10 @@ function CarDetail({ host, car: v, on, now, i, ref }: { host: HostVM; car: Car; 
               {v.climateOn && <span className="sys-car-climate">Climate on</span>}
             </Press>
           )}
+          {/* the controls live on the Car tab: this car, picked there */}
+          <Press className="sys-car-open vl-link" aria-label={`Open Car: ${host.label}'s controls`} onPress={() => { setCarPick(host.id); go('car') }}>
+            <Icon name="car" size={13} tone="dim" />Open Car<Icon name="go" size={12} tone="dim" />
+          </Press>
         </div>
       </div>
     </section>

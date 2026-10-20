@@ -8,6 +8,7 @@ import { quietThor } from '../lib/fixtures.mjs'
 const PRIMS = [
   { label: 'AI', id: 'ai' },
   { label: 'Lights', id: 'lights' },
+  { label: 'Car', id: 'car' },
   { label: 'Media', id: 'media' },
   { label: 'System', id: 'system' },
   { label: 'Dashboard', id: 'dashboard' },

@@ -57,6 +57,23 @@ export async function haRequest(method: 'GET' | 'POST', path: string, body?: unk
   return r.json()
 }
 
+/**
+ * One request with its own time limit, answered with Home Assistant's status
+ * and body instead of a throw (routes/vehicles.ts: a car command can wait
+ * about 40 s while Home Assistant wakes the car, and its error text matters).
+ * A timeout or a dead connection still throws.
+ */
+export async function haFetch(method: 'GET' | 'POST', path: string, body: unknown, timeoutMs: number): Promise<{ status: number; text: string }> {
+  const cfg = getConfig()
+  const r = await fetch(`${cfg.ha_url}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${makeToken()}`, 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  return { status: r.status, text: await r.text().catch(() => '') }
+}
+
 // ---------------------------------------------------------------------------
 // What the bulbs actually do (Home Assistant history and recorder, 2026-10-11
 // to 10-18, and HA's own cync/light.py and pycync 0.5.0)
