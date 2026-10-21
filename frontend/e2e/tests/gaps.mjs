@@ -291,6 +291,28 @@ function sessionTests() {
         t.check((await page.path()) === '/m/ai/sessions' && !(await page.blockedNav()).length, 'On screen headed for the in-page terminal')
       },
     },
+    {
+      name: 'gap:sessions:on-screen-hover',
+      group: 'gaps',
+      device: 'desktop',
+      timeout: 45_000,
+      async run(t) {
+        const st = sessionsState()
+        const page = await t.page()
+        sessionsBackend(page, st)
+        page.onWrite((w) => (w.method === 'POST' && w.path === '/api/hosts/thor/launch' ? ok({ ok: true }) : undefined))
+        await page.goto('/m/ai/sessions')
+        await boardUp(page)
+        const acts = await page.eval((sel) => [...document.querySelectorAll(`${sel} .vc-hover-acts .vc-hact`)].map((b) => b.textContent.trim()), row(BOARD_IDS.closed))
+        t.check(acts.includes('On screen'), `the recent row's hover actions are ${JSON.stringify(acts)}, want On screen without opening the row`)
+        // the hover bar takes the pointer only under hover, so the point reads as the row until the mouse is there
+        await page.tap({ sel: `${row(BOARD_IDS.closed)} .vc-hover-acts .vc-hact`, text: 'On screen' }, { allowCovered: true })
+        const w = await waitW(page, 1)
+        t.check(w.json?.sessionId === BOARD_IDS.closed && w.json?.cwd === '', `hover On screen sent ${w.body}, want the session to resume on thor`)
+        await page.waitToast(/Opened "E2E closed session" on .+'s screen/)
+        t.check((await page.path()) === '/m/ai/sessions' && !(await page.blockedNav()).length, 'hover On screen headed for the in-page terminal')
+      },
+    },
   ]
 }
 

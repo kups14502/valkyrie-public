@@ -2411,9 +2411,15 @@ function SessionItem({ s, i, ctx, noArea = false }: { s: Row; i: number; ctx: Ro
   const free = s.host === HOME_HOST && !s.live && !pane
   // its own window: the pane it runs in, or a new pane for a thor session nothing runs
   const pop = ctx.where.windows && !locked && (!!pane || free)
-  const hoverExtra: RowAction[] = pop
-    ? [{ id: 'window', label: 'New window', icon: 'popout', tone: 'fg', run: () => ctx.onWindow(s) }]
-    : []
+  const hoverExtra: RowAction[] = []
+  // bare: with On screen and Done beside it, a labeled New window pushed the bar over the row's middle, where a click opens the strip
+  if (pop) hoverExtra.push({ id: 'window', label: 'New window', icon: 'popout', tone: 'fg', run: () => ctx.onWindow(s), bare: free })
+  // a terminal on the screen in front of him, one click from the row like Recover desk, not only in the tapped strip
+  if (free && !locked) {
+    hoverExtra.push(ctx.where.remote
+      ? { id: 'local', label: 'On this screen', icon: 'mimir', tone: 'fg', run: () => ctx.onLocal(s) }
+      : { id: 'screen', label: 'On screen', icon: hostIcon(HOME_HOST), tone: 'fg', run: () => ctx.onScreen(s) })
+  }
   return (
     <div
       className="vc-item"
@@ -2582,7 +2588,7 @@ function RowStrip({ s, live, locked, way, home, screen, local, pop, onOpen, onWi
 // still for LONG_MS (or a right click) picks the row instead; in select mode
 // nothing slides and a tap toggles the pick.
 
-type RowAction = { id: string; label: string; icon: AnyIconName; tone: 'fg' | 'acc2'; run: () => void; disabled?: boolean }
+type RowAction = { id: string; label: string; icon: AnyIconName; tone: 'fg' | 'acc2'; run: () => void; disabled?: boolean; /** hover bar: the icon alone, the label as its tooltip */ bare?: boolean }
 const ACT_W = 78
 const SWIPE_ZONE = 72
 
@@ -2782,9 +2788,9 @@ function SwipeRow({ i, open, setOpen, actions, hoverExtra = [], onFull, onTap, o
       {/* mouse: the same actions on hover, so desktop does not need a drag */}
       <div className="vc-hover-acts">
         {[...hoverExtra, ...actions].map((a) => (
-          <Press key={a.id} className="vc-hact" data-tone={a.tone} tabIndex={-1} disabled={a.disabled} onPress={a.run}>
+          <Press key={a.id} className="vc-hact" data-tone={a.tone} data-bare={a.bare || undefined} tabIndex={-1} disabled={a.disabled} aria-label={a.bare ? a.label : undefined} title={a.bare ? a.label : undefined} onPress={a.run}>
             <AnyIcon name={a.icon} size={14} tone={a.tone === 'acc2' ? 'acc2' : 'dim'} />
-            {a.label}
+            {!a.bare && a.label}
           </Press>
         ))}
       </div>

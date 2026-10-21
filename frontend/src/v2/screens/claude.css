@@ -633,6 +633,7 @@
     border: 1px solid var(--line);
     background: rgba(0, 0, 0, .6);
   }
+  .vc-hact[data-bare] { padding: 0 9px; }
   .vc-hact[data-tone='acc2'] { color: var(--acc2); border-color: color-mix(in srgb, var(--acc2) 45%, transparent); }
   .vc-hact[data-pressed], .vc-hact:hover { color: var(--fg); border-color: var(--line-strong); }
   .vc-hact:hover .vl-icon-dim { color: var(--fg); }
