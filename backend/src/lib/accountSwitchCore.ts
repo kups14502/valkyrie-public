@@ -378,12 +378,20 @@ export function decide(i: DecideInput): Decision {
 // "limit" in headless runs; some paths say "You've reached your" instead.
 // Another account fixes every one of those. "usage credit limit", "fast limit"
 // and "team's shared budget" are not account limits, so they never match.
+// With extra usage on and the org's monthly spend used up (2.1.280,
+// 2026-10-22), the line names the spend limit first and the account's own
+// window last: "You've hit your org's monthly spend limit · visit
+// claude.ai/admin-settings/usage to raise it · your session limit resets
+// 3:40pm (America/New_York)". The window is what ran out, so another account
+// fixes it. The spend line without a window is the org's budget alone.
 // Continue-Stopped.ps1 on thor carries a copy of this and the pane patterns
 // below; scripts/fixtures/pane-screens.json keeps the two in step.
 const LIMIT_RE = /You[’']ve (?:hit|reached) your (?:(session|weekly|Opus|Sonnet|Fable) )?limit\b/
+const SPEND_RE = /You[’']ve (?:hit|reached) your org[’']s monthly spend limit\b.*\byour (session|weekly|Opus|Sonnet|Fable) limit resets\b/
 
 export function classifyLimitText(text: string | null | undefined): LimitKind | null {
-  const m = LIMIT_RE.exec(String(text ?? ''))
+  const s = String(text ?? '')
+  const m = LIMIT_RE.exec(s) ?? SPEND_RE.exec(s)
   if (!m) return null
   const k = (m[1] ?? '').toLowerCase()
   return k === 'session' || k === 'weekly' || k === 'opus' || k === 'sonnet' || k === 'fable' ? k : 'generic'

@@ -258,6 +258,12 @@ test('limit text: the Fable limit and the "reached" wording of 2.1.280 to 2.1.30
   assert.equal(classifyLimitText("You've reached your usage limit"), null)
   assert.equal(classifyLimitText("You've reached your monthly spend limit"), null)
 })
+test('limit text: the org spend line counts by the window it names (2.1.280, 2026-10-22)', () => {
+  assert.equal(classifyLimitText("You've hit your org's monthly spend limit · visit claude.ai/admin-settings/usage to raise it · your session limit resets 3:40pm (America/New_York)"), 'session')
+  assert.equal(classifyLimitText("You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 3:40pm (America/New_York)"), 'session')
+  assert.equal(classifyLimitText("You've hit your org's monthly spend limit · run /usage-credits to raise it · your weekly limit resets Mon 8pm"), 'weekly')
+  assert.equal(classifyLimitText("You've hit your org's monthly spend limit · run /usage-credits to raise it"), null)
+})
 test('decide: a Fable limit is model-wide like Opus, so a reading with room does not cancel it', () => {
   const accounts = [acct('a', q(30), {}, NOW - 1000), acct('b', q(5))]
   const d = decide({ cfg: cfg(), killed: false, host: host({ lastSwitchAt: NOW - H }), accounts, now: NOW, event: { at: NOW - 5000, limit: 'fable' } })
