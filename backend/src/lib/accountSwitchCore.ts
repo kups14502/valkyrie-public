@@ -54,8 +54,6 @@ export type SwitchConfig = {
   minIntervalMin: number
   // Between any two switches on one host, a hard limit included.
   hardFloorSec: number
-  // Applied switches per host per rolling 24 hours.
-  maxPerDay: number
   // The active account's reading must be this fresh to act on.
   quotaFreshSec: number
   // A candidate's reading older than this ranks behind fresh ones.
@@ -85,7 +83,6 @@ export const DEFAULT_CONFIG: SwitchConfig = {
   weeklyMaxPct: 98,
   minIntervalMin: 10,
   hardFloorSec: 60,
-  maxPerDay: 12,
   quotaFreshSec: 180,
   candidateFreshMin: 20,
   nudge: true,
@@ -124,7 +121,6 @@ export function normalizeConfig(raw: unknown): SwitchConfig {
     weeklyMaxPct: num(r.weeklyMaxPct, 50, 100, d.weeklyMaxPct),
     minIntervalMin: num(r.minIntervalMin, 1, 240, d.minIntervalMin),
     hardFloorSec: num(r.hardFloorSec, 15, 3600, d.hardFloorSec),
-    maxPerDay: num(r.maxPerDay, 1, 100, d.maxPerDay),
     quotaFreshSec: num(r.quotaFreshSec, 30, 1800, d.quotaFreshSec),
     candidateFreshMin: num(r.candidateFreshMin, 1, 240, d.candidateFreshMin),
     nudge: r.nudge !== false,
@@ -299,7 +295,6 @@ export type HostView = {
   pausedReason: string | null
   // The last applied switch, or the last dry-run decision in dry run.
   lastSwitchAt: number | null
-  switchesToday: number
 }
 
 export type LimitKind = 'session' | 'weekly' | 'opus' | 'sonnet' | 'fable' | 'generic'
@@ -369,7 +364,6 @@ export function decide(i: DecideInput): Decision {
       return { action: 'blocked', reason: `last switch was ${Math.round(since / 60_000)} min ago (minimum ${cfg.minIntervalMin})` }
     }
   }
-  if (host.switchesToday >= cfg.maxPerDay) return { action: 'blocked', reason: `${host.switchesToday} switches in 24 hours (cap ${cfg.maxPerDay})` }
 
   const pick = pickTarget(accounts, host.active, cfg, now)
   if (!pick.target) return { action: 'exhausted', reason: `${trigger.why}; no account has room`, earliestRelief: pick.earliestRelief }

@@ -13,7 +13,7 @@ import { ACCOUNT_ID_RE, HOSTS, type HostName } from '../lib/accountSwitchCore.js
 //   GET  /api/account-switch/log[?limit=N] { entries: LogEntry[] }, newest first
 //   POST /api/account-switch/config        { enabled?, dryRun?, thresholdPct?,
 //                                          targetMaxPct?, weeklyMaxPct?, minIntervalMin?,
-//                                          maxPerDay?, nudge?, hosts?: { thor?, odin? } }
+//                                          nudge?, hosts?: { thor?, odin? } }
 //                                          -> { config }
 //   POST /api/account-switch/switch        { host: 'thor'|'odin'|'all', account, confirm: true }
 //                                          -> { results: [{ host, ok, error?, nudged }] }
@@ -70,7 +70,7 @@ router.get('/account-switch/log', (req, res) => {
 
 const CONFIG_KEYS = new Set([
   'enabled', 'dryRun', 'hosts', 'thresholdPct', 'targetMaxPct', 'weeklyMaxPct', 'minIntervalMin',
-  'hardFloorSec', 'maxPerDay', 'nudge', 'nudgeText', 'order', 'lastResort', 'exclude',
+  'hardFloorSec', 'nudge', 'nudgeText', 'order', 'lastResort', 'exclude',
 ])
 
 router.post('/account-switch/config', (req, res) => {

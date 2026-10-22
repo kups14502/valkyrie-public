@@ -41,7 +41,7 @@ const acct = (id: string, quota: Quota | null, over: Partial<AccountView> = {}, 
   quota: quota ? { quota, at, source: 'probe' } : null, ...over,
 })
 const host = (over: Partial<HostView> = {}): HostView => ({
-  host: 'thor', enabled: true, active: 'a', owner: 'pool', paused: false, pausedReason: null, lastSwitchAt: null, switchesToday: 0, ...over,
+  host: 'thor', enabled: true, active: 'a', owner: 'pool', paused: false, pausedReason: null, lastSwitchAt: null, ...over,
 })
 
 // ------------------------------------------------------------------ config --
@@ -61,11 +61,10 @@ test('config: only a literal true enables, only a literal false leaves dry run',
   assert.equal(normalizeConfig({ dryRun: false }).dryRun, false)
 })
 test('config: numbers clamp, garbage falls back, target stays under threshold', () => {
-  const c = normalizeConfig({ thresholdPct: 120, targetMaxPct: 'x', minIntervalMin: -4, maxPerDay: 1e9 })
+  const c = normalizeConfig({ thresholdPct: 120, targetMaxPct: 'x', minIntervalMin: -4 })
   assert.equal(c.thresholdPct, 100)
   assert.equal(c.targetMaxPct, 90)
   assert.equal(c.minIntervalMin, 1)
-  assert.equal(c.maxPerDay, 100)
   assert.equal(normalizeConfig({ thresholdPct: 80, targetMaxPct: 95 }).targetMaxPct, 79)
   assert.equal(normalizeConfig({ thresholdPct: '95' }).thresholdPct, 95)
 })
@@ -201,9 +200,9 @@ test('decide: minimum interval holds a soft switch, a hard limit gets through af
   const veryRecent = host({ lastSwitchAt: NOW - 20_000 })
   assert.equal(decide({ cfg: cfg(), killed: false, host: veryRecent, accounts: three(q(100)), now: NOW }).action, 'blocked')
 })
-test('decide: the daily cap blocks', () => {
-  const d = decide({ cfg: cfg({ maxPerDay: 3 }), killed: false, host: host({ switchesToday: 3 }), accounts: three(q(100)), now: NOW })
-  assert.equal(d.action, 'blocked')
+test('decide: no daily cap, a hard limit switches after any number of switches', () => {
+  const d = decide({ cfg: cfg(), killed: false, host: host({ lastSwitchAt: NOW - 5 * 60_000 }), accounts: three(q(100)), now: NOW })
+  assert.equal(d.action, 'switch')
 })
 test('decide: every account near its limit is exhausted, not a switch', () => {
   const d = decide({ cfg: cfg(), killed: false, host: host(), accounts: [acct('a', q(100)), acct('b', q(93)), acct('c', q(20, 99))], now: NOW })

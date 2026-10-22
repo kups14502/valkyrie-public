@@ -626,7 +626,7 @@ function withLock<T>(fn: () => Promise<T>, waitMs = 30_000): Promise<T> {
 
 // ---------------------------------------------------------------- tick ----
 
-function hostView(s: State, h: HostName, cfg: SwitchConfig, now: number): HostView {
+function hostView(s: State, h: HostName, cfg: SwitchConfig): HostView {
   const hs = s.hosts[h]
   return {
     host: h,
@@ -636,7 +636,6 @@ function hostView(s: State, h: HostName, cfg: SwitchConfig, now: number): HostVi
     paused: hs.paused,
     pausedReason: hs.pausedReason,
     lastSwitchAt: cfg.dryRun ? hs.lastDryRunAt : hs.lastSwitchAt,
-    switchesToday: countRecent(hs.switches, now),
   }
 }
 
@@ -733,7 +732,7 @@ async function confirmTarget(
     if (!t) break
     const p = s.probes[d.to]
     if (!p || Date.now() - p.at > TARGET_PROBE_MS) await probeInto(s, t)
-    const again = decide({ cfg, killed: isKilled, host: hostView(s, h, cfg, Date.now()), accounts: views(s, pool, h), now: Date.now(), event })
+    const again = decide({ cfg, killed: isKilled, host: hostView(s, h, cfg), accounts: views(s, pool, h), now: Date.now(), event })
     if (again.action === 'switch' && again.to === d.to) return again
     d = again
   }
@@ -795,7 +794,7 @@ async function tickLocked(force: boolean): Promise<void> {
     const ev = hostEvents.length ? { at: hostEvents[hostEvents.length - 1].at, limit: hostEvents[hostEvents.length - 1].limit } : null
     // An event counts once: it triggered this decision or it never will.
     const eventForDecision = eventHosts.has(h) ? ev : null
-    let d = decide({ cfg, killed: isKilled, host: hostView(s, h, cfg, Date.now()), accounts: views(s, pool, h), now: Date.now(), event: eventForDecision })
+    let d = decide({ cfg, killed: isKilled, host: hostView(s, h, cfg), accounts: views(s, pool, h), now: Date.now(), event: eventForDecision })
     if (d.action === 'switch') d = await confirmTarget(s, h, d, cfg, pool, eventForDecision, isKilled)
     await act(s, h, d, cfg, pool)
     await sweep(s, h, d, cfg, eventHosts.has(h))
@@ -865,9 +864,6 @@ async function act(s: State, h: HostName, d: Decision, cfg: SwitchConfig, pool: 
   if (d.action === 'blocked') {
     if (hs.lastBlocked !== d.reason && !d.reason.startsWith('paused')) {
       writeLog({ kind: 'blocked', host: h, from: hs.active, to: d.to ?? null, reason: d.reason, ok: false })
-      if (/switches in 24 hours/.test(d.reason)) {
-        await dmOnce(s, `cap:${h}`, 12 * 3600_000, `Claude auto-switch stopped switching ${h}: ${d.reason}.`)
-      }
     }
     hs.lastBlocked = d.reason
     return
@@ -934,7 +930,7 @@ export function continueCheck(host: HostName): { ok: boolean; why: string; activ
   const isKilled = killed()
   const s = loadState()
   const pool = loadPool()
-  const d = decide({ cfg, killed: isKilled, host: hostView(s, host, cfg, Date.now()), accounts: views(s, pool, host), now: Date.now(), event: null })
+  const d = decide({ cfg, killed: isKilled, host: hostView(s, host, cfg), accounts: views(s, pool, host), now: Date.now(), event: null })
   const g = continueGate(s, host, d, cfg, isKilled)
   return { ok: g.ok, why: g.why, active: s.hosts[host].active, text: cfg.nudgeText }
 }
