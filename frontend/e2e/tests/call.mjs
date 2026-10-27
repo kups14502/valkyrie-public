@@ -66,7 +66,7 @@ function callBackend(page, { live = false, callOver = {} } = {}) {
   const st = {
     rev: 7,
     status: live ? 'live' : 'idle',
-    areas: [{ id: 'one', label: 'Area one' }, { id: 'two', label: 'Area two' }],
+    areas: [{ id: 'one', label: 'Area one' }, { id: 'two', label: 'Area two' }, { id: 'three', label: 'Area three' }],
     last: { area: 'Area two', startedAt: iso(now - 3 * 3600_000), endedAt: iso(now - 2.5 * 3600_000), lines: 40, cards: 6, saved: null },
     call: live ? liveCall(callOver) : null,
   }
@@ -145,7 +145,7 @@ export function callTests() {
         await shellUp(page)
         await page.waitFor(() => /Start listening/.test(document.querySelector('.vl-page[data-active]')?.innerText ?? ''), { message: 'Start listening did not show' })
         const txt = await page.eval(() => document.querySelector('.vl-page[data-active]')?.innerText ?? '')
-        t.check(/Live Captions/.test(txt) && /Teams or Zoom/.test(txt), 'the idle page does not say how it hears the call')
+        t.check(/Live Captions/.test(txt) && /Teams, Zoom or Discord/.test(txt), 'the idle page does not say how it hears the call')
         t.check(/Last call: Area two, .+ ET, 40 lines, 6 cards\. Not saved\./.test(txt.replace(/\s+/g, ' ')), `the last call line reads "${(/Last call[^\n]*/.exec(txt) ?? [''])[0]}"`)
         t.check(!/\u2014/.test(txt), 'an em dash on the Call page')
         await fits(t, page, `${ROUTE} idle @${device}`)

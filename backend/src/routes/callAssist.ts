@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 
-// AI > Call: thor listens to a Teams or Zoom call through Windows Live
+// AI > Call: thor listens to a call (Teams, Zoom, Discord) through Windows Live
 // Captions and has Claude suggest answers while it runs (thor's call-assist
 // service, C:\Thor\tools\call-assist, port 8768). This route only passes
 // requests through: the call, its transcript and its cards live in thor's
@@ -19,13 +19,14 @@ class CallError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }
 
-async function thor(req: Request, pathAndQuery: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
+async function thor(res: Response, pathAndQuery: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
   if (!CALL_TOKEN) throw new CallError(503, 'CALL_ASSIST_TOKEN is not set on the api host')
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), init.timeoutMs ?? 15_000)
-  // A page that went away stops waiting on thor too.
-  const gone = () => ac.abort()
-  req.on('close', gone)
+  // A page that went away stops waiting on thor too. The response's close, not
+  // the request's: a request with a body closes as soon as the body is read.
+  const gone = () => { if (!res.writableFinished) ac.abort() }
+  res.on('close', gone)
   try {
     const r = await fetch(CALL_URL + pathAndQuery, {
       method: init.method ?? 'GET',
@@ -45,7 +46,7 @@ async function thor(req: Request, pathAndQuery: string, init: { method?: string;
     throw new CallError(502, `thor's call service is not answering (${why})`)
   } finally {
     clearTimeout(timer)
-    req.off('close', gone)
+    res.off('close', gone)
   }
 }
 
@@ -69,7 +70,7 @@ router.get('/call/state', h(async (req, res) => {
   if (rev) q.set('rev', rev)
   if (after) q.set('after', after)
   if (wait) q.set('wait', String(wait))
-  const data = await thor(req, `/state?${q}`, { timeoutMs: (wait + 10) * 1000 })
+  const data = await thor(res, `/state?${q}`, { timeoutMs: (wait + 10) * 1000 })
   if (res.destroyed) return
   res.set('Cache-Control', 'no-store').json(data)
 }))
@@ -77,24 +78,24 @@ router.get('/call/state', h(async (req, res) => {
 router.post('/call/start', h(async (req, res) => {
   const area = String(req.body?.area ?? '')
   if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(area)) throw new CallError(400, 'area must be an area id')
-  res.json(await thor(req, '/start', { method: 'POST', body: { area } }))
+  res.json(await thor(res, '/start', { method: 'POST', body: { area } }))
 }))
 
 router.post('/call/stop', h(async (req, res) => {
-  res.json(await thor(req, '/stop', { method: 'POST', body: { save: req.body?.save === true }, timeoutMs: 30_000 }))
+  res.json(await thor(res, '/stop', { method: 'POST', body: { save: req.body?.save === true }, timeoutMs: 30_000 }))
 }))
 
 router.post('/call/ask', h(async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
   if (!text) throw new CallError(400, 'text is required')
   if (text.length > 2000) throw new CallError(400, 'text is over 2000 characters')
-  res.json(await thor(req, '/ask', { method: 'POST', body: { text } }))
+  res.json(await thor(res, '/ask', { method: 'POST', body: { text } }))
 }))
 
 router.post('/call/dismiss', h(async (req, res) => {
   const id = String(req.body?.id ?? '')
   if (!/^[0-9a-f-]{36}$/.test(id)) throw new CallError(400, 'id must be a card id')
-  res.json(await thor(req, '/dismiss', { method: 'POST', body: { id } }))
+  res.json(await thor(res, '/dismiss', { method: 'POST', body: { id } }))
 }))
 
 export default router

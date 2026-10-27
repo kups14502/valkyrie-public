@@ -15,7 +15,7 @@ import './call.css'
 
 // AI > Call, and the same page in a window of its own (/m/w/call). thor hears
 // the call through Windows Live Captions (what thor plays: the caller's side
-// of a Teams or Zoom call) and Claude turns what the caller says into cards:
+// of a Teams, Zoom or Discord call) and Claude turns what the caller says into cards:
 // what to answer, what to check, the client fact from their records. Cards
 // come newest first; the transcript runs beside them (under them on a phone),
 // and a box at the top asks Claude something directly.
@@ -308,7 +308,7 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
         </header>
         <p className="vk-call-note">
           thor listens to the call through Windows Live Captions, and Claude suggests answers while the caller talks.
-          It hears what thor plays, so the caller's side of a Teams or Zoom call. Your own voice is not transcribed.
+          It hears what thor plays, so the other side of a Teams, Zoom or Discord call. Your own voice is not transcribed.
         </p>
         {areas.length > 1 && (
           <Segmented options={areas.map((a) => ({ value: a.id, label: a.label }))} value={pick} onChange={setArea} className="vk-call-areas" />
