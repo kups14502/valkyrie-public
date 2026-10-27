@@ -502,7 +502,10 @@ export type HostStat = {
   uptime: number | null
   cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
   memory: HostMetric | null
+  // The system disk. `disks` lists every disk (a drive letter on Windows, a
+  // mount point on Linux), the system disk first, where the host reports them.
   disk: HostMetric | null
+  disks?: (HostMetric & { name: string })[]
   // Only hosts with a battery (the Frame). While the host is offline this is
   // the last reading, taken at ts.
   battery?: { percent: number; status: 'charging' | 'discharging' | 'full' | 'not charging' | 'unknown' } | null

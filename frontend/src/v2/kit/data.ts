@@ -6,7 +6,7 @@ import {
   fetchImgToken, imgAuthRev, imgTrusted, musicImg, plexImg, plexImgPath, subscribeImgAuth, type PlexItem,
 } from '../../lib/api'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarApi'
-import type { LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
+import type { HostStat, LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
 import { lightColor, pctFromBrightness } from '../../lib/lights'
 import { fetchProjList } from '../../lib/projectsApi'
 import { shortName } from '../../lib/quickSessions'
@@ -145,6 +145,7 @@ export type HostVM = {
   stale: boolean
   cpu: number | null
   mem: number | null
+  /** the fullest disk, so one figure flags the disk that needs room */
   disk: number | null
   cores: number | null
   battery: { percent: number; charging: boolean } | null
@@ -154,6 +155,8 @@ export type HostVM = {
   memTotalGb: number | null
   diskUsedGb: number | null
   diskTotalGb: number | null
+  /** every disk, the system disk first; empty when the host reports none */
+  disks: DiskVM[]
   /** last hour, oldest first, 0-100 */
   history: { t: number; cpu: number | null; mem: number | null }[]
   /** true for the phone and tablet, which report a battery (and maybe storage) and nothing else */
@@ -166,10 +169,25 @@ export type HostVM = {
   ts: number | null
 }
 
+/** One disk. name: "C:", "/", "ssdpool" (a mount point's last part); null where the host names none. */
+export type DiskVM = { name: string | null; percent: number; usedGb: number; totalGb: number }
+
 /** A car's facts, as /api/hosts gives them, re-checked and rounded for the page (model: HA's, e.g. "Model Y"). */
 export type VehicleVM = VehicleStat
 
 const gib = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10
+
+/** the host's disks; one unnamed disk for a host that reports only `disk` */
+function diskVMs(h: HostStat): DiskVM[] {
+  const vm = (name: string | null, d: { percent: number; used: number; total: number }): DiskVM =>
+    ({ name, percent: Math.round(d.percent), usedGb: gib(d.used), totalGb: gib(d.total) })
+  const short = (n: string) => (n.startsWith('/') && n !== '/' ? n.slice(n.lastIndexOf('/') + 1) : n)
+  if (h.disks?.length) return h.disks.map((d) => vm(short(d.name), d))
+  return h.disk ? [vm(null, h.disk)] : []
+}
+
+/** the fullest disk */
+export const fullest = (disks: DiskVM[]): DiskVM | null => disks.reduce<DiskVM | null>((a, d) => (a == null || d.percent > a.percent ? d : a), null)
 const fin = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const r0 = (v: unknown): number | null => { const n = fin(v); return n == null ? null : Math.round(n) }
 const r1 = (v: unknown): number | null => { const n = fin(v); return n == null ? null : Math.round(n * 10) / 10 }
@@ -199,31 +217,36 @@ function vehicleVM(raw: VehicleStat | undefined): VehicleVM {
 }
 
 const reviveHosts = (d: unknown): HostVM[] | undefined => Array.isArray(d)
-  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, mobile: false, seen: null, vehicle: null, ts: null, ...h }) as HostVM)
+  ? (d as Partial<HostVM>[]).map((h) => ({ memUsedGb: null, memTotalGb: null, diskUsedGb: null, diskTotalGb: null, disks: [], mobile: false, seen: null, vehicle: null, ts: null, ...h }) as HostVM)
   : undefined
 
 export function useHosts(): Live<HostVM[]> {
-  return useLive('hosts', async () => (await fetchHosts()).map((h): HostVM => ({
-    id: h.host,
-    label: h.label,
-    online: h.online,
-    stale: h.stale,
-    cpu: h.cpu ? Math.round(h.cpu.usage) : null,
-    mem: h.memory ? Math.round(h.memory.percent) : null,
-    disk: h.disk ? Math.round(h.disk.percent) : null,
-    cores: h.cpu?.cores ?? null,
-    battery: h.battery ? { percent: Math.round(h.battery.percent), charging: h.battery.status === 'charging' } : null,
-    uptime: h.uptime,
-    memUsedGb: h.memory ? gib(h.memory.used) : null,
-    memTotalGb: h.memory ? gib(h.memory.total) : null,
-    diskUsedGb: h.disk ? gib(h.disk.used) : null,
-    diskTotalGb: h.disk ? gib(h.disk.total) : null,
-    history: (h.history ?? []).map((p) => ({ t: p.t, cpu: p.cpu, mem: p.mem })),
-    mobile: h.os === 'ios',
-    seen: h.seen ?? null,
-    vehicle: h.os === 'vehicle' ? vehicleVM(h.vehicle) : null,
-    ts: fin(h.ts),
-  })), 5_000, { revive: reviveHosts })
+  return useLive('hosts', async () => (await fetchHosts()).map((h): HostVM => {
+    const disks = diskVMs(h)
+    const worst = fullest(disks)
+    return {
+      id: h.host,
+      label: h.label,
+      online: h.online,
+      stale: h.stale,
+      cpu: h.cpu ? Math.round(h.cpu.usage) : null,
+      mem: h.memory ? Math.round(h.memory.percent) : null,
+      disk: worst?.percent ?? null,
+      cores: h.cpu?.cores ?? null,
+      battery: h.battery ? { percent: Math.round(h.battery.percent), charging: h.battery.status === 'charging' } : null,
+      uptime: h.uptime,
+      memUsedGb: h.memory ? gib(h.memory.used) : null,
+      memTotalGb: h.memory ? gib(h.memory.total) : null,
+      diskUsedGb: worst?.usedGb ?? null,
+      diskTotalGb: worst?.totalGb ?? null,
+      disks,
+      history: (h.history ?? []).map((p) => ({ t: p.t, cpu: p.cpu, mem: p.mem })),
+      mobile: h.os === 'ios',
+      seen: h.seen ?? null,
+      vehicle: h.os === 'vehicle' ? vehicleVM(h.vehicle) : null,
+      ts: fin(h.ts),
+    }
+  }), 5_000, { revive: reviveHosts })
 }
 
 // ---------- AI usage ----------
