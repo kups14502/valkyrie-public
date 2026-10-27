@@ -125,15 +125,18 @@ const batteryTone = (v: number | null): Tone => (v != null && v < 20 ? 'acc2' : 
 /** "25.4 / 31.1 GB" (GiB, as Windows and htop show memory) */
 const memSizes = (h: HostVM) => (h.memUsedGb != null && h.memTotalGb != null ? `${h.memUsedGb.toFixed(1)} / ${h.memTotalGb.toFixed(1)} GB` : null)
 /** "3.1 / 4.0 TB", "10 GB / 1.0 TB" (decimal, as drives are sold) */
-const diskSizes = (h: HostVM) => {
-  if (h.diskUsedGb == null || h.diskTotalGb == null) return null
+const sizesGb = (usedGb: number | null, totalGb: number | null) => {
+  if (usedGb == null || totalGb == null) return null
   const dec = (gib: number) => (gib * 1024 ** 3) / 1e9
   const one = (gb: number, unit: 'TB' | 'GB') => (unit === 'TB' ? (gb / 1000).toFixed(1) : gb >= 10 ? gb.toFixed(0) : gb.toFixed(1))
-  const used = dec(h.diskUsedGb), total = dec(h.diskTotalGb)
+  const used = dec(usedGb), total = dec(totalGb)
   const tu = total >= 1000 ? 'TB' : 'GB'
   const uu = used >= 100 && tu === 'TB' ? 'TB' : 'GB'
   return uu === tu ? `${one(used, uu)} / ${one(total, tu)} ${tu}` : `${one(used, uu)} ${uu} / ${one(total, tu)} ${tu}`
 }
+const diskSizes = (h: HostVM) => sizesGb(h.diskUsedGb, h.diskTotalGb)
+/** "C: 94% (3.7 / 4.0 TB)" a line per disk, for a row's tooltip */
+const diskLines = (h: HostVM) => h.disks.map((d) => `${d.name ?? 'Disk'} ${d.percent}% (${sizesGb(d.usedGb, d.totalGb)})`).join('\n')
 
 const hostState = (h: HostVM): 'on' | 'stale' | 'off' => (!h.online ? 'off' : h.stale ? 'stale' : 'on')
 
@@ -672,7 +675,8 @@ function DeviceDetail({ id, on, i, ref }: { id: ModelOnlyId; on: boolean; i: num
   )
 }
 
-type Metric = { id: string; icon: IconName; label: string; value: number | null; tone: Tone; sizes: string | null }
+/** spot: the model's hotspot the plate lights, when it is not the plate's id (each disk lights the one disk diamond) */
+type Metric = { id: string; icon: IconName; label: string; value: number | null; tone: Tone; sizes: string | null; spot?: string; aria?: string }
 
 /**
  * The selected host: its x-ray model, large, over one gauge plate per reading
@@ -700,30 +704,62 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
   // the phone and tablet report a battery and storage, never CPU or memory: no empty plates for those,
   // and the battery leads where the CPU would
   const noLoad = host.mobile || (host.cpu == null && host.mem == null && !!host.battery)
+  // more than one disk: a plate each, named, in a row of their own under the others
+  const disks: Metric[] = host.disks.length > 1
+    ? host.disks.map((d, k) => ({
+      id: `disk-${k}`, icon: 'disk', label: d.name ?? `Disk ${k + 1}`, aria: `Disk ${d.name ?? k + 1}`, value: d.percent, tone: loadTone(d.percent), sizes: sizesGb(d.usedGb, d.totalGb), spot: 'disk',
+    } satisfies Metric))
+    : []
   const metrics: Metric[] = [
     ...(noLoad ? [] : [
       { id: 'cpu', icon: 'cpu', label: 'CPU', value: host.cpu, tone: loadTone(host.cpu), sizes: host.cores ? `${host.cores} cores` : null } satisfies Metric,
       { id: 'mem', icon: 'mem', label: 'Memory', value: host.mem, tone: loadTone(host.mem), sizes: memSizes(host) } satisfies Metric,
     ]),
-    ...(host.mobile && host.disk == null ? [] : [
+    ...(disks.length || (host.mobile && host.disk == null) ? [] : [
       { id: 'disk', icon: 'disk', label: spots.get('disk') ?? 'Disk', value: host.disk, tone: loadTone(host.disk), sizes: diskSizes(host) } satisfies Metric,
     ]),
   ]
   if (host.battery) {
     metrics.push({ id: 'battery', icon: host.battery.charging ? 'charging' : 'battery', label: 'Battery', value: host.battery.percent, tone: batteryTone(host.battery.percent), sizes: host.battery.charging ? 'charging' : null })
   }
-  const byId = new Map(metrics.map((m) => [m.id, m] as const))
+  const plates = [...metrics, ...disks]
+  const byId = new Map(plates.map((m) => [m.id, m] as const))
+  // a hotspot lights the first plate that maps to it (the disk diamond: the system disk)
+  const bySpot = new Map<string, string>()
+  for (const m of plates) if (!bySpot.has(m.spot ?? m.id)) bySpot.set(m.spot ?? m.id, m.id)
   // hotspots without a reading (GPU, exhaust fans, lenses) keep the lit plate where it is
   const onHotspot = (id: string) => {
-    if (!byId.has(id) || !host.online) {
+    const plate = bySpot.get(id)
+    if (!plate || !host.online) {
       toast(`${spots.get(id) ?? title(id)}: ${host.online ? 'no reading from this host' : `${host.label} is offline`}`)
       return
     }
-    setFocus((cur) => (cur === id ? null : id))
+    setFocus((cur) => (cur && byId.get(cur)?.spot === id) || cur === plate ? null : plate)
   }
   const home = noLoad ? 'battery' : 'cpu'
   const lit = focus && byId.has(focus) ? focus : home
+  const litSpot = focus && byId.has(focus) ? (byId.get(focus)!.spot ?? focus) : null
   const up = uptime(host.uptime)
+  const gauge = (m: Metric, k: number) => (
+    <Press
+      key={m.id}
+      className="sys-gauge vl-build"
+      style={iv(i + 1 + k)}
+      data-plate={m.id}
+      data-lit={m.id === lit || undefined}
+      aria-pressed={m.id === lit}
+      aria-label={`${m.aria ?? m.label} ${m.value ?? 'unknown'}%: highlight on the model`}
+      onPress={() => setFocus(m.id === home ? null : m.id === focus ? null : m.id)}
+    >
+      <span className="sys-gauge-head">
+        <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
+        <span className="sys-gauge-label">{m.label}</span>
+        {m.sizes && <em className="vl-ellipsis">{m.sizes}</em>}
+        <b data-tone={m.tone}>{m.value ?? '--'}<small>%</small></b>
+      </span>
+      <Bar value={m.value} tone={m.tone} ticks={4} />
+    </Press>
+  )
 
   // the last hour, x by clock: a host that restarted fills only the newest part
   const t0 = t1 - HOUR
@@ -754,39 +790,22 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
                 pose={poseFor(model)}
                 host={model}
                 fill={0.9}
-                layoutKey={`${host.id}:${metrics.length}`}
+                layoutKey={`${host.id}:${plates.length}`}
                 className="absolute inset-0"
-                activeHotspot={focus}
+                activeHotspot={litSpot}
                 onHotspot={onHotspot}
               />
             </div>
           )}
-          {host.online && !metrics.length ? (
+          {host.online && !plates.length ? (
             <div className="sys-detail-off vl-build" style={iv(i + 1)}>
               <b><Icon name="battery" size={16} tone="dim" />No battery report yet</b>
               <span>Open the Home Assistant app on this device (odin:8123)</span>
             </div>
           ) : host.online ? (
-            <div className="sys-gauges" data-n={metrics.length}>
-              {metrics.map((m, k) => (
-                <Press
-                  key={m.id}
-                  className="sys-gauge vl-build"
-                  style={iv(i + 1 + k)}
-                  data-lit={m.id === lit || undefined}
-                  aria-pressed={m.id === lit}
-                  aria-label={`${m.label} ${m.value ?? 'unknown'}%: highlight on the model`}
-                  onPress={() => setFocus(m.id === home ? null : m.id === focus ? null : m.id)}
-                >
-                  <span className="sys-gauge-head">
-                    <Icon name={m.icon} size={14} tone={m.id === lit ? 'fg' : m.tone === 'fg' ? 'dim' : m.tone} glow={m.id === lit} />
-                    <span className="sys-gauge-label">{m.label}</span>
-                    {m.sizes && <em className="vl-ellipsis">{m.sizes}</em>}
-                    <b data-tone={m.tone}>{m.value ?? '--'}<small>%</small></b>
-                  </span>
-                  <Bar value={m.value} tone={m.tone} ticks={4} />
-                </Press>
-              ))}
+            <div className="sys-gauges" data-n={plates.length} data-disks={disks.length || undefined}>
+              {metrics.map((m, k) => gauge(m, k))}
+              {disks.length > 0 && <div className="sys-gauge-disks">{disks.map((m, k) => gauge(m, metrics.length + k))}</div>}
             </div>
           ) : (
             <div className="sys-detail-off vl-build" style={iv(i + 1)}>
@@ -865,6 +884,31 @@ function Cell({ value, tone, sizes, c }: { value: number | null; tone: Tone; siz
   )
 }
 
+/**
+ * The Disk column. One disk: a Cell. More than one: a line per disk (name, bar,
+ * percent) on a wide screen, and the fullest disk's figure where the column is
+ * too narrow for names.
+ */
+function DiskCell({ h }: { h: HostVM }) {
+  if (h.disks.length < 2) return <Cell value={h.disk} tone={loadTone(h.disk)} sizes={diskSizes(h)} />
+  const tone = loadTone(h.disk)
+  return (
+    <span className="sys-cell sys-disks" title={diskLines(h)}>
+      <b data-tone={tone}>{h.disk ?? '--'}<small>%</small></b>
+      <Bar value={h.disk} tone={tone} ticks={4} />
+      <span className="sys-disk-list">
+        {h.disks.map((d, k) => (
+          <span key={k} className="sys-disk">
+            <i className="vl-ellipsis">{d.name ?? k + 1}</i>
+            <Bar value={d.percent} tone={loadTone(d.percent)} ticks={1} />
+            <b data-tone={loadTone(d.percent)}>{d.percent}<small>%</small></b>
+          </span>
+        ))}
+      </span>
+    </span>
+  )
+}
+
 function HostRow({ h, k, t1, selected, onPick }: { h: HostVM; k: number; t1: number; selected: boolean; onPick: (id: string) => void }) {
   const state = hostState(h)
   const up = upShort(h.uptime)
@@ -908,7 +952,7 @@ function HostRow({ h, k, t1, selected, onPick }: { h: HostVM; k: number; t1: num
           <Spark h={h} t1={t1} />
           <Cell value={h.cpu} tone={loadTone(h.cpu)} c="cpu" />
           <Cell value={h.mem} tone={loadTone(h.mem)} sizes={memSizes(h)} />
-          <Cell value={h.disk} tone={loadTone(h.disk)} sizes={diskSizes(h)} />
+          <DiskCell h={h} />
         </>
       ) : (
         <span className="sys-host-offline">No stats published</span>

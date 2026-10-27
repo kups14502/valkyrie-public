@@ -171,6 +171,14 @@
 .sys-cell .vl-bar { min-width: 0; height: 8px; }
 .sys-host[data-on] .sys-cell[data-c='cpu'] b { text-shadow: var(--text-glow); }
 
+/* more than one disk: the fullest disk's figure, and a line per disk once the column is wide enough for names */
+.sys-disk-list { display: none; }
+.sys-disk { display: contents; }
+.sys-disk i { font-style: normal; font-size: 10.5px; line-height: 12px; color: var(--dim); max-width: 7ch; }
+.sys-disk .vl-bar { min-width: 0; height: 8px; }
+.sys-disk b { font-size: 11.5px; line-height: 12px; font-variant-numeric: tabular-nums; }
+.sys-disk b small { font-size: 9px; }
+
 @media (min-width: 640px) and (max-width: 1099px) {
   .sys-host-grid { grid-template-columns: 30px minmax(0, 1fr) minmax(36px, 56px) 42px 42px 42px; column-gap: 6px; }
 }
@@ -185,6 +193,9 @@
   .sys-cell b { font-size: 15px; line-height: 18px; }
   .sys-cell[data-c='cpu'] b { font-size: 17px; }
   .sys-cell em { display: block; font-style: normal; text-align: right; font-size: 10.5px; line-height: 12px; color: var(--dim); white-space: nowrap; }
+  .sys-disks > b, .sys-disks > .vl-bar { display: none; }
+  .sys-disk-list { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 5px; row-gap: 2px; }
+  .sys-disk b { font-size: 12px; }
   .sys-host-cols { font-size: 10px; }
   /* eight rows and more (the machines, the phone and tablet, two cars): a step tighter, so the page still fits the window */
   .sys-host-list:has(> :nth-child(9)) .sys-host { min-height: 49px; padding-top: 5px; padding-bottom: 5px; }
@@ -248,6 +259,9 @@
 .sys-gauge-head b { flex: none; margin-left: auto; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
 .sys-gauge-head b small { font-size: 10.5px; font-weight: 500; margin-left: 1px; color: color-mix(in srgb, currentColor 72%, transparent); }
 .sys-gauge .vl-bar { min-width: 0; height: 7px; }
+/* more than one disk: their plates side by side in a row of their own, at every width */
+.sys-gauge-disks { display: flex; gap: 5px; min-width: 0; }
+.sys-gauge-disks > .sys-gauge { flex: 1 1 0; min-width: 0; }
 .sys-gauge[data-lit] .sys-gauge-head { color: var(--text); text-shadow: 0 0 4px rgba(0, 0, 0, .6); }
 .sys-gauge[data-lit] .sys-gauge-head em { color: color-mix(in srgb, var(--text) 78%, transparent); }
 .sys-gauge[data-lit] .sys-gauge-head b { text-shadow: var(--num-glow); }
@@ -303,7 +317,11 @@
   .sys-gauge { flex: 1 1 0; min-width: 0; min-height: 56px; padding: 6px 10px 7px; }
   /* four readings (Loki): two by two, so the sizes beside each label still fit */
   .sys-gauges[data-n='4'] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* several disks: CPU and Memory on one row, the disks on the next */
+  .sys-gauges[data-disks] { display: flex; flex-wrap: wrap; }
+  .sys-gauges[data-disks] .sys-gauge-disks { flex: 1 1 100%; gap: 8px; }
   .sys-detail[data-nomodel] .sys-gauges { display: flex; flex-direction: column; }
+  .sys-detail[data-nomodel] .sys-gauge-disks { flex: none; }
   .sys-gauge-head { font-size: 13px; }
   .sys-gauge-head em { font-size: 11px; }
   .sys-gauge-head b { font-size: 20px; line-height: 22px; }

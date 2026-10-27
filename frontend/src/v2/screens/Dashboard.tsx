@@ -6,7 +6,7 @@ import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, equityAge, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
+  ago, equityAge, fullest, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
   useTrade, useTracker, useUsage,
   type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession, type TradeVM,
 } from '../kit/data'
@@ -1451,9 +1451,15 @@ function hostCells(h: HostVM): HostCell[] {
     const b = h.battery
     cells.push({ key: 'bat', icon: b.charging ? 'charging' : 'battery', label: b.charging ? 'Battery, charging' : 'Battery', v: b.percent, alert: !b.charging && b.percent <= 15 })
   } else {
-    cells.push({ key: 'disk', icon: 'disk', label: 'Disk', v: h.disk, alert: (h.disk ?? 0) >= 90 })
+    cells.push({ key: 'disk', icon: 'disk', label: diskWord(h), v: h.disk, alert: (h.disk ?? 0) >= 90 })
   }
   return cells
+}
+
+/** "Disk", or "Disk C:" on a host with several disks: the figure is its fullest disk's, so name that one */
+function diskWord(h: HostVM): string {
+  const d = h.disks.length > 1 ? fullest(h.disks) : null
+  return d?.name ? `Disk ${d.name}` : 'Disk'
 }
 
 function HostLine({ h, onPress }: { h: HostVM; onPress: () => void }) {
@@ -1580,7 +1586,7 @@ function deviceCells(h: HostVM): HostCell[] {
   return [
     { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
     { key: 'mem', icon: 'mem', label: 'Memory', v: h.mem, alert: (h.mem ?? 0) >= 90 },
-    disk('Disk'),
+    disk(diskWord(h)),
     ...bat,
   ]
 }

@@ -10,7 +10,8 @@ import { vehicleHosts } from './vehicles.js'
 // GET /api/hosts: health for every machine in the fleet on one panel.
 //
 // Transport, deliberately boring and matching the session board (workspaces.ts):
-//   * odin (this host) is measured locally, right here, with os + df.
+//   * odin (this host) is measured locally, right here, with os + df (every
+//     disk, not only /).
 //   * thor and mimir each publish a tiny stats JSON into bifrost on a timer
 //     (Publish-HostStats.ps1). odin reads those files off its OWN local disk
 //     (/home/brendon/bifrost/...), so there is NO network listener, NO token on
@@ -58,6 +59,8 @@ const REMOTE_HOSTS: { host: string; label: string; os: 'windows' | 'linux' }[] =
 ]
 
 type HostMetric = { percent: number; used: number; total: number }
+// One disk: a drive letter ("C:") on Windows, a mount point on Linux.
+type Disk = HostMetric & { name: string }
 type HistoryPoint = { t: number; cpu: number | null; mem: number | null; disk: number | null }
 const BATTERY_STATUSES = ['charging', 'discharging', 'full', 'not charging', 'unknown'] as const
 type BatteryStatus = typeof BATTERY_STATUSES[number]
@@ -72,7 +75,10 @@ type HostStat = {
   uptime: number | null
   cpu: { usage: number; cores: number; loadAvg?: [number, number, number] } | null
   memory: HostMetric | null
+  // The system disk. `disks` lists every disk, the system disk first, on the
+  // hosts that report more than one.
   disk: HostMetric | null
+  disks?: Disk[]
   // Only hosts with a battery. While the host is offline this is the last
   // reading, taken at ts.
   battery?: Battery | null
@@ -126,17 +132,46 @@ const metric = (v: unknown): HostMetric | null => {
   return { percent, used, total }
 }
 
+// A remote host's disk list, re-validated like every other field: a bounded
+// count and a short plain name, since the name is shown on the page.
+const MAX_DISKS = 16
+const disksOf = (v: unknown): Disk[] | undefined => {
+  if (!Array.isArray(v)) return undefined
+  const out: Disk[] = []
+  for (const d of v.slice(0, MAX_DISKS)) {
+    const m = metric(d)
+    const name = (d as Record<string, unknown> | null)?.name
+    if (m && typeof name === 'string' && /^[\w:/. -]{1,64}$/.test(name)) out.push({ name, ...m })
+  }
+  return out.length ? out : undefined
+}
+
+// odin's own disks: block-device filesystems only, so the rclone mount and
+// tmpfs are never stat'd (a wedged FUSE mount would hang df). btrfs lists one
+// device at every subvolume and df puts / first, so the first mount per device
+// names it. /boot is vfat and left out.
+const DF_TYPES = ['btrfs', 'xfs', 'ext4', 'ext3', 'f2fs']
+async function odinDisks(): Promise<Disk[]> {
+  const { stdout } = await exec('df', ['-B1', '--output=source,size,used,target', ...DF_TYPES.flatMap((t) => ['-t', t])], { timeout: 5_000 })
+  const seen = new Set<string>()
+  const disks: Disk[] = []
+  for (const line of stdout.trim().split('\n').slice(1)) {
+    const [source, size, used, ...target] = line.trim().split(/\s+/)
+    const total = Number(size)
+    const u = Number(used)
+    if (!source?.startsWith('/dev/') || seen.has(source) || !(total > 0)) continue
+    seen.add(source)
+    disks.push({ name: target.join(' '), total, used: u, percent: (u / total) * 100 })
+  }
+  return disks.sort((a, b) => Number(b.name === '/') - Number(a.name === '/'))
+}
+
 async function measureOdin(): Promise<HostStat> {
   const total = os.totalmem()
   const free = os.freemem()
-  let disk: HostMetric | null = null
-  try {
-    const { stdout } = await exec('df', ['-B1', '/'])
-    const parts = stdout.trim().split('\n')[1].split(/\s+/)
-    const dTotal = Number(parts[1])
-    const dUsed = Number(parts[2])
-    if (dTotal > 0) disk = { total: dTotal, used: dUsed, percent: (dUsed / dTotal) * 100 }
-  } catch { /* leave disk null */ }
+  let disks: Disk[] = []
+  try { disks = await odinDisks() } catch { /* leave the disks empty */ }
+  const root = disks.find((d) => d.name === '/')
   return {
     host: 'odin',
     label: 'odin',
@@ -151,7 +186,8 @@ async function measureOdin(): Promise<HostStat> {
       loadAvg: os.loadavg() as [number, number, number],
     },
     memory: { total, used: total - free, percent: ((total - free) / total) * 100 },
-    disk,
+    disk: root ? { total: root.total, used: root.used, percent: root.percent } : null,
+    disks: disks.length ? disks : undefined,
   }
 }
 
@@ -201,6 +237,7 @@ async function readRemote(spec: { host: string; label: string; os: 'windows' | '
     cpu,
     memory: metric(doc.memory),
     disk: metric(doc.disk),
+    disks: disksOf(doc.disks),
   }
 }
 
