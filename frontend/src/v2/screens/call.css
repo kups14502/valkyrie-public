@@ -1,0 +1,113 @@
+/* AI > Call (Call.tsx) and its pop-out window (/m/w/call). Cards are the point,
+   so they get the panels and the large type; the status, the ask box and the
+   transcript are plain lines under hairlines. One column on a phone and in the
+   pop-out, cards beside the transcript from 900 px. */
+
+.vk-call { display: flex; flex-direction: column; gap: 10px; padding: 8px 12px 14px 10px; min-width: 0; }
+
+/* ---- idle: what it does, the area, the one button ---- */
+.vk-call-idle { display: flex; flex-direction: column; gap: 12px; max-width: 560px; padding: 10px 14px 14px; }
+.vk-call-head { display: flex; align-items: center; gap: 7px; min-height: 22px; }
+.vk-call-label { font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); }
+.vk-call-pop { margin: -12px -10px -12px auto; }
+.vk-call-note { margin: 0; font-size: 13px; line-height: 19px; color: var(--text); }
+.vk-call-areas { max-width: 320px; }
+.vk-call-idle > .vl-btn { align-self: flex-start; }
+.vk-call-last { margin: 0; font-size: 12px; line-height: 17px; color: var(--dim); }
+
+/* ---- live: the bar ---- */
+.vk-call-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-height: 44px; }
+.vk-call-live {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg);
+}
+.vk-call-live i {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--acc2); box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 70%, transparent);
+  animation: vl-pulse 1.6s ease-in-out infinite;
+}
+.vk-call-live b { font-weight: 600; letter-spacing: .04em; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+.vk-call-area { font-size: 12px; line-height: 18px; color: var(--text); padding: 0 7px; border: 1px solid var(--line); }
+.vk-call-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; color: var(--dim); max-width: 100%; }
+.vk-call-status > .vl-icon { flex: none; }
+.vk-call-status[data-warn] { color: var(--acc2); }
+.vk-call-gap { flex: 1; }
+.vk-call-end { display: inline-flex; gap: 8px; }
+
+.vk-call-err { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; line-height: 18px; color: var(--acc2); }
+.vk-call-err > .vl-icon { flex: none; }
+.vk-call-solo { padding: 10px 12px; }
+
+/* ---- the ask box: a line, not a box ---- */
+.vk-call-ask { display: flex; align-items: center; gap: 8px; min-height: 40px; border-bottom: 1px solid var(--line); }
+.vk-call-ask > .vl-icon { flex: none; }
+.vk-call-ask input {
+  flex: 1; min-width: 0; padding: 8px 0;
+  border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: 14px; line-height: 20px; color: var(--ink-hi);
+}
+.vk-call-ask input::placeholder { color: var(--faint); }
+.vk-call-ask .vl-iconbtn { margin: -2px -8px; }
+
+/* ---- body: cards, then the transcript ---- */
+.vk-call-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.vk-call-cards { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.vk-call-card { padding: 10px 12px 9px 14px; min-width: 0; }
+.vk-call-card[data-ask] { --panel-line: color-mix(in srgb, var(--fg) 55%, transparent); }
+.vk-call-card header { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.vk-call-card h3 { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; line-height: 21px; font-weight: 600; color: var(--ink-hi); }
+.vk-call-x { flex: none; margin: -12px -12px -10px 0; }
+.vk-call-asked { margin: 2px 0 0; font-size: 12px; line-height: 17px; color: var(--dim); }
+.vk-call-cbody p { margin: 5px 0 0; font-size: 13.5px; line-height: 20px; color: var(--text); overflow-wrap: anywhere; }
+.vk-call-cbody p[data-bullet] { position: relative; padding-left: 13px; }
+.vk-call-cbody p[data-bullet]::before { content: ''; position: absolute; left: 2px; top: 9px; width: 4px; height: 4px; background: var(--fg); opacity: .7; }
+.vk-call-cbody b { font-weight: 600; color: var(--ink-hi); }
+.vk-call-code {
+  display: inline; padding: 0 5px; margin: 0 1px;
+  border: 1px solid var(--line); background: transparent;
+  font-family: var(--v2-font-mono); font-size: 12.5px; line-height: 18px; color: var(--fg);
+  cursor: copy; -webkit-user-select: text; user-select: text;
+}
+.vk-call-code[data-pressed] { border-color: var(--fg); }
+.vk-call-card footer { margin-top: 7px; font-size: 11px; line-height: 15px; color: var(--dim); }
+.vk-call-draft { opacity: .78; }
+.vk-call-draft h3::after { content: '_'; margin-left: 2px; color: var(--fg); animation: vl-cursor 1s step-end infinite; }
+
+.vk-call-empty { display: flex; align-items: center; gap: 7px; margin: 4px 0; font-size: 12.5px; line-height: 18px; color: var(--dim); }
+
+.vk-call-script { min-width: 0; }
+.vk-call-script h2 {
+  display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px;
+  font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg);
+}
+.vk-call-script h2 span { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); }
+.vk-call-lines {
+  max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
+  padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 13px; line-height: 19px; color: var(--text);
+}
+.vk-call-lines p { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 6px; margin: 0 0 4px; }
+.vk-call-lines time { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.vk-call-partial { color: var(--dim); font-style: italic; }
+
+@media (min-width: 900px) {
+  .vk-call { padding: 12px 20px 18px 12px; }
+  .vk-call-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; gap: 22px; }
+  .vk-call-script { position: sticky; top: 8px; }
+  .vk-call-lines { max-height: 68vh; }
+}
+
+/* ---- the pop-out window: the status strip as the title bar, then the page ---- */
+.vk-callw {
+  position: fixed; inset: 0;
+  display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
+  overflow: hidden; overscroll-behavior: none;
+  background: #000; color: var(--text);
+}
+.vk-callw-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.vk-callw > :not(.vk-callw-backdrop) { position: relative; z-index: 1; }
+.vk-callw-head { z-index: 3; -webkit-user-select: none; user-select: none; background: linear-gradient(180deg, #000 calc(100% - 8px), rgba(0, 0, 0, 0)); }
+.vk-callw-main { overflow-y: auto; overscroll-behavior: contain; }
+.vk-callw .vk-call { padding: 6px 12px 14px; }
+.vk-callw .vk-call-body { display: flex; }
+.vk-callw .vk-call-lines { max-height: 30vh; }

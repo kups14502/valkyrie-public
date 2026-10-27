@@ -32,6 +32,7 @@ import {
   LinkSessionPicker, NewProjectFlow, PIcon, ProjectNotes, ProjectSettings, SessionActions, type NoteTab, type ProjMeta,
 } from './ProjectPage'
 import { Accounts } from './Accounts'
+import { CallView } from './Call'
 import './claude.css'
 
 // AI (Claude.tsx, the /m/ai tab): the session board, Valkyrie Projects and Usage
@@ -444,7 +445,7 @@ function useFitToScroller(gap = 18): (el: HTMLElement | null) => void {
 // ---------- the screen ----------
 
 type UndoItem = { key: number; rows: Row[]; title: string; pending: boolean }
-type Tab = 'sessions' | 'projects' | 'usage'
+type Tab = 'sessions' | 'projects' | 'usage' | 'call'
 type Recover = { done: number; total: number }
 /** an area group of Recent shows this many rows before "Show N more": the list is the page, not a teaser */
 const AREA_SHOWN = 60
@@ -479,7 +480,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   const wide = useMedia('(min-width: 640px)')
   const short = useMedia('(min-width: 640px) and (max-height: 480px)')
   const desk = useMedia('(min-width: 1200px)')
-  const tab: Tab = sub === 'projects' || sub === 'usage' ? sub : 'sessions'
+  const tab: Tab = sub === 'projects' || sub === 'usage' || sub === 'call' ? sub : 'sessions'
   // the area filter is a column beside the list (wide, not a landscape phone)
   const sideFilter = wide && !short
 
@@ -1294,7 +1295,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
 
   return (
     <div className="vc-root">
-      {tab === 'usage' ? <UsageView now={now} /> : (
+      {tab === 'call' ? <CallView active={active} /> : tab === 'usage' ? <UsageView now={now} /> : (
         <div className="vc" data-detail={inlineDetail || undefined} data-fab={!wide || undefined} data-proj={tab === 'projects' || undefined}>
           <aside className="vc-side">
             <Summary

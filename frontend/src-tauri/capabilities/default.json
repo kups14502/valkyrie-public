@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Every app window: the main one and the pop-outs (session-*, project-*), which src/v2/kit/windows.ts opens and which drag, focus, title and close themselves.",
+  "description": "Every app window: the main one and the pop-outs (session-*, project-*, call), which src/v2/kit/windows.ts opens and which drag, focus, title and close themselves.",
   "windows": [
     "main",
     "session-*",
-    "project-*"
+    "project-*",
+    "call"
   ],
   "permissions": [
     "core:default",

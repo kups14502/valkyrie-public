@@ -2,10 +2,12 @@ import { isTauri, isTauriMobile } from '../../lib/auth'
 import { TERM_NAME_RE } from '../../lib/term'
 import { toast } from './ui'
 
-// Pop-out windows: one project or one session in a window of its own, beside
-// the main one. The window shows a standalone page with no tab bar (src/v2/App.tsx
-// routes /m/w/project/<id> and /m/w/term/<name>), whose status strip is the
-// frameless window's title bar, as it is in the main window.
+// Pop-out windows: one project, one session or the call (AI > Call) in a window
+// of its own, beside the main one. The window shows a standalone page with no
+// tab bar (src/v2/App.tsx routes /m/w/project/<id>, /m/w/term/<name> and
+// /m/w/call), whose status strip is the frameless window's title bar, as it is
+// in the main window. The call window stays on top, so it can sit beside the
+// Teams or Zoom window.
 //
 // In the desktop app a pop-out is a real app window, labeled by its target
 // (project-<id>, session-<name>), so asking for one that is already open
@@ -15,7 +17,7 @@ import { toast } from './ui'
 // the same window. The Android app has no second window: the target opens in
 // place, at its usual page.
 
-export type DetachTarget = { kind: 'project'; id: string } | { kind: 'session'; name: string; title?: string }
+export type DetachTarget = { kind: 'project'; id: string } | { kind: 'session'; name: string; title?: string } | { kind: 'call' }
 
 /** Where the standalone pages live. */
 export const DETACHED_BASE = '/m/w'
@@ -26,23 +28,27 @@ export const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 const SIZE = {
   project: { width: 1180, height: 820, minWidth: 560, minHeight: 480 },
   session: { width: 1100, height: 760, minWidth: 420, minHeight: 480 },
+  call: { width: 480, height: 820, minWidth: 360, minHeight: 420 },
 } as const
 
-const valid = (t: DetachTarget): boolean => (t.kind === 'project' ? PROJECT_ID_RE.test(t.id) : TERM_NAME_RE.test(t.name))
+const valid = (t: DetachTarget): boolean => (t.kind === 'call' ? true : t.kind === 'project' ? PROJECT_ID_RE.test(t.id) : TERM_NAME_RE.test(t.name))
 
 /** The standalone page for a target, null for an id or name that is not one. */
 export function detachedPath(t: DetachTarget): string | null {
   if (!valid(t)) return null
+  if (t.kind === 'call') return `${DETACHED_BASE}/call`
   return t.kind === 'project' ? `${DETACHED_BASE}/project/${t.id}` : `${DETACHED_BASE}/term/${t.name}`
 }
 
 /** The target's usual page in the main UI (the Android app, and a pop-out that cannot open). */
 function inAppPath(t: DetachTarget): string {
+  if (t.kind === 'call') return '/m/ai/call'
   return t.kind === 'project' ? `/m/ai/projects?p=${encodeURIComponent(t.id)}` : `/m/ai/term/${encodeURIComponent(t.name)}`
 }
 
 /** One window per target: the desktop app's window label, and the browser's window name. */
 export function windowLabel(t: DetachTarget): string {
+  if (t.kind === 'call') return 'call'
   return t.kind === 'project' ? `project-${t.id}` : `session-${t.name}`
 }
 
@@ -97,9 +103,10 @@ async function openAppWindow(t: DetachTarget, path: string): Promise<void> {
     }
     const w = new WebviewWindow(label, {
       url: path,
-      title: t.kind === 'session' && t.title ? `${t.title} · Valkyrie` : 'Valkyrie',
+      title: t.kind === 'session' && t.title ? `${t.title} · Valkyrie` : t.kind === 'call' ? 'Call · Valkyrie' : 'Valkyrie',
       ...SIZE[t.kind],
       center: true,
+      alwaysOnTop: t.kind === 'call',
       resizable: true,
       // the strip is the title bar (src/v2 StatusStrip, data-tauri-drag-region), as in the main window
       decorations: false,

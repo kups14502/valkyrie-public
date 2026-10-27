@@ -29,6 +29,8 @@ const Term = lazy(() => import('./screens/Term'))
 // a window of its own, no tab bar, the status strip as its title bar. The
 // session one is the terminal above in its standalone mode.
 const ProjectWindow = lazy(() => import('./screens/ProjectWindow'))
+// AI > Call in a window of its own, kept on top of the Teams or Zoom window.
+const CallWindow = lazy(() => import('./screens/Call').then((m) => ({ default: m.CallWindow })))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside
 // the classic Shell (no classic header, menu or player bar). URLs are
@@ -41,7 +43,7 @@ const SCREENS: ScreenDef[] = [
   // Dashboard draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there
   { id: 'dashboard', label: 'Dashboard', Component: Dashboard, floor: false },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
-  { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
+  { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }, { id: 'call', label: 'Call' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
   // the car's controls under its Model Y; the model draws its own floor in its box, so the page floor stays faint
@@ -168,6 +170,7 @@ export default function V2App() {
         <Route path="ai/open" element={<OpenFromAlert />} />
         <Route path="w/project/:id" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><ProjectWindow /></Suspense>} />
         <Route path="w/term/:name" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Term standalone /></Suspense>} />
+        <Route path="w/call" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><CallWindow /></Suspense>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="meals" element={<MealsPage />} />
         <Route path=":screen/:sub?" element={<V2 />} />
