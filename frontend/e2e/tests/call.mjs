@@ -42,13 +42,17 @@ function liveCall(over = {}) {
     id: CALL_ID,
     area: { id: 'one', label: 'Area one' },
     startedAt: iso(now - 6 * MIN),
-    captions: 'on',
+    hearing: 'on',
+    devices: { caller: 'Speakers (Example)', me: 'Microphone (Example)' },
     brain: 'ready',
     activity: null,
     draft: null,
     partial: 'and the second floor is the',
-    lineCount: 5,
-    lines: [1, 2, 3, 4, 5].map((n) => ({ n, at: iso(now - (6 - n) * MIN), text: `Caller line ${n}.` })),
+    lineCount: 6,
+    lines: [
+      ...[1, 2, 3, 4, 5].map((n) => ({ n, at: iso(now - (6 - n) * MIN), who: 'caller', text: `Caller line ${n}.` })),
+      { n: 6, at: iso(now - 30_000), who: 'me', text: 'Let me check that for you.' },
+    ],
     cards: [
       card(1, { title: 'Check the printer queue', body: '- Open `printmanagement.msc`\n- Clear the stuck job\nThen **restart** the spooler.', sources: ['Docs: Example Co'] }),
       card(2, { title: 'Printer model', body: 'Example 5850 at the front desk', ask: 'what printer do they have?', sources: ['KB: printer'] }),
@@ -145,7 +149,7 @@ export function callTests() {
         await shellUp(page)
         await page.waitFor(() => /Start listening/.test(document.querySelector('.vl-page[data-active]')?.innerText ?? ''), { message: 'Start listening did not show' })
         const txt = await page.eval(() => document.querySelector('.vl-page[data-active]')?.innerText ?? '')
-        t.check(/Live Captions/.test(txt) && /Teams, Zoom or Discord/.test(txt), 'the idle page does not say how it hears the call')
+        t.check(/Whisper/.test(txt) && /Teams, Zoom or Discord/.test(txt) && /never leaves thor/.test(txt), 'the idle page does not say how it hears the call')
         t.check(/Last call: Area two, .+ ET, 40 lines, 6 cards\. Not saved\./.test(txt.replace(/\s+/g, ' ')), `the last call line reads "${(/Last call[^\n]*/.exec(txt) ?? [''])[0]}"`)
         t.check(!/\u2014/.test(txt), 'an em dash on the Call page')
         await fits(t, page, `${ROUTE} idle @${device}`)
@@ -157,8 +161,11 @@ export function callTests() {
         await live(page)
         await page.waitFor(() => document.querySelectorAll('.vk-call-cards .vk-call-card').length === 3, { message: 'the three cards did not show' })
         t.check(JSON.stringify(await titles(page)) === JSON.stringify(['Licenses renew in March', 'Printer model', 'Check the printer queue']), `cards are not newest first: ${JSON.stringify(await titles(page))}`)
-        const lines = await page.eval(() => [...document.querySelectorAll('.vk-call-lines p:not(.vk-call-partial)')].map((p) => p.textContent))
-        t.check(lines.length === 5 && /Caller line 5\./.test(lines[4]), `the transcript shows ${JSON.stringify(lines)}`)
+        const lines = await page.eval(() => [...document.querySelectorAll('.vk-call-lines p:not(.vk-call-partial)')].map((p) => ({ me: p.hasAttribute('data-me'), text: p.textContent })))
+        t.check(lines.length === 6 && /Caller line 5\./.test(lines[4].text) && !lines[4].me, `the transcript shows ${JSON.stringify(lines)}`)
+        t.check(lines[5]?.me && /[AP]MYou Let me check/.test(lines[5].text), `Brendon's line is not marked as his: ${JSON.stringify(lines[5])}`)
+        const hears = await page.eval(() => document.querySelector('.vk-call-status')?.getAttribute('title') ?? '')
+        t.check(hears === 'Hearing Speakers (Example) and Microphone (Example)', `the status does not name what it hears: "${hears}"`)
         t.check(await page.eval(() => /second floor/.test(document.querySelector('.vk-call-partial')?.textContent ?? '')), 'the sentence still being said is missing')
         const bar = await page.eval(() => document.querySelector('.vk-call-bar')?.innerText.replace(/\s+/g, ' ') ?? '')
         t.check(/Live\s*\d+:\d\d/i.test(bar) && /Area two/.test(bar) && /Listening/.test(bar), `the bar reads "${bar}"`)

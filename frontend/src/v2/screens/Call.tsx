@@ -14,11 +14,12 @@ import {
 import './call.css'
 
 // AI > Call, and the same page in a window of its own (/m/w/call). thor hears
-// the call through Windows Live Captions (what thor plays: the caller's side
-// of a Teams, Zoom or Discord call) and Claude turns what the caller says into cards:
-// what to answer, what to check, the client fact from their records. Cards
-// come newest first; the transcript runs beside them (under them on a phone),
-// and a box at the top asks Claude something directly.
+// the call (what it plays: the other side of a Teams, Zoom or Discord call)
+// and Brendon's mic, writes both down with Whisper on its own GPU, and Claude
+// turns what the caller says into cards: what to answer, what to check, the
+// client fact from their records. Cards come newest first; the transcript runs
+// beside them (under them on a phone), and a box at the top asks Claude
+// something directly.
 //
 // Everything lives on thor while the call runs (thor's call-assist service,
 // through odin's /api/call). Ending the call drops the transcript unless
@@ -148,9 +149,8 @@ function Card({ card, i, onDismiss }: { card: CallCard; i: number; onDismiss: ()
 
 /** What the caption side and the Claude side are doing, as one line. */
 function statusOf(c: CallLive): { text: string; warn: boolean; busy: boolean } {
-  if (c.captions === 'starting') return { text: 'Starting Live Captions', warn: false, busy: true }
-  if (c.captions === 'closed') return { text: 'Live Captions was closed. End the call and start again.', warn: true, busy: false }
-  if (c.captions === 'off' || c.captions === 'error') return { text: 'Not hearing the call', warn: true, busy: false }
+  if (c.hearing === 'starting') return { text: 'Loading Whisper', warn: false, busy: true }
+  if (c.hearing === 'off' || c.hearing === 'error') return { text: 'Not hearing the call', warn: true, busy: false }
   if (c.brain === 'starting') return { text: 'Claude is starting', warn: false, busy: true }
   if (c.brain === 'error') return { text: 'Claude is off for this call', warn: true, busy: false }
   if (c.activity) return { text: c.activity === 'Thinking' ? 'Claude is reading' : `Looking up ${c.activity}`, warn: false, busy: true }
@@ -173,9 +173,9 @@ function Transcript({ lines, partial }: { lines: CallLine[]; partial: string }) 
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
       }}
     >
-      {!lines.length && !partial && <p className="vk-call-empty">The caller's words show here.</p>}
+      {!lines.length && !partial && <p className="vk-call-empty">The call's words show here.</p>}
       {lines.map((l) => (
-        <p key={l.n}><time>{clock(l.at)}</time>{l.text}</p>
+        <p key={l.n} data-me={l.who === 'me' || undefined}><time>{clock(l.at)}</time><span>{l.who === 'me' && <b>You </b>}{l.text}</span></p>
       ))}
       {partial && <p className="vk-call-partial"><time />{partial}</p>}
     </div>
@@ -189,6 +189,7 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
   const [ask, setAsk] = useState('')
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
   const st = statusOf(c)
+  const hears = c.devices ? `Hearing ${[c.devices.caller, c.devices.me].filter(Boolean).join(' and ')}` : undefined
   const cards = c.cards.filter((k) => !hidden.has(k.id)).slice().reverse()
 
   useEffect(() => {
@@ -224,7 +225,7 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
       <header className="vk-call-bar">
         <span className="vk-call-live"><i aria-hidden />Live <b>{elapsed(now - Date.parse(c.startedAt))}</b></span>
         <span className="vk-call-area">{c.area.label}</span>
-        <span className="vk-call-status vl-ellipsis" data-warn={st.warn || undefined}>
+        <span className="vk-call-status vl-ellipsis" data-warn={st.warn || undefined} title={hears}>
           <Icon name={st.warn ? 'alert' : st.busy ? 'refresh' : 'online'} size={13} tone={st.warn ? 'acc2' : st.busy ? 'fg' : 'dim'} className={st.busy ? 'vl-pulse' : undefined} />
           {st.text}
         </span>
@@ -274,7 +275,7 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
           )}
         </section>
         <section className="vk-call-script" aria-label="Transcript">
-          <h2>Caller <span>{c.lineCount} lines · ET</span></h2>
+          <h2>Transcript <span>{c.lineCount} lines · ET</span></h2>
           <Transcript lines={lines} partial={c.partial} />
         </section>
       </div>
@@ -307,8 +308,8 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
           )}
         </header>
         <p className="vk-call-note">
-          thor listens to the call through Windows Live Captions, and Claude suggests answers while the caller talks.
-          It hears what thor plays, so the other side of a Teams, Zoom or Discord call. Your own voice is not transcribed.
+          thor writes the call down with Whisper on its own GPU, and Claude suggests answers while the caller talks.
+          It hears what thor plays (the other side of a Teams, Zoom or Discord call) and your mic. The audio never leaves thor.
         </p>
         {areas.length > 1 && (
           <Segmented options={areas.map((a) => ({ value: a.id, label: a.label }))} value={pick} onChange={setArea} className="vk-call-areas" />

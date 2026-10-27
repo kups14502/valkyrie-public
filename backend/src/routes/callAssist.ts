@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 
-// AI > Call: thor listens to a call (Teams, Zoom, Discord) through Windows Live
-// Captions and has Claude suggest answers while it runs (thor's call-assist
+// AI > Call: thor hears a call (Teams, Zoom, Discord), writes it down with
+// Whisper on its own GPU and has Claude suggest answers while it runs (thor's call-assist
 // service, C:\Thor\tools\call-assist, port 8768). This route only passes
 // requests through: the call, its transcript and its cards live in thor's
 // memory, and nothing about a call is stored on odin.

@@ -88,6 +88,8 @@
 }
 .vk-call-lines p { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 6px; margin: 0 0 4px; }
 .vk-call-lines time { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.vk-call-lines p[data-me] { color: var(--dim); }
+.vk-call-lines p[data-me] b { font-weight: 600; color: var(--fg); }
 .vk-call-partial { color: var(--dim); font-style: italic; }
 
 @media (min-width: 900px) {

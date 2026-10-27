@@ -2,7 +2,8 @@ import { api } from './api'
 
 // AI > Call: thor's call-assist service through odin (backend routes/callAssist.ts).
 
-export type CallLine = { n: number; at: string; text: string }
+/** who: the other side of the call (what thor plays) or Brendon (the mic) */
+export type CallLine = { n: number; at: string; who: 'caller' | 'me'; text: string }
 
 export type CallCard = {
   id: string
@@ -20,7 +21,10 @@ export type CallLive = {
   id: string
   area: { id: string; label: string }
   startedAt: string
-  captions: 'starting' | 'on' | 'off' | 'closed' | 'error'
+  /** thor's listener: Whisper loading, hearing the call, stopped, or failed */
+  hearing: 'starting' | 'on' | 'off' | 'error'
+  /** what it hears: the output device (the caller) and the mic, once it hears them */
+  devices: { caller: string | null; me: string | null } | null
   brain: 'starting' | 'ready' | 'error'
   /** what Claude is doing right now ("Thinking", "Docs: <company>"), null when idle */
   activity: string | null
@@ -29,7 +33,7 @@ export type CallLive = {
   /** the sentence the caller is still saying */
   partial: string
   lineCount: number
-  /** lines after the poll's `after`, plus the newest two again (they can still change) */
+  /** lines after the poll's `after` */
   lines: CallLine[]
   cards: CallCard[]
   queued: number
