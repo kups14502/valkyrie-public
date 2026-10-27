@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { isConfigured, setupCredentials, verifyCredentials } from '../auth/store.js'
 import { signAppToken } from '../auth/token.js'
 import { isLoopbackReq, isTailnetReq, isAuthStrict } from '../middleware/auth.js'
@@ -28,9 +28,21 @@ function recordFail(ip: string | undefined) {
 }
 function recordSuccess(ip: string | undefined) { attempts.delete(clientKey(ip)) }
 
+// Who is logging in, for the lockout. Through the tunnel that is
+// cf-connecting-ip: Cloudflare sets it and the client cannot. cloudflared
+// reaches us over loopback, so the header only counts on a loopback socket.
+// Otherwise req.ip, which with trust proxy = loopback ignores a remote
+// client's own X-Forwarded-For.
+const LOOPBACK_IPS = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
+function loginKey(req: Request): string | undefined {
+  const cf = req.headers['cf-connecting-ip']
+  if (typeof cf === 'string' && cf && LOOPBACK_IPS.includes(req.socket.remoteAddress || '')) return cf
+  return req.ip
+}
+
 // Whether owner credentials have been set up yet — drives the login vs. setup
 // UI. `trusted` means this request is already authorized by where it came from
-// (tailnet peer or loopback), so the client should skip the login gate.
+// (a listed tailnet device or this host), so the client should skip the login gate.
 router.get('/auth/status', (req, res) => {
   res.json({
     configured: isConfigured(),
@@ -59,13 +71,14 @@ router.post('/auth/setup', (req, res) => {
 // Exchange password + TOTP for an app token.
 router.post('/auth/login', (req, res) => {
   if (!isConfigured()) return res.status(409).json({ error: 'not configured' })
-  if (isLockedOut(req.ip)) return res.status(429).json({ error: 'too many attempts', detail: 'try again later' })
+  const who = loginKey(req)
+  if (isLockedOut(who)) return res.status(429).json({ error: 'too many attempts', detail: 'try again later' })
   const { password, totp } = (req.body ?? {}) as { password?: string; totp?: string }
   if (!verifyCredentials(String(password ?? ''), String(totp ?? ''))) {
-    recordFail(req.ip)
+    recordFail(who)
     return res.status(401).json({ error: 'invalid credentials' })
   }
-  recordSuccess(req.ip)
+  recordSuccess(who)
   res.json(signAppToken())
 })
 

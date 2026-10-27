@@ -9,7 +9,9 @@ import { verifyAppToken, verifyImgToken } from '../auth/token.js'
 //      the dedicated desktop/mobile apps use this.
 //   2. Cloudflare Access JWT (cf-access-jwt-assertion header) — transitional,
 //      still active until the Access policy is retired in the cutover.
-//   3. Loopback and tailnet peers, decided on the socket address.
+//   3. Processes on this host (loopback with no proxy in between), and the
+//      tailnet devices named in TRUSTED_TAILNET_IPS. Any other tailnet node
+//      needs a token like anyone else.
 // Nothing else gets in. The migration-era origin/host pairing that let a
 // request through with no credential was removed on 2026-09-28: Origin and
 // Host are set by the caller, so they prove nothing.
@@ -50,26 +52,70 @@ export function viaCloudflare(req: Pick<IncomingMessage, 'headers'>): boolean {
   return Boolean(req.headers['cf-ray'] || req.headers['cf-connecting-ip'])
 }
 
-// A request that originated on this host (dev, or a local reverse proxy like
-// `tailscale serve`), not one Cloudflare forwarded. Decided on the actual
-// socket peer address only: X-Forwarded-For and req.ip are client-controlled
-// under `trust proxy` and must never grant access.
-export function isLoopbackReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
-  const socketIP = req.socket.remoteAddress || ''
-  const loopbacks = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
-  return loopbacks.includes(socketIP) && !viaCloudflare(req)
+type SocketReq = Pick<IncomingMessage, 'socket' | 'headers'>
+
+const LOOPBACK_IPS = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
+const TAILNET_V4 = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./
+const TAILNET_V6 = /^fd7a:115c:a1e0:/i
+
+const normIP = (ip: string) => ip.trim().toLowerCase().replace(/^::ffff:/, '')
+
+// The tailnet devices trusted without a token, by Tailscale address (v4 and
+// v6). The list lives in odin's .env, not here, because this repo is public.
+// Entries outside the tailnet ranges are dropped, and an unset list trusts no
+// tailnet device: servers, headsets and shared users all need a token.
+const TRUSTED_TAILNET = new Set(
+  (process.env.TRUSTED_TAILNET_IPS ?? '').split(',').map(normIP)
+    .filter((ip) => TAILNET_V4.test(ip) || TAILNET_V6.test(ip)),
+)
+if (process.env.NODE_ENV === 'production' && TRUSTED_TAILNET.size === 0) {
+  console.warn('[auth] TRUSTED_TAILNET_IPS is unset: every tailnet device needs a token')
 }
 
-// A request from a Tailscale peer: the socket peer address is in the tailnet
-// CGNAT range 100.64.0.0/10 (Node reports v4 as ::ffff:-mapped) or Tailscale's
-// ULA v6 prefix. Devices on the tailnet are already authenticated by WireGuard
-// key, so these requests are trusted like loopback. Same socket-only rule as
-// isLoopbackReq — never derived from forwarded headers.
-const TAILNET_V4 = /^(?:::ffff:)?100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./
-const TAILNET_V6 = /^fd7a:115c:a1e0:/i
-export function isTailnetReq(req: Pick<IncomingMessage, 'socket' | 'headers'>): boolean {
-  const socketIP = req.socket.remoteAddress || ''
-  return !viaCloudflare(req) && (TAILNET_V4.test(socketIP) || TAILNET_V6.test(socketIP))
+function socketIsLoopback(req: SocketReq): boolean {
+  return LOOPBACK_IPS.includes(req.socket.remoteAddress || '')
+}
+
+function hostName(req: SocketReq): string {
+  const h = String(req.headers.host ?? '').toLowerCase()
+  return h.startsWith('[') ? h.slice(0, h.indexOf(']') + 1) : h.split(':')[0]
+}
+
+// A loopback connection a local reverse proxy (`tailscale serve`) opened for a
+// remote client: it carries X-Forwarded-For, or a Host that is not loopback.
+// Processes on this host call 127.0.0.1:<port> with neither.
+function proxiedLocally(req: SocketReq): boolean {
+  return Boolean(req.headers['x-forwarded-for']) || !LOOPBACK_HOSTS.has(hostName(req))
+}
+
+// The client a local proxy forwarded for: the LAST X-Forwarded-For entry, the
+// one the proxy appended itself. Earlier entries come from the client.
+function forwardedClient(req: SocketReq): string | null {
+  const raw = req.headers['x-forwarded-for']
+  const parts = (Array.isArray(raw) ? raw.join(',') : (raw ?? '')).split(',').map((s) => s.trim()).filter(Boolean)
+  return parts.length ? normIP(parts[parts.length - 1]) : null
+}
+
+// A request that originated on this host, not one Cloudflare or `tailscale
+// serve` forwarded. Decided on the socket peer address; forwarded headers can
+// only take this trust away, never grant it.
+export function isLoopbackReq(req: SocketReq): boolean {
+  return socketIsLoopback(req) && !viaCloudflare(req) && !proxiedLocally(req)
+}
+
+// A request from a trusted tailnet device: either straight to the tailnet
+// listener (socket peer address), or through `tailscale serve`, which reaches
+// us over loopback and names the peer in X-Forwarded-For. LAN packets claiming
+// a tailnet source are dropped by tailscaled's ts-input chain.
+export function isTailnetReq(req: SocketReq): boolean {
+  if (viaCloudflare(req)) return false
+  if (socketIsLoopback(req)) {
+    if (!proxiedLocally(req)) return false
+    const client = forwardedClient(req)
+    return client !== null && TRUSTED_TAILNET.has(client)
+  }
+  return TRUSTED_TAILNET.has(normIP(req.socket.remoteAddress || ''))
 }
 
 // Verify a Cloudflare Access JWT (RS256, JWKS-backed). Returns payload or null.

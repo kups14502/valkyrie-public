@@ -56,7 +56,7 @@ const PORT = Number(process.env.PORT) || 3001
 const BIND = process.env.BIND || '127.0.0.1'
 
 app.disable('x-powered-by')
-app.set('trust proxy', true)
+app.set('trust proxy', 'loopback')
 // CSP off: this server also serves the built frontend (tailnet access), whose
 // HTML loads Google Fonts and TMDB posters; helmet's default CSP (and its
 // upgrade-insecure-requests) would break it over plain-http tailnet origins.
