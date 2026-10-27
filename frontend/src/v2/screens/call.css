@@ -109,5 +109,4 @@
 .vk-callw-head { z-index: 3; -webkit-user-select: none; user-select: none; background: linear-gradient(180deg, #000 calc(100% - 8px), rgba(0, 0, 0, 0)); }
 .vk-callw-main { overflow-y: auto; overscroll-behavior: contain; }
 .vk-callw .vk-call { padding: 6px 12px 14px; }
-.vk-callw .vk-call-body { display: flex; }
 .vk-callw .vk-call-lines { max-height: 30vh; }

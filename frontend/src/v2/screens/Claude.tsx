@@ -1441,7 +1441,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
           </div>
         ) : !wide && tab === 'projects' ? (
           <NewButton className="vc-fab" label="New project" onPress={startNewProject} />
-        ) : !wide && tab !== 'usage' ? (
+        ) : !wide && tab === 'sessions' ? (
           <NewButton className="vc-fab" onPress={() => setPicker(true)} />
         ) : null}
       </div>

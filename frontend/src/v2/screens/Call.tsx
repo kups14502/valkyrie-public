@@ -28,7 +28,8 @@ type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
 const errText = (e: unknown) => apiErrorText(e, (e as Error | null)?.message || 'no reply')
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+// New York time, the way every Valkyrie time reads
+const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
 const elapsed = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(s / 3600)
@@ -137,7 +138,7 @@ function Card({ card, i, onDismiss }: { card: CallCard; i: number; onDismiss: ()
       {card.ask && <p className="vk-call-asked">You asked: {card.ask}</p>}
       {card.body && <CardBody body={card.body} />}
       <footer>
-        {clock(card.at)}
+        {clock(card.at)} ET
         {card.sources.length ? <> · {card.sources.join(' · ')}</> : null}
         <> · {(card.ms / 1000).toFixed(1)} s</>
       </footer>
@@ -246,6 +247,11 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
         <input
           value={ask}
           onChange={(e) => setAsk(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+            e.preventDefault()
+            send()
+          }}
           placeholder="Ask Claude about this call"
           enterKeyHint="send"
           maxLength={2000}
@@ -268,7 +274,7 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
           )}
         </section>
         <section className="vk-call-script" aria-label="Transcript">
-          <h2>Caller <span>{c.lineCount} lines</span></h2>
+          <h2>Caller <span>{c.lineCount} lines · ET</span></h2>
           <Transcript lines={lines} partial={c.partial} />
         </section>
       </div>
@@ -312,7 +318,7 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
         </Button>
         {last && (
           <p className="vk-call-last">
-            Last call: {last.area}, {clock(last.startedAt)} to {clock(last.endedAt)}, {last.lines} lines, {last.cards} cards.
+            Last call: {last.area}, {clock(last.startedAt)} to {clock(last.endedAt)} ET, {last.lines} lines, {last.cards} cards.
             {last.saved ? ' Saved to your notes.' : ' Not saved.'}
           </p>
         )}

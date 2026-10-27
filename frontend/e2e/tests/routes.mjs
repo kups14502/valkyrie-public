@@ -20,6 +20,8 @@ export const ROUTES = [
   { path: '/m/ai/sessions', tab: 'AI', sub: 'Sessions', ready: { text: /\d+\s*live/i } },
   { path: '/m/ai/projects', tab: 'AI', sub: 'Projects', ready: { text: /\d+\s*projects?/i } },
   { path: '/m/ai/usage', tab: 'AI', sub: 'Usage', ready: { text: /\d+\s*%/ } },
+  // thor's call service, live through odin: idle (Start listening) unless a call is running
+  { path: '/m/ai/call', tab: 'AI', sub: 'Call', ready: { text: /Start listening|Listening|Live\s*\d/ } },
   { path: '/m/ai/skin', shell: false, ready: { sel: '.xterm-rows', text: /Claude Code/ } },
   { path: '/m/lights', tab: 'Lights', ready: { text: /\d+\s*of\s*\d+\s*on|No bulbs reported/i } },
   // the live car from /api/hosts; its controls view is a fixture (tests/car.mjs), answered in the browser

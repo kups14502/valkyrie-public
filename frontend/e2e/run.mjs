@@ -37,6 +37,7 @@ import { hostTests } from './tests/hosts.mjs'
 import { carTests } from './tests/car.mjs'
 import { apartmentTests } from './tests/apartment.mjs'
 import { unitTests } from './tests/unit.mjs'
+import { callTests } from './tests/call.mjs'
 import { killLeftovers } from './lib/odin.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -58,7 +59,7 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- the tests ----------
 
-const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...carTests(), ...apartmentTests(), ...unitTests()]
+const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...carTests(), ...apartmentTests(), ...unitTests(), ...callTests()]
 const wanted = opt.only ? opt.only.split(',').map((s) => s.trim()).filter(Boolean) : []
 const groups = opt.group ? opt.group.split(',').map((s) => s.trim()).filter(Boolean) : []
 const tests = all.filter((t) => (!wanted.length || wanted.some((w) => t.name.includes(w) || t.group === w)) && (!groups.length || groups.includes(t.group)))
