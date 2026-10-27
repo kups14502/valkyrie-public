@@ -253,6 +253,8 @@
 /* a narrow plate (a row of them on an iPad in landscape) drops the sizes beside its label rather than cut them off */
 .sys-gauge { container-type: inline-size; }
 @container (max-width: 215px) { .sys-gauge-head em { display: none; } }
+/* a disk plate's label is a drive letter or a short mount name: its sizes still fit a narrower plate */
+@container (min-width: 170px) and (max-width: 215px) { .sys-gauge-disks .sys-gauge-head em { display: block; } }
 .sys-gauge-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 20px; color: var(--text); }
 .sys-gauge-label { flex: none; font-weight: 500; }
 .sys-gauge-head em { flex: 1 1 auto; min-width: 0; font-style: normal; font-size: 10.5px; color: var(--dim); }
