@@ -1,15 +1,15 @@
 {
-  "version": "0.3.155",
-  "notes": "Hosts: disk plates keep their sizes on a narrower plate",
-  "pub_date": "2026-10-27T18:46:01Z",
+  "version": "0.3.156",
+  "notes": "Call: Recording switch, REC, where the saved video went",
+  "pub_date": "2026-10-28T19:33:02Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVrd21hUENsTzJ5YXVyYzNDcmpJNmM1d3ROQ29CMUs3Qmw0NzRWZXFRdmw0Qm9YbzVWbmVpcHhadXBEcUpVV25ockdZRnNpbGNEZlYvdE9pZW1xNUFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTI2NjU0CWZpbGU6VmFsa3lyaWVfMC4zLjE1NV94NjQtc2V0dXAuZXhlCjVrOWtxSGZ4SkJFSFQ4aTJMNUVEcm5SRmk3RU5iOEYwRGRJRUpKalg3STA3YnNGYkpraGlnQUVMK2x1VGRVbEVuYS9FM21kejZKYUk3WXhJd29YZEJnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.155/Valkyrie_0.3.155_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVFKb3hURUpScFlsR1RrSXl2NitMZkV4NUtndWxMWlRFUGErM05kMFlSSmpQQVpPZHk2Ry8yRjBFRUdjVTl3dHVveGI3VHQwN0V5ejJFZk1yS1VVMVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjE1ODU0CWZpbGU6VmFsa3lyaWVfMC4zLjE1Nl94NjQtc2V0dXAuZXhlCkFiU3p6SEVpSGphZGY2L3pobGpwRVdZT1ZqZXhjbC9la2hMWEVtc2ZacTkvVWZ2bkhXRklpSFFsT1BubHRDdTNtMnpYMWlhbi9aeW5Xei8wNzBmdUFRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.156/Valkyrie_0.3.156_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZ3cmUvbExzSnNCMVFlZE00emNrWVM2bE5KTzhGYy9HaVY1M3NmVjFaejVJc0tidnZDNFRsT3BxL0tOY1pCemxBMVRGd2JBOHdYWmgrOHpXS3N0TkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTI2NTk1CWZpbGU6VmFsa3lyaWVfMC4zLjE1NV9hbWQ2NC5BcHBJbWFnZQowQ2J6R3hlSHdvaTZ5bkRuMk8vK0FrU1k5aFlObzhJNW9tY2hjNEV5dWVEWDlLOU81dTBLNFhpWHJqMThUd3NhK0s1NTFmd25SVUF6WVNqMkV6M3JBUT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.155/Valkyrie_0.3.155_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWYyWWhJRFF4d0g5YkZLUytiUWw2TVVTNHBJN3VTU1gzZzJHZVFJaE9sRmpUTXMxQTl5SzZTWGdhTnBwUytGZ0hHLzU1SktlMXhERm1uNUFNUzRvVHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjE1Nzk2CWZpbGU6VmFsa3lyaWVfMC4zLjE1Nl9hbWQ2NC5BcHBJbWFnZQo1N2wwRkhJTGZwSC8vbXUwMlhpL2NydXBLbTVmN2lVbFRvdkJIR2xtdWRCOGtlWlBxdTFLaEwvdDgyMnp4ZDhodXNNMkx4cU8zKzlIbGQyZTI3WkNEQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.156/Valkyrie_0.3.156_amd64.AppImage"
     }
   }
 }
