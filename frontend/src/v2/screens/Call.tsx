@@ -22,8 +22,10 @@ import './call.css'
 // something directly.
 //
 // Everything lives on thor while the call runs (thor's call-assist service,
-// through odin's /api/call). Ending the call drops the transcript unless
-// "Save and end" keeps it in the notes.
+// through odin's /api/call). With Recording on, thor also records the screen
+// the call is on. "End" drops the transcript and the recording; "Save and end"
+// keeps the transcript in the notes and files the video on odin, in a folder
+// named after the client.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
@@ -39,6 +41,9 @@ const elapsed = (ms: number) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
 }
 const AREA_KEY = 'v2.call.area'
+const REC_KEY = 'v2.call.record'
+/** "<Area>\\<client>\\2026-10-28 1432 call.mp4" out of the full path on odin */
+const shortVideo = (p: string) => p.split(/call-recordings[\\/]/i)[1] ?? p
 
 /** thor's call state, kept current by a long poll while `on`. Lines collect by number across polls. */
 function useCallState(on: boolean) {
@@ -202,7 +207,12 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
     if (busy) return
     setBusy(true)
     stopCall(save)
-      .then((r) => toast(r.last.saved ? 'Call ended. Transcript saved to your notes.' : 'Call ended. Transcript dropped.', { ms: 3500 }))
+      .then((r) => toast(
+        r.last.saved
+          ? `Call ended. Transcript saved to your notes${r.last.video ? ', recording on its way to odin' : ''}.`
+          : 'Call ended. Nothing kept.',
+        { ms: 3500 },
+      ))
       .catch((e) => toast(`Could not end the call: ${errText(e)}`, { ms: 5000 }))
       .finally(() => { setBusy(false); setEnding(false) })
   }
@@ -225,6 +235,9 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
       <header className="vk-call-bar">
         <span className="vk-call-live"><i aria-hidden />Live <b>{elapsed(now - Date.parse(c.startedAt))}</b></span>
         <span className="vk-call-area">{c.area.label}</span>
+        {(c.recording === 'on' || c.recording === 'starting') && (
+          <span className="vk-call-rec" data-on={c.recording === 'on' || undefined} title="Recording the screen the call is on, and the audio">REC</span>
+        )}
         <span className="vk-call-status vl-ellipsis" data-warn={st.warn || undefined} title={hears}>
           <Icon name={st.warn ? 'alert' : st.busy ? 'refresh' : 'online'} size={13} tone={st.warn ? 'acc2' : st.busy ? 'fg' : 'dim'} className={st.busy ? 'vl-pulse' : undefined} />
           {st.text}
@@ -233,8 +246,8 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
         {!standalone && canDetach() && <IconButton icon="popout" size={15} label="Open in its own window" onPress={() => openDetached({ kind: 'call' })} />}
         {ending ? (
           <span className="vk-call-end">
-            <Button kind="line" lit disabled={busy} onPress={() => end(true)}>Save and end</Button>
-            <Button kind="line" disabled={busy} onPress={() => end(false)}>End</Button>
+            <Button kind="line" lit disabled={busy} onPress={() => end(true)} title={c.recording ? 'Keeps the transcript and the recording' : 'Keeps the transcript'}>Save and end</Button>
+            <Button kind="line" disabled={busy} onPress={() => end(false)} title={c.recording ? 'Deletes the transcript and the recording' : 'Deletes the transcript'}>End</Button>
           </span>
         ) : (
           <Button kind="line" icon="stop" onPress={() => setEnding(true)}>End</Button>
@@ -287,13 +300,14 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
   const areas = state?.areas ?? []
   const [area, setArea] = useState(() => localStorage.getItem(AREA_KEY) ?? '')
   const [starting, setStarting] = useState(false)
+  const [record, setRecord] = useState(() => localStorage.getItem(REC_KEY) !== '0')
   const pick = areas.some((a) => a.id === area) ? area : areas[0]?.id ?? ''
   const last = state?.last
   const start = () => {
     if (!pick || starting) return
     setStarting(true)
     localStorage.setItem(AREA_KEY, pick)
-    startCall(pick)
+    startCall(pick, record)
       .catch((e) => toast(`Could not start: ${errText(e)}`, { ms: 5000 }))
       .finally(() => setStarting(false))
   }
@@ -309,18 +323,41 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
         </header>
         <p className="vk-call-note">
           thor writes the call down with Whisper on its own GPU, and Claude suggests answers while the caller talks.
-          It hears what thor plays (the other side of a Teams, Zoom or Discord call) and your mic. The audio never leaves thor.
+          It hears what thor plays (the other side of a Teams, Zoom or Discord call) and your mic.
+        </p>
+        <p className="vk-call-note">
+          With recording on, it also records the screen the call is on. Save and end files the video on odin under the
+          client's name; End deletes it.
         </p>
         {areas.length > 1 && (
           <Segmented options={areas.map((a) => ({ value: a.id, label: a.label }))} value={pick} onChange={setArea} className="vk-call-areas" />
         )}
-        <Button icon="call" disabled={!pick || starting || state?.status === 'stopping'} onPress={start}>
-          {starting ? 'Starting' : 'Start listening'}
-        </Button>
+        <div className="vk-call-go">
+          <Button icon="call" disabled={!pick || starting || state?.status === 'stopping'} onPress={start}>
+            {starting ? 'Starting' : 'Start listening'}
+          </Button>
+          <Button
+            kind="line"
+            icon="video"
+            lit={record}
+            className="vk-call-recbtn"
+            aria-pressed={record}
+            onPress={() => {
+              const v = !record
+              setRecord(v)
+              localStorage.setItem(REC_KEY, v ? '1' : '0')
+            }}
+          >
+            {record ? 'Recording on' : 'Recording off'}
+          </Button>
+        </div>
         {last && (
           <p className="vk-call-last">
             Last call: {last.area}, {clock(last.startedAt)} to {clock(last.endedAt)} ET, {last.lines} lines, {last.cards} cards.
             {last.saved ? ' Saved to your notes.' : ' Not saved.'}
+            {last.saving && ' Saving the recording.'}
+            {!last.saving && last.video && ` Video: call-recordings\\${shortVideo(last.video)}${last.videoMb != null ? ` (${last.videoMb} MB)` : ''}.`}
+            {last.videoError && ` The recording was not saved: ${last.videoError}.`}
           </p>
         )}
       </section>

@@ -25,6 +25,8 @@ export type CallLive = {
   hearing: 'starting' | 'on' | 'off' | 'error'
   /** what it hears: the output device (the caller) and the mic, once it hears them */
   devices: { caller: string | null; me: string | null } | null
+  /** the screen and audio recording: null when this call is not recorded */
+  recording: 'starting' | 'on' | 'off' | 'error' | null
   brain: 'starting' | 'ready' | 'error'
   /** what Claude is doing right now ("Thinking", "Docs: <company>"), null when idle */
   activity: string | null
@@ -40,7 +42,22 @@ export type CallLive = {
   error: string | null
 }
 
-export type CallLast = { area: string; startedAt: string; endedAt: string; lines: number; cards: number; saved: string | null }
+export type CallLast = {
+  area: string
+  startedAt: string
+  endedAt: string
+  lines: number
+  cards: number
+  /** the transcript note, when the call was saved */
+  saved: string | null
+  /** the client Claude named for a saved, recorded work call */
+  client?: string | null
+  /** where the recording goes on odin; saving: still being joined and copied */
+  video?: string | null
+  saving?: boolean
+  videoMb?: number
+  videoError?: string
+}
 
 export type CallState = {
   rev: number
@@ -54,7 +71,7 @@ export type CallState = {
 export const fetchCallState = async (rev: number, after: number, wait: number, signal?: AbortSignal) =>
   (await api.get<CallState>('/call/state', { params: { rev, after, wait }, signal, timeout: (wait + 20) * 1000 })).data
 
-export const startCall = async (area: string) => (await api.post<CallState>('/call/start', { area })).data
+export const startCall = async (area: string, record: boolean) => (await api.post<CallState>('/call/start', { area, record })).data
 
 export const stopCall = async (save: boolean) => (await api.post<{ ok: true; last: CallLast }>('/call/stop', { save })).data
 

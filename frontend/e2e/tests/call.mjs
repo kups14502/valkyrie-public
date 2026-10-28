@@ -7,10 +7,13 @@
 // only: this repo is public.
 //
 //   idle       what it does, the areas, the last call in ET, Start listening
-//              sending the picked area, then the live page: cards newest first,
-//              the transcript and the sentence still being said (phone, desktop)
+//              sending the picked area and Recording on, then the live page: REC,
+//              cards newest first, the transcript and the sentence still being
+//              said (phone, desktop)
+//   record-off the Recording switch off: Start sends record false, no REC, and the
+//              choice is kept across a reload
 //   actions    the ask box (Enter sends), dismiss, End then Save and end, and the
-//              idle page saying the transcript was saved
+//              idle page saying the transcript was saved and where the video went
 //   working    a card being written and a lookup running: the draft card and
 //              "Looking up ..." in the status
 //   window     the pop-out button opens /m/w/call in a window named after it;
@@ -44,6 +47,7 @@ function liveCall(over = {}) {
     startedAt: iso(now - 6 * MIN),
     hearing: 'on',
     devices: { caller: 'Speakers (Example)', me: 'Microphone (Example)' },
+    recording: 'on',
     brain: 'ready',
     activity: null,
     draft: null,
@@ -83,7 +87,7 @@ function callBackend(page, { live = false, callOver = {} } = {}) {
     if (w.method !== 'POST') return undefined
     if (w.path === '/api/call/start') {
       st.status = 'live'
-      st.call = liveCall({ area: st.areas.find((a) => a.id === w.json?.area) ?? st.areas[0] })
+      st.call = liveCall({ area: st.areas.find((a) => a.id === w.json?.area) ?? st.areas[0], recording: w.json?.record ? 'on' : null })
       bump()
       return ok(st)
     }
@@ -95,7 +99,11 @@ function callBackend(page, { live = false, callOver = {} } = {}) {
     }
     if (w.path === '/api/call/stop') {
       const c = st.call
-      st.last = { area: c?.area.label ?? 'Area one', startedAt: c?.startedAt ?? iso(Date.now()), endedAt: iso(Date.now()), lines: 5, cards: 3, saved: w.json?.save ? 'C:\\notes\\call.md' : null }
+      const video = w.json?.save && c?.recording ? '\\\\odin\\bifrost\\call-recordings\\Area one\\Example Co\\2026-10-28 1432 call.mp4' : null
+      st.last = {
+        area: c?.area.label ?? 'Area one', startedAt: c?.startedAt ?? iso(Date.now()), endedAt: iso(Date.now()), lines: 5, cards: 3,
+        saved: w.json?.save ? 'C:\\notes\\call.md' : null, client: video ? 'Example Co' : null, video, saving: false, videoMb: video ? 12.5 : undefined,
+      }
       st.status = 'idle'
       st.call = null
       bump()
@@ -149,15 +157,16 @@ export function callTests() {
         await shellUp(page)
         await page.waitFor(() => /Start listening/.test(document.querySelector('.vl-page[data-active]')?.innerText ?? ''), { message: 'Start listening did not show' })
         const txt = await page.eval(() => document.querySelector('.vl-page[data-active]')?.innerText ?? '')
-        t.check(/Whisper/.test(txt) && /Teams, Zoom or Discord/.test(txt) && /never leaves thor/.test(txt), 'the idle page does not say how it hears the call')
+        t.check(/Whisper/.test(txt) && /Teams, Zoom or Discord/.test(txt), 'the idle page does not say how it hears the call')
         t.check(/Last call: Area two, .+ ET, 40 lines, 6 cards\. Not saved\./.test(txt.replace(/\s+/g, ' ')), `the last call line reads "${(/Last call[^\n]*/.exec(txt) ?? [''])[0]}"`)
         t.check(!/\u2014/.test(txt), 'an em dash on the Call page')
         await fits(t, page, `${ROUTE} idle @${device}`)
         await t.shot(page, 'idle')
         await page.tap({ sel: '.vk-call-areas .vl-seg-cell', text: 'Area two' })
         await page.tap({ sel: '.vk-call-idle .vl-btn', text: /Start listening/ })
+        t.check(/records the screen the call is on/.test(txt) && /Recording on/.test(txt), 'the idle page does not offer the recording')
         const w = await waitW(page, 1)
-        t.check(w.path === '/api/call/start' && w.json?.area === 'two', `Start sent ${w.method} ${w.path} ${w.body}`)
+        t.check(w.path === '/api/call/start' && w.json?.area === 'two' && w.json?.record === true, `Start sent ${w.method} ${w.path} ${w.body}`)
         await live(page)
         await page.waitFor(() => document.querySelectorAll('.vk-call-cards .vk-call-card').length === 3, { message: 'the three cards did not show' })
         t.check(JSON.stringify(await titles(page)) === JSON.stringify(['Licenses renew in March', 'Printer model', 'Check the printer queue']), `cards are not newest first: ${JSON.stringify(await titles(page))}`)
@@ -169,6 +178,7 @@ export function callTests() {
         t.check(await page.eval(() => /second floor/.test(document.querySelector('.vk-call-partial')?.textContent ?? '')), 'the sentence still being said is missing')
         const bar = await page.eval(() => document.querySelector('.vk-call-bar')?.innerText.replace(/\s+/g, ' ') ?? '')
         t.check(/Live\s*\d+:\d\d/i.test(bar) && /Area two/.test(bar) && /Listening/.test(bar), `the bar reads "${bar}"`)
+        t.check(await page.eval(() => !!document.querySelector('.vk-call-rec[data-on]')), 'no REC on a recorded call')
         t.check(await page.eval(() => [...document.querySelectorAll('.vk-call-code')].some((c) => c.textContent === 'printmanagement.msc')), 'the command is not a copy chip')
         t.check(await page.eval(() => /You asked: what printer/.test(document.querySelector('.vk-call-card[data-ask]')?.innerText ?? '')), 'the answered question is not on its card')
         t.check(!(await page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .vc-fab')].some((b) => b.getBoundingClientRect().width > 0))), 'New session floats over the call')
@@ -207,7 +217,32 @@ export function callTests() {
       w = await waitW(page, 3)
       t.check(w.path === '/api/call/stop' && w.json?.save === true, `Save and end sent ${w.method} ${w.path} ${w.body}`)
       await page.waitFor(() => /Saved to your notes/.test(document.querySelector('.vl-page[data-active]')?.innerText ?? ''), { message: 'the idle page does not say the transcript was saved' })
+      const lastLine = await page.eval(() => document.querySelector('.vk-call-last')?.textContent ?? '')
+      t.check(lastLine.includes('Video: call-recordings\\Area one\\Example Co\\2026-10-28 1432 call.mp4 (12.5 MB).'), `the last call does not say where the video went: "${lastLine}"`)
       await t.shot(page, 'ended')
+    },
+  })
+
+  tests.push({
+    name: 'call:record-off',
+    group: 'call',
+    device: 'desktop',
+    timeout: 40_000,
+    async run(t) {
+      const page = await t.page()
+      callBackend(page)
+      await page.goto(ROUTE)
+      await shellUp(page)
+      await page.tap({ sel: '.vk-call-recbtn', text: /Recording on/ })
+      await page.waitFor(() => /Recording off/.test(document.querySelector('.vk-call-recbtn')?.textContent ?? ''), { message: 'the switch did not turn off' })
+      await page.goto(ROUTE)
+      await shellUp(page)
+      await page.waitFor(() => /Recording off/.test(document.querySelector('.vk-call-recbtn')?.textContent ?? ''), { message: 'Recording off was not kept across a reload' })
+      await page.tap({ sel: '.vk-call-idle .vl-btn', text: /Start listening/ })
+      const w = await waitW(page, 1)
+      t.check(w.json?.record === false, `Start sent record ${w.json?.record}`)
+      await live(page)
+      t.check(await page.eval(() => !document.querySelector('.vk-call-rec')), 'REC shows on a call that is not recorded')
     },
   })
 

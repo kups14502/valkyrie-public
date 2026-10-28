@@ -4,7 +4,7 @@ import {
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
   House, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
-  Smartphone, Sparkles, SquareTerminal, PhoneCall, SquareArrowOutUpRight, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
+  Smartphone, Sparkles, SquareTerminal, PhoneCall, SquareArrowOutUpRight, Video, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
   UtensilsCrossed, Cctv, Fan, Snowflake, Armchair, Package, Blinds, Flashlight, Megaphone, Sunrise, MapPinned, CircleDot, CloudDownload, KeyRound,
   createLucideIcon, type LucideIcon,
 } from 'lucide-react'
@@ -49,6 +49,7 @@ export const ICONS = {
   // AI > Call, and opening something in a window of its own
   call: PhoneCall,
   popout: SquareArrowOutUpRight,
+  video: Video,
   // hosts and devices (by host id)
   thor: Monitor,
   odin: Server,

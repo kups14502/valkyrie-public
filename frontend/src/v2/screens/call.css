@@ -12,7 +12,7 @@
 .vk-call-pop { margin: -12px -10px -12px auto; }
 .vk-call-note { margin: 0; font-size: 13px; line-height: 19px; color: var(--text); }
 .vk-call-areas { max-width: 420px; }
-.vk-call-idle > .vl-btn { align-self: flex-start; }
+.vk-call-go { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .vk-call-last { margin: 0; font-size: 12px; line-height: 17px; color: var(--dim); }
 
 /* ---- live: the bar ---- */
@@ -28,6 +28,11 @@
 }
 .vk-call-live b { font-weight: 600; letter-spacing: .04em; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
 .vk-call-area { font-size: 12px; line-height: 18px; color: var(--text); padding: 0 7px; border: 1px solid var(--line); }
+.vk-call-rec {
+  font-size: 10.5px; line-height: 16px; font-weight: 700; letter-spacing: .14em; padding: 0 6px;
+  color: var(--dim); border: 1px solid var(--line);
+}
+.vk-call-rec[data-on] { color: var(--acc2); border-color: color-mix(in srgb, var(--acc2) 60%, transparent); }
 .vk-call-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; color: var(--dim); max-width: 100%; }
 .vk-call-status > .vl-icon { flex: none; }
 .vk-call-status[data-warn] { color: var(--acc2); }
