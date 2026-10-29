@@ -40,8 +40,11 @@ import vehiclesRoute from './routes/vehicles.js'
 import callAssistRoute from './routes/callAssist.js'
 import inboxRoute from './routes/inbox.js'
 import tasksRoute from './routes/tasks.js'
+import todayRoute from './routes/today.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
+import { startBrief } from './lib/brief.js'
+import { resumeCaptures } from './lib/capture.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
 // exception (e.g. a transient error inside a poller) would otherwise kill the
@@ -142,6 +145,7 @@ app.use('/api', accountSigninRoute)
 app.use('/api', callAssistRoute)
 app.use('/api', inboxRoute)
 app.use('/api', tasksRoute)
+app.use('/api', todayRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
@@ -196,6 +200,9 @@ server.listen(PORT, BIND, () => {
   startAlerts()
   // Idle until ~/.config/claude-switch/config.json turns it on.
   startAccountSwitch()
+  // the morning brief at 7:30 New York time, and any capture a restart left half filed
+  startBrief()
+  resumeCaptures()
 })
 
 // Optional second listener on the tailscale interface: tailnet devices talk to

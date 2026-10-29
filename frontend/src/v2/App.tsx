@@ -2,12 +2,13 @@ import { Suspense, lazy, useEffect, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
-import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef } from './kit/shell'
+import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef, type ScreenProps } from './kit/shell'
 import { Palette } from './kit/palette'
 import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
 import Dashboard from './screens/Dashboard'
+import Today from './screens/Today'
 import Claude from './screens/Claude'
 import Lights from './screens/Lights'
 import Car from './screens/Car'
@@ -40,10 +41,23 @@ const CallWindow = lazy(() => import('./screens/Call').then((m) => ({ default: m
 // v2.css is keyed on html[data-v2], which is set only while this is mounted,
 // so the classic pages never change.
 
+// The Dashboard tab: Overview (the dashboard itself, still where the app opens) and Today (the day
+// in one place: capture, the brief, schedule, due tasks, unread inbox, busy sessions).
+function DashboardTab(p: ScreenProps) {
+  return p.sub === 'today' ? <Today active={p.active} /> : <Dashboard {...p} />
+}
+
 // Valkyrie's real sections, in tab order. No screen forces a mode.
 const SCREENS: ScreenDef[] = [
-  // Dashboard draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there
-  { id: 'dashboard', label: 'Dashboard', Component: Dashboard, floor: false },
+  // Overview draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there;
+  // Today is a list screen and keeps it faint
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    subs: [{ id: 'overview', label: 'Overview' }, { id: 'today', label: 'Today' }],
+    Component: DashboardTab,
+    floor: (sub) => (sub === 'today' ? 'faint' : false),
+  },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }, { id: 'call', label: 'Call' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
@@ -68,7 +82,7 @@ const SCREENS: ScreenDef[] = [
 
 // Old URLs (bookmarks, the home screen icon, screens still saying go('claude')) land on the new tabs
 const LEGACY: LegacyMap = (screen, sub) => {
-  if (screen === 'home') return sub === 'settings' ? 'settings' : 'dashboard'
+  if (screen === 'home') return sub === 'settings' ? 'settings' : sub === 'today' ? 'dashboard/today' : 'dashboard'
   if (screen === 'claude') return sub ? `ai/${sub}` : 'ai'
   return null
 }

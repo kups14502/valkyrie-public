@@ -37,6 +37,8 @@ const GROUPS: Cmd['group'][] = ['Go to', 'Sessions', 'Actions', 'Classic']
 
 // a sub-tab's icon and the words it answers to; a sub-tab not listed takes its screen's icon
 const SUB_META: Record<string, { icon: IconName; keys: string }> = {
+  'dashboard/overview': { icon: 'dashboard', keys: 'home tracker lights trade' },
+  'dashboard/today': { icon: 'calendar', keys: 'today day brief capture agenda due now' },
   'ai/sessions': { icon: 'claude', keys: 'claude terminals board' },
   'ai/projects': { icon: 'projects', keys: 'project' },
   'ai/usage': { icon: 'gauge', keys: 'quota limits 5h week claude accounts' },

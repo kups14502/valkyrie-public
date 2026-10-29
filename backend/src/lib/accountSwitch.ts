@@ -289,6 +289,22 @@ function loadPool(): Map<string, PoolToken> {
   return tokens
 }
 
+/**
+ * Pool tokens a headless run may spend (lib/claudeCli.ts): not refused, not expired, not at a limit,
+ * the most 5-hour room first by the switcher's latest probe. Every account counts here, the ones kept
+ * out of the host rotation too: a one-line answer is not a terminal.
+ */
+export function poolTokensByRoom(): { id: string; token: string }[] {
+  const s = loadState()
+  const now = Date.now()
+  return [...loadPool().values()]
+    .filter((t) => !s.dead[t.id] && (!t.expiresAt || t.expiresAt > now))
+    .map((t) => ({ t, q: poolProbe(t.id)?.quota ?? null }))
+    .filter(({ q }) => !q || (q.sessionPct < 98 && q.weeklyPct < 98))
+    .sort((a, b) => (a.q?.sessionPct ?? 50) - (b.q?.sessionPct ?? 50))
+    .map(({ t }) => ({ id: t.id, token: t.accessToken }))
+}
+
 export function vaultHealth(): VaultHealth {
   const h: VaultHealth = { dir: P.vault, exists: false, modeOk: false, entries: 0, badFiles: [] }
   try {

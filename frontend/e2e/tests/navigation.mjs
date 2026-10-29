@@ -70,7 +70,8 @@ export function navigationTests() {
       name: `nav:tabs:${device}`,
       group: 'navigation',
       device,
-      timeout: 60_000,
+      // six tabs, each waiting for its live data: 58 s of 60 on a day thor's reads took 6 s each
+      timeout: 90_000,
       async run(t) {
         const page = await t.page()
         await page.goto('/m/dashboard')
