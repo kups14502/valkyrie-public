@@ -4,7 +4,7 @@ import { openDb } from './db.js'
 import { AREAS } from './projectAreas.js'
 import { addLilkupsReminder, normalizeAt, readLilkupsStates, removeLilkupsReminder } from './lilkups.js'
 import {
-  KEY_RE, LIMITS, MIXABLE_AREAS, ProjError, UUID_RE,
+  DUE_RE, KEY_RE, LIMITS, MIXABLE_AREAS, ProjError, UUID_RE,
   type Area, type Automation, type AutomationKind, type AutomationSummary, type ChecklistItem, type Ctx,
   type EventEntity, type Exposure, type FileContent, type FileKind, type FilePatch, type FileRef, type LinkedVia,
   type LinkItem, type Model, type NewProjectInput, type NewTabInput, type PinFileInput, type ProjChange,
@@ -498,6 +498,19 @@ const LIST_MARK_RE = /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/
 
 const newCheckItem = (t: string): ChecklistItem => ({ id: randomUUID().slice(0, 8), text: t, done: false, doneAt: null })
 
+/** A due date or time as stored: New York wall clock, checked to be a real day and time. */
+export function dueOf(v: unknown): string {
+  if (typeof v !== 'string' || !DUE_RE.test(v)) throw new ProjError(400, 'due must be YYYY-MM-DD or YYYY-MM-DDTHH:mm (New York time)')
+  const [y, m, d] = v.slice(0, 10).split('-').map(Number)
+  const day = new Date(Date.UTC(y, m - 1, d))
+  if (day.getUTCFullYear() !== y || day.getUTCMonth() !== m - 1 || day.getUTCDate() !== d) throw new ProjError(400, `due ${v} is not a real date`)
+  if (v.length > 10) {
+    const [hh, mm] = v.slice(11).split(':').map(Number)
+    if (hh > 23 || mm > 59) throw new ProjError(400, `due ${v} is not a real time`)
+  }
+  return v
+}
+
 function newLinkItem(label: unknown, url: unknown): LinkItem {
   return { id: randomUUID().slice(0, 8), label: text('label', label, LIMITS.linkLabel, 'line', true), url: urlOf('url', url, true) }
 }
@@ -964,8 +977,9 @@ export function tabItem(id: string, tabId: string, op: TabItemOp, ctx: Ctx): Tab
       case 'add': {
         if (items.length >= LIMITS.itemsPerTab) throw new ProjError(400, `a tab holds at most ${LIMITS.itemsPerTab} items`)
         const it = check ? newCheckItem(text('text', o.text, LIMITS.checklistText, 'line', true)) : newLinkItem(o.label, o.url)
+        if (check && o.due != null) (it as ChecklistItem).due = dueOf(o.due)
         items.push(it)
-        summary = `added ${quoted(itemName(it))} to ${quoted(before.title)}`
+        summary = `added ${quoted(itemName(it))} to ${quoted(before.title)}${check && o.due != null ? ` due ${o.due}` : ''}`
         break
       }
       case 'set': {
@@ -981,7 +995,14 @@ export function tabItem(id: string, tabId: string, op: TabItemOp, ctx: Ctx): Tab
         const i = find()
         if (check) {
           const it = items[i] as ChecklistItem
-          if (o.text !== undefined) items[i] = { ...it, text: text('text', o.text, LIMITS.checklistText, 'line', true) }
+          const next: ChecklistItem = { ...it }
+          if (o.text !== undefined) next.text = text('text', o.text, LIMITS.checklistText, 'line', true)
+          if (o.due !== undefined) next.due = o.due === null ? null : dueOf(o.due)
+          items[i] = next
+          if (o.text === undefined && o.due !== undefined) {
+            summary = next.due ? `set ${quoted(it.text)} due ${next.due}` : `cleared the due date of ${quoted(it.text)}`
+            break
+          }
         } else {
           const it = items[i] as LinkItem
           items[i] = {
@@ -1005,6 +1026,49 @@ export function tabItem(id: string, tabId: string, op: TabItemOp, ctx: Ctx): Tab
     q.tabSave.run(next)
     return { result: tabFrom(next), event: { action: 'tab.item', entity: 'tab', entityId: before.id, summary, before, after: next } }
   })
+}
+
+// ----------------------------------------------------------------- tasks ----
+
+export type ChecklistTask = {
+  project: Pick<Project, 'id' | 'name' | 'area' | 'status' | 'exposure'>
+  tab: { id: string; title: string; sortOrder: number }
+  item: ChecklistItem
+  order: number
+}
+
+/**
+ * Every item of every live checklist tab in projects that are not archived:
+ * the Tasks list's project half (lib/tasksStore.ts). Read only; changes go
+ * through tabItem like any other checklist edit.
+ */
+export function listChecklistTasks(): ChecklistTask[] {
+  const rows = db.prepare(`SELECT p.id AS pid, p.name, p.area, p.status, p.exposure, t.id AS tid, t.title, t.sortOrder, t.items
+    FROM project_tabs t JOIN projects p ON p.id = t.projectId
+    WHERE t.kind = 'checklist' AND t.deletedAt IS NULL AND p.status != 'archived'
+    ORDER BY p.sortOrder, p.name, t.sortOrder, t.createdAt`).all() as {
+    pid: string; name: string; area: Area; status: Project['status']; exposure: Exposure
+    tid: string; title: string; sortOrder: number; items: string
+  }[]
+  const out: ChecklistTask[] = []
+  for (const r of rows) {
+    parseItems(r.items).forEach((it, order) => {
+      if (!('text' in it)) return
+      out.push({
+        project: { id: r.pid, name: r.name, area: r.area, status: r.status, exposure: r.exposure },
+        tab: { id: r.tid, title: r.title, sortOrder: r.sortOrder },
+        item: { ...it, due: it.due ?? null },
+        order,
+      })
+    })
+  }
+  return out
+}
+
+/** The project's first live checklist tab, where a task added from the Tasks list goes. */
+export function firstChecklistTab(id: string): string | null {
+  const live = q.tabsLive.all({ projectId: id }) as TabRow[]
+  return live.find((t) => t.kind === 'checklist')?.id ?? null
 }
 
 // ----------------------------------------------------------------- files ----

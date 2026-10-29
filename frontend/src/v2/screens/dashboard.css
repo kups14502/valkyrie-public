@@ -1184,3 +1184,9 @@ html[data-density='comfortable'] .hm-arow { min-height: 34px; }
 html[data-density='comfortable'] .hm-now-main { min-height: 40px; }
 html[data-density='comfortable'] .hm-chips[data-wide] > .hm-chip { min-height: 44px; }
 html[data-density='comfortable'] .hm-allbar { min-height: 48px; }
+
+/* the Calendar block's tasks (Dashboard.tsx TasksGlance): the agenda's look, overdue in the hot color */
+.hm-tasks-head { width: 100%; text-align: left; }
+.hm-tasks-head[data-pressed] .vl-caps { text-shadow: var(--text-glow); }
+.hm-tasks [data-late] { color: var(--hot); text-shadow: var(--hot-glow); }
+.hm-tasks .hm-arow + .hm-arow { border-top: 1px solid var(--line); }

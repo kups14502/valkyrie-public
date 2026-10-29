@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { Archive, ArchiveRestore, ArrowDownToLine, Ellipsis, FileText, Link2, Unlink, type LucideIcon } from 'lucide-react'
 import { Press, Segmented, cx, toast } from '../kit/ui'
 import { Icon, type IconName, type IconTone } from '../kit/icons'
-import { ago, useLaunchTargets } from '../kit/data'
+import { ago, useLaunchTargets, useTick } from '../kit/data'
 import { apiErrorText, fetchSessionList, openTermSession } from '../../lib/api'
 import { copyText } from '../../lib/clipboard'
 import {
@@ -15,6 +15,7 @@ import {
 } from '../../lib/projectsApi'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { v2TermPath } from '../../lib/term'
+import { dueLabel, dueState } from '../../lib/taskDue'
 import { Markdown, safeHref } from '../../components/Markdown'
 import './projectpage.css'
 
@@ -724,8 +725,14 @@ const until = (ms: number, now: number) => {
 
 const ARM_MS = 4000
 
-export type ProjTask = { id: string; tabId: string; text: string; done: boolean }
+export type ProjTask = { id: string; tabId: string; text: string; done: boolean; due?: string | null }
 export type ProjReminder = { id: string; at: number; message: string }
+
+/** A task's due date beside it: Today, Fri, Nov 3; overdue in the hot color (lib/taskDue.ts). */
+export function DueChip({ due }: { due: string }) {
+  const now = useTick(60_000)
+  return <em className="vc-task-due" data-state={dueState(due, now)}>{dueLabel(due, now)}</em>
+}
 
 /**
  * The project's checklist: every open item, a tap ticks it (or unticks one
@@ -819,6 +826,7 @@ export function ProjectTasks({ projectId, tasks, listTab, k, onChanged }: {
                 >
                   <i className="vc-task-box">{done && <Icon name="done" size={11} tone="ink" />}</i>
                   <span>{t.text}</span>
+                  {t.due && !done && <DueChip due={t.due} />}
                 </Press>
               </li>
             )

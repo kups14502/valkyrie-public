@@ -3,10 +3,11 @@ import {
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, equityAge, fullest, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
+  ago, equityAge, fullest, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, useOpenTasks, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
   useTrade, useTracker, useUsage,
   type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession, type TradeVM,
 } from '../kit/data'
@@ -25,6 +26,8 @@ import { PRESETS, brightnessFromPct, lightColor, pctFromBrightness, presetSwatch
 import { useQuickSessions } from '../../lib/quickSessions'
 import { UpIcon, UploadRows } from '../kit/upload'
 import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } from '../kit/uploads'
+import { clockOf, dueLabel, dueState } from '../../lib/taskDue'
+import { taskKey } from '../../lib/tasksApi'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
 import './dashboard.css'
 
@@ -1081,11 +1084,52 @@ function Calendar({ onOpen }: { onOpen: (o: CalendarOpen) => void }) {
               </span>
             )}
             {past.length > 0 && featured && <Press className="hm-earlier" onPress={() => open(day0)}>{past.length} earlier today</Press>}
-            <Ahead days={days} now={now} next={next} onOpen={open} />
           </>
         )}
+        {/* its own source: due tasks show while the calendar is still loading or not answering */}
+        <TasksGlance now={now} />
+        {events && <Ahead days={days} now={now} next={next} onOpen={open} />}
       </div>
     </Panel>
+  )
+}
+
+/**
+ * The Calendar block's tasks (screens/Tasks.tsx): a line with what is overdue, what is due today
+ * and how many are open, then up to three overdue or due-today tasks. All of it opens /m/tasks.
+ * Nothing at all until the list has loaded once.
+ */
+function TasksGlance({ now }: { now: number }) {
+  const tasks = useOpenTasks()
+  const navigate = useNavigate()
+  const list = tasks.data?.tasks
+  if (!list) return null
+  const due = list.filter((t) => t.due && dueState(t.due, now) !== 'soon' && dueState(t.due, now) !== 'later')
+  const late = due.filter((t) => dueState(t.due!, now) === 'overdue').length
+  const go = () => navigate('/m/tasks', { state: { v2Back: true } })
+  const parts = [
+    late ? { text: `${late} overdue`, late: true } : null,
+    due.length - late ? { text: `${due.length - late} due today`, late: false } : null,
+    { text: `${list.length} open`, late: false },
+  ].filter((x): x is { text: string; late: boolean } => x !== null)
+  return (
+    <div className="hm-ahead hm-tasks">
+      <Press className="hm-ahead-head hm-tasks-head" onPress={go} aria-label={`Tasks: ${parts.map((x) => x.text).join(', ')}. Open the list`}>
+        <span className="vl-caps">Tasks</span>
+        <span>
+          {parts.map((x, k) => <span key={x.text} data-late={x.late || undefined}>{k ? ' · ' : ''}{x.text}</span>)}
+        </span>
+      </Press>
+      {due.slice(0, 3).map((t) => {
+        const isLate = dueState(t.due!, now) === 'overdue'
+        return (
+          <Press key={taskKey(t.ref)} className="hm-arow" onPress={go} aria-label={`${t.text}, due ${dueLabel(t.due!, now)}, open Tasks`}>
+            <span className="hm-aday" data-late={isLate || undefined}>{isLate ? 'Late' : t.due!.length > 10 ? clockOf(t.due!.slice(11, 16)) : 'Today'}</span>
+            <span className="hm-atitle">{t.text}</span>
+          </Press>
+        )
+      })}
+    </div>
   )
 }
 

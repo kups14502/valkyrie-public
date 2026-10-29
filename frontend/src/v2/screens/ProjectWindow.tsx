@@ -348,7 +348,7 @@ function ProjectBody({ doc, now, onChanged }: { doc: ProjectDoc; now: number; on
   // ---- the doc, shaped ----
   const target = targets.data?.find((t) => t.key === p.targetKey)
   const lists = doc.tabs.filter((t) => t.kind === 'checklist')
-  const tasks: ProjTask[] = lists.flatMap((t) => (t.items as ChecklistItem[]).map((it) => ({ id: it.id, tabId: t.id, text: it.text, done: it.done })))
+  const tasks: ProjTask[] = lists.flatMap((t) => (t.items as ChecklistItem[]).map((it) => ({ id: it.id, tabId: t.id, text: it.text, done: it.done, due: it.due ?? null })))
   const reminders: ProjReminder[] = doc.reminders
     .filter((r) => r.state === 'pending')
     .map((r) => ({ id: r.id, at: Date.parse(r.at), message: r.message }))
