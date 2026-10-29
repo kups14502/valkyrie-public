@@ -22,10 +22,10 @@ import './call.css'
 // something directly.
 //
 // Everything lives on thor while the call runs (thor's call-assist service,
-// through odin's /api/call). With Recording on, thor also records the screen
-// the call is on. "End" drops the transcript and the recording; "Save and end"
-// keeps the transcript in the notes and files the video on odin, in a folder
-// named after the client.
+// through odin's /api/call). With Recording on, thor also records all its
+// screens, laid out as they sit on the desk. "End" drops the transcript and
+// the recording; "Save and end" keeps the transcript in the notes and files
+// the video on odin, in a folder named after the client.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
@@ -236,7 +236,7 @@ function LiveCall({ c, lines, standalone }: { c: CallLive; lines: CallLine[]; st
         <span className="vk-call-live"><i aria-hidden />Live <b>{elapsed(now - Date.parse(c.startedAt))}</b></span>
         <span className="vk-call-area">{c.area.label}</span>
         {(c.recording === 'on' || c.recording === 'starting') && (
-          <span className="vk-call-rec" data-on={c.recording === 'on' || undefined} title="Recording the screen the call is on, and the audio">REC</span>
+          <span className="vk-call-rec" data-on={c.recording === 'on' || undefined} title="Recording all screens and the audio">REC</span>
         )}
         <span className="vk-call-status vl-ellipsis" data-warn={st.warn || undefined} title={hears}>
           <Icon name={st.warn ? 'alert' : st.busy ? 'refresh' : 'online'} size={13} tone={st.warn ? 'acc2' : st.busy ? 'fg' : 'dim'} className={st.busy ? 'vl-pulse' : undefined} />
@@ -326,8 +326,8 @@ function Idle({ state, standalone }: { state: CallState | null; standalone: bool
           It hears what thor plays (the other side of a Teams, Zoom or Discord call) and your mic.
         </p>
         <p className="vk-call-note">
-          With recording on, it also records the screen the call is on. Save and end files the video on odin under the
-          client's name; End deletes it.
+          With recording on, it also records all your screens. Save and end files the video on odin under the client's
+          name; End deletes it.
         </p>
         {areas.length > 1 && (
           <Segmented options={areas.map((a) => ({ value: a.id, label: a.label }))} value={pick} onChange={setArea} className="vk-call-areas" />

@@ -164,7 +164,7 @@ export function callTests() {
         await t.shot(page, 'idle')
         await page.tap({ sel: '.vk-call-areas .vl-seg-cell', text: 'Area two' })
         await page.tap({ sel: '.vk-call-idle .vl-btn', text: /Start listening/ })
-        t.check(/records the screen the call is on/.test(txt) && /Recording on/.test(txt), 'the idle page does not offer the recording')
+        t.check(/records all your screens/.test(txt) && /Recording on/.test(txt), 'the idle page does not offer the recording')
         const w = await waitW(page, 1)
         t.check(w.path === '/api/call/start' && w.json?.area === 'two' && w.json?.record === true, `Start sent ${w.method} ${w.path} ${w.body}`)
         await live(page)
