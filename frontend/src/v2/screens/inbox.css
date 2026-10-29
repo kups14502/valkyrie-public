@@ -1,0 +1,139 @@
+/* Inbox (Inbox.tsx), the page at /m/inbox inside the v2 page frame (calendar.css .vpg). Plain CSS
+   on top of v2.css; colors are the mode variables, so a scheme change repaints it. Text tabs, one
+   row per item with hairlines, no boxes. An unread row is bright with a lit mark; a read one dims. */
+
+.ib {
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 6px calc(20px + env(safe-area-inset-right)) 40px calc(20px + env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ib-quiet { margin: 10px 2px; font-size: 12.5px; color: var(--dim); }
+.ib-hint { margin: 2px 2px 6px; font-size: 11.5px; line-height: 16px; color: var(--dim); }
+
+/* ---------- views and the bulk actions ---------- */
+
+.ib-bar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ib-tabs { display: flex; gap: 18px; min-width: 0; }
+.ib-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 0 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ib-tab[data-on] { color: var(--fg); font-weight: 700; text-shadow: var(--text-glow); }
+.ib-tab[data-on]::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--fg); box-shadow: var(--glow); }
+.ib-tab-n { font-size: 10.5px; letter-spacing: 0; color: var(--ink-hi); }
+@media (hover: hover) and (pointer: fine) { .ib-tab:not([data-on]):hover { color: var(--text); } }
+.ib-bar-acts { margin-left: auto; display: flex; align-items: center; gap: 14px; padding-bottom: 8px; }
+
+/* ---------- source filter ---------- */
+
+.ib-chips {
+  display: flex;
+  gap: 4px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  padding: 0 2px 2px;
+}
+.ib-chips::-webkit-scrollbar { display: none; }
+.ib-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--dim);
+  border-bottom: 1px solid transparent;
+}
+.ib-chip[data-on] { color: var(--fg); border-bottom-color: var(--fg); text-shadow: var(--text-glow); }
+.ib-chip-n { font-size: 10.5px; font-weight: 700; color: var(--ink-hi); }
+@media (hover: hover) and (pointer: fine) { .ib-chip:not([data-on]):hover { color: var(--text); } }
+
+/* ---------- the list ---------- */
+
+.ib-rows > * + * { border-top: 1px solid var(--line); }
+.ib-row[data-open] { background: linear-gradient(90deg, color-mix(in srgb, var(--fg) 8%, transparent), transparent 85%); }
+.ib-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 50px;
+  padding: 7px 2px;
+  text-align: left;
+  color: var(--text);
+  transition: background-color .15s;
+}
+.ib-row-main[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+@media (hover: hover) and (pointer: fine) { .ib-row-main:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); } }
+
+/* the level mark: a short bar, lit while unread; alert in the hot color, info hollow */
+.ib-mark {
+  flex: none;
+  align-self: stretch;
+  width: 3px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+}
+.ib-row[data-level='info'] .ib-mark { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent); }
+.ib-row[data-unread] .ib-mark { background: var(--fg); box-shadow: var(--glow); }
+.ib-row[data-unread][data-level='info'] .ib-mark { background: color-mix(in srgb, var(--fg) 55%, transparent); box-shadow: none; }
+.ib-row[data-level='alert'] .ib-mark { background: color-mix(in srgb, var(--hot) 45%, transparent); }
+.ib-row[data-unread][data-level='alert'] .ib-mark { background: var(--hot); box-shadow: var(--hot-glow); }
+
+.ib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-text b {
+  font-size: 13.5px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ib-row[data-unread] .ib-text b { font-weight: 700; color: var(--ink-hi); }
+.ib-row[data-open] .ib-text b { white-space: normal; overflow-wrap: anywhere; }
+.ib-count { font-style: normal; font-weight: 600; color: var(--dim); }
+.ib-text > span { font-size: 11.5px; line-height: 15px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ib-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 34%; }
+.ib-from { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ib-meta time { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+.ib-row[data-unread] .ib-meta time { color: var(--text); }
+
+/* ---------- an open row ---------- */
+
+.ib-detail { display: flex; flex-direction: column; gap: 10px; padding: 0 2px 14px 17px; }
+.ib-note { margin: 0; font-size: 12.5px; line-height: 18px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-link { color: var(--fg); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 2px; }
+.ib-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ib-acts .vl-btn-line { min-height: 32px; }
+.ib-when { margin: 0; font-size: 11px; line-height: 15px; color: var(--faint); }
+
+/* ---------- sources and their push ---------- */
+
+.ib-sources { display: flex; flex-direction: column; }
+.ib-src { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 6px 2px; }
+.ib-src-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-src-text b { font-size: 13.5px; font-weight: 600; color: var(--ink-hi); }
+.ib-src-text span { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-push.vl-seg { flex: none; width: 168px; height: 30px; }
+.ib-push .vl-seg-cell { font-size: 11px; }

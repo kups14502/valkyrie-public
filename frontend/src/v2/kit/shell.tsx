@@ -7,7 +7,7 @@ import { applyPalette, saveMode, storedMode, useFont, useStoredMode, type Mode }
 import {
   animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, useSwipePager, type MotionSetting,
 } from './motion'
-import { useHosts, useLights, useTick, type HostVM, type MediaVM } from './data'
+import { useHosts, useInboxCount, useLights, useTick, type HostVM, type MediaVM } from './data'
 import { Search } from 'lucide-react'
 import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, openPalette, paletteOpen, toast, type DotFloorHandle, type ToastOptions } from './ui'
 import { Icon, hostIcon, isIconName, type IconName } from './icons'
@@ -351,6 +351,7 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
         <span className="vl-strip-date"><span className="vl-strip-wd">{weekday} </span>{date}</span>
         <b>·</b>
         <span className="vl-strip-time">{time}</span>
+        {onSettings && <InboxButton />}
         {onSettings && (
           <Press className="vl-strip-search" aria-label="Search" title="Search: jump anywhere (Ctrl+K)" aria-haspopup="dialog" onPress={openPalette}>
             <Search size={13} strokeWidth={1.7} className="vl-icon vl-icon-dim" aria-hidden />
@@ -372,6 +373,37 @@ export function StatusStrip({ center, onSettings, settingsOpen = false }: {
       {/* src/components/TauriTitleBar: absolute at the strip's right end; the strip reserves its width (v2.css) */}
       {win && <div className="vl-winctl"><WindowControls /></div>}
     </div>
+  )
+}
+
+/**
+ * The inbox (/m/inbox, screens/Inbox.tsx): its icon and the unread count, on every screen and
+ * every size, since it is where alerts land. Lit while anything is unread, hot while an unread
+ * item is an alert. A press opens the page; on the page it does nothing.
+ */
+function InboxButton() {
+  const count = useInboxCount()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const unread = count.data?.unread ?? 0
+  const alerts = count.data?.alerts ?? 0
+  const here = pathname.startsWith(`${BASE}/inbox`)
+  const label = unread
+    ? `Inbox: ${unread} unread${alerts ? `, ${alerts} ${alerts === 1 ? 'alert' : 'alerts'}` : ''}`
+    : 'Inbox'
+  return (
+    <Press
+      className="vl-strip-inbox"
+      data-on={here || undefined}
+      data-unread={unread || undefined}
+      data-alert={alerts || undefined}
+      aria-label={label}
+      title={label}
+      onPress={() => { if (!here) navigate(`${BASE}/inbox`, { state: { v2Back: true } }) }}
+    >
+      <Icon name="inbox" size={14} tone={alerts ? 'hot' : unread || here ? 'fg' : 'dim'} glow={unread > 0 || here} />
+      {unread > 0 && <span className="vl-strip-inbox-n">{unread > 99 ? '99+' : unread}</span>}
+    </Press>
   )
 }
 

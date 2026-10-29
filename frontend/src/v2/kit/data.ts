@@ -6,6 +6,7 @@ import {
   fetchImgToken, imgAuthRev, imgTrusted, musicImg, plexImg, plexImgPath, subscribeImgAuth, type PlexItem,
 } from '../../lib/api'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarApi'
+import { fetchInboxCount, type InboxCount } from '../../lib/inboxApi'
 import type { HostStat, LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
 import { lightColor, pctFromBrightness } from '../../lib/lights'
 import { fetchProjList } from '../../lib/projectsApi'
@@ -982,6 +983,13 @@ export function useTracker(): Live<TrackerVM> {
 }
 
 // ---------- calendar ----------
+
+// ---------- inbox (the strip's count; the list itself is Inbox.tsx's own query) ----------
+
+/** Unread items, and how many of them are alerts. Only counts, so it is safe in the persisted cache. */
+export function useInboxCount(): Live<InboxCount> {
+  return useLive('inbox-count', fetchInboxCount, 20_000)
+}
 
 export type EventVM = { id: string; title: string; start: number; end: number; allDay: boolean; location: string; color: string; source: string }
 

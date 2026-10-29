@@ -3,7 +3,7 @@
  *
  * Default: an offline run against fakes, on odin from a scratch copy (tmux needed). A fake
  * `claude` prints an authorize URL and reads a code like the real CLI, a fake ssh answers for
- * thor, a fake lilkups records the DM and a loopback server answers the token probe. It drives
+ * thor, a scratch inbox records the sign-in note and a loopback server answers the token probe. It drives
  * the routes over HTTP: login and token mode through the one-tap path, a wrong code, the input
  * checks, and the vault file modes. Nothing real is signed in and nothing leaves the box.
  *
@@ -123,6 +123,8 @@ echo sent
     VALKYRIE_ODIN_CLAUDE: path.join(bin, 'claude'),
     VALKYRIE_SSH_BIN: path.join(bin, 'ssh'),
     LILKUPS_BIN: path.join(bin, 'lilkups'),
+    // the sign-in steps land in the inbox: a scratch one, never odin's real data dir
+    VALKYRIE_DATA_DIR: path.join(root, 'data'),
     CLAUDE_SWITCH_DIR: path.join(root, 'switch'),
     ACCOUNT_SWITCH_TMUX_SOCKET: `claude-signin-smoke-${process.pid}`,
     ACCOUNT_SWITCH_API_BASE: `http://127.0.0.1:${(probeSrv.address() as { port: number }).port}`,
@@ -172,8 +174,13 @@ echo sent
     check('second start 409', (await j('POST', '/account-switch/signin', { accountId: 'smoke-acct', mode: 'token' }))[0] === 409)
     let r = await waitFor(id1, (x) => x.needsCode || x.finishedAt)
     check('login needs code after captcha', r.needsCode === true && r.fallbackReason === 'captcha' && r.dmSent === true, `${r.stage} ${r.detail}`)
-    const dm = fs.readFileSync(path.join(root, 'dm.txt'), 'utf8')
-    check('DM carries the authorize URL and the reason', dm.includes('oauth/authorize') && /captcha/.test(dm))
+    const inbox = await import('../src/lib/inboxStore.ts')
+    const note = inbox.listInbox({ source: 'claude' })[0]
+    const dm = note ? `${note.title}
+${note.body}` : ''
+    check('inbox note carries the authorize URL and the reason', dm.includes('oauth/authorize') && /captcha/.test(dm))
+    check('inbox note opens the paste page', note?.url === `/m/ai/usage?signin=${id1}`, String(note?.url))
+    check('no Discord DM while the inbox works', !fs.existsSync(path.join(root, 'dm.txt')))
     check('status never carries the URL', !JSON.stringify((await j('GET', '/account-switch/signin'))[1]).includes('oauth/authorize'))
     check('malformed code 400', (await j('POST', `/account-switch/signin/${id1}/code`, { code: 'not a code' }))[0] === 400)
     ;[st] = await j('POST', `/account-switch/signin/${id1}/code`, { code: ` ${GOOD}\n` })

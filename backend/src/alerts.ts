@@ -1,17 +1,13 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { pushToAll } from './routes/push.js'
+import { postInbox, type InboxLevel } from './lib/inboxStore.js'
 import { CLAUDE_ACCOUNTS } from './lib/claudeAccounts.js'
 
 // The health alerts (Claude quota and sign-ins, disk, Vaultwarden) go to the
-// phone as Web Push from this server. They used to be Discord webhook posts,
-// which meant the one place Brendon had to watch for "something is wrong" was
-// a chat channel he had to remember to open.
-//
-// postDiscord stays for the Plex media-request notices in routes/plex.ts.
-// Those are a running record of what was asked for, not something to interrupt
-// a phone over, so they keep the channel.
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
+// inbox (lib/inboxStore.ts), which keeps them and pushes them to the phone.
+// They used to be Discord webhook posts, which meant the one place Brendon had
+// to watch for "something is wrong" was a chat channel he had to remember to
+// open, and then bare Web Push, which left no record once dismissed.
 const POLL_MS = 60_000
 const RESETSAT_JITTER_MS = 30 * 60_000
 const DISK_THRESHOLD = 90
@@ -59,32 +55,30 @@ function saveState(state: AlertState): void {
   }
 }
 
-export async function postDiscord(content: string): Promise<void> {
-  if (!WEBHOOK_URL) return
-  try {
-    const r = await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
-    })
-    if (!r.ok) {
-      console.error('[alerts] webhook failed', r.status, await r.text().catch(() => ''))
-    }
-  } catch (err) {
-    console.error('[alerts] webhook error', (err as Error).message)
-  }
-}
-
 /**
- * Raise one health alert on every subscribed device.
+ * Raise one health alert: an inbox item, pushed to every subscribed device.
  *
- * `tag` is the lock-screen collapse key, and the pairs here are deliberate: a
- * recovery carries the SAME tag as the problem it clears, so "disk back under
- * 90%" replaces "disk at 94%" instead of leaving both on the screen.
+ * `tag` is both the inbox fold key and the lock-screen collapse key, and the
+ * pairs here are deliberate: a recovery carries the SAME tag as the problem it
+ * clears, so "disk back under 90%" replaces "disk at 94%" in the inbox and on
+ * the lock screen instead of leaving both. Recoveries are info level but still
+ * push, or the problem would stay on the lock screen. `pushUrl` is the classic
+ * path the service worker maps to a v2 screen by tag (public/push-sw.js);
+ * `url` is where the inbox's Open goes.
  */
-async function alert(title: string, body: string, tag: string, url: string): Promise<void> {
-  const r = await pushToAll({ title, body, tag, url })
-  if (!r.ok) console.error('[alerts] push failed', { title, detail: r.detail })
+async function alert(a: {
+  title: string; body: string; tag: string; pushUrl: string; url: string
+  source: string; level: InboxLevel; push?: boolean
+}): Promise<void> {
+  try {
+    const r = await postInbox({
+      source: a.source, level: a.level, title: a.title, body: a.body, tag: a.tag, url: a.url,
+      push: a.push ?? true, pushTag: a.tag, pushUrl: a.pushUrl,
+    })
+    if (!r.pushed && r.pushDetail) console.error('[alerts] push failed', { title: a.title, detail: r.pushDetail })
+  } catch (err) {
+    console.error('[alerts] inbox post failed', { title: a.title, err: (err as Error).message })
+  }
 }
 
 async function fetchJSON<T>(p: string): Promise<T | null> {
@@ -155,11 +149,11 @@ async function tick(state: AlertState): Promise<AlertState> {
     if (quota) {
       const over = quota.sessionPct >= CLAUDE_THRESHOLD
       if (over && !state.claudeOver90) {
-        await alert(
-          `Claude session at ${quota.sessionPct}%`,
-          `Resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`,
-          'claude-quota', '/dashboard',
-        )
+        await alert({
+          title: `Claude session at ${quota.sessionPct}%`,
+          body: `Resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`,
+          tag: 'claude-quota', pushUrl: '/dashboard', url: '/m/ai/usage', source: 'claude', level: 'warn',
+        })
       }
       next.claudeOver90 = over
     }
@@ -174,11 +168,11 @@ async function tick(state: AlertState): Promise<AlertState> {
     for (const c of dead) {
       if (state.signedOut.includes(c.id)) continue
       const who = c.email ? `${c.label ?? c.id} (${c.email})` : (c.label ?? c.id)
-      await alert(
-        `Claude sign-in ${c.authError}`,
-        `${who}. Run claude /login against its config dir on odin.`,
-        `claude-signin-${c.id}`, '/dashboard',
-      )
+      await alert({
+        title: `Claude sign-in ${c.authError}`,
+        body: `${who}. Run claude /login against its config dir on odin.`,
+        tag: `claude-signin-${c.id}`, pushUrl: '/dashboard', url: '/m/ai/usage', source: 'claude', level: 'warn',
+      })
     }
     const recovered = state.signedOut.filter((id) => {
       const c = clients.find((x) => x.id === id)
@@ -186,7 +180,10 @@ async function tick(state: AlertState): Promise<AlertState> {
     })
     for (const id of recovered) {
       const c = clients.find((x) => x.id === id)
-      await alert('Claude sign-in restored', `${c?.label ?? id}.`, `claude-signin-${id}`, '/dashboard')
+      await alert({
+        title: 'Claude sign-in restored', body: `${c?.label ?? id}.`,
+        tag: `claude-signin-${id}`, pushUrl: '/dashboard', url: '/m/ai/usage', source: 'claude', level: 'info',
+      })
     }
     next.signedOut = dead.map((c) => c.id)
   }
@@ -195,9 +192,15 @@ async function tick(state: AlertState): Promise<AlertState> {
     const pct = sys.disk.percent
     const over = pct >= DISK_THRESHOLD
     if (over && !state.diskOver90) {
-      await alert(`Disk at ${pct.toFixed(1)}%`, 'Running out of space on /.', 'disk', '/services')
+      await alert({
+        title: `Disk at ${pct.toFixed(1)}%`, body: 'Running out of space on /.',
+        tag: 'disk', pushUrl: '/services', url: '/m/system/hosts', source: 'odin', level: 'alert',
+      })
     } else if (!over && state.diskOver90) {
-      await alert(`Disk back under ${DISK_THRESHOLD}%`, `Now ${pct.toFixed(1)}%.`, 'disk', '/services')
+      await alert({
+        title: `Disk back under ${DISK_THRESHOLD}%`, body: `Now ${pct.toFixed(1)}%.`,
+        tag: 'disk', pushUrl: '/services', url: '/m/system/hosts', source: 'odin', level: 'info',
+      })
     }
     next.diskOver90 = over
   }
@@ -205,17 +208,29 @@ async function tick(state: AlertState): Promise<AlertState> {
   if (vault) {
     const down = !vault.container.running
     if (down && !state.vaultDown) {
-      await alert('Vaultwarden is down', 'The container stopped.', 'vault-container', '/vault')
+      await alert({
+        title: 'Vaultwarden is down', body: 'The container stopped.',
+        tag: 'vault-container', pushUrl: '/vault', url: '/vault', source: 'vaultwarden', level: 'alert',
+      })
     } else if (!down && state.vaultDown) {
-      await alert('Vaultwarden is back up', 'The container is running again.', 'vault-container', '/vault')
+      await alert({
+        title: 'Vaultwarden is back up', body: 'The container is running again.',
+        tag: 'vault-container', pushUrl: '/vault', url: '/vault', source: 'vaultwarden', level: 'info',
+      })
     }
     next.vaultDown = down
 
     const stale = vault.backups.stale
     if (stale && !state.vaultStale) {
-      await alert('Vault backups are stale', 'The last backup is older than 36 hours.', 'vault-backups', '/vault')
+      await alert({
+        title: 'Vault backups are stale', body: 'The last backup is older than 36 hours.',
+        tag: 'vault-backups', pushUrl: '/vault', url: '/vault', source: 'vaultwarden', level: 'warn',
+      })
     } else if (!stale && state.vaultStale) {
-      await alert('Vault backups are fresh again', 'A backup landed inside the window.', 'vault-backups', '/vault')
+      await alert({
+        title: 'Vault backups are fresh again', body: 'A backup landed inside the window.',
+        tag: 'vault-backups', pushUrl: '/vault', url: '/vault', source: 'vaultwarden', level: 'info',
+      })
     }
     next.vaultStale = stale
   }

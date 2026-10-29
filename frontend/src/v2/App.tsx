@@ -16,6 +16,7 @@ import System from './screens/System'
 import { SettingsScreen } from './screens/Settings'
 import { CalendarPage } from './screens/Calendar'
 import MealsPage from './screens/Meals'
+import InboxPage from './screens/Inbox'
 import './v2.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
@@ -173,6 +174,7 @@ export default function V2App() {
         <Route path="w/call" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><CallWindow /></Suspense>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="meals" element={<MealsPage />} />
+        <Route path="inbox" element={<InboxPage />} />
         <Route path=":screen/:sub?" element={<V2 />} />
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}

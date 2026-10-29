@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import { Agent, fetch as undiciFetch } from 'undici'
-import { postDiscord } from '../alerts.js'
+import { postInbox } from '../lib/inboxStore.js'
 import { signImgToken } from '../auth/token.js'
 
 // Plex library browsing + media requests.
@@ -13,10 +13,18 @@ import { signImgToken } from '../auth/token.js'
 // need the Plex token. Requests ride the existing acquisition stack: movies go
 // to Radarr, shows to Sonarr, albums to Lidarr (lookup -> add -> they search
 // and download, Plex picks the file up). Free-text requests that the automated
-// path can't resolve are journaled and posted to Discord, where the agent (or
-// Brendon) picks them up — that's the "message an agent" path.
+// path can't resolve are journaled and noted in the inbox, where Brendon picks
+// them up — that's the "message an agent" path.
 
 const router = Router()
+
+// A request leaves a line in the inbox (Media source, no push): a running
+// record of what was asked for, not something to interrupt the phone over.
+// It used to be a Discord webhook post.
+function noteRequest(title: string, body: string): void {
+  void postInbox({ source: 'plex', level: 'info', title: `Requested: ${title}`, body, url: '/m/media/requests' })
+    .catch((err: Error) => console.error('[plex] inbox note failed', err.message))
+}
 
 const PLEX_URL = process.env.PLEX_URL || 'http://127.0.0.1:32400'
 const PLEX_TOKEN = process.env.PLEX_TOKEN || ''
@@ -1092,7 +1100,7 @@ router.post('/plex/request/add', async (req, res) => {
         }),
       })
       journalAppend({ kind: 'movie', title: movie.title, year: movie.year, tmdbId, status: 'queued' })
-      void postDiscord(`🎬 media request: **${movie.title}**${movie.year ? ` (${movie.year})` : ''} → radarr, searching now`)
+      noteRequest(`${movie.title}${movie.year ? ` (${movie.year})` : ''}`, 'Sent to Radarr, searching now.')
       return res.json({ ok: true, detail: `${movie.title} sent to radarr — it will appear in Plex once downloaded` })
     }
     if (kind === 'show' && typeof tvdbId === 'number' && SONARR_KEY) {
@@ -1111,7 +1119,7 @@ router.post('/plex/request/add', async (req, res) => {
         }),
       })
       journalAppend({ kind: 'show', title: series.title, year: series.year, tvdbId, status: 'queued' })
-      void postDiscord(`📺 media request: **${series.title}**${series.year ? ` (${series.year})` : ''} → sonarr, searching now`)
+      noteRequest(`${series.title}${series.year ? ` (${series.year})` : ''}`, 'Sent to Sonarr, searching now.')
       return res.json({ ok: true, detail: `${series.title} sent to sonarr — episodes will appear in Plex as they download` })
     }
     if (kind === 'album' && typeof foreignAlbumId === 'string' && /^[0-9a-f-]{36}$/i.test(foreignAlbumId) && lidarrConfigured()) {
@@ -1121,7 +1129,7 @@ router.post('/plex/request/add', async (req, res) => {
       const label = `${album.artist.artistName}: ${album.title}`
       const done = () => {
         journalAppend({ kind: 'album', title: album.title, artist: album.artist?.artistName, year, foreignAlbumId, status: 'queued' })
-        void postDiscord(`🎵 media request: **${label}**${year ? ` (${year})` : ''} → lidarr, searching now`)
+        noteRequest(`${label}${year ? ` (${year})` : ''}`, 'Sent to Lidarr, searching now.')
         return res.json({ ok: true, detail: `${label} sent to lidarr, it will appear in Plex once downloaded` })
       }
       // Lidarr already knows it. With files it is in the library; monitored
@@ -1197,7 +1205,7 @@ router.post('/plex/request/message', async (req, res) => {
   const message = String((req.body ?? {}).message ?? '').trim().slice(0, 500)
   if (message.length < 3) return res.status(400).json({ error: 'message too short' })
   journalAppend({ kind: 'message', message, status: 'sent to agent' })
-  void postDiscord(`🤖 **media request for the agent:** ${message}`)
+  noteRequest('Message for the agent', message)
   res.json({ ok: true, detail: 'sent — the agent will take it from here' })
 })
 
