@@ -78,7 +78,8 @@ router.get('/call/state', h(async (req, res) => {
 router.post('/call/start', h(async (req, res) => {
   const area = String(req.body?.area ?? '')
   if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(area)) throw new CallError(400, 'area must be an area id')
-  res.json(await thor(res, '/start', { method: 'POST', body: { area } }))
+  // record: also record the screen and audio (AI > Call's Recording switch)
+  res.json(await thor(res, '/start', { method: 'POST', body: { area, record: req.body?.record === true } }))
 }))
 
 router.post('/call/stop', h(async (req, res) => {

@@ -53,9 +53,12 @@ check(last()?.url === '/state?rev=1&after=4&wait=3' && last()?.auth === `Bearer 
 r = await j('GET', '/call/state?wait=99&rev=x')
 check(last()?.url === '/state?wait=25', `state clamps the wait and drops a bad rev: ${last()?.url}`)
 
-r = await j('POST', '/call/start', { area: 'one' })
+r = await j('POST', '/call/start', { area: 'one', record: true })
 check(r[0] === 200 && r[1].call?.id === 'c1', `start answered ${r[0]} ${JSON.stringify(r[1])}`)
-check(last()?.method === 'POST' && last()?.url === '/start' && last()?.body?.area === 'one', `start reached thor with ${JSON.stringify(last()?.body)}`)
+// 2026-10-29: the route dropped record, and a saved call had no video
+check(last()?.method === 'POST' && last()?.url === '/start' && last()?.body?.area === 'one' && last()?.body?.record === true, `start reached thor with ${JSON.stringify(last()?.body)}`)
+await j('POST', '/call/start', { area: 'one' })
+check(last()?.body?.record === false, `a start without record reached thor with ${JSON.stringify(last()?.body)}`)
 const n = seen.length
 r = await j('POST', '/call/start', { area: 'Bad Area!' })
 check(r[0] === 400 && seen.length === n, `a bad area is refused on odin (${r[0]})`)
