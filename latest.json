@@ -1,15 +1,15 @@
 {
-  "version": "0.3.158",
-  "notes": "Call: the recording covers every screen",
-  "pub_date": "2026-10-29T16:50:41Z",
+  "version": "0.3.159",
+  "notes": "Tasks: one list of every open task, with due dates",
+  "pub_date": "2026-10-29T17:24:20Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVo0eFY0a0xDSUhZYXRzTy8rQ3d5YTV6dVEramEvSGNwQlpPQU81R01oQ0FUZTBHLzVLeDNHRUkvNUw2cnpKUWpHRVo1aW1vZ2pVQUNVZFBTTUxzbWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjkyNTQyCWZpbGU6VmFsa3lyaWVfMC4zLjE1OF94NjQtc2V0dXAuZXhlCmlYRU9KTHpPT1NrRGFsdGcwZFA2YjVkNHBiZHVqMjJYcWdXZ2NOa2s3MGpHQVJ3Vk40ODNnLzhXTkxKazhJUG5PVkFUME0wR1g0eVFpVTdiZFpCNEFRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.158/Valkyrie_0.3.158_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWFkeHJBVXhvcnNBd2REWGRnR05xZmt4L0lGdEovMEtPT3BwbGVNbklxc3haaEZTdFhydXFSQmVBMHJhOGJ1TVkyT0VqYWZ0WG5nTWozZUdXSFhOVkF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjk0NTU3CWZpbGU6VmFsa3lyaWVfMC4zLjE1OV94NjQtc2V0dXAuZXhlCnBaSWZoYThsVktVQ3ZibkUrTWVCeTFsT1RLNFhxZkVKMWFWWEE4ZGVzWXViekxYanp3b1dvYVNzRTlWdGlnaXN5MnhJeXpCRmZaZERPTEtJOVh2eUJBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.159/Valkyrie_0.3.159_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVwdkprL3F6UWFYaEhLak5lZHVURFRyRDU2cWJUM0RRcnFvbGU1aXFOUStBWFlCTGZqb1plWEhrLzVQczF3V3dJVEhRSkVFY2YvTUVZa2t1VXBnelFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjkyNDgzCWZpbGU6VmFsa3lyaWVfMC4zLjE1OF9hbWQ2NC5BcHBJbWFnZQpjaXBSMFBXWENDc1lMVXJiMnlleldtbDJMWXVqamEySU9DbzAwa2ZJVlppYjA5dGxzVGl3T3ZVYW9Sb3NZY2h0cy9aaEtmbGVicy9FSVJUVk1Va1VBZz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.158/Valkyrie_0.3.158_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJpMzZDbGo5U2JGMFdEOWVnK0gycDdoQStsOXF4dWdNUlZ3VjdDcC9DZVhWRlpoaXh4YlJRMjRIWmdlMFZoZTJRZjhNR1lkSDhBWkNMeFErak9oYkFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjk0NDk2CWZpbGU6VmFsa3lyaWVfMC4zLjE1OV9hbWQ2NC5BcHBJbWFnZQpaVEVhQ25OQjZ0MHZzd21ERkUxRUdEcmxRa3llaFpkaDNjZkUzZnVNT0pLZEZVOXhlVDA1bkJlV0N6N2dVQ2w1ZlAzTGJPejFyL0w2Wk5aQ1JzVFlDUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.159/Valkyrie_0.3.159_amd64.AppImage"
     }
   }
 }
