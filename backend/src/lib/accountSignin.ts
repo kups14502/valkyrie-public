@@ -4,6 +4,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { CLAUDE_ACCOUNTS, type ClaudeAccount } from './claudeAccounts.js'
+import { postInbox } from './inboxStore.js'
 
 // Claude sign-ins for the account switcher, one account at a time.
 //
@@ -515,11 +516,18 @@ async function browserLeg(url: string, req: SigninRequest, dryRun: boolean): Pro
 
 const NY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
 
-async function dm(text: string): Promise<boolean> {
+// The sign-in steps go to the inbox (lib/inboxStore.ts), pushed, with Open on the paste page.
+// Only if the inbox refuses it, Lil' kups sends a Discord DM: --message - reads stdin, so the
+// authorize URL is never on a command line, and lilkups logs the length only.
+async function dm(text: string, id?: string): Promise<boolean> {
   try {
-    // --message - reads stdin, so the authorize URL is never on a command line; lilkups logs the
-    // length only.
-    const r = await run(LILKUPS_BIN, ['send', '--message', '-'], { input: text, timeoutMs: 20_000 })
+    await postInbox({ source: 'claude', level: 'warn', push: true, body: text, url: id ? `/m/ai/usage?signin=${id}` : '/m/ai/usage' })
+    return true
+  } catch (err) {
+    console.error('[account-signin] inbox post failed:', (err as Error).message)
+  }
+  try {
+    const r = await run(LILKUPS_BIN, ['send', '--discord', '--message', '-'], { input: text, timeoutMs: 20_000 })
     return r.code === 0
   } catch {
     return false
@@ -567,7 +575,7 @@ async function waitForPerson(firstReason: string): Promise<void> {
     a.waitUntil = until
     const lead = dmLead
     dmLead = null
-    const dmSent = await dm(dmText(a, reason, until, lead))
+    const dmSent = await dm(dmText(a, reason, until, lead), req.id)
     if (active !== a) return
     update(req, {
       stage: 'needs-code', needsCode: true, fallbackReason: reason, dmSent, dmAt: now(),
@@ -609,7 +617,7 @@ export async function resendDm(id: string): Promise<SigninRequest> {
   if (!a || a.req.id !== id) throw new SigninError(404, 'that sign-in is not running')
   if (!a.settle || !a.waitUntil) throw new SigninError(409, 'that sign-in is not waiting for a code')
   if (a.req.dmAt && Date.now() - Date.parse(a.req.dmAt) < DM_RESEND_MS) throw new SigninError(429, 'the DM went out less than a minute ago')
-  const dmSent = await dm(dmText(a, a.req.fallbackReason ?? 'manual', a.waitUntil, null))
+  const dmSent = await dm(dmText(a, a.req.fallbackReason ?? 'manual', a.waitUntil, null), a.req.id)
   if (active === a) update(a.req, { dmSent, dmAt: now(), detail: dmSent ? 'waiting for the pasted code' : 'waiting for the pasted code (the DM failed)' })
   if (!dmSent) throw new SigninError(502, 'Lil kups did not send the DM')
   return getSignin(id)!

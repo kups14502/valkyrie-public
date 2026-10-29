@@ -164,6 +164,7 @@ function PaletteBox({ screens, onClose }: { screens: ScreenDef[]; onClose: () =>
     // the full pages outside the tabs (Calendar.tsx PageFrame): pushed, so their Back returns here
     const page = (to: string) => navigate(to, { state: { v2Back: true } })
     out.push({ id: 'go:calendar', label: 'Calendar', group: 'Go to', icon: 'calendar', keys: 'events month week agenda day', run: () => page(`${BASE}/calendar`) })
+    out.push({ id: 'go:inbox', label: 'Inbox', group: 'Go to', icon: 'inbox', keys: 'alerts notifications messages reminders unread', run: () => page(`${BASE}/inbox`) })
     out.push({ id: 'go:meals', label: 'Meals', group: 'Go to', icon: 'supplements', keys: 'food macros calories protein', run: () => page(`${BASE}/meals`) })
     out.push({ id: 'go:settings', label: 'Settings', group: 'Go to', icon: 'settings', keys: 'appearance scheme color font notifications build sign out device', run: () => go(`${BASE}/${SETTINGS_ID}`) })
     out.push({ id: 'go:skin', label: 'AI · Terminal preview', group: 'Go to', icon: 'claude', keys: 'skin sample', run: () => go(`${BASE}/ai/skin`) })

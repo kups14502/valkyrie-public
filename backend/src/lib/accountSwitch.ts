@@ -7,6 +7,7 @@ import {
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { CLAUDE_ACCOUNTS } from './claudeAccounts.js'
+import { postInbox } from './inboxStore.js'
 import { linkSwitcher } from './accountSignin.js'
 import { capturePane, listSessions, paneInMode, remoteLabel, SSH_BIN, typeLine } from '../terminal/tmux.js'
 import {
@@ -225,9 +226,17 @@ export function readLog(limit = 50): LogEntry[] {
 
 // ------------------------------------------------------------- notify ----
 
+// To the inbox (lib/inboxStore.ts), which keeps it and pushes it to the phone.
+// Lil' kups straight to a Discord DM only if the inbox itself refuses it.
 async function dm(text: string): Promise<void> {
   try {
-    await exec(LILKUPS, ['send', '--target', DM_TARGET, '--message=' + text], { timeout: 15_000 })
+    await postInbox({ source: 'claude', level: 'warn', body: text, url: '/m/ai/usage' })
+    return
+  } catch (err) {
+    console.error('[account-switch] inbox post failed:', (err as Error).message)
+  }
+  try {
+    await exec(LILKUPS, ['send', '--discord', '--target', DM_TARGET, '--message=' + text], { timeout: 15_000 })
   } catch (err) {
     const e = err as Error & { stderr?: string; code?: unknown }
     const why = String(e.stderr ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? `exit ${String(e.code ?? '?')}`
