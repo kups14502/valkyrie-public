@@ -148,10 +148,12 @@ function tabItemOp(b: Body): TabItemOp {
   const text = str(b, 'text')
   const label = str(b, 'label')
   const url = str(b, 'url')
-  if (op === 'add') return defined({ op, text, label, url })
+  // null clears a checklist item's due date, so it is kept apart from absent
+  const due = b.due === null ? null : str(b, 'due')
+  if (op === 'add') return defined({ op, text, label, url, due })
   const itemId = need(str(b, 'itemId'), 'itemId')
   if (op === 'set') return { op, itemId, done: need(bool(b, 'done'), 'done') }
-  if (op === 'edit') return defined({ op, itemId, text, label, url })
+  if (op === 'edit') return defined({ op, itemId, text, label, url, due })
   return { op, itemId }
 }
 

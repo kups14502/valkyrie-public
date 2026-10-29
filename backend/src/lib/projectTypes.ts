@@ -17,7 +17,8 @@ export type Project = {
   rev: number; metaRev: number; createdAt: string; updatedAt: string
 }
 export type TabKind = 'markdown' | 'checklist' | 'links'
-export type ChecklistItem = { id: string; text: string; done: boolean; doneAt: string | null }
+// due: New York wall-clock time, 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:mm'; absent on items made before due dates
+export type ChecklistItem = { id: string; text: string; done: boolean; doneAt: string | null; due?: string | null }
 export type LinkItem = { id: string; label: string; url: string }
 export type Tab = {
   id: string; projectId: string; kind: TabKind; title: string
@@ -81,9 +82,9 @@ export type ProjectPatch = { name?: string; summary?: string; nextAction?: strin
 export type NewTabInput = { kind: TabKind; title: string; body?: string; items?: string[] | { label: string; url: string }[]; position?: 'start' | 'end' }
 export type TabPatch = { baseRev?: number; title?: string; body?: string; appendBody?: string }
 export type TabItemOp =
-  | { op: 'add'; text?: string; label?: string; url?: string }
+  | { op: 'add'; text?: string; label?: string; url?: string; due?: string | null }
   | { op: 'set'; itemId: string; done: boolean }
-  | { op: 'edit'; itemId: string; text?: string; label?: string; url?: string }
+  | { op: 'edit'; itemId: string; text?: string; label?: string; url?: string; due?: string | null }
   | { op: 'remove'; itemId: string }
 export type PinFileInput = { kind: FileKind; label: string; relPath?: string; url?: string; note?: string; content?: string; contentType?: 'markdown' | 'text' }
 export type FilePatch = { label?: string; note?: string; content?: string; contentType?: 'markdown' | 'text' }
@@ -114,4 +115,6 @@ export class ProjError extends Error {
 }
 
 export const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+// a checklist item's due: a New York date, or a date and a time
+export const DUE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

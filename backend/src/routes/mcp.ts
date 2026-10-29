@@ -365,8 +365,9 @@ function registerTools(server: McpServer, loc: McpLocals): void {
   }, (a) => toolRun(() => removeTab(target(a.projectId), a.tabId, ctx)))
 
   server.registerTool('tab_item', {
-    description: 'Change one item in a checklist or links tab. checklist: add takes text; set takes itemId and done; '
-      + 'edit takes itemId and text. links: add takes label and url; edit takes itemId, label and url. remove takes itemId.',
+    description: 'Change one item in a checklist or links tab. checklist: add takes text and an optional due; set takes itemId and done; '
+      + 'edit takes itemId and text and/or due. links: add takes label and url; edit takes itemId, label and url. remove takes itemId. '
+      + 'due is New York time, YYYY-MM-DD or YYYY-MM-DDTHH:mm; null clears it. Checklist items are the tasks on the Tasks list.',
     inputSchema: {
       ...P,
       tabId: z.string(),
@@ -376,15 +377,16 @@ function registerTools(server: McpServer, loc: McpLocals): void {
       done: z.boolean().optional(),
       label: text(LIMITS.linkLabel).optional(),
       url: text(LIMITS.url).optional(),
+      due: z.string().max(16).nullable().optional(),
     },
   }, (a) => toolRun(() => {
     let op: TabItemOp
     if (a.op === 'add') {
-      op = defined({ op: a.op, text: a.text, label: a.label, url: a.url })
+      op = defined({ op: a.op, text: a.text, label: a.label, url: a.url, due: a.due })
     } else {
       const itemId = a.itemId ?? fail(`${a.op} needs itemId`)
       if (a.op === 'set') op = { op: a.op, itemId, done: a.done ?? fail('set needs done') }
-      else if (a.op === 'edit') op = defined({ op: a.op, itemId, text: a.text, label: a.label, url: a.url })
+      else if (a.op === 'edit') op = defined({ op: a.op, itemId, text: a.text, label: a.label, url: a.url, due: a.due })
       else op = { op: a.op, itemId }
     }
     return tabItem(target(a.projectId), a.tabId, op, ctx)

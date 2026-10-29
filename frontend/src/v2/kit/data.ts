@@ -7,6 +7,7 @@ import {
 } from '../../lib/api'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarApi'
 import { fetchInboxCount, type InboxCount } from '../../lib/inboxApi'
+import { fetchTasks, type TasksPage } from '../../lib/tasksApi'
 import type { HostStat, LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
 import { lightColor, pctFromBrightness } from '../../lib/lights'
 import { fetchProjList } from '../../lib/projectsApi'
@@ -982,7 +983,12 @@ export function useTracker(): Live<TrackerVM> {
   }, 60_000)
 }
 
-// ---------- calendar ----------
+// ---------- tasks (the dashboard's glance; the page itself is Tasks.tsx's own query) ----------
+
+/** Every open task with its project and due date (lib/tasksApi.ts). */
+export function useOpenTasks(): Live<TasksPage> {
+  return useLive('tasks-open', () => fetchTasks('open'), 60_000)
+}
 
 // ---------- inbox (the strip's count; the list itself is Inbox.tsx's own query) ----------
 
@@ -990,6 +996,8 @@ export function useTracker(): Live<TrackerVM> {
 export function useInboxCount(): Live<InboxCount> {
   return useLive('inbox-count', fetchInboxCount, 20_000)
 }
+
+// ---------- calendar ----------
 
 export type EventVM = { id: string; title: string; start: number; end: number; allDay: boolean; location: string; color: string; source: string }
 

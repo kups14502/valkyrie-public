@@ -898,6 +898,10 @@
 .vc-task[data-done] .vc-task-box { background: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
 .vc-task[data-done] > span { color: var(--dim); text-decoration: line-through; }
 .vc-task[data-busy] { opacity: .75; }
+/* its due date (ProjectPage.tsx DueChip), at the line's end; overdue in the hot color */
+.vc-task-due { flex: none; margin-left: auto; padding-left: 10px; font-style: normal; font-size: 11px; line-height: 17px; color: var(--dim); white-space: nowrap; }
+.vc-task-due[data-state='today'] { color: var(--fg); text-shadow: var(--text-glow); }
+.vc-task-due[data-state='overdue'] { color: var(--hot); text-shadow: var(--hot-glow); }
 @media (hover: hover) and (pointer: fine) { .vc-task:hover { background: color-mix(in srgb, var(--fg) 6%, #000); } }
 
 /* text inputs: an outlined dark field, 16px on touch so iOS never zooms */

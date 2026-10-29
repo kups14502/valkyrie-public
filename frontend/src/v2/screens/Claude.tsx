@@ -29,7 +29,7 @@ import { shortName } from '../../lib/quickSessions'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { UploadButton } from '../kit/upload'
 import {
-  LinkSessionPicker, NewProjectFlow, PIcon, ProjectNotes, ProjectSettings, SessionActions, type NoteTab, type ProjMeta,
+  DueChip, LinkSessionPicker, NewProjectFlow, PIcon, ProjectNotes, ProjectSettings, SessionActions, type NoteTab, type ProjMeta,
 } from './ProjectPage'
 import { Accounts } from './Accounts'
 import { CallView } from './Call'
@@ -2980,7 +2980,7 @@ function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected,
   )
 }
 
-type ProjTask = { id: string; tabId: string; text: string; done: boolean }
+type ProjTask = { id: string; tabId: string; text: string; done: boolean; due?: string | null }
 type ProjReminder = { id: string; at: number; message: string }
 type ProjLink = { id: string; host: string; note: string; at: number }
 
@@ -3007,7 +3007,7 @@ function useProjDoc(id: string): Live<ProjDocVM> {
   return useLive<ProjDocVM>(projDocKey(id), async () => {
     const d = await fetchProjDoc(id)
     const lists = d.tabs.filter((t) => t.kind === 'checklist')
-    const tasks = lists.flatMap((t) => (t.items as ChecklistItem[]).map((it): ProjTask => ({ id: it.id, tabId: t.id, text: it.text, done: it.done })))
+    const tasks = lists.flatMap((t) => (t.items as ChecklistItem[]).map((it): ProjTask => ({ id: it.id, tabId: t.id, text: it.text, done: it.done, due: it.due ?? null })))
     const seen = new Set<string>()
     const links = d.sessions
       .filter((l) => !seen.has(l.sessionId) && !!seen.add(l.sessionId))
@@ -3547,6 +3547,7 @@ function ProjTasks({ projectId, tasks, listTab, k, onChanged }: {
                 >
                   <i className="vc-task-box">{done && <Icon name="done" size={11} tone="ink" />}</i>
                   <span>{t.text}</span>
+                  {t.due && !done && <DueChip due={t.due} />}
                 </Press>
               </li>
             )

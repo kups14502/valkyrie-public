@@ -2,7 +2,7 @@ import type { CSSProperties, ReactElement } from 'react'
 import {
   Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
-  House, Inbox, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
+  House, Inbox, LayoutDashboard, Laptop, Lightbulb, LightbulbOff, ListChecks, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
   Smartphone, Sparkles, SquareTerminal, PhoneCall, SquareArrowOutUpRight, Video, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
   UtensilsCrossed, Cctv, Fan, Snowflake, Armchair, Package, Blinds, Flashlight, Megaphone, Sunrise, MapPinned, CircleDot, CloudDownload, KeyRound,
@@ -46,6 +46,7 @@ export const ICONS = {
   calendar: CalendarDays,
   meals: UtensilsCrossed,
   inbox: Inbox,
+  tasks: ListChecks,
   projects: FolderKanban,
   // AI > Call, and opening something in a window of its own
   call: PhoneCall,
