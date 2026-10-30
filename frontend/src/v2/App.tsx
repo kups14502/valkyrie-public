@@ -19,6 +19,7 @@ import { CalendarPage } from './screens/Calendar'
 import MealsPage from './screens/Meals'
 import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
+import Messages from './screens/Messages'
 import './v2.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
@@ -58,6 +59,8 @@ const SCREENS: ScreenDef[] = [
     Component: DashboardTab,
     floor: (sub) => (sub === 'today' ? 'faint' : false),
   },
+  // Brendon and his AI employees (lib/agents.ts on the backend): channels, proposals, tickets
+  { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint' },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }, { id: 'call', label: 'Call' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room

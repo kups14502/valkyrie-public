@@ -118,6 +118,46 @@ export async function askClaude(prompt: string, opts: { model?: string; timeoutM
   }
 }
 
+export type CliRun = { text: string; cred: string; costUsd: number | null; turns: number | null; durationMs: number | null }
+
+/**
+ * A headless run with tools, for the work agents (lib/agents.ts): the caller
+ * passes every flag but the credential, in a working directory it owns. A
+ * credential that fails is followed by the next only while retryable() says
+ * the run has not acted yet, so a run that already posted or proposed is
+ * never repeated under another account.
+ */
+export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: () => boolean }): Promise<CliRun> {
+  const cli = CLI_CANDIDATES.find((c) => existsSync(c))
+  if (!cli) throw new ClaudeCliError('the claude CLI is not installed on this host')
+  const errors: string[] = []
+  for (const p of creds(opts.scratch)) {
+    try {
+      const { stdout } = await run(cli, args, {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs,
+        env: { ...process.env, ...p.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' },
+      })
+      const env = extractJson(stdout) as { result?: unknown; is_error?: unknown; total_cost_usd?: unknown; num_turns?: unknown; duration_ms?: unknown } | null
+      if (env && env.is_error === true) throw new Error(String(env.result ?? 'the CLI reported an error').slice(0, 300))
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+      return {
+        text: env && typeof env.result === 'string' ? env.result : stdout.slice(0, 4000),
+        cred: p.id,
+        costUsd: num(env?.total_cost_usd),
+        turns: num(env?.num_turns),
+        durationMs: num(env?.duration_ms),
+      }
+    } catch (err) {
+      const e = err as Error & { killed?: boolean; code?: string; stdout?: string }
+      const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : (e.stdout ? String(e.stdout).slice(0, 300) : e.message.slice(0, 300))
+      errors.push(`${p.id}: ${why}`)
+      if (!opts.retryable() || why === 'timed out') break
+    }
+  }
+  throw new ClaudeCliError(errors.join('; ') || 'no Claude profile answered')
+}
+
 // ---------------------------------------------------------- New York time ----
 
 const NY_PARTS = new Intl.DateTimeFormat('en-US', {

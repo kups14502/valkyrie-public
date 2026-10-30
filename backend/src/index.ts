@@ -42,9 +42,13 @@ import inboxRoute from './routes/inbox.js'
 import tasksRoute from './routes/tasks.js'
 import todayRoute from './routes/today.js'
 import mailRoute from './routes/mail.js'
+import msgRoute from './routes/msg.js'
+import agentMcpRoute from './routes/agentMcp.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
 import { startBrief } from './lib/brief.js'
+import { startAgents } from './lib/agents.js'
+import { startWorkFeeds } from './lib/workFeeds.js'
 import { resumeCaptures } from './lib/capture.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -148,6 +152,8 @@ app.use('/api', inboxRoute)
 app.use('/api', tasksRoute)
 app.use('/api', todayRoute)
 app.use('/api', mailRoute)
+app.use('/api', msgRoute)
+app.use('/api', agentMcpRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
@@ -205,6 +211,11 @@ server.listen(PORT, BIND, () => {
   // the morning brief at 7:30 New York time, and any capture a restart left half filed
   startBrief()
   resumeCaptures()
+  // the work agents and what they watch (Valkyrie Messages); AGENTS_OFF=1 keeps both idle
+  if (process.env.AGENTS_OFF !== '1') {
+    startAgents()
+    startWorkFeeds()
+  }
 })
 
 // Optional second listener on the tailscale interface: tailnet devices talk to
