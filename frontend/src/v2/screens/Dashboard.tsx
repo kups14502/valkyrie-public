@@ -876,7 +876,7 @@ function Tracker() {
         lit={count === items.length}
         i={4}
         mid={(
-          <span className="hm-step" data-no-swipe role="group" aria-label="Day">
+          <span className="hm-step" role="group" aria-label="Day">
             <Press className="hm-step-btn" aria-label={`The day before ${shownName.toLowerCase()}`} onPress={() => step(-1)}>
               <Chevron dir="left" />
             </Press>
@@ -2336,7 +2336,6 @@ function BulbSlider({ value, on, label, onCommit, onPreview }: {
       data-on={on || undefined}
       data-unknown={unknown || undefined}
       data-drag={drag || undefined}
-      data-no-swipe
       role="slider"
       tabIndex={0}
       aria-label={label}

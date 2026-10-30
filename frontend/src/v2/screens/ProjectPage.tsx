@@ -193,7 +193,7 @@ function AiProject({ onLeave, onManual }: { onLeave: () => void; onManual: () =>
   }
 
   return (
-    <form className="vp-form vl-build-on" onSubmit={(e) => { e.preventDefault(); void start() }} data-no-swipe>
+    <form className="vp-form vl-build-on" onSubmit={(e) => { e.preventDefault(); void start() }}>
       <label className="vc-flabel vl-build" style={iv(1)}>
         <span>What is it</span>
         <textarea
@@ -259,7 +259,7 @@ function ManualProject({ area, onCreated, onBack }: { area: string; onCreated: (
   }
 
   return (
-    <form className="vp-form vl-build-on" onSubmit={(e) => { e.preventDefault(); void create() }} data-no-swipe>
+    <form className="vp-form vl-build-on" onSubmit={(e) => { e.preventDefault(); void create() }}>
       <label className="vc-flabel vl-build" style={iv(1)}>
         <span>Name</span>
         <input ref={nameRef} className="vc-field" value={name} maxLength={LIMITS.projectName} onChange={(e) => setName(e.target.value)} placeholder="What this project is" autoComplete="off" />
@@ -388,7 +388,7 @@ export function ProjectSettings({ p, meta, onClose, onSaved, onArchived }: {
   if (init.status === 'archived') statusOptions.push({ value: 'archived', label: 'Archived', icon: <PIcon name="archive" tone={draft.status === 'archived' ? 'ink' : 'dim'} /> })
 
   return (
-    <form className="vc-edit vp-settings vl-build-on" onSubmit={(e) => { e.preventDefault(); save() }} data-no-swipe>
+    <form className="vc-edit vp-settings vl-build-on" onSubmit={(e) => { e.preventDefault(); save() }}>
       <label className="vc-flabel">
         <span>Name</span>
         <input className="vc-field" value={draft.name} maxLength={LIMITS.projectName} onChange={(e) => set('name', e.target.value)} autoComplete="off" />
@@ -508,7 +508,7 @@ export function LinkSessionPicker({ projectId, area, linked, inputRef, onClose, 
   }
 
   return (
-    <div className="vp-link" data-no-swipe>
+    <div className="vp-link">
       <div className="vc-search vp-link-search">
         <Icon name="search" size={15} tone={q ? 'fg' : 'dim'} className="vc-search-icon" />
         <input
@@ -586,7 +586,7 @@ export function SessionActions({ canMove, canStop, canDone, done, busy, onMove, 
     return () => clearTimeout(t)
   }, [armed])
   return (
-    <div className="vp-sacts" data-no-swipe>
+    <div className="vp-sacts">
       {canMove && (
         <Press className="vc-sact" data-main disabled={busy} title="Stop it in its window on thor and pick the conversation up here" onPress={onMove}>
           <PIcon name="move" tone="fg" />Move here
@@ -833,7 +833,7 @@ export function ProjectTasks({ projectId, tasks, listTab, k, onChanged }: {
           })}
         </ul>
       )}
-      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }}>
         <Icon name="add" size={14} tone={draft.trim() ? 'fg' : 'dim'} />
         <input
           className="vc-field"
@@ -933,7 +933,7 @@ export function ProjectReminders({ projectId, list, now, k, onChanged }: {
         )}
       </SecHead>
       {form && (
-        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }}>
           <input
             className="vc-field"
             value={msg}

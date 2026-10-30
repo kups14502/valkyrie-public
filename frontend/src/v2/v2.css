@@ -862,7 +862,7 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   }
   .vl-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
-  /* horizontal snap scroller: carries data-no-swipe in markup */
+  /* horizontal snap scroller */
   .vl-hscroll {
     display: flex;
     gap: 10px;
@@ -1279,7 +1279,6 @@ html[data-v2win] { --strip-h: 32px; }
   touch-action: pan-y;
   overscroll-behavior: none;
 }
-.vl-pager[data-swiping] { cursor: grabbing; }
 .vl-page {
   position: absolute;
   inset: 0;

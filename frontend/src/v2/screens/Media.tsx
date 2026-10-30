@@ -262,7 +262,7 @@ function Row({ icon, lit, label, value, extra, i, children, keyFor }: {
           </span>
         )}
       </Head>
-      <div ref={ref} className="vl-hscroll vm-scroll" data-no-swipe data-start>
+      <div ref={ref} className="vl-hscroll vm-scroll" data-start>
         {children}
       </div>
     </section>
@@ -303,7 +303,7 @@ function SearchLine({ value, onChange, placeholder, busy, onClose, autoFocus, la
     if (autoFocus) ref.current?.focus({ preventScroll: true })
   }, [autoFocus])
   return (
-    <div className="vm-search" data-no-swipe data-busy={busy || undefined}>
+    <div className="vm-search" data-busy={busy || undefined}>
       <Icon name="search" size={16} tone={busy ? 'fg' : 'dim'} glow={busy} className="vm-search-icon" />
       <input
         ref={ref}
@@ -1174,7 +1174,6 @@ function AZStrip({ has, current, onJump, label }: {
     <div
       ref={ref}
       className="vm-az"
-      data-no-swipe
       data-scrub={scrub ? '' : undefined}
       role="group"
       aria-label={label}
@@ -2559,7 +2558,7 @@ function NowPlaying({ i }: { i: number }) {
           <Press className="vm-ctl" aria-label="Next" disabled={p.index >= p.queue.length - 1} onPress={playerActions.next}><Glyph name="next" size={13} /></Press>
         </span>
       </div>
-      <div className="vm-seek" data-no-swipe>
+      <div className="vm-seek">
         <span>{clock(pos * 1000)}</span>
         <input
           type="range"
@@ -2893,7 +2892,7 @@ function RequestSearch({ open, visible }: { open: RequestVM[]; visible: boolean 
       {composing && (
         <form className="vm-compose" onSubmit={(e) => { e.preventDefault(); send() }}>
           <p className="vm-quiet-line">Not in the results, or something specific? The media agent takes it from there.</p>
-          <div className="vm-search" data-no-swipe data-busy={posting || undefined}>
+          <div className="vm-search" data-busy={posting || undefined}>
             <Icon name="asking" size={16} tone={posting ? 'fg' : 'dim'} glow={posting} className="vm-search-icon" />
             <input
               ref={msgRef}

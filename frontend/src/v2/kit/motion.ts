@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 // Motion primitives for v2. Everything here animates transform/opacity
 // through plain RAF loops that stop as soon as they settle, so an idle screen
@@ -133,59 +133,34 @@ export function useSpringNumber(target: number, opts?: SpringOpts): number {
   return v
 }
 
-// ---------- swipe pager ----------
+// ---------- pager ----------
 
-export type SwipePagerOpts = {
-  count: number
+export type PagerOpts = {
   /** committed page index (the shell's active tab) */
   index: number
-  /** called on release when a swipe lands on a different page */
-  onCommit: (i: number) => void
   /** called every frame with the float page position (0 = first page) */
   onFrame: (pos: number) => void
-  /** gestures on these descendants are ignored, default '[data-no-swipe]' */
-  ignore?: string
-  enabled?: boolean
 }
 
-export type SwipePager = {
+export type Pager = {
   /** set the position at once (tab tap, deep link) */
   jump: (i: number) => void
   /** spring to a page */
   settle: (i: number, velocity?: number) => void
   /** current float position */
   pos: () => number
-  /** true while a finger is dragging horizontally */
-  dragging: () => boolean
-}
-
-const LOCK_PX = 8
-const FLICK_PX_PER_MS = 0.35
-
-/** iOS-like rubber band: x pages past the end shows as at most ~0.55 pages. */
-function rubber(x: number): number {
-  return (1 - 1 / (x * 0.55 + 1)) * 0.55
 }
 
 /**
- * Finger-following horizontal paging. Axis lock on the first 8 px (vertical
- * drags go to the page's native scroller), rubber band at the ends, velocity
- * flick, ~300 ms spring settle. The element should carry `touch-action: pan-y`
- * so the browser leaves horizontal touch moves to us.
+ * Horizontal page position with a ~300 ms spring settle. Tabs change by tap,
+ * key or URL only: dragging the screen sideways does nothing.
  */
-export function useSwipePager(ref: RefObject<HTMLElement | null>, opts: SwipePagerOpts): SwipePager {
+export function usePager(opts: PagerOpts): Pager {
   const o = useRef(opts)
   o.current = opts
-  const st = useRef({
-    pos: opts.index,
-    stop: null as null | (() => void),
-    drag: null as null | {
-      id: number; x0: number; y0: number; axis: 'x' | 'y' | null; start: number; startIndex: number
-      w: number; lastX: number; lastT: number; vx: number
-    },
-  })
+  const st = useRef({ pos: opts.index, stop: null as null | (() => void) })
 
-  const api = useRef<SwipePager>(null as unknown as SwipePager)
+  const api = useRef<Pager>(null as unknown as Pager)
   if (!api.current) {
     const set = (p: number) => {
       st.current.pos = p
@@ -205,94 +180,10 @@ export function useSwipePager(ref: RefObject<HTMLElement | null>, opts: SwipePag
         })
       },
       pos: () => st.current.pos,
-      dragging: () => st.current.drag?.axis === 'x',
     }
   }
 
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ignore = () => o.current.ignore ?? '[data-no-swipe]'
-
-    const down = (e: PointerEvent) => {
-      if (o.current.enabled === false) return
-      if (e.pointerType === 'mouse' && e.button !== 0) return
-      if (st.current.drag) return
-      const t = e.target as Element | null
-      if (t?.closest?.(ignore())) return
-      st.current.drag = {
-        id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, start: st.current.pos,
-        startIndex: o.current.index, w: el.clientWidth || 1, lastX: e.clientX, lastT: e.timeStamp, vx: 0,
-      }
-    }
-
-    const move = (e: PointerEvent) => {
-      const d = st.current.drag
-      if (!d || e.pointerId !== d.id) return
-      const dx = e.clientX - d.x0
-      const dy = e.clientY - d.y0
-      if (!d.axis) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) < LOCK_PX) return
-        d.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
-        if (d.axis === 'y') { st.current.drag = null; return }
-        try { el.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ }
-        st.current.stop?.()
-        st.current.stop = null
-        d.start = st.current.pos
-        el.dataset.swiping = ''
-      }
-      e.preventDefault()
-      const dt = Math.max(1, e.timeStamp - d.lastT)
-      const inst = (e.clientX - d.lastX) / dt
-      d.vx = d.vx * 0.3 + inst * 0.7
-      d.lastX = e.clientX
-      d.lastT = e.timeStamp
-      const max = o.current.count - 1
-      let p = d.start - dx / d.w
-      if (p < 0) p = -rubber(-p)
-      else if (p > max) p = max + rubber(p - max)
-      st.current.pos = p
-      o.current.onFrame(p)
-    }
-
-    const up = (e: PointerEvent) => {
-      const d = st.current.drag
-      if (!d || e.pointerId !== d.id) return
-      st.current.drag = null
-      if (d.axis !== 'x') return
-      delete el.dataset.swiping
-      try { el.releasePointerCapture(e.pointerId) } catch { /* already released */ }
-      // a velocity sample older than 80 ms means the finger stopped before lifting
-      const vx = e.timeStamp - d.lastT > 80 ? 0 : d.vx
-      const max = o.current.count - 1
-      const pos = st.current.pos
-      let target = Math.round(pos)
-      if (e.type !== 'pointercancel' && Math.abs(vx) > FLICK_PX_PER_MS) {
-        target = vx < 0 ? Math.floor(pos) + 1 : Math.ceil(pos) - 1
-        // one page per flick
-        target = Math.max(d.startIndex - 1, Math.min(d.startIndex + 1, target))
-      }
-      target = Math.max(0, Math.min(max, target))
-      // swallow the click a drag would otherwise produce
-      const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault() }
-      window.addEventListener('click', swallow, { capture: true, once: true })
-      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
-      api.current.settle(target, (-vx * 1000) / d.w)
-      if (target !== o.current.index) o.current.onCommit(target)
-    }
-
-    el.addEventListener('pointerdown', down)
-    el.addEventListener('pointermove', move)
-    el.addEventListener('pointerup', up)
-    el.addEventListener('pointercancel', up)
-    return () => {
-      el.removeEventListener('pointerdown', down)
-      el.removeEventListener('pointermove', move)
-      el.removeEventListener('pointerup', up)
-      el.removeEventListener('pointercancel', up)
-      st.current.stop?.()
-    }
-  }, [ref])
+  useEffect(() => () => st.current.stop?.(), [])
 
   return api.current
 }

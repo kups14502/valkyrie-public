@@ -859,7 +859,7 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-dev-anchor { position: absolute; top: 26px; right: 2px; bottom: 2px; left: var(--hm-dev-text); pointer-events: none; }
 .hm-dev-in[data-compact] .hm-dev-anchor { top: 8px; right: 0; bottom: 8px; }
 .hm-dev-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-/* the press lies over the model: no orbit and no diamonds here (System > Hosts has both), and a swipe still changes tabs */
+/* the press lies over the model: no orbit and no diamonds here (System > Hosts has both) */
 .hm-dev-scene .vl-hero { pointer-events: none; }
 .hm-dev-scene [data-hotspot], .hm-dev-scene [data-orbit-zone] { display: none !important; }
 .hm-dev-press {

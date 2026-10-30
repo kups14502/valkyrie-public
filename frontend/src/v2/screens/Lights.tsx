@@ -830,9 +830,8 @@ function BulbRow({ b, i, selected, busy, rowRef, onSelect, onToggle, onPct, onCo
 /**
  * A glass bar you drag or tap. Lights up on pointerdown. A mouse sets the value
  * at once; a finger sets it on a sideways drag or on lift, and a vertical move
- * hands the gesture back to the page scroll (touch-action: pan-y). The shell's
- * swipe pager ignores it (data-no-swipe). `value` null = unknown: a dim full
- * track with no head. `look` 'line' = an off bulb: a hairline in the same 44 px
+ * hands the gesture back to the page scroll (touch-action: pan-y). `value`
+ * null = unknown: a dim full track with no head. `look` 'line' = an off bulb: a hairline in the same 44 px
  * hit box, still draggable to turn the bulb on.
  *
  * It commits ONCE per gesture (release, tap, or key up after the arrows), as
@@ -992,7 +991,6 @@ function Slider({ value, onCommit, onStart, onPreview, size, label, disabled, lo
       data-unknown={unknown || undefined}
       data-drag={drag || undefined}
       data-disabled={disabled || undefined}
-      data-no-swipe
       role="slider"
       tabIndex={disabled ? -1 : 0}
       aria-label={label}

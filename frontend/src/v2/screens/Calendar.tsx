@@ -631,7 +631,7 @@ function Chev({ dir }: { dir: 'left' | 'right' }) {
 
 function ViewTabs({ view, onChange }: { view: View; onChange: (v: View) => void }) {
   return (
-    <div className="cal-tabs" role="tablist" aria-label="Calendar view" data-no-swipe>
+    <div className="cal-tabs" role="tablist" aria-label="Calendar view">
       {VIEWS.map((v) => (
         <Press
           key={v.value}
@@ -1674,7 +1674,7 @@ export function CalendarSheet({ open, onClose, seed }: {
 
   if (!mounted || pageWide) return null
   return createPortal(
-    <div className="cal-root" data-shown={shown || undefined} data-no-swipe>
+    <div className="cal-root" data-shown={shown || undefined}>
       {/* closes on a press that began on it: the sheet mounts inside the opening tap, so the
           click a touch screen sends after it lands here and would shut the sheet at once */}
       <div className="cal-back" onPointerDown={() => { backDown.current = true }} onClick={() => { if (backDown.current) close.current(); backDown.current = false }} />
@@ -1752,7 +1752,7 @@ export function PageFrame({ id, title, icon, scroll = false, children }: {
       <div className="vl-shell-backdrop"><DotFloor className="vl-floor-faint vpg-floor" /></div>
       <header className="vl-head">
         <StatusStrip onSettings={() => navigate('/m/settings', { state: { v2Back: true } })} />
-        <div className="vl-setbar" data-no-swipe data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
+        <div className="vl-setbar" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
           <Press className="vl-setbar-back" aria-label="Back to the Dashboard" onPress={back}>
             <Glyph name="left" size={11} />
             <span>Dashboard</span>

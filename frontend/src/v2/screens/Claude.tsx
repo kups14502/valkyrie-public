@@ -1502,7 +1502,7 @@ function SelectBar({ n, open, done, all, onAll, onMark, onUndo, onCancel }: {
   onCancel: () => void
 }) {
   return (
-    <div className="vc-selbar" role="toolbar" aria-label="Picked sessions" data-no-swipe>
+    <div className="vc-selbar" role="toolbar" aria-label="Picked sessions">
       <Press className="vc-selbar-x" aria-label="Stop picking" title="Stop picking" onPress={onCancel}>
         <Icon name="stop" size={16} tone="dim" />
       </Press>
@@ -1530,7 +1530,7 @@ function SearchLine({ value, onChange, onClose, closable, inputRef, note }: {
   note: string | null
 }) {
   return (
-    <div className="vc-search vl-build" style={iv(3)} data-no-swipe>
+    <div className="vc-search vl-build" style={iv(3)}>
       <Icon name="search" size={16} tone={value ? 'fg' : 'dim'} glow={!!value} className="vc-search-icon" />
       <input
         ref={inputRef}
@@ -1866,27 +1866,7 @@ function AreaFilter({ items, value, onChange, vertical }: {
 }) {
   const box = useRef<HTMLDivElement>(null)
   const els = useRef<Record<string, HTMLButtonElement | null>>({})
-  const [scroll, setScroll] = useState(false)
-  const key = items.map((i) => i.id + i.count).join(',')
 
-  // a row wider than the phone scrolls sideways and keeps its own drags
-  // (data-no-swipe) only while it actually overflows
-  const measure = useCallback(() => {
-    const b = box.current
-    if (!b) return
-    setScroll(!vertical && b.scrollWidth > b.clientWidth + 1)
-  }, [vertical])
-  useLayoutEffect(() => {
-    measure()
-  }, [measure, key])
-  useEffect(() => {
-    const b = box.current
-    if (!b) return
-    const ro = new ResizeObserver(measure)
-    ro.observe(b)
-    document.fonts?.ready.then(measure)
-    return () => ro.disconnect()
-  }, [measure])
   // keep the lit plate in view when it changes
   useEffect(() => {
     const b = box.current
@@ -1905,7 +1885,6 @@ function AreaFilter({ items, value, onChange, vertical }: {
       role="radiogroup"
       aria-label="Area"
       data-vertical={vertical || undefined}
-      data-no-swipe={scroll || undefined}
     >
       {items.map((a) => (
         <Press
@@ -2582,10 +2561,9 @@ function RowStrip({ s, live, locked, way, home, screen, local, pop, onOpen, onWi
 }
 
 // A row that slides left to reveal its actions. It only starts a slide from
-// the right edge (the age column) or while already open, so a left swipe on
-// the title still pages to the next tab. Native listeners on the row see the
-// gesture before the pager does, keep their own drags, and let vertical
-// scrolls and rightward swipes (to the previous tab) through. A press held
+// the right edge (the age column) or while already open. Native listeners on
+// the row keep their own drags and let vertical scrolls and rightward swipes
+// through. A press held
 // still for LONG_MS (or a right click) picks the row instead; in select mode
 // nothing slides and a tap toggles the pick.
 
@@ -3554,7 +3532,7 @@ function ProjTasks({ projectId, tasks, listTab, k, onChanged }: {
           })}
         </ul>
       )}
-      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+      <form className="vc-addline" onSubmit={(e) => { e.preventDefault(); add() }}>
         <Icon name="add" size={14} tone={draft.trim() ? 'fg' : 'dim'} />
         <input
           className="vc-field"
@@ -3654,7 +3632,7 @@ function ProjReminders({ projectId, list, now, k, onChanged }: {
         )}
       </GroupHead>
       {form && (
-        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }} data-no-swipe>
+        <form className="vc-remform" onSubmit={(e) => { e.preventDefault(); add() }}>
           <input
             className="vc-field"
             value={msg}

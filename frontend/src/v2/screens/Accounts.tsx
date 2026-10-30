@@ -854,7 +854,7 @@ function HostCard({ h, s, now, i }: { h: HostVM; s: SwitchVM; now: number; i: nu
           <Icon name="refresh" size={14} tone="fg" />Switch now
         </Press>
       ) : (
-        <div className="va-confirm vl-build-on" data-no-swipe>
+        <div className="va-confirm vl-build-on">
           <span className="va-confirm-q">Switch every {h.id} terminal to{s.dryRun ? ' (real, even in dry run)' : ''}</span>
           <div className="va-picks" role="radiogroup" aria-label={`Account for ${h.id}`}>
             {choices.map((a) => (
@@ -1174,7 +1174,7 @@ function RunBody({ run, email, label: who, now }: { run: RunVM; email: string | 
             <li>Sign in as {email ?? who} and press Authorize.</li>
             <li>Copy the code the page shows and paste it here.</li>
           </ol>
-          <form className="va-code" data-no-swipe onSubmit={(e) => { e.preventDefault(); send() }}>
+          <form className="va-code" onSubmit={(e) => { e.preventDefault(); send() }}>
             <input
               ref={input}
               type="text"

@@ -125,7 +125,7 @@ function CaptureLine({ active, today }: { active: boolean; today: string }) {
   }
   return (
     <section className="td-sec td-capture" aria-label="Capture">
-      <form className="td-cap-line" data-no-swipe onSubmit={(e) => { e.preventDefault(); go() }}>
+      <form className="td-cap-line" onSubmit={(e) => { e.preventDefault(); go() }}>
         <Icon name="add" size={15} tone={text.trim() ? 'fg' : 'dim'} />
         <input
           className="td-field"
