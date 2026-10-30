@@ -1,15 +1,15 @@
 {
-  "version": "0.3.160",
-  "notes": "Today: Capture, the morning brief and the day in one place",
-  "pub_date": "2026-10-29T20:38:50Z",
+  "version": "0.3.161",
+  "notes": "Mail: the work mailboxes on Today, in the inbox and in the brief",
+  "pub_date": "2026-10-30T00:49:06Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVXNlNnRUVRNExwS2JseEs2eW5TdG9xKzZRSnFON283RlRadFNxd3NJaVhwSGlrcVdhbDVlcHJRbVM1VUk5S0d1ckF2VmRKZWFkNHJSMDZOK1ZBMWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzA1ODA4CWZpbGU6VmFsa3lyaWVfMC4zLjE2MF94NjQtc2V0dXAuZXhlCjRkK3lsOVI4cVlxN0VWeTJYSUVXcG1jZW1zNkhBYmlTTEpnNUplelcva0FSTTZ0T1Rwb3UxcWZtemVwdUx4cU4wY29OM0gzSGYrZ2huWU4rMGJYZkNnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.160/Valkyrie_0.3.160_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWJMR054Y3JMRjlLREV3NEUzSzU1NEgzR0NrekJjNUtZeVVnVEpXaHU1N09sQlEvOTZiWCtjU2NDZVVjNnYwV3hQVFhMYkp2MysySUs3bFF1MW1TNGdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzIwNzM5CWZpbGU6VmFsa3lyaWVfMC4zLjE2MV94NjQtc2V0dXAuZXhlCjM3Nkw4cnJWaWQwNkVBZnFHLzNVMUpsUUpOc1VuendqY0dYakhMUGNqbkRSbGNJTTBkRmlDZk9kSnRnSXBBZ0RGYnphbUVIalY1ZCtOVFFBaWdhNkJBPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.161/Valkyrie_0.3.161_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMwdDhoa0NEZDZJV1l4UjdRL2FuMk5rcldnc01aWkJwdFl3MUxrV01mcVFGUElzeFE5cUdieGMvMEZiWThVNjRzQVlqNDhYNlh1aldiVVJBNndyTUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzA1NTU4CWZpbGU6VmFsa3lyaWVfMC4zLjE2MF9hbWQ2NC5BcHBJbWFnZQozZlMvN2kyVCt0VEpVRHc0Mnd3T2VFd1NJczVGTXU3VEV0KzM5U3ZackRML0llNGNJSVZjalhLZGpxTkEySE4wME5OWHhySnpoa3hYU0srNWEyL1pEdz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.160/Valkyrie_0.3.160_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWR2cVVDTUFSTHliKzFaMmF4QzRZNSt2eXhNZXNFQkswOE0vSktIVUhkT1hVczlEdHFrbnlJZVAxeDNIR2QvSVFOY1kyYVN0aWxZYzM4WFU4aUZCTVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzIwNDY3CWZpbGU6VmFsa3lyaWVfMC4zLjE2MV9hbWQ2NC5BcHBJbWFnZQo4MUR5K3d0V041TUJFMG5zOU9vTzh4VlQ5N3FtbTAzZnBqVDc2L09lbHF5akwrbE1ubWszOVA4V3pFRzZyTDlTNEtYMHAvZEQwa2hnRXBCVEdTYThCZz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.161/Valkyrie_0.3.161_amd64.AppImage"
     }
   }
 }
