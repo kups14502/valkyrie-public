@@ -587,7 +587,7 @@ function Schemes({ i }: { i: number }) {
             <span className="st-dot" data-empty={customDot ? undefined : ''} aria-hidden />
             <span className="st-scheme-name">Custom</span>
           </Press>
-          <div className="st-hex" data-bad={bad || undefined} data-no-swipe>
+          <div className="st-hex" data-bad={bad || undefined}>
             <input type="color" className="st-swatch" value={accent} aria-label="Pick a color" title="Pick a color"
               style={{ '--c': accent } as Vars} onChange={(e) => commit(e.target.value)} />
             <input

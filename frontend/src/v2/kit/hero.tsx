@@ -22,7 +22,7 @@ import { cx } from './ui'
 // Placement: the hero fills its box. Pass `anchor` (an element in your layout)
 // and, for every pose, the model's projected outline is centered on the
 // visible part of that element and sized to `fill` of it. Only a disc around
-// the model starts an orbit; the rest of the floor still swipes between tabs.
+// the model starts an orbit.
 //
 // Legibility: with an anchor, a soft black scrim dims the floor, beams and
 // airflow on the side where the content sits (the widest margin around the

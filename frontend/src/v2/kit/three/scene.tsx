@@ -46,7 +46,7 @@ export type WireSceneProps = {
   /**
    * Where an orbit drag may start. 'box' (default): anywhere in the scene.
    * 'model': only a disc around the model (it follows the camera), so a
-   * full-screen scene still leaves the empty floor to the shell's swipe pager.
+   * full-screen scene leaves the empty floor alone.
    */
   orbitArea?: 'box' | 'model'
 }
@@ -358,7 +358,6 @@ export function WireScene(props: WireSceneProps) {
       ref={wrapRef}
       className={className}
       data-wire-scene=""
-      {...(orbit ? { 'data-no-swipe': '' } : {})}
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}

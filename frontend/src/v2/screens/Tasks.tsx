@@ -234,7 +234,7 @@ function Detail({ t, onDue, onProject, onRemove }: {
   return (
     <div className="tk-detail">
       {!t.done && (
-        <div className="tk-due-edit" data-no-swipe>
+        <div className="tk-due-edit">
           <span className="tk-k">Due</span>
           <input type="date" className="tk-field" value={day} aria-label="Due date" onChange={(e) => setDay(e.target.value)} />
           <input type="time" className="tk-field" value={time} aria-label="Due time" onChange={(e) => setTime(e.target.value)} />
@@ -287,7 +287,7 @@ function AddLine({ areas, projects, onAdded }: {
   }
   const can = draft.trim() !== '' && !add.isPending
   return (
-    <form className="tk-add" data-typing={draft.trim() ? '' : undefined} data-no-swipe onSubmit={(e) => { e.preventDefault(); if (can) add.mutate() }}>
+    <form className="tk-add" data-typing={draft.trim() ? '' : undefined} onSubmit={(e) => { e.preventDefault(); if (can) add.mutate() }}>
       <div className="tk-add-line">
         <Icon name="add" size={14} tone={draft.trim() ? 'fg' : 'dim'} />
         <input

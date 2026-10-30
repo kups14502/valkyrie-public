@@ -598,7 +598,6 @@ export function EquityChart(props: EquityChartProps) {
       className={className}
       role="img"
       aria-label={ariaLabel}
-      data-no-swipe
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}

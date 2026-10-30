@@ -252,7 +252,7 @@ function TextTabs<T extends string>({ items, value, onChange, label, className }
   className?: string
 }) {
   return (
-    <div className={cx('sys-filter', className)} role="tablist" aria-label={label} data-no-swipe>
+    <div className={cx('sys-filter', className)} role="tablist" aria-label={label}>
       {items.map((t) => (
         <Press key={t.id} role="tab" aria-selected={value === t.id} data-on={value === t.id || undefined} data-none={t.count === 0 || undefined} className="sys-filter-btn" onPress={() => onChange(t.id)}>
           {t.label}
@@ -1300,7 +1300,7 @@ function ServicesView({ on, svc }: { on: boolean; svc: Live<SvcSysVM> }) {
 /** One hairline search line for every Services tab. Escape clears it. */
 function SearchField({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef: RefObject<HTMLInputElement | null> }) {
   return (
-    <div className="sys-search" data-no-swipe data-on={value ? '' : undefined}>
+    <div className="sys-search" data-on={value ? '' : undefined}>
       <Icon name="search" size={14} tone={value ? 'fg' : 'dim'} glow={!!value} />
       <input
         ref={inputRef}

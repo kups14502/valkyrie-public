@@ -629,7 +629,7 @@ export function ToastHost({ className, style }: { className?: string; style?: CS
   return (
     <div className={cx('vl-toasts', className)} style={style} aria-live="polite">
       {list.map((t) => (
-        <div key={t.id} className="vl-toast" data-action={t.action ? '' : undefined} data-leaving={t.leaving || undefined} data-no-swipe={t.action ? '' : undefined}>
+        <div key={t.id} className="vl-toast" data-action={t.action ? '' : undefined} data-leaving={t.leaving || undefined}>
           <span className="vl-toast-msg">{t.msg}</span>
           {t.action && (
             <Press

@@ -670,7 +670,6 @@ function LimitBar({ c, k, action, ctl, label }: {
       aria-disabled={off || undefined}
       aria-busy={!!p || undefined}
       data-k={k}
-      data-no-swipe
       data-held={held !== null || undefined}
       data-busy={p ? '' : undefined}
       data-failed={failed || undefined}

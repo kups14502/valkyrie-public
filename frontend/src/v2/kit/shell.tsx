@@ -5,7 +5,7 @@ import {
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { applyPalette, saveMode, storedMode, useFont, useStoredMode, type Mode } from './theme'
 import {
-  animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, useSwipePager, type MotionSetting,
+  animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, usePager, type MotionSetting,
 } from './motion'
 import { useHosts, useInboxCount, useLights, useTick, type HostVM, type MediaVM } from './data'
 import { Search } from 'lucide-react'
@@ -67,7 +67,7 @@ export function floorFor(def: ScreenDef, sub: string): FloorSetting {
 
 export type ShellApi = {
   active: string
-  go: (id: string, sub?: string, via?: 'tap' | 'swipe') => void
+  go: (id: string, sub?: string, via?: 'tap' | 'key') => void
   sub: string
   /** a toast under the header; `opts.action` adds a button (Undo), `opts.ms` sets how long it shows */
   toast: (msg: string, opts?: ToastOptions) => void
@@ -486,7 +486,7 @@ function Rail({ getScroller, activeKey, icon, label }: {
   }
 
   return (
-    <aside className="vl-rail" ref={railRef} data-no-swipe aria-hidden>
+    <aside className="vl-rail" ref={railRef} aria-hidden>
       <Press ref={upRef} className="vl-rail-btn" tabIndex={-1} aria-label="Scroll up" onPress={() => scrollStep(-1)}><Glyph name="up" size={9} /></Press>
       {/* the active screen's icon, lit; a tap goes back to the top of the page */}
       <Press
@@ -726,7 +726,7 @@ function Nav({ screens, activeId, sub, go }: {
   }, [layout])
 
   return (
-    <nav className="vl-nav" ref={navRef} data-ready={ready || undefined} data-no-swipe aria-label="Sections" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
+    <nav className="vl-nav" ref={navRef} data-ready={ready || undefined} aria-label="Sections" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
       <div className="vl-nav-prims" ref={primsRef}>
         {screens.map((s) => (
           <Press
@@ -767,7 +767,7 @@ function Nav({ screens, activeId, sub, go }: {
 /** Settings' header row in place of the tabs: back to the tab it came from, the title lit with the caret under it. */
 function SettingsBar({ back, onBack }: { back: string; onBack: () => void }) {
   return (
-    <div className="vl-setbar" data-no-swipe data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
+    <div className="vl-setbar" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
       <Press className="vl-setbar-back" aria-label={`Back to ${back}`} onPress={onBack}>
         <Glyph name="left" size={11} />
         <span>{back}</span>
@@ -885,7 +885,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
   }, [activeId, sub])
 
   // ---- navigation ----
-  const navVia = useRef<'tap' | 'swipe' | 'url'>('url')
+  const navVia = useRef<'tap' | 'key' | 'url'>('url')
   const go = useCallback<ShellApi['go']>((id, s, via = 'tap') => {
     let d = screensRef.current.find((x) => x.id === id)
     let target = s
@@ -979,16 +979,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
     pageEls.current[i] = el
   }, [])
 
-  const pager = useSwipePager(pagerRef, {
-    count: screens.length,
-    index,
-    onFrame,
-    enabled: !settingsOpen,
-    onCommit: (i) => {
-      const id = screensRef.current[i]?.id
-      if (id) go(id, undefined, 'swipe')
-    },
-  })
+  const pager = usePager({ index, onFrame })
 
   useLayoutEffect(() => {
     const el = pagerRef.current
@@ -1033,8 +1024,9 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
       return
     }
     prevSub.current = sub
-    if (via === 'swipe' && from !== -1) return
-    // tap, key or URL: the content switches in place and builds in while the
+    // an arrow key slides the pages (pager.settle already runs)
+    if (via === 'key' && from !== -1) return
+    // tap or URL: the content switches in place and builds in while the
     // floor glides like a camera move (reference: tabs do not slide pages)
     jumping.current = true
     pager.jump(index)
@@ -1073,7 +1065,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
       if (i < 0 || i >= list.length) return
       e.preventDefault()
       pager.settle(i)
-      go(list[i].id, undefined, 'swipe')
+      go(list[i].id, undefined, 'key')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1150,7 +1142,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
             ))}
           </div>
           {settingsOpen && SettingsScreen && (
-            <section className="vl-set vl-build-on" aria-label="Settings" data-no-swipe>
+            <section className="vl-set vl-build-on" aria-label="Settings">
               <SettingsScreen active />
             </section>
           )}
