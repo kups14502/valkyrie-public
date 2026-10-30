@@ -27,6 +27,8 @@ import { pushToAll } from '../routes/push.js'
 //     only Discord path left, and only for things that must not be missed.
 //   * Items archive themselves 7 days after they were read; archived ones are
 //     deleted 180 days after archiving. The list never grows without bound.
+//   * A PRIVATE source (work mail, lib/mailStore.ts) is tailnet only: through
+//     Cloudflare its items are left out of the list, the counts and the sources.
 
 const exec = promisify(execFile)
 
@@ -70,6 +72,10 @@ const db = openDb('inbox', `
     push TEXT NOT NULL DEFAULT 'auto'
   );
 `)
+// added with work mail: a source whose items stay on the tailnet
+if (!(db.prepare('PRAGMA table_info(inbox_sources)').all() as { name: string }[]).some((c) => c.name === 'private')) {
+  db.exec('ALTER TABLE inbox_sources ADD COLUMN private INTEGER NOT NULL DEFAULT 0')
+}
 
 type Row = {
   id: number; source: string; level: InboxLevel; title: string; body: string
@@ -144,6 +150,25 @@ export function setPushSetting(source: string, push: PushSetting): void {
   if (!PUSH_SETTINGS.includes(push)) throw new InboxError('push must be auto, on or off')
   db.prepare(`INSERT INTO inbox_sources (source, push) VALUES (?, ?)
     ON CONFLICT(source) DO UPDATE SET push = excluded.push`).run(source, push)
+}
+
+/** Mark a source tailnet only (or not). Its push setting is kept. */
+export function setSourcePrivate(source: string, priv: boolean): void {
+  if (!SOURCE_RE.test(source)) throw new InboxError('bad source')
+  db.prepare(`INSERT INTO inbox_sources (source, push, private) VALUES (?, 'auto', ?)
+    ON CONFLICT(source) DO UPDATE SET private = excluded.private`).run(source, priv ? 1 : 0)
+}
+
+/** The sources that stay on the tailnet. */
+export function privateSources(): Set<string> {
+  return new Set((db.prepare('SELECT source FROM inbox_sources WHERE private = 1').all() as { source: string }[]).map((r) => r.source))
+}
+
+/** SQL that leaves private sources out, with its arguments. */
+function notPrivate(hide: boolean | undefined): { sql: string; args: string[] } {
+  if (!hide) return { sql: '', args: [] }
+  const list = [...privateSources()]
+  return list.length ? { sql: ` AND source NOT IN (${list.map(() => '?').join(',')})`, args: list } : { sql: '', args: [] }
 }
 
 function wantsPush(source: string, level: InboxLevel, push: boolean | undefined): boolean {
@@ -240,18 +265,19 @@ export type InboxView = 'open' | 'archive'
 
 export type SourceStat = { source: string; open: number; unread: number; push: PushSetting; lastAt: string | null }
 
-export function listInbox(opts: { view?: InboxView; source?: string; limit?: number; before?: string }): InboxItem[] {
+export function listInbox(opts: { view?: InboxView; source?: string; limit?: number; before?: string; hidePrivate?: boolean }): InboxItem[] {
   const view = opts.view === 'archive' ? 'archive' : 'open'
   const limit = Math.max(1, Math.min(500, Math.floor(opts.limit ?? 200)))
   const where = [view === 'archive' ? 'archivedAt IS NOT NULL' : 'archivedAt IS NULL']
   const args: (string | number)[] = []
   if (opts.source) { where.push('source = ?'); args.push(opts.source) }
   if (opts.before) { where.push('lastAt < ?'); args.push(opts.before) }
-  return db.prepare(`SELECT * FROM inbox_items WHERE ${where.join(' AND ')} ORDER BY lastAt DESC, id DESC LIMIT ${limit}`)
-    .all(...args) as InboxItem[]
+  const priv = notPrivate(opts.hidePrivate)
+  return db.prepare(`SELECT * FROM inbox_items WHERE ${where.join(' AND ')}${priv.sql} ORDER BY lastAt DESC, id DESC LIMIT ${limit}`)
+    .all(...args, ...priv.args) as InboxItem[]
 }
 
-export function sourceStats(): SourceStat[] {
+export function sourceStats(hidePrivate = false): SourceStat[] {
   const rows = db.prepare(`SELECT source,
       SUM(CASE WHEN archivedAt IS NULL THEN 1 ELSE 0 END) AS open,
       SUM(CASE WHEN archivedAt IS NULL AND readAt IS NULL THEN 1 ELSE 0 END) AS unread,
@@ -264,17 +290,20 @@ export function sourceStats(): SourceStat[] {
   for (const [source, push] of settings) {
     if (!out.some((r) => r.source === source)) out.push({ source, open: 0, unread: 0, push, lastAt: null })
   }
-  return out.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? '') || a.source.localeCompare(b.source))
+  const hidden = hidePrivate ? privateSources() : new Set<string>()
+  return out.filter((r) => !hidden.has(r.source))
+    .sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? '') || a.source.localeCompare(b.source))
 }
 
 export type InboxCount = { unread: number; alerts: number; lastAt: string | null }
 
-export function inboxCount(): InboxCount {
+export function inboxCount(hidePrivate = false): InboxCount {
+  const priv = notPrivate(hidePrivate)
   const r = db.prepare(`SELECT
       SUM(CASE WHEN readAt IS NULL THEN 1 ELSE 0 END) AS unread,
       SUM(CASE WHEN readAt IS NULL AND level = 'alert' THEN 1 ELSE 0 END) AS alerts,
       MAX(lastAt) AS lastAt
-    FROM inbox_items WHERE archivedAt IS NULL`).get() as { unread: number | null; alerts: number | null; lastAt: string | null }
+    FROM inbox_items WHERE archivedAt IS NULL${priv.sql}`).get(...priv.args) as { unread: number | null; alerts: number | null; lastAt: string | null }
   return { unread: r.unread ?? 0, alerts: r.alerts ?? 0, lastAt: r.lastAt }
 }
 

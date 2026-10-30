@@ -11,6 +11,8 @@
 //   brief      no brief yet: Write it now starts one, Writing shows, the lines arrive
 //   tick       a due task's box ticks it (PATCH done) and it leaves the list
 //   empty      nothing anywhere: every block says so in one line
+//   mail       the Mail block: unread total and per mailbox, Focused rows newest first, a mailbox not
+//              synced lately says so, a row opens its Outlook link, mail items stay out of the Inbox block
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -26,7 +28,7 @@ const plus = (key, n) => {
 }
 const iso = (ms) => new Date(ms).toISOString()
 
-function fakes(page, { empty = false, brief = 'done' } = {}) {
+function fakes(page, { empty = false, brief = 'done', mail = false } = {}) {
   const t0 = today()
   const now = Date.now()
   const st = {
@@ -38,12 +40,23 @@ function fakes(page, { empty = false, brief = 'done' } = {}) {
       { ref: { kind: 'loose', id: 'aaaaaaaaaaa2' }, text: 'Renew the passport', due: plus(t0, 30), done: false, doneAt: null, area: 'personal', project: null, list: null, createdAt: null },
     ],
     inbox: empty ? [] : [
+      ...(mail ? [{ id: 9, source: 'work-mail', level: 'warn', title: 'Client One: Printer offline', body: '', url: null, tag: null, count: 1, firstAt: iso(now - 300_000), lastAt: iso(now - 300_000), readAt: null, archivedAt: null, pushedAt: null, pushDetail: null }] : []),
       { id: 1, source: 'backups', level: 'warn', title: 'Backup watchdog: 1 problem', body: '', url: null, tag: null, count: 1, firstAt: iso(now - 600_000), lastAt: iso(now - 600_000), readAt: null, archivedAt: null, pushedAt: null, pushDetail: null },
       { id: 2, source: 'raid', level: 'alert', title: '[odin RAID] Fail on /dev/md0', body: '', url: null, tag: null, count: 1, firstAt: iso(now - 3600_000), lastAt: iso(now - 3600_000), readAt: null, archivedAt: null, pushedAt: null, pushDetail: null },
       { id: 3, source: 'trade', level: 'info', title: 'Already read', body: '', url: null, tag: null, count: 1, firstAt: iso(now - 60_000), lastAt: iso(now - 60_000), readAt: iso(now), archivedAt: null, pushedAt: null, pushDetail: null },
     ],
   }
   page.mock('/api/capture', () => ok({ captures: st.captures }))
+  page.mock('/api/mail', () => ok(mail ? {
+    mailboxes: [
+      { key: 'work', label: 'Work mail', source: 'work-mail', unread: 3, syncedAt: iso(now - 60_000), stale: false, error: null },
+      { key: 'support', label: 'Support', source: 'support-mail', unread: 1, syncedAt: iso(now - 3600_000), stale: true, error: 'Graph 401' },
+    ],
+    unread: [
+      { mailbox: 'work', label: 'Work mail', fromName: 'Client One', fromAddress: 'one@example.com', subject: 'Printer offline', preview: 'p', receivedAt: iso(now - 300_000), isRead: false, webLink: 'https://outlook.office365.com/owa/?ItemID=x1', flagged: false, important: true },
+      { mailbox: 'support', label: 'Support', fromName: '', fromAddress: 'two@example.com', subject: 'Password reset', preview: 'p', receivedAt: iso(now - 900_000), isRead: false, webLink: 'https://outlook.office365.com/owa/?ItemID=x2', flagged: false, important: false },
+    ],
+  } : { mailboxes: [], unread: [] }))
   page.mock('/api/brief', () => ok({ brief: st.brief }))
   page.mock('/api/tasks', () => ok({ view: 'open', today: t0, tasks: st.tasks.filter((t) => !t.done), projects: [], areas: ['personal'] }))
   page.mock('/api/inbox', () => ok({ view: 'open', items: st.inbox, sources: [], count: { unread: st.inbox.filter((i) => !i.readAt).length, alerts: 1, lastAt: null } }))
@@ -257,6 +270,37 @@ export function todayTests() {
       const quiet = await page.eval(() => [...document.querySelectorAll('.td-quiet')].map((p) => p.textContent))
       t.check(['Nothing today.', 'Nothing due today.', 'Nothing unread.', 'No session is working or asking.'].every((q) => quiet.includes(q)), `the empty lines read ${JSON.stringify(quiet)}`)
       await fits(t, page, `${ROUTE} empty`)
+    },
+  })
+
+  tests.push({
+    name: 'today:mail',
+    group: 'today',
+    device: 'desktop',
+    timeout: 40_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      fakes(page, { mail: true })
+      await page.eval(() => {
+        const opens = window.__opens = []
+        window.open = (url) => { opens.push(String(url)); return null }
+      })
+      await page.goto(ROUTE)
+      await pageUp(page)
+      await page.waitFor(() => !!document.querySelector('.td-sec[aria-label="Mail"] .td-row'), { timeout: 10_000, message: 'no Mail block' })
+      const head = await text(page, '.td-sec[aria-label="Mail"] .vl-section-row')
+      t.check(/Mail · 4 unread/i.test(head) && /Work mail 3 · Support 1/.test(head), `the Mail head reads "${head}"`)
+      const rows = await sectionRows(page, 'Mail')
+      t.check(rows?.length === 2 && /^Client One: Printer offline Work mail · 5m$/.test(rows[0]) && /^two@example\.com: Password reset Support · 15m$/.test(rows[1]), `mail rows read ${JSON.stringify(rows)}`)
+      t.check(/Support not synced lately/.test(await text(page, '.td-sec[aria-label="Mail"]')), 'no line for the mailbox that is not synced')
+      const inbox = await sectionRows(page, 'Inbox')
+      t.check(!inbox?.some((r) => /Printer offline/.test(r)), `mail shows twice: the Inbox block has ${JSON.stringify(inbox)}`)
+      await page.eval(() => { window.open = (url) => { (window.__opens ??= []).push(String(url)); return null } })
+      await page.tap({ sel: '.td-sec[aria-label="Mail"] .td-row', text: /Printer offline/ })
+      const opened = await page.eval(() => window.__opens ?? [])
+      t.check(opened.includes('https://outlook.office365.com/owa/?ItemID=x1'), `the row opened ${JSON.stringify(opened)}`)
+      await t.shot(page, 'mail')
     },
   })
 

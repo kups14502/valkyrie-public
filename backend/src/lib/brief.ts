@@ -1,6 +1,7 @@
 import { openDb } from './db.js'
 import { askClaude, nyNowLine, nyWallToMs } from './claudeCli.js'
-import { listInbox } from './inboxStore.js'
+import { listInbox, privateSources } from './inboxStore.js'
+import { mailboxes, unreadMail } from './mailStore.js'
 import { listProjects } from './projectsStore.js'
 import { listTasks, nyToday } from './tasksStore.js'
 
@@ -72,7 +73,17 @@ async function facts(): Promise<string[]> {
     out.push(`- ${t.due!.slice(0, 10) < today ? 'OVERDUE ' : ''}${t.due}: ${t.text} (${t.project?.name ?? t.area})`)
   }
 
-  const unread = listInbox({ view: 'open', limit: 40 }).filter((i) => !i.readAt)
+  const boxes = mailboxes(false).filter((b) => b.syncedAt)
+  if (boxes.length) {
+    out.push(`Mail: ${boxes.map((b) => `${b.label} ${b.unread ?? '?'} unread`).join(', ')}. Unread Focused mail from the last day:`)
+    const recent = unreadMail(false, 1, 10)
+    if (!recent.length) out.push('- none')
+    for (const m of recent) out.push(`- ${m.label}: ${m.fromName || m.fromAddress}: ${m.subject || '(no subject)'}${m.important ? ' (high importance)' : ''}`)
+  }
+
+  // mail already has its own lines above
+  const mailSources = privateSources()
+  const unread = listInbox({ view: 'open', limit: 40 }).filter((i) => !i.readAt && !mailSources.has(i.source))
   out.push(`Inbox: ${unread.length} unread.`)
   for (const i of unread.sort((a, b) => (a.level === 'alert' ? -1 : 0) - (b.level === 'alert' ? -1 : 0)).slice(0, 8)) {
     out.push(`- [${i.level}] ${i.source}: ${i.title}`)
@@ -90,7 +101,7 @@ function prompt(lines: string[]): string {
   return [
     `Write Brendon's brief for today. Now: ${nyNowLine()}.`,
     'He has ADHD and skims. The first line is the one thing that matters most today, as a plain sentence.',
-    'Then at most 5 short lines: what is scheduled (times like 2:30 PM), what is overdue or due, and inbox items that need him.',
+    'Then at most 5 short lines: what is scheduled (times like 2:30 PM), what is overdue or due, mail that looks like it needs a reply from him, and inbox items that need him.',
     'If the day is light, say so in one line and stop.',
     'Plain text, one item per line, no headings, no bullets, no markdown, no em dashes, US English, no greeting, no sign-off.',
     'Use only the facts below. Never invent anything. Leave out what does not need him today.',
