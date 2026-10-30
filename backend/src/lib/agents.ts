@@ -272,10 +272,29 @@ function capWait(agentId: string): { until: number; why: string } | null {
   return null
 }
 
+/** What woke a run, in words: the status line on the channel list and the run log. */
+const TRIGGER_WORDS: Record<string, [string, string]> = {
+  mail: ['new mail', 'new mails'],
+  ticket_new: ['new ticket', 'new tickets'],
+  ticket_activity: ['ticket update', 'ticket updates'],
+  ticket_closed: ['ticket closed', 'tickets closed'],
+  ticket_reopened: ['ticket reopened', 'tickets reopened'],
+  tracker_seeded: ['first look at the tickets', 'first look at the tickets'],
+  teams: ['Teams message', 'Teams messages'],
+  message: ['a message', 'messages'],
+  proposal: ['a proposal decided', 'proposals decided'],
+  daily_review: ['morning review', 'morning review'],
+  daily_check: ['morning check', 'morning check'],
+  check: ['a check you asked for', 'a check you asked for'],
+}
+
 function triggerLine(events: AgentEvent[]): string {
   const counts = new Map<string, number>()
   for (const e of events) counts.set(e.kind.replace(/^retry:/, ''), (counts.get(e.kind.replace(/^retry:/, '')) ?? 0) + 1)
-  return [...counts].map(([k, n]) => (n > 1 ? `${n} ${k}` : k)).join(', ')
+  return [...counts].map(([k, n]) => {
+    const [one, many] = TRIGGER_WORDS[k] ?? [k, k]
+    return n > 1 && one !== many && !many.startsWith('morning') ? `${n} ${many}` : one
+  }).join(', ')
 }
 
 async function runAgent(agentId: string): Promise<void> {

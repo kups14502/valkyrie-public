@@ -90,7 +90,7 @@ html[data-motion='reduced'] .mx-dot { animation: none; }
   border-bottom: 1px solid var(--line);
 }
 .mx-back { flex: none; align-self: center; font-size: 22px; line-height: 1; padding: 0 8px 4px 0; color: var(--fg); }
-.mx-head-text { flex: 1; min-width: 0; padding-bottom: 8px; }
+.mx-head-text { flex: 1 1 13rem; min-width: 0; padding-bottom: 8px; }
 .mx-head-text h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mx-head-text p { margin: 2px 0 0; font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mx-head-text p[data-state='working'], .mx-head-text p[data-state='queued'] { color: var(--fg); }

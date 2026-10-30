@@ -460,9 +460,12 @@ export function runsSince(agentId: string, iso: string): number {
   return (db.prepare('SELECT COUNT(*) AS n FROM runs WHERE agentId = ? AND startedAt >= ?').get(agentId, iso) as { n: number }).n
 }
 
-/** A run left 'running' by a restart never finishes: close it. */
+/** A run left 'running' by a restart never finishes: close it, and give its events one more try. */
 export function failStaleRuns(): number {
-  return db.prepare("UPDATE runs SET status = 'failed', endedAt = ?, error = 'Valkyrie restarted during the run' WHERE status = 'running'").run(nowIso()).changes
+  const ids = (db.prepare("SELECT id FROM runs WHERE status = 'running'").all() as { id: string }[]).map((r) => r.id)
+  db.prepare("UPDATE runs SET status = 'failed', endedAt = ?, error = 'Valkyrie restarted during the run' WHERE status = 'running'").run(nowIso())
+  for (const id of ids) releaseEvents(id)
+  return ids.length
 }
 
 // ---------------------------------------------------------- proposals ----
