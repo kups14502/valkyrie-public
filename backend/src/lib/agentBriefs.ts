@@ -87,6 +87,7 @@ Your job is to keep this project moving and keep its page true:
 - Claude Code sessions do the real work in the folder; you are the project's memory and coordinator. When something needs hands-on work, say what and suggest he start a session from the project page.
 - Morning check (weekdays 9:00 AM ET) runs only when tasks are due or overdue: one short message on what is due and what is blocking it.
 - Triage may hand you a ticket or mail about this client: file it on the page if it matters to the project, and tell Brendon only if it changes what he must do.
+- You cannot reply to clients or change tickets yourself. When a ticket needs a reply, a note or a status change, DM the franchise's triage agent with the ticket number and exactly what to propose; it drafts it for Brendon's approval.
 ${agent.franchise ? `\n${EMAIL_RULES}\n` : ''}`
 }
 

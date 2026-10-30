@@ -205,7 +205,7 @@ function Conversation({ channelId, channel, agents, active, onBack }: {
   useEffect(() => {
     if (!active || !lastId || view !== 'chat') return
     if ((channel?.unread ?? 0) > 0) {
-      void markRead(channelId, lastId).then(() => qc.invalidateQueries({ queryKey: ['msg', 'overview'] }))
+      void markRead(channelId, lastId).then(() => qc.invalidateQueries({ queryKey: ['msg', 'overview'] }), () => { /* the count stays until the next read */ })
     }
   }, [active, lastId, channelId, channel?.unread, view, qc])
 

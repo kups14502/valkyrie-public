@@ -1,6 +1,6 @@
 import {
   addEvent, addMessage, addProposal, AgentError, finishAction, getAgent, getMail, getProposal, markSelfTouch, moveProposal,
-  queueAction, setMailState, setProposalMessage, type Agent, type Proposal, type ProposalKind, type Ref,
+  queueAction, setMailState, setProposalMessage, trackedTicket, type Agent, type Proposal, type ProposalKind, type Ref,
 } from './agentsStore.js'
 import { addInternalNote, createTicket, franchiseLabel, PsaError, ticketUrl, updateTicket, type Franchise, type TicketPatch } from './psa.js'
 import { agentPost, etLabel, systemPost, wake } from './agents.js'
@@ -49,17 +49,24 @@ export function proposeMailReply(agent: Agent, a: { n: number; body: string; rep
     to: mail.fromAddress, toName: mail.fromName, subject: mail.subject,
   }
   const title = `Reply to ${mail.fromName || mail.fromAddress}: ${mail.subject || '(no subject)'}`
-  const text = `Draft reply to ${mail.fromName || mail.fromAddress} for approval${a.note ? `\n${a.note}` : ''}`
+  const text = a.note?.trim() || `Draft reply to ${mail.fromName || mail.fromAddress} for your approval.`
   return post(agent, 'mail_reply', title, payload, text, [{ type: 'mail', n: mail.n, subject: mail.subject, from: mail.fromName || mail.fromAddress, url: mail.webLink ?? undefined }], hop)
+}
+
+/** The ticket a proposal is about, named by its number (agents often pass only the id). */
+function ticketRef(f: Franchise, id: number, number?: string): { number: string; ref: Ref } {
+  const tr = trackedTicket(f, id)
+  const num = number?.trim() || tr?.number || String(id)
+  return { number: num, ref: { type: 'ticket', franchise: f, id, number: num, title: tr?.title, url: ticketUrl(f, id) } }
 }
 
 export function proposeTicketNote(agent: Agent, a: { ticketId: number; number?: string; title: string; text: string; why?: string }, hop: number): Proposal {
   const f = agent.franchise
   if (!f || agent.kind !== 'triage') throw new AgentError(403, 'only the triage agents propose ticket notes')
-  const payload = { franchise: f, ticketId: a.ticketId, number: a.number ?? '', title: a.title.slice(0, 250), text: a.text.slice(0, 8000) }
-  return post(agent, 'ticket_note', `Internal note on ${a.number || a.ticketId}: ${a.title}`, payload,
-    `Internal note for ${a.number || `ticket ${a.ticketId}`}${a.why ? `\n${a.why}` : ''}`,
-    [{ type: 'ticket', franchise: f, id: a.ticketId, number: a.number ?? String(a.ticketId), url: ticketUrl(f, a.ticketId) }], hop)
+  const t = ticketRef(f, a.ticketId, a.number)
+  const payload = { franchise: f, ticketId: a.ticketId, number: t.number, title: a.title.slice(0, 250), text: a.text.slice(0, 8000) }
+  return post(agent, 'ticket_note', `Internal note on ${t.number}: ${a.title}`, payload,
+    a.why?.trim() || 'An internal note for your approval.', [t.ref], hop)
 }
 
 export function proposeTicketUpdate(agent: Agent, a: { ticketId: number; number?: string } & TicketPatch & { why: string }, hop: number): Proposal {
@@ -71,11 +78,11 @@ export function proposeTicketUpdate(agent: Agent, a: { ticketId: number; number?
   if (a.assignToBrendon) change.push('assign to Brendon')
   if (a.due) change.push(`due ${a.due}`)
   if (!change.length) throw new AgentError(400, 'nothing to change')
-  const payload = { franchise: f, ticketId: a.ticketId, number: a.number ?? '', status: a.status, priority: a.priority, assignToBrendon: a.assignToBrendon, due: a.due }
+  const t = ticketRef(f, a.ticketId, a.number)
+  const payload = { franchise: f, ticketId: a.ticketId, number: t.number, status: a.status, priority: a.priority, assignToBrendon: a.assignToBrendon, due: a.due }
   const closes = /^complete$/i.test(a.status ?? '')
-  return post(agent, 'ticket_update', `${a.number || a.ticketId}: ${change.join(', ')}`, payload,
-    `Change ${a.number || `ticket ${a.ticketId}`}: ${change.join(', ')}${closes ? '. Completing it emails the contact the resolution.' : ''}\n${a.why}`,
-    [{ type: 'ticket', franchise: f, id: a.ticketId, number: a.number ?? String(a.ticketId), url: ticketUrl(f, a.ticketId) }], hop)
+  return post(agent, 'ticket_update', `${t.number}: ${change.join(', ')}`, payload,
+    `${a.why.trim()}${closes ? '\n\nCompleting it emails the contact the resolution.' : ''}`, [t.ref], hop)
 }
 
 export function proposeTicketCreate(agent: Agent, a: { companyId: number; company: string; title: string; description: string; priority?: string; queue?: string; contactId?: number; contact?: string; n?: number; why?: string }, hop: number): Proposal {
@@ -83,9 +90,11 @@ export function proposeTicketCreate(agent: Agent, a: { companyId: number; compan
   if (!f || agent.kind !== 'triage') throw new AgentError(403, 'only the triage agents propose new tickets')
   const payload = { franchise: f, ...a }
   const refs: Ref[] = a.n ? [{ type: 'mail', n: a.n }] : []
+  const who = a.contactId
+    ? `With contact ${a.contact ?? a.contactId}: Autotask emails them that it was created.`
+    : 'No contact: internal, nobody is emailed.'
   return post(agent, 'ticket_create', `New ${franchiseLabel(f)} ticket for ${a.company}: ${a.title}`, payload,
-    `New ticket for ${a.company}: ${a.title}${a.contactId ? `\nWith contact ${a.contact ?? a.contactId}: Autotask emails them that it was created.` : '\nNo contact: internal, nobody is emailed.'}${a.why ? `\n${a.why}` : ''}`,
-    refs, hop)
+    a.why?.trim() ? `${a.why.trim()}\n\n${who}` : who, refs, hop)
 }
 
 // ------------------------------------------------------------ decide ----
