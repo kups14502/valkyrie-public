@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express'
-import { requireStrongAuth } from '../middleware/auth.js'
+import { requireStrongAuth, viaCloudflare } from '../middleware/auth.js'
 import {
   InboxError, LEVELS, PUSH_SETTINGS, SOURCE_RE, inboxCount, listInbox, markRead, postInbox, setArchived,
   setPushSetting, sourceStats, type InboxLevel, type PushSetting, type Selector,
@@ -57,31 +57,33 @@ router.get('/inbox', h((req, res) => {
   const source = typeof req.query.source === 'string' && SOURCE_RE.test(req.query.source) ? req.query.source : undefined
   const limit = Number(req.query.limit) || undefined
   const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : undefined
-  res.json({ view, items: listInbox({ view, source, limit, before }), sources: sourceStats(), count: inboxCount() })
+  // through Cloudflare, private sources (work mail) are left out entirely
+  const hide = viaCloudflare(req)
+  res.json({ view, items: listInbox({ view, source, limit, before, hidePrivate: hide }), sources: sourceStats(hide), count: inboxCount(hide) })
 }))
 
 // What the strip's inbox button polls: cheap, no item bodies.
-router.get('/inbox/count', h((_req, res) => {
-  res.json(inboxCount())
+router.get('/inbox/count', h((req, res) => {
+  res.json(inboxCount(viaCloudflare(req)))
 }))
 
 router.post('/inbox/read', h((req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>
   const changed = markRead(selector(b), b.read !== false)
-  res.json({ ok: true, changed, count: inboxCount() })
+  res.json({ ok: true, changed, count: inboxCount(viaCloudflare(req)) })
 }))
 
 router.post('/inbox/archive', h((req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>
   const changed = setArchived({ ...selector(b), readOnly: b.readOnly === true }, b.archived !== false)
-  res.json({ ok: true, changed, count: inboxCount() })
+  res.json({ ok: true, changed, count: inboxCount(viaCloudflare(req)) })
 }))
 
 router.put('/inbox/sources/:source', h((req, res) => {
   const push = String((req.body ?? {}).push ?? '') as PushSetting
   if (!PUSH_SETTINGS.includes(push)) throw new InboxError('push must be auto, on or off')
   setPushSetting(String(req.params.source), push)
-  res.json({ ok: true, sources: sourceStats() })
+  res.json({ ok: true, sources: sourceStats(viaCloudflare(req)) })
 }))
 
 export default router

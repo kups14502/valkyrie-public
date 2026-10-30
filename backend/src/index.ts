@@ -40,6 +40,7 @@ import vehiclesRoute from './routes/vehicles.js'
 import inboxRoute from './routes/inbox.js'
 import tasksRoute from './routes/tasks.js'
 import todayRoute from './routes/today.js'
+import mailRoute from './routes/mail.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
 import { startBrief } from './lib/brief.js'
@@ -144,6 +145,7 @@ app.use('/api', accountSigninRoute)
 app.use('/api', inboxRoute)
 app.use('/api', tasksRoute)
 app.use('/api', todayRoute)
+app.use('/api', mailRoute)
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit

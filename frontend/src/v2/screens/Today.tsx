@@ -7,6 +7,7 @@ import { useShell } from '../kit/shell'
 import { ago, useCalendar, useOpenTasks, useSessions, useTick, type EventVM, type SessionVM } from '../kit/data'
 import { apiErrorText } from '../../lib/api'
 import { fetchInbox, type InboxItem } from '../../lib/inboxApi'
+import { fetchMail, type MailMessage, type Mailbox } from '../../lib/mailApi'
 import { clockOf, dueLabel, dueState, nyDayKey } from '../../lib/taskDue'
 import { taskKey, updateTask, type Task } from '../../lib/tasksApi'
 import { fetchBrief, fetchCaptures, refreshBrief, sendCapture, undoCapture, type Capture } from '../../lib/todayApi'
@@ -17,8 +18,9 @@ import './today.css'
 // Claude decides task, reminder, event or note, the backend does it), then the
 // morning brief Claude wrote at 7:30 (lib/brief.ts), then what is left on
 // today's calendar, the tasks that are overdue or due today (the box ticks
-// them), the unread inbox with alerts first, and the sessions that are asking
-// or working. Every block opens its own page for the rest. All times are New
+// them), unread mail from the work mailboxes (synced from thor, Focused only),
+// the rest of the unread inbox with alerts first, and the sessions that are
+// asking or working. Every block opens its own page for the rest. All times are New
 // York time. Blocks with nothing in them say so in one line.
 
 const NY_HEAD = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric' })
@@ -32,12 +34,15 @@ export default function Today({ active }: { active: boolean }) {
   const tasks = useOpenTasks()
   const inbox = useQuery({ queryKey: ['inbox', 'open', ''], queryFn: () => fetchInbox('open'), refetchInterval: () => (document.hidden || !active ? false : 30_000) })
   const sessions = useSessions()
+  const mail = useQuery({ queryKey: ['mail'], queryFn: fetchMail, refetchInterval: () => (document.hidden || !active ? false : 60_000) })
+  // mail has its own block, so the inbox block leaves the mail sources out
+  const mailSources = useMemo(() => new Set((mail.data?.mailboxes ?? []).map((b) => b.source)), [mail.data])
 
   const events = useMemo(() => (cal.data ?? []).filter((e) => nyDayKey(e.start) <= today && (e.allDay ? nyDayKey(e.end - 1) >= today : nyDayKey(e.end) >= today)), [cal.data, today])
   const left = events.filter((e) => e.allDay || e.end > now)
   const due = useMemo(() => (tasks.data?.tasks ?? []).filter((t) => t.due && (dueState(t.due, now) === 'overdue' || dueState(t.due, now) === 'today')), [tasks.data, now])
-  const unread = useMemo(() => (inbox.data?.items ?? []).filter((i) => !i.readAt)
-    .sort((a, b) => (a.level === 'alert' ? 0 : 1) - (b.level === 'alert' ? 0 : 1) || b.lastAt.localeCompare(a.lastAt)), [inbox.data])
+  const unread = useMemo(() => (inbox.data?.items ?? []).filter((i) => !i.readAt && !mailSources.has(i.source))
+    .sort((a, b) => (a.level === 'alert' ? 0 : 1) - (b.level === 'alert' ? 0 : 1) || b.lastAt.localeCompare(a.lastAt)), [inbox.data, mailSources])
   const busy = useMemo(() => (sessions.data ?? []).filter((s) => s.live && (s.activity === 'asking' || s.activity === 'working'))
     .sort((a, b) => (a.activity === 'asking' ? 0 : 1) - (b.activity === 'asking' ? 0 : 1) || b.last - a.last), [sessions.data])
 
@@ -62,6 +67,7 @@ export default function Today({ active }: { active: boolean }) {
           <DueTasks due={due} open={tasks.data?.tasks.length ?? null} now={now} failed={tasks.failed && !tasks.data} />
         </div>
         <div className="td-col">
+          {(mail.data?.mailboxes.length ?? 0) > 0 && <MailBlock boxes={mail.data!.mailboxes} list={mail.data!.unread} now={now} />}
           <UnreadInbox items={unread} loaded={!!inbox.data} failed={inbox.isError && !inbox.data} now={now} />
           <Busy list={busy} loaded={!!sessions.data} failed={sessions.failed && !sessions.data} now={now} />
         </div>
@@ -282,6 +288,37 @@ function DueTasks({ due, open, now, failed }: { due: Task[]; open: number | null
           })}
         </div>
       )}
+    </section>
+  )
+}
+
+// ---------- mail ----------
+
+function MailBlock({ boxes, list, now }: { boxes: Mailbox[]; list: MailMessage[]; now: number }) {
+  const unread = boxes.reduce((n, b) => n + (b.unread ?? 0), 0)
+  const late = boxes.filter((b) => b.stale || b.error)
+  const open = (m: MailMessage) => { if (m.webLink) window.open(m.webLink, '_blank', 'noopener,noreferrer') }
+  return (
+    <section className="td-sec" aria-label="Mail">
+      <Section icon="inbox" lit={list.length > 0} action={<span className="td-note">{boxes.map((b) => `${b.label} ${b.unread ?? '?'}`).join(' · ')}</span>}>
+        {`Mail · ${unread} unread`}
+      </Section>
+      {late.length > 0 && (
+        <p className="td-quiet" title={late.map((b) => b.error).filter(Boolean).join('; ') || undefined}>
+          {late.map((b) => b.label).join(' and ')} not synced lately (thor reads it).
+        </p>
+      )}
+      <div className="td-rows">
+        {list.length === 0 && <p className="td-quiet">No unread Focused mail.</p>}
+        {list.slice(0, 6).map((m) => (
+          <Press key={`${m.mailbox}:${m.receivedAt}:${m.subject}`} className="td-row" data-level={m.important ? 'alert' : 'warn'} onPress={() => open(m)} aria-label={`${m.fromName || m.fromAddress}: ${m.subject}, open in Outlook`}>
+            <span className="td-mark" aria-hidden />
+            <span className="td-what">{m.fromName || m.fromAddress}: {m.subject || '(no subject)'}</span>
+            <span className="td-meta">{boxes.length > 1 ? `${m.label} · ` : ''}{ago(Date.parse(m.receivedAt), now)}</span>
+          </Press>
+        ))}
+        {list.length > 6 && <p className="td-note">{list.length - 6} more unread</p>}
+      </div>
     </section>
   )
 }
