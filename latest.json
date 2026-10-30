@@ -1,15 +1,15 @@
 {
-  "version": "0.3.162",
-  "notes": "Shell: remove drag-the-screen to change tabs",
-  "pub_date": "2026-10-30T01:54:26Z",
+  "version": "0.3.163",
+  "notes": "Messages: clearer proposals, trigger words, seven tabs on the phone",
+  "pub_date": "2026-10-30T07:48:57Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWY2QWMwcnh0ZzlkNFZ3MGpiSkp2WHViME8xSmZ2ZW5sUlNPekc2M0U0ZVlVR0wrQm95bUdqd1JPNXUvUWljM0loNXhINStkVG9aMDNQcytWZDdoWmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzI0NzkyCWZpbGU6VmFsa3lyaWVfMC4zLjE2Ml94NjQtc2V0dXAuZXhlCllXQlhXcCtQSFliVzZMMDRhU0puS1lEMlo4eFJRVDFTdEdJNW82MFhqMUxlMWdSdVMzRENTVG9WL3ErUmJjc2k3VEZRUHJqcmpvWEV2Y3ZOQTlNbENnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.162/Valkyrie_0.3.162_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZYMXpWc1QxMHJvOW1KNWNINDdSNDd0VDNHeGlGZFhOTERUVmUvU1NSUUFPSjNMSHEyeDNiOW1tbVU0bGhVTDhZTkRpNnk1dENnS3JWeVlYSXM4dlFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzQ2MDE4CWZpbGU6VmFsa3lyaWVfMC4zLjE2M194NjQtc2V0dXAuZXhlCk5hcDE0VFNzNzJrU1VJeVhEQ3lUQVMwZm9JbmlJUlJ1ckU1aEp4K2IrcU9sVjl4UFJUTk04NUwvemtFclg5ekZJK0x0a0VnMUFkSkRLZ05NTGZ1RUN3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.163/Valkyrie_0.3.163_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVMzS044ZmJ0eWxmOXJRRExDQzN3NG5QSFZLUkhZQlA5ekQxMC9PNEFVVnA5WnN1Qm9TNVcwN2t1WG5NeGR6cXF2K0o2dTIxTjhhK1VpNVY1ZTkxNndFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzI0NTE2CWZpbGU6VmFsa3lyaWVfMC4zLjE2Ml9hbWQ2NC5BcHBJbWFnZQp4NmNEbTRZR2ZPMFZDVmNxVlhjdVM4RmFvL2drck15UGRmMmJBUTNoWWdlYXY2eHRpNjkwTkhTYkZENVk4b2FMK3RwbGFPZGVYWEpKRkZPcGsyYi9DZz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.162/Valkyrie_0.3.162_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZEZmFidFNWU0xhZVAyNFNweFg5Y1pBZmdFeXprN21RVlJjOXN5bk9YR25pY3o4MmdUYnR2SldveHBpUkgwVkZKRzBwQ1RsZ0FXS1ovYnNtd3N4WUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzQ1NzY3CWZpbGU6VmFsa3lyaWVfMC4zLjE2M19hbWQ2NC5BcHBJbWFnZQpaVktTdmZ6eUxJaU45MngwdWxWc295OGQ3c2tRbUFkMzlib1RwMFM2TnZxSFV5YmZ5YVJob1lFRWhjdWhGeGhkUXJOWVlZYlp4SlhmK0gvS3o3R0ZEUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.163/Valkyrie_0.3.163_amd64.AppImage"
     }
   }
 }
