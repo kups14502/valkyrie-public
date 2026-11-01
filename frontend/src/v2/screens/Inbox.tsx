@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Press, Segmented, toast } from '../kit/ui'
@@ -12,11 +12,16 @@ import { PageFrame } from './Calendar'
 import './inbox.css'
 
 // The inbox in v2 (/m/inbox): everything odin, thor and Valkyrie itself want to
-// tell Brendon, newest first (backend/src/lib/inboxStore.ts has the rules). One
-// row per item: a level mark, the title, a line of the body, the source and
-// when. A row opens to the whole text, Open (the item's link), Mark unread and
-// Archive; opening an unread row reads it. Open / Archive / Sources are text
-// tabs; Sources sets each source's push. A push notification lands here with
+// tell Brendon, newest first (backend/src/lib/inboxStore.ts has the rules). Rows
+// sit under day headings (Today, Yesterday, Fri, Oct 30), so a row only carries
+// its clock time. One row per item, two lines: the title and the time, then a
+// line of the body and the source. A mail item's "Sender: Subject" title splits
+// into the sender over the subject. Unread rows are lit, read ones dim (he said
+// the first cut was "hard to look at", 2026-11-01: every row the same bright
+// weight, a shouted source slug on each, long dates eating the phone width). A
+// row opens to the whole text, Open (the item's link), Mark unread and Archive;
+// opening an unread row reads it. Inbox / Archive / Sources are text tabs;
+// Sources sets each source's push. A push notification lands here with
 // ?item=<id>, which opens and reads that row.
 //
 // The list is a plain query, never the v2 localStorage cache: an item can hold
@@ -56,9 +61,40 @@ function when(iso: string, now: number): string {
   return NY_DAY.format(t)
 }
 
+const NY_WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
+
+/** A row's time under its day heading: "now", "13m", then the clock. */
+function clock(iso: string, now: number): string {
+  const d = now - Date.parse(iso)
+  if (d < 60_000) return 'now'
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m`
+  return NY_TIME.format(Date.parse(iso))
+}
+
+/** The heading a row sits under: Today, Yesterday, the weekday and date this week, else the date. */
+function dayLabel(iso: string, now: number): string {
+  const t = Date.parse(iso)
+  const k = NY_KEY.format(t)
+  if (k === NY_KEY.format(now)) return 'Today'
+  if (k === NY_KEY.format(now - 86_400_000)) return 'Yesterday'
+  return now - t < 6 * 86_400_000 ? NY_WEEKDAY.format(t) : NY_DAY.format(t)
+}
+
 const full = (iso: string) => `${NY_FULL.format(Date.parse(iso))} ET`
 
 const firstLine = (s: string) => s.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+
+const SOURCE_LABELS: Record<string, string> = { raid: 'RAID' }
+
+/** A source as a person reads it: "work-mail" is Work mail. */
+const sourceLabel = (s: string) => SOURCE_LABELS[s] ?? `${s.charAt(0).toUpperCase()}${s.slice(1)}`.replace(/-/g, ' ')
+
+/** A row's two lines. Mail is titled "Sender: Subject" (backend lib/mailStore.ts): the sender heads it. */
+function rowLines(it: InboxItem): { head: string; sub: string; fromBody: boolean } {
+  const cut = it.source.endsWith('-mail') ? it.title.indexOf(': ') : -1
+  if (cut > 0) return { head: it.title.slice(0, cut), sub: it.title.slice(cut + 2), fromBody: false }
+  return { head: it.title, sub: firstLine(it.body), fromBody: true }
+}
 
 /** The body as plain text with its links live. */
 function Linked({ text }: { text: string }) {
@@ -213,7 +249,7 @@ function InboxScreen({ asked }: { asked: number | null }) {
         {tab === 'open' && items.length > 0 && (
           <div className="ib-bar-acts">
             {shownUnread > 0 && (
-              <Button kind="link" onPress={() => read.mutate({ sel: source ? { source } : { all: true }, value: true })}>Mark all read</Button>
+              <Button kind="link" onPress={() => read.mutate({ sel: source ? { source } : { all: true }, value: true })}>Read all</Button>
             )}
             {items.some((it) => it.readAt) && (
               <Button kind="link" onPress={() => archive.mutate({ sel: source ? { source } : { all: true }, value: true, readOnly: true })}>Archive read</Button>
@@ -227,7 +263,7 @@ function InboxScreen({ asked }: { asked: number | null }) {
           <Press className="ib-chip" data-on={!source || undefined} onPress={() => setParam({ source: null, item: null })}>All</Press>
           {chips.map((s) => (
             <Press key={s.source} className="ib-chip" data-on={s.source === source || undefined} onPress={() => setParam({ source: s.source === source ? null : s.source, item: null })}>
-              {s.source}
+              {sourceLabel(s.source)}
               {view === 'open' && s.unread > 0 && <span className="ib-chip-n">{s.unread}</span>}
             </Press>
           ))}
@@ -244,7 +280,7 @@ function InboxScreen({ asked }: { asked: number | null }) {
             {sources.map((s) => (
               <div key={s.source} className="ib-src">
                 <div className="ib-src-text">
-                  <b>{s.source}</b>
+                  <b>{sourceLabel(s.source)}</b>
                   <span>{s.open} open{s.unread ? `, ${s.unread} unread` : ''}{s.lastAt ? ` · last ${when(s.lastAt, now)}` : ''}</span>
                 </div>
                 <Segmented className="ib-push" options={PUSH_OPTS} value={s.push} onChange={(v) => push.mutate({ src: s.source, value: v })} />
@@ -255,54 +291,65 @@ function InboxScreen({ asked }: { asked: number | null }) {
       ) : (
         <>
           {q.data && items.length === 0 && (
-            <p className="ib-quiet">{view === 'archive' ? 'The archive is empty.' : source ? `Nothing open from ${source}.` : 'Nothing new.'}</p>
+            <p className="ib-quiet">{view === 'archive' ? 'The archive is empty.' : source ? `Nothing open from ${sourceLabel(source)}.` : 'Nothing new.'}</p>
           )}
           <div className="ib-rows">
-            {items.map((it) => {
+            {items.map((it, i) => {
               const open = it.id === openId
-              const preview = firstLine(it.body)
+              const lines = rowLines(it)
+              const head = lines.head
+              // a line taken from the body steps aside once the row is open and shows the whole body
+              const sub = open && lines.fromBody ? '' : lines.sub
+              const day = dayLabel(it.lastAt, now)
+              const newDay = i === 0 || dayLabel(items[i - 1].lastAt, now) !== day
               return (
-                <div
-                  key={it.id}
-                  ref={(el) => { if (el) rowRefs.current.set(it.id, el); else rowRefs.current.delete(it.id) }}
-                  className="ib-row"
-                  data-open={open || undefined}
-                  data-unread={!it.readAt || undefined}
-                  data-level={it.level}
-                >
-                  <Press className="ib-row-main" aria-expanded={open} onPress={() => toggle(it)}>
-                    <span className="ib-mark" aria-label={it.level === 'info' ? undefined : it.level} />
-                    <span className="ib-text">
-                      <b>
-                        {it.title}
-                        {it.count > 1 && <i className="ib-count"> ×{it.count}</i>}
-                      </b>
-                      {preview && !open && <span>{preview}</span>}
-                    </span>
-                    <span className="ib-meta">
-                      <span className="ib-from">{it.source}</span>
-                      <time dateTime={it.lastAt} title={full(it.lastAt)}>{when(it.lastAt, now)}</time>
-                    </span>
-                  </Press>
-                  {open && (
-                    <div className="ib-detail">
-                      {it.body && <Linked text={it.body} />}
-                      <div className="ib-acts">
-                        {it.url && <Button kind="line" icon="go" onPress={() => openLink(it.url!)}>Open</Button>}
-                        {!it.archivedAt && it.readAt && (
-                          <Button kind="link" onPress={() => { setOpenId(null); read.mutate({ sel: { ids: [it.id] }, value: false }) }}>Mark unread</Button>
+                <Fragment key={it.id}>
+                  {newDay && <p className="ib-day">{day}</p>}
+                  <div
+                    ref={(el) => { if (el) rowRefs.current.set(it.id, el); else rowRefs.current.delete(it.id) }}
+                    className="ib-row"
+                    data-open={open || undefined}
+                    data-unread={!it.readAt || undefined}
+                    data-level={it.level}
+                  >
+                    <Press className="ib-row-main" aria-expanded={open} onPress={() => toggle(it)}>
+                      <span className="ib-mark" aria-label={it.level === 'info' ? undefined : it.level} />
+                      <span className="ib-text" data-nosub={!sub || undefined}>
+                        <span className="ib-l1">
+                          <b>
+                            {head}
+                            {it.count > 1 && <i className="ib-count"> ×{it.count}</i>}
+                          </b>
+                          <time dateTime={it.lastAt} title={full(it.lastAt)}>{clock(it.lastAt, now)}</time>
+                        </span>
+                        {(sub || !source) && (
+                          <span className="ib-l2">
+                            <span className="ib-sub">{sub}</span>
+                            {!source && <span className="ib-from">{sourceLabel(it.source)}</span>}
+                          </span>
                         )}
-                        <Button kind="link" onPress={() => { setOpenId(null); archive.mutate({ sel: { ids: [it.id] }, value: !it.archivedAt }) }}>
-                          {it.archivedAt ? 'Back to inbox' : 'Archive'}
-                        </Button>
+                      </span>
+                    </Press>
+                    {open && (
+                      <div className="ib-detail">
+                        {it.body && <Linked text={it.body} />}
+                        <div className="ib-acts">
+                          {it.url && <Button kind="line" icon="go" onPress={() => openLink(it.url!)}>Open</Button>}
+                          {!it.archivedAt && it.readAt && (
+                            <Button kind="link" onPress={() => { setOpenId(null); read.mutate({ sel: { ids: [it.id] }, value: false }) }}>Mark unread</Button>
+                          )}
+                          <Button kind="link" onPress={() => { setOpenId(null); archive.mutate({ sel: { ids: [it.id] }, value: !it.archivedAt }) }}>
+                            {it.archivedAt ? 'Back to inbox' : 'Archive'}
+                          </Button>
+                        </div>
+                        <p className="ib-when">
+                          {it.count > 1 ? `${it.count} times, first ${full(it.firstAt)}, last ${full(it.lastAt)}` : full(it.lastAt)}
+                          {it.pushedAt ? ' · pushed' : it.pushDetail ? ` · push failed: ${it.pushDetail}` : ''}
+                        </p>
                       </div>
-                      <p className="ib-when">
-                        {it.count > 1 ? `${it.count} times, first ${full(it.firstAt)}, last ${full(it.lastAt)}` : full(it.lastAt)}
-                        {it.pushedAt ? ' · pushed' : it.pushDetail ? ` · push failed: ${it.pushDetail}` : ''}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                </Fragment>
               )
             })}
           </div>
