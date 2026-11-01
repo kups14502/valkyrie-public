@@ -737,10 +737,15 @@ async function doSwitch(
     kind, host: h, from: d.from ?? r.previous, to: d.to, reason: d.reason, ok: true,
     fromPct: fromQ?.sessionPct ?? null, toPct: toQ?.sessionPct ?? null, nudged: nudged.length,
   })
-  await dm(switchMessage({
-    host: h, from: d.from || r.previous ? { label: labelOf(d.from ?? r.previous), quota: fromQ } : null,
-    to: { label: labelOf(d.to), quota: toQ }, reason: d.reason, dryRun: false, nudged: nudged.length, outside: outsideIds.size,
-  }, now))
+  // A switch that went through is in the log and on AI > Usage. It reaches the
+  // inbox only when a session somewhere needs a manual continue (2026-11-01):
+  // thor continues its own, so that is a host other than thor.
+  if (outsideIds.size > 0 && h !== 'thor') {
+    await dm(switchMessage({
+      host: h, from: d.from || r.previous ? { label: labelOf(d.from ?? r.previous), quota: fromQ } : null,
+      to: { label: labelOf(d.to), quota: toQ }, reason: d.reason, dryRun: false, nudged: nudged.length, outside: outsideIds.size,
+    }, now))
+  }
   return { ok: true, nudged: nudged.length }
 }
 

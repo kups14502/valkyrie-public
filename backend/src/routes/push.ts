@@ -177,6 +177,9 @@ router.post('/push/subscribe', (req, res) => {
       p256dh = excluded.p256dh, auth = excluded.auth, label = excluded.label,
       ua = excluded.ua, lastError = NULL, failCount = 0
   `).run({ endpoint, p256dh, auth, label, ua, now: new Date().toISOString() })
+  // inboxStore imports this module, so it is loaded lazily here rather than in a cycle
+  void import('../lib/inboxStore.js').then((m) => m.clearPushOff())
+    .catch((err: Error) => console.error('[push] could not clear the push-off item', err.message))
   res.json({ ok: true, id: subId(endpoint), subscriptions: listSubs().map(publicSub) })
 })
 

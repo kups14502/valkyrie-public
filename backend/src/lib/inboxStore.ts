@@ -29,6 +29,13 @@ import { pushToAll } from '../routes/push.js'
 //     deleted 180 days after archiving. The list never grows without bound.
 //   * A PRIVATE source (work mail, lib/mailStore.ts) is tailnet only: through
 //     Cloudflare its items are left out of the list, the counts and the sources.
+//   * The inbox holds only what needs Brendon (his call, 2026-11-01). Senders
+//     post problems and things to act on, never routine "all good" reports,
+//     progress or confirmations. A sender whose problem clears calls
+//     resolveInbox() so the item leaves on its own.
+//   * When a push finds no subscribed device, ONE item says so (push-off) and
+//     stays until a push gets through again. Before it existed, three days of
+//     dead push went unseen while every fallback piled into the inbox.
 
 const exec = promisify(execFile)
 
@@ -196,6 +203,33 @@ function pushBody(row: Row): string {
   return clip(first || row.source, 300)
 }
 
+const PUSH_OFF = { source: 'valkyrie', tag: 'push-off' }
+
+/** Archive the open item raised under this source and tag, once its condition has cleared. */
+export function resolveInbox(source: string, tag: string): number {
+  const at = nowIso()
+  return db.prepare(`UPDATE inbox_items SET archivedAt = ?, readAt = COALESCE(readAt, ?)
+    WHERE source = ? AND tag = ? AND archivedAt IS NULL`).run(at, at, source, tag).changes
+}
+
+/** A device subscribed or a push got through: the push-off item has done its job. */
+export function clearPushOff(): void {
+  resolveInbox(PUSH_OFF.source, PUSH_OFF.tag)
+}
+
+/** One standing item while no device can take a push; never folded, so it does not jump to the top again. */
+function notePushOff(): void {
+  const open = db.prepare('SELECT id FROM inbox_items WHERE source = ? AND tag = ? AND archivedAt IS NULL')
+    .get(PUSH_OFF.source, PUSH_OFF.tag)
+  if (open) return
+  const at = nowIso()
+  db.prepare(`INSERT INTO inbox_items (source, level, title, body, url, tag, firstAt, lastAt)
+    VALUES (?, 'warn', ?, ?, '/m/settings', ?, ?, ?)`).run(
+    PUSH_OFF.source, 'Phone notifications are off',
+    'No device is subscribed, so nothing reaches the lock screen. On the phone, open Valkyrie from the Home Screen, then Settings > This device > On.',
+    PUSH_OFF.tag, at, at)
+}
+
 async function discordFallback(row: Row): Promise<void> {
   const text = [`${row.title}`, row.body].filter(Boolean).join('\n').slice(0, 1900)
   try {
@@ -251,6 +285,8 @@ export async function postInbox(input: InboxInput): Promise<InboxResult> {
     pushed = r.ok
     pushDetail = r.detail
     db.prepare('UPDATE inbox_items SET pushedAt = ?, pushDetail = ? WHERE id = ?').run(r.ok ? nowIso() : null, r.detail, id)
+    if (r.ok) clearPushOff()
+    else if (r.detail === 'no subscriptions') notePushOff()
     // not awaited: the sender's request must not wait on Discord, or a slow send times the
     // sender out and it posts the same text to Discord a second time
     if (!r.ok && level === 'alert') void discordFallback(row)

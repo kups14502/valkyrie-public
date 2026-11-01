@@ -109,7 +109,8 @@ check('store now on fake-b, mcpOAuth kept, mode 600', () => {
 })
 await waitFor('the reply on fake-b', () => /REPLY-FROM-ACCOUNT-B/.test(cap()))
 check('the pane ran its turn on fake-b', () => assert.match(apiLog(), /stream=True[\s\S]*tok=dummy-B-t model=claude-haiku-4-5-20251001 stream=True/))
-check('switch DM names both accounts and the nudge', () => assert.match(dms(), /Switched odin from Fake A .* to Fake B .*Continued 1 stopped pane\./))
+// a clean switch is log only since 2026-11-01; the DM is kept for a session that needs a manual continue
+check('a clean switch sends no DM', () => assert.doesNotMatch(dms(), /Switched odin from Fake A .* to Fake B .*Continued 1 stopped pane\./))
 check('fake-d was probed, refused, and DMed once', () => {
   const st = JSON.parse(readFileSync(`${T}/sw/state.json`, 'utf8'))
   assert.ok(st.dead['fake-d'] || !st.probes['fake-d'], 'fake-d not yet probed is fine')

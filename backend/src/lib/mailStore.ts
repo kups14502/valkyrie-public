@@ -15,6 +15,10 @@ import { InboxError, markRead, postInbox, setSourcePrivate, SOURCE_RE } from './
 //   * a NEW unread Focused message from the last 24 hours becomes an inbox
 //     item under the mailbox's source, info level, no push (Outlook already
 //     buzzes the phone); reading it in Outlook marks that item read here;
+//   * only mail a person wrote does (2026-11-01). Focused let through
+//     statements, newsletters, delivery notices, meeting replies and ticket
+//     notifications, so automated() drops them; they stay in Mail and Today.
+//     A message sitting in two mailboxes (CC'd to both) is one inbox item;
 //   * a mailbox marked private (work mail) is tailnet only: through Cloudflare
 //     its rows and its inbox items answer like they do not exist.
 
@@ -74,6 +78,21 @@ const nowIso = () => new Date().toISOString()
 const clip = (v: unknown, max: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
 const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
+// A sender that only ever sends automatically: the mailbox name, or the
+// sending subdomain bulk mailers use (m., email., post., account. ...).
+const AUTO_LOCAL_RE = /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|newsletters?|news|notifications?|notify|alerts?|mailer(-daemon)?|bounces?|marketing|promo(tions)?|offers|deals|digest|updates?|replies|order-update|shipment-tracking|auto-confirm|billing|statements?)([-_.+].*)?$/i
+const AUTO_HOST_RE = /^(m|e|em|email|emails|mail|mailer|mailing|post|news|newsletter|marketing|promo|info|account|accounts|notify|notifications|alerts|consult|talent|engage|txn)\./i
+// Meeting replies and ticket notifications: generated, even when a person's name is on them.
+const AUTO_SUBJECT_RE = /^(accepted|declined|tentative|tentatively accepted)\s*:|^(ticket|task) (note|created|assigned|updated|completed|escalated)\b|\bnote created:/i
+
+/** True for mail no person wrote: it stays in Mail but never becomes an inbox item. */
+export function automated(m: { fromAddress: string; subject: string }): boolean {
+  const [local = '', host = ''] = m.fromAddress.toLowerCase().split('@')
+  if (AUTO_LOCAL_RE.test(local)) return true
+  if (host.split('.').length >= 3 && AUTO_HOST_RE.test(host)) return true
+  return AUTO_SUBJECT_RE.test(m.subject)
+}
+
 type SyncInput = {
   mailbox?: { key?: unknown; label?: unknown; source?: unknown; private?: unknown }
   unread?: unknown; total?: unknown; error?: unknown
@@ -126,7 +145,13 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
       importance: clip(m.importance, 10) || 'normal', flagged: m.flagged === true ? 1 : 0, focused: m.focused === false ? 0 : 1,
       inboxId: null, firstSeenAt: at,
     }
-    if (!isRead && row.focused && Date.now() - Date.parse(row.receivedAt) < INBOX_WINDOW_MS) {
+    // the same message delivered to another mailbox already has an item: share it
+    const twin = db.prepare(`SELECT inboxId FROM mail_messages WHERE mailbox != ? AND fromAddress = ? AND subject = ?
+      AND ABS(julianday(receivedAt) - julianday(?)) * 1440 < 2 AND inboxId IS NOT NULL`)
+      .get(key, row.fromAddress, row.subject, row.receivedAt) as { inboxId: number } | undefined
+    if (twin) {
+      row.inboxId = twin.inboxId
+    } else if (!isRead && row.focused && !automated(row) && Date.now() - Date.parse(row.receivedAt) < INBOX_WINDOW_MS) {
       try {
         const r = await postInbox({
           source, level: row.importance === 'high' ? 'warn' : 'info', push: false,

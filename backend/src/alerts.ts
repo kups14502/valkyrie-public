@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { postInbox, type InboxLevel } from './lib/inboxStore.js'
+import { postInbox, resolveInbox, type InboxLevel } from './lib/inboxStore.js'
 import { CLAUDE_ACCOUNTS } from './lib/claudeAccounts.js'
 
-// The health alerts (Claude quota and sign-ins, disk, Vaultwarden) go to the
+// The health alerts (Claude sign-ins, disk, Vaultwarden) go to the
 // inbox (lib/inboxStore.ts), which keeps them and pushes them to the phone.
 // They used to be Discord webhook posts, which meant the one place Brendon had
 // to watch for "something is wrong" was a chat channel he had to remember to
@@ -109,16 +109,6 @@ type VaultShape = {
   backups: { stale: boolean }
 }
 
-function fmtMins(ms: number): string {
-  const mins = Math.round(ms / 60_000)
-  if (mins < 60) return `${mins}m`
-  return `${Math.floor(mins / 60)}h${mins % 60}m`
-}
-
-function fmtClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
-}
-
 async function tick(state: AlertState): Promise<AlertState> {
   const [ai, sys, vault] = await Promise.all([
     fetchJSON<AIUsageShape>('/api/ai-usage'),
@@ -144,19 +134,9 @@ async function tick(state: AlertState): Promise<AlertState> {
     }
     next.sessionResetsAt = resetsAt
 
-    const untilReset = resetsAtMs - now
-
-    if (quota) {
-      const over = quota.sessionPct >= CLAUDE_THRESHOLD
-      if (over && !state.claudeOver90) {
-        await alert({
-          title: `Claude session at ${quota.sessionPct}%`,
-          body: `Resets at ${fmtClock(resetsAt)} ET (${fmtMins(untilReset)}).`,
-          tag: 'claude-quota', pushUrl: '/dashboard', url: '/m/ai/usage', source: 'claude', level: 'warn',
-        })
-      }
-      next.claudeOver90 = over
-    }
+    // No inbox item at 90% any more (2026-11-01): the auto-switch moves to an
+    // account with room, and only what needs Brendon goes to the inbox.
+    if (quota) next.claudeOver90 = quota.sessionPct >= CLAUDE_THRESHOLD
   }
 
   // A dead sign-in used to sit on the dashboard unnoticed for weeks:
@@ -178,13 +158,9 @@ async function tick(state: AlertState): Promise<AlertState> {
       const c = clients.find((x) => x.id === id)
       return c && !c.authError
     })
-    for (const id of recovered) {
-      const c = clients.find((x) => x.id === id)
-      await alert({
-        title: 'Claude sign-in restored', body: `${c?.label ?? id}.`,
-        tag: `claude-signin-${id}`, pushUrl: '/dashboard', url: '/m/ai/usage', source: 'claude', level: 'info',
-      })
-    }
+    // A sign-in that works again takes its "signed out" item out of the inbox
+    // instead of adding a "restored" one: nothing is left to do.
+    for (const id of recovered) resolveInbox('claude', `claude-signin-${id}`)
     next.signedOut = dead.map((c) => c.id)
   }
 
