@@ -7,7 +7,7 @@
 //              with its alert color, no overflow (phone, desktop, desk1080)
 //   open       a row opens to its text with a live link and reads itself; Mark unread; Open
 //              goes to the item's app path; Archive with Undo
-//   bulk       Mark all read, Archive read, the source filter asking for that source
+//   bulk       Read all, Archive read, the source filter asking for that source
 //   sources    the Sources tab and a push setting sent as a PUT
 //   push-tap   ?item=<id> opens and reads that row; an archived one is found in the archive
 //   strip      the strip's button on the dashboard opens the inbox
@@ -136,9 +136,12 @@ export function inboxTests() {
         })
         t.check(strip?.n === '3' && strip.alert && strip.label === 'Inbox: 3 unread, 1 alert', `the strip button reads ${JSON.stringify(strip)}`)
         const chips = await page.eval(() => [...document.querySelectorAll('.ib-chip')].map((c) => c.textContent))
-        t.check(chips[0] === 'All' && chips.includes('raid1') && chips.includes('reminder'), `the source filter reads ${JSON.stringify(chips)}`)
+        t.check(chips[0] === 'All' && chips.includes('RAID1') && chips.includes('Reminder'), `the source filter reads ${JSON.stringify(chips)}`)
         const times = await page.eval(() => [...document.querySelectorAll('.ib-row time')].map((e) => e.getAttribute('title') ?? ''))
         t.check(times.length === 4 && times.every((x) => / ET$/.test(x)), `row times are not labeled ET: ${JSON.stringify(times)}`)
+        const days = await page.eval(() => [...document.querySelectorAll('.ib-day')].map((d) => d.textContent))
+        const clocks = await page.eval(() => [...document.querySelectorAll('.ib-row time')].map((e) => e.textContent))
+        t.check(days.length >= 1 && days.length <= 2 && clocks.every((c) => !/,/.test(c)), `rows are not under day headings with a bare clock: ${JSON.stringify({ days, clocks })}`)
         const txt = await page.eval(() => document.querySelector('.ib')?.innerText ?? '')
         t.check(!/—/.test(txt), 'an em dash on the inbox page')
         await fits(t, page, `${ROUTE} @${device}`)
@@ -205,9 +208,9 @@ export function inboxTests() {
       await page.goto(ROUTE)
       await pageUp(page)
       await rowsUp(page, 4)
-      await page.tap({ sel: '.ib-bar-acts .vl-link', text: /Mark all read/ })
+      await page.tap({ sel: '.ib-bar-acts .vl-link', text: /Read all/ })
       let w = await waitW(page, 1)
-      t.check(w.path === '/api/inbox/read' && w.json?.all === true && w.json?.read === true, `Mark all read sent ${w.method} ${w.path} ${w.body}`)
+      t.check(w.path === '/api/inbox/read' && w.json?.all === true && w.json?.read === true, `Read all sent ${w.method} ${w.path} ${w.body}`)
       await page.waitFor(() => !document.querySelector('.ib-row[data-unread]'), { message: 'rows stayed unread' })
       await page.waitFor(() => !document.querySelector('.vl-strip-inbox-n'), { message: 'the strip still shows a count' })
       await page.tap({ sel: '.ib-bar-acts .vl-link', text: /Archive read/ })
@@ -219,7 +222,7 @@ export function inboxTests() {
       // the source filter asks for that source
       await page.tap({ sel: '.ib-tab', text: /Archive/ })
       await page.waitFor(() => document.querySelectorAll('.ib-row').length === 5, { message: 'the archive did not list all five' })
-      await page.tap({ sel: '.ib-chip', text: /^raid/ })
+      await page.tap({ sel: '.ib-chip', text: /^RAID/ })
       await page.waitFor(() => document.querySelectorAll('.ib-row').length === 1, { message: 'the raid filter did not narrow the list' })
       t.check(st.gets.some((q) => q.view === 'archive' && q.source === 'raid'), `the filter never asked for raid: ${JSON.stringify(st.gets.slice(-3))}`)
       t.check((await page.path()).includes('source=raid'), 'the filter is not in the URL')
@@ -238,9 +241,9 @@ export function inboxTests() {
       await pageUp(page)
       await page.waitFor(() => document.querySelectorAll('.ib-src').length === 4, { message: 'the four sources did not show' })
       const set = await page.eval(() => [...document.querySelectorAll('.ib-src')].map((r) => `${r.querySelector('b')?.textContent}:${r.querySelector('.vl-seg-cell[data-on]')?.textContent}`))
-      t.check(set.includes('trade:Off') && set.includes('reminder:On') && set.includes('raid:Auto'), `the settings read ${JSON.stringify(set)}`)
+      t.check(set.includes('Trade:Off') && set.includes('Reminder:On') && set.includes('RAID:Auto'), `the settings read ${JSON.stringify(set)}`)
       await t.shot(page, 'sources')
-      const raidRow = await page.eval(() => [...document.querySelectorAll('.ib-src')].findIndex((r) => r.querySelector('b')?.textContent === 'raid'))
+      const raidRow = await page.eval(() => [...document.querySelectorAll('.ib-src')].findIndex((r) => r.querySelector('b')?.textContent === 'RAID'))
       await page.tap({ sel: `.ib-src:nth-child(${raidRow + 1}) .vl-seg-cell`, text: 'Off' })
       const w = await waitW(page, 1)
       t.check(w.method === 'PUT' && w.path === '/api/inbox/sources/raid' && w.json?.push === 'off', `the setting sent ${w.method} ${w.path} ${w.body}`)
