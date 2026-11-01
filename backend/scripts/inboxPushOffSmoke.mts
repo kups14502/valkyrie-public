@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import webpush from 'web-push'
 
 const LIVE_DIR = path.join(homedir(), 'valkyrie', 'backend', 'data')
@@ -19,6 +19,12 @@ if (!dataDir || fs.realpathSync(dataDir) === (() => { try { return fs.realpathSy
   console.error('inboxPushOffSmoke: set VALKYRIE_DATA_DIR to a scratch directory')
   process.exit(2)
 }
+// an alert that reaches no device goes to Discord: point that at a stub, never the real Lil' kups
+const scratch = fs.mkdtempSync(path.join(tmpdir(), 'inbox-pushoff-'))
+const stub = path.join(scratch, 'lilkups')
+fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n')
+fs.chmodSync(stub, 0o755)
+process.env.LILKUPS_BIN = stub
 const keys = webpush.generateVAPIDKeys()
 process.env.VAPID_PUBLIC_KEY = keys.publicKey
 process.env.VAPID_PRIVATE_KEY = keys.privateKey
