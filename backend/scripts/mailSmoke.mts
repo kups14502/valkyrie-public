@@ -5,7 +5,9 @@
  * Other, read and older mail, keeps the unread count; a later sync that sees a message read in
  * Outlook marks its inbox item read; an error sync is kept as the mailbox's error; validation; and the
  * Cloudflare rule: a private mailbox, its rows and its inbox items (list, count, sources) answer like
- * they do not exist, while a non-private one stays visible.
+ * they do not exist, while a non-private one stays visible. Mail no person wrote (noreply senders,
+ * bulk subdomains, meeting replies, ticket notifications) adds no inbox item, and a message in two
+ * mailboxes is one item.
  *
  *   VALKYRIE_DATA_DIR=$(mktemp -d) node --import tsx scripts/mailSmoke.mts
  */
@@ -97,6 +99,27 @@ check('bad source', (await j('POST', '/mail/sync', { mailbox: { key: 'ok', sourc
 check('junk rows skipped, bad links dropped', st === 200 && r.added === 1, r)
 const jItem = (await j('GET', '/inbox?source=work-mail'))[1].items.find((i: any) => i.title.startsWith('Sender j'))
 check('no link kept', jItem && jItem.url === null, jItem)
+
+// only mail a person wrote becomes an inbox item (2026-11-01)
+const { automated } = await import('../src/lib/mailStore.ts')
+const auto = (fromAddress: string, subject = 'Hello') => automated({ fromAddress, subject })
+check('noreply senders are automated', ['no_reply@post.example.apple', 'no-reply@example.com', 'donotreply@example.com', 'newsletter@example.com', 'order-update@example.com', 'replies@m.example.com'].every((s) => auto(s)))
+check('bulk sending subdomains are automated', ['brand@account.example.com', 'careers@talent.mail.example.com', 'advisors@consult.example.com'].every((s) => auto(s)))
+check('meeting replies and ticket notifications are automated', auto('person@example.com', 'Accepted: Project: next steps')
+  && auto('support@example.com', 'Ticket Note Note Created: T20261030.0003 - printer') && auto('person@example.com', 'Tentative: sync'))
+check('people are not automated', !auto('jane.doe@example.com', 'Re: T20261030.0003 - Terminal opening at PC start')
+  && !auto('DEO@EXAMPLE.COM', 'Fw: Welcome to your account') && !auto('jlin@example.org', 'Re: Email on your phone')
+  && !auto('person@sub.example.com', 'Canceled: Monday sync'))
+;[st, r] = await j('POST', '/mail/sync', { mailbox: work, unread: 2, messages: [
+  msg('n1', { fromAddress: 'newsletter@example.com' }), msg('n2', { subject: 'Accepted: Project kickoff' }),
+] })
+check('automated mail is kept but adds no inbox item', st === 200 && r.added === 0 && r.known === 0, r)
+const support = { key: 'support', label: 'Support', source: 'support-mail', private: true }
+const shared = msg('p2', { fromAddress: 'person@example.org', subject: 'Re: shared', receivedAt: ago(1) })
+await j('POST', '/mail/sync', { mailbox: work, unread: 1, messages: [{ ...shared, id: 'p2-work' }] })
+;[st, r] = await j('POST', '/mail/sync', { mailbox: support, unread: 1, messages: [{ ...shared, id: 'p2-support' }] })
+check('mail CC\'d to two mailboxes is one inbox item', st === 200 && r.added === 0
+  && (await j('GET', '/inbox'))[1].items.filter((i: any) => i.title === 'Sender p2: Re: shared').length === 1, r)
 
 console.log(`mail smoke: ${pass} passed, ${fail} failed`)
 srv.close(); process.exit(fail ? 1 : 0)
