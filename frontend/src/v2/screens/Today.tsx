@@ -66,12 +66,12 @@ export default function Today({ active }: { active: boolean }) {
         <div className="td-col">
           <Schedule events={events} left={left} now={now} today={today} tomorrow={(cal.data ?? []).find((e) => !e.allDay && nyDayKey(e.start) > today) ?? null} failed={cal.failed && !cal.data} />
           <DueTasks due={due} open={tasks.data?.tasks.length ?? null} now={now} failed={tasks.failed && !tasks.data} />
+          <JobsBlock active={active} />
         </div>
         <div className="td-col">
           {(mail.data?.mailboxes.length ?? 0) > 0 && <MailBlock boxes={mail.data!.mailboxes} list={mail.data!.unread} now={now} />}
           <UnreadInbox items={unread} loaded={!!inbox.data} failed={inbox.isError && !inbox.data} now={now} />
           <Busy list={busy} loaded={!!sessions.data} failed={sessions.failed && !sessions.data} now={now} />
-          <JobsBlock active={active} />
         </div>
       </div>
     </div>
