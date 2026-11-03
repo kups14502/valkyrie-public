@@ -1,12 +1,13 @@
-// JOBS: the applications page (src/v2/screens/Jobs.tsx, /m/jobs) and its block on Dashboard > Today,
+// JOBS: the Jobs tab (src/v2/screens/Jobs.tsx, /m/jobs/<applied|held|skipped>) and its block on Dashboard > Today,
 // over a fake /api/jobs in routes/jobs.ts's shapes. Times are built from now, so Today and
 // Yesterday group right on any day. Every write is caught in the browser. Generic names only:
 // this repo is public.
 //
-//   list       the summary line, Applied grouped Today / Yesterday, region chips, no overflow (three sizes)
+//   list       the Jobs tab in the tab bar, its sub-tabs, the summary line, Applied grouped Today /
+//              Yesterday, region chips, no overflow (three sizes)
 //   outcome    a row opens; Interview sends the outcome and shows on the row; Undo clears it
 //   held       the Held tab shows the reason; Skip sends the skip and drops the row
-//   today      the Today block counts today against the cap and opens /m/jobs
+//   today      the Today block counts today against the cap and opens the Jobs tab
 //   down       the jobs API not answering: one plain line, no crash
 
 import { sleep } from '../lib/cdp.mjs'
@@ -60,7 +61,7 @@ function jobsBackend(page, { down = false } = {}) {
   return st
 }
 
-const pageUp = (page) => page.waitFor(() => !!document.querySelector('.jb .jb-tabs'), { timeout: 12_000, message: 'the Jobs page did not come up' })
+const pageUp = (page) => page.waitFor(() => !!document.querySelector('.jb .jb-sum, .jb .jb-quiet'), { timeout: 12_000, message: 'the Jobs tab did not come up' })
 const rowsUp = (page, n) => page.waitFor((k) => document.querySelectorAll('.jb-row').length === k, { args: [n], timeout: 8000, message: `the list did not show ${n} rows` })
 
 async function waitW(page, n, timeout = 6000) {
@@ -91,11 +92,13 @@ export function jobsTests() {
         await pageUp(page)
         await rowsUp(page, 3)
         const sum = await page.eval(() => document.querySelector('.jb-sum')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
-        t.check(/3 applied/.test(sum) && /2 of 40 today/.test(sum) && /Next run 7:00 AM/.test(sum), `the summary reads "${sum}"`)
+        t.check(/3 applied/.test(sum) && /2 of 40 today/.test(sum) && /1 held/.test(sum) && /1 skipped/.test(sum) && /Next run 7:00 AM/.test(sum), `the summary reads "${sum}"`)
         const heads = await page.eval(() => [...document.querySelectorAll('.jb-ghead span:first-child')].map((e) => e.textContent))
         t.check(JSON.stringify(heads) === JSON.stringify(['Today', 'Yesterday']), `groups read ${JSON.stringify(heads)}`)
-        const tabs = await page.eval(() => [...document.querySelectorAll('.jb-tab')].map((e) => e.textContent))
-        t.check(JSON.stringify(tabs) === JSON.stringify(['Applied3', 'Held1', 'Skipped1']), `tabs read ${JSON.stringify(tabs)}`)
+        const tabs = await page.eval(() => [...document.querySelectorAll('.vl-tab-sub')].map((e) => e.textContent.trim()))
+        t.check(JSON.stringify(tabs) === JSON.stringify(['Applied', 'Held', 'Skipped']), `sub-tabs read ${JSON.stringify(tabs)}`)
+        const main = await page.eval(() => [...document.querySelectorAll('.vl-tab')].map((e) => e.textContent.trim()))
+        t.check(main.includes('Jobs'), `no Jobs tab in ${JSON.stringify(main)}`)
         const chips = await page.eval(() => [...document.querySelectorAll('.jb-chip')].map((c) => c.textContent))
         t.check(JSON.stringify(chips) === JSON.stringify(['All', 'TX/FL1', 'NC/PA1', 'Remote1']), `region chips read ${JSON.stringify(chips)}`)
         const txt = await page.eval(() => document.querySelector('.jb')?.innerText ?? '')
@@ -145,7 +148,7 @@ export function jobsTests() {
     async run(t) {
       const page = await t.page()
       jobsBackend(page)
-      await page.goto(`${ROUTE}?view=held`)
+      await page.goto(`${ROUTE}/held`)
       await pageUp(page)
       await rowsUp(page, 1)
       const why = await page.eval(() => document.querySelector('.jb-row .jb-why')?.textContent ?? '')
@@ -177,7 +180,7 @@ export function jobsTests() {
         await t.shot(page, 'today')
         await page.tap({ sel: '[aria-label="Job applications"] .vl-link', text: /All applications/ })
         // the check runs in the page, where ROUTE does not exist
-        await page.waitFor(() => location.pathname === '/m/jobs', { message: 'the block did not open /m/jobs' })
+        await page.waitFor(() => location.pathname.startsWith('/m/jobs'), { message: 'the block did not open the Jobs tab' })
         await pageUp(page)
       },
     })

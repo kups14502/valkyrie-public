@@ -2,14 +2,14 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Button, Press, toast } from '../kit/ui'
+import type { ScreenProps } from '../kit/shell'
 import { useTick } from '../kit/data'
 import { apiErrorText } from '../../lib/api'
 import { addDayKey, nyDayKey } from '../../lib/taskDue'
 import { fetchJobs, setOutcome, skipJob, type Job, type JobView, type JobsPage as JobsData, type Outcome } from '../../lib/jobsApi'
-import { PageFrame } from './Calendar'
 import './jobs.css'
 
-// Job applications in v2 (/m/jobs): what the auto-apply runner on odin sent
+// The Jobs tab (/m/jobs/<applied|held|skipped>): what the auto-apply runner on odin sent
 // (backend/src/routes/jobs.ts reads its SQLite file). Applied groups by the New
 // York day it went out; a row opens to mark what came back (Interview,
 // Rejected, Offer, Withdrawn), the posting, the resume used and any written
@@ -17,12 +17,6 @@ import './jobs.css'
 // the form to finish by hand or Skip so the runner leaves it alone. Skipped is
 // everything it passed on or could not reach. The line on top says how many
 // went out today against the daily cap and when the next run starts.
-
-const VIEWS: { id: JobView; label: string }[] = [
-  { id: 'applied', label: 'Applied' },
-  { id: 'held', label: 'Held' },
-  { id: 'skipped', label: 'Skipped' },
-]
 
 const OUTCOMES: { id: Outcome; label: string }[] = [
   { id: 'interview', label: 'Interview' },
@@ -50,20 +44,26 @@ function openUrl(u: string | null) {
   if (u) window.open(u, '_blank', 'noopener,noreferrer')
 }
 
-export default function JobsPage() {
+// The tab's sub-tabs (v2/App.tsx SCREENS): one per view
+export const JOB_SUBS: { id: JobView; label: string }[] = [
+  { id: 'applied', label: 'Applied' },
+  { id: 'held', label: 'Held' },
+  { id: 'skipped', label: 'Skipped' },
+]
+
+export default function Jobs({ active, sub }: ScreenProps) {
+  const view: JobView = sub === 'held' || sub === 'skipped' ? sub : 'applied'
   return (
-    <PageFrame id="jobs" title="Jobs" icon="jobs" scroll>
-      <JobsScreen />
-    </PageFrame>
+    <div className="vl-screen">
+      <JobsScreen view={view} active={active} />
+    </div>
   )
 }
 
-function JobsScreen() {
+function JobsScreen({ view, active }: { view: JobView; active: boolean }) {
   const [params, setParams] = useSearchParams()
   const qc = useQueryClient()
   const now = useTick(60_000)
-  const raw = params.get('view')
-  const view: JobView = raw === 'held' || raw === 'skipped' ? raw : 'applied'
   const region = params.get('region')
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -71,7 +71,8 @@ function JobsScreen() {
   const q = useQuery({
     queryKey: key,
     queryFn: () => fetchJobs(view),
-    refetchInterval: () => (document.hidden ? false : 60_000),
+    enabled: active,
+    refetchInterval: () => (document.hidden || !active ? false : 60_000),
     refetchOnWindowFocus: true,
   })
   const all = useMemo(() => q.data?.items ?? [], [q.data])
@@ -144,26 +145,11 @@ function JobsScreen() {
           <span>{counts.applied} applied</span>
           <span data-on={counts.today > 0 || undefined}>{counts.today} of {q.data.cap} today</span>
           {counts.replies > 0 && <span data-on="">{counts.replies} {counts.replies === 1 ? 'reply' : 'replies'}</span>}
+          <span>{counts.held} held</span>
+          <span>{counts.skipped} skipped</span>
           <span>Next run {q.data.runs}</span>
         </p>
       )}
-
-      <div className="jb-bar">
-        <nav className="jb-tabs" aria-label="Application views">
-          {VIEWS.map((v) => (
-            <Press
-              key={v.id}
-              className="jb-tab"
-              data-on={v.id === view || undefined}
-              aria-current={v.id === view ? 'page' : undefined}
-              onPress={() => { setOpenId(null); setParam({ view: v.id === 'applied' ? null : v.id }) }}
-            >
-              {v.label}
-              {counts && <span className="jb-tab-n">{counts[v.id]}</span>}
-            </Press>
-          ))}
-        </nav>
-      </div>
 
       {regions.length > 1 && (
         <div className="jb-chips" role="group" aria-label="Regions">
