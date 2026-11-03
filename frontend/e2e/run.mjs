@@ -39,6 +39,7 @@ import { apartmentTests } from './tests/apartment.mjs'
 import { unitTests } from './tests/unit.mjs'
 import { inboxTests } from './tests/inbox.mjs'
 import { tasksTests } from './tests/tasks.mjs'
+import { jobsTests } from './tests/jobs.mjs'
 import { todayTests } from './tests/today.mjs'
 import { killLeftovers } from './lib/odin.mjs'
 
@@ -61,7 +62,7 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- the tests ----------
 
-const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...carTests(), ...apartmentTests(), ...unitTests(), ...inboxTests(), ...tasksTests(), ...todayTests()]
+const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...carTests(), ...apartmentTests(), ...unitTests(), ...inboxTests(), ...tasksTests(), ...jobsTests(), ...todayTests()]
 const wanted = opt.only ? opt.only.split(',').map((s) => s.trim()).filter(Boolean) : []
 const groups = opt.group ? opt.group.split(',').map((s) => s.trim()).filter(Boolean) : []
 const tests = all.filter((t) => (!wanted.length || wanted.some((w) => t.name.includes(w) || t.group === w)) && (!groups.length || groups.includes(t.group)))

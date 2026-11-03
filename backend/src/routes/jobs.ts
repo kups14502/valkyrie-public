@@ -55,6 +55,9 @@ const VIEW_OF: Record<string, JobView> = {
   limit: 'skipped',
 }
 
+// The runner's resume kinds, as the page names them
+const RESUME_LABEL: Record<string, string> = { base: 'Base', sysadmin: 'Systems Admin', aiops: 'AI systems' }
+
 const TXFL = /\btexas\b|, ?tx\b|\btx,|austin|dallas|houston|san antonio|fort worth|plano|irving|frisco|\bflorida\b|, ?fl\b|\bfl,|tampa|orlando|miami|jacksonville|fort lauderdale|boca raton|st\.? petersburg/i
 const NCPA = /north carolina|, ?nc\b|\bnc,|charlotte|raleigh|durham|\bcary\b|pennsylvania|, ?pa\b|\bpa,|philadelphia|pittsburgh|king of prussia|malvern/i
 const REMOTE = /remote|anywhere|distributed|work from home/i
@@ -158,7 +161,7 @@ router.get('/jobs', h((req, res, c) => {
       detail: r.detail ?? '',
       form: r.form,
       posting: r.posting,
-      resume: r.resume === 'sysadmin' ? 'Systems Admin' : r.resume === 'base' ? 'Base' : r.resume,
+      resume: RESUME_LABEL[r.resume ?? ''] ?? r.resume,
       outcome: r.outcome as Outcome | null,
       outcomeAt: wallMs(r.outcome_at),
       answers: view === 'applied' ? prose(r.answers) : [],
