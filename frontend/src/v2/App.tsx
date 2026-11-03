@@ -19,7 +19,7 @@ import { CalendarPage } from './screens/Calendar'
 import MealsPage from './screens/Meals'
 import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
-import JobsPage from './screens/Jobs'
+import Jobs, { JOB_SUBS } from './screens/Jobs'
 import Messages from './screens/Messages'
 import './v2.css'
 
@@ -64,6 +64,8 @@ const SCREENS: ScreenDef[] = [
   { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint' },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }, { id: 'call', label: 'Call' }], Component: Claude, floor: 'faint' },
+  // the auto-apply runner's applications (screens/Jobs.tsx), a list screen
+  { id: 'jobs', label: 'Jobs', subs: JOB_SUBS, Component: Jobs, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
   // the car's controls under its Model Y; the model draws its own floor in its box, so the page floor stays faint
@@ -195,7 +197,6 @@ export default function V2App() {
         <Route path="meals" element={<MealsPage />} />
         <Route path="inbox" element={<InboxPage />} />
         <Route path="tasks" element={<TasksPage />} />
-        <Route path="jobs" element={<JobsPage />} />
         <Route path=":screen/:sub?" element={<V2 />} />
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}

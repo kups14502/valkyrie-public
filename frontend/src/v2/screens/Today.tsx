@@ -361,13 +361,13 @@ const NY_TIME = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
 
 /** Today's applications from the auto-apply runner (screens/Jobs.tsx): the count against the cap, held and replies, then up to three of today's. Nothing until it has loaded, and nothing on a host without the runner. */
 function JobsBlock({ active }: { active: boolean }) {
-  const navigate = useNavigate()
+  const { go } = useShell()
   const q = useQuery({ queryKey: ['jobs', 'applied'], queryFn: () => fetchJobs('applied'), refetchInterval: () => (document.hidden || !active ? false : 5 * 60_000), retry: false })
   if (!q.data) return null
   const { counts, cap, items } = q.data
   const today = nyDayKey(Date.now())
   const sent: Job[] = items.filter((j) => j.at && nyDayKey(j.at) === today).slice(0, 3)
-  const open = () => navigate('/m/jobs', { state: { v2Back: true } })
+  const open = () => go('jobs', 'applied')
   const head = [`${counts.today} of ${cap} today`, counts.held ? `${counts.held} held` : null, counts.replies ? `${counts.replies} ${counts.replies === 1 ? 'reply' : 'replies'}` : null].filter(Boolean).join(' · ')
   return (
     <section className="td-sec" aria-label="Job applications">

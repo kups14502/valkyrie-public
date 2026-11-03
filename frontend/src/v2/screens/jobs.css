@@ -1,4 +1,4 @@
-/* Jobs (Jobs.tsx), the page at /m/jobs inside the v2 page frame (calendar.css .vpg). Same build as
+/* Jobs (Jobs.tsx), the Jobs tab at /m/jobs inside the v2 shell's .vl-screen. Same build as
    tasks.css: text tabs, groups under an accent label, one row per application with hairlines, no
    boxes. An offer or interview reads in the accent, a rejection in the dim tone. */
 
@@ -6,7 +6,7 @@
   width: 100%;
   max-width: 1024px;
   margin: 0 auto;
-  padding: 6px calc(20px + env(safe-area-inset-right)) 40px calc(20px + env(safe-area-inset-left));
+  padding: 2px 0 40px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -15,27 +15,6 @@
 
 .jb-sum { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 2px 0; font-size: 12px; color: var(--dim); }
 .jb-sum [data-on] { color: var(--fg); text-shadow: var(--text-glow); }
-
-/* ---------- views ---------- */
-
-.jb-bar { display: flex; align-items: flex-end; gap: 6px 16px; border-bottom: 1px solid var(--line); }
-.jb-tabs { display: flex; gap: 18px; min-width: 0; }
-.jb-tab {
-  position: relative;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 10px 0 9px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-.jb-tab[data-on] { color: var(--fg); font-weight: 700; text-shadow: var(--text-glow); }
-.jb-tab[data-on]::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--fg); box-shadow: var(--glow); }
-.jb-tab-n { font-size: 10.5px; letter-spacing: 0; color: var(--ink-hi); }
-@media (hover: hover) and (pointer: fine) { .jb-tab:not([data-on]):hover { color: var(--text); } }
 
 /* ---------- region filter ---------- */
 
