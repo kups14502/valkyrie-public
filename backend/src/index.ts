@@ -39,6 +39,7 @@ import devicesRoute from './routes/devices.js'
 import vehiclesRoute from './routes/vehicles.js'
 import inboxRoute from './routes/inbox.js'
 import tasksRoute from './routes/tasks.js'
+import jobsRoute from './routes/jobs.js'
 import todayRoute from './routes/today.js'
 import mailRoute from './routes/mail.js'
 import msgRoute from './routes/msg.js'
@@ -148,6 +149,7 @@ app.use('/api', accountSwitchRoute)
 app.use('/api', accountSigninRoute)
 app.use('/api', inboxRoute)
 app.use('/api', tasksRoute)
+app.use('/api', jobsRoute)
 app.use('/api', todayRoute)
 app.use('/api', mailRoute)
 app.use('/api', msgRoute)

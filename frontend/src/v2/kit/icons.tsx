@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactElement } from 'react'
 import {
-  Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
+  Activity, ArrowRight, Battery, Briefcase, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
   House, Inbox, LayoutDashboard, MessagesSquare, Laptop, Lightbulb, LightbulbOff, ListChecks, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
@@ -48,6 +48,7 @@ export const ICONS = {
   inbox: Inbox,
   messages: MessagesSquare,
   tasks: ListChecks,
+  jobs: Briefcase,
   projects: FolderKanban,
   // opening something in a window of its own
   popout: SquareArrowOutUpRight,
