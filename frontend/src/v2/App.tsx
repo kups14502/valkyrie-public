@@ -19,6 +19,7 @@ import { CalendarPage } from './screens/Calendar'
 import MealsPage from './screens/Meals'
 import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
+import JobsPage from './screens/Jobs'
 import Messages from './screens/Messages'
 import './v2.css'
 
@@ -194,6 +195,7 @@ export default function V2App() {
         <Route path="meals" element={<MealsPage />} />
         <Route path="inbox" element={<InboxPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        <Route path="jobs" element={<JobsPage />} />
         <Route path=":screen/:sub?" element={<V2 />} />
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}

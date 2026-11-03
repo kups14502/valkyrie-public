@@ -7,6 +7,7 @@ import { useShell } from '../kit/shell'
 import { ago, useCalendar, useOpenTasks, useSessions, useTick, type EventVM, type SessionVM } from '../kit/data'
 import { apiErrorText } from '../../lib/api'
 import { fetchInbox, type InboxItem } from '../../lib/inboxApi'
+import { fetchJobs, type Job } from '../../lib/jobsApi'
 import { fetchMail, type MailMessage, type Mailbox } from '../../lib/mailApi'
 import { clockOf, dueLabel, dueState, nyDayKey } from '../../lib/taskDue'
 import { taskKey, updateTask, type Task } from '../../lib/tasksApi'
@@ -70,6 +71,7 @@ export default function Today({ active }: { active: boolean }) {
           {(mail.data?.mailboxes.length ?? 0) > 0 && <MailBlock boxes={mail.data!.mailboxes} list={mail.data!.unread} now={now} />}
           <UnreadInbox items={unread} loaded={!!inbox.data} failed={inbox.isError && !inbox.data} now={now} />
           <Busy list={busy} loaded={!!sessions.data} failed={sessions.failed && !sessions.data} now={now} />
+          <JobsBlock active={active} />
         </div>
       </div>
     </div>
@@ -352,6 +354,39 @@ function UnreadInbox({ items, loaded, failed, now }: { items: InboxItem[]; loade
 }
 
 // ---------- sessions ----------
+
+// ---------- job applications ----------
+
+const NY_TIME = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
+
+/** Today's applications from the auto-apply runner (screens/Jobs.tsx): the count against the cap, held and replies, then up to three of today's. Nothing until it has loaded, and nothing on a host without the runner. */
+function JobsBlock({ active }: { active: boolean }) {
+  const navigate = useNavigate()
+  const q = useQuery({ queryKey: ['jobs', 'applied'], queryFn: () => fetchJobs('applied'), refetchInterval: () => (document.hidden || !active ? false : 5 * 60_000), retry: false })
+  if (!q.data) return null
+  const { counts, cap, items } = q.data
+  const today = nyDayKey(Date.now())
+  const sent: Job[] = items.filter((j) => j.at && nyDayKey(j.at) === today).slice(0, 3)
+  const open = () => navigate('/m/jobs', { state: { v2Back: true } })
+  const head = [`${counts.today} of ${cap} today`, counts.held ? `${counts.held} held` : null, counts.replies ? `${counts.replies} ${counts.replies === 1 ? 'reply' : 'replies'}` : null].filter(Boolean).join(' · ')
+  return (
+    <section className="td-sec" aria-label="Job applications">
+      <Section icon="jobs" lit={counts.today > 0} action={<Button kind="link" onPress={open}>{`All applications (${counts.applied})`}</Button>}>
+        {`Jobs · ${head}`}
+      </Section>
+      <div className="td-rows">
+        {sent.length === 0 && <p className="td-quiet">Nothing sent yet today.</p>}
+        {sent.map((j) => (
+          <Press key={j.jobId} className="td-row" onPress={open}>
+            <span className="td-when">{NY_TIME.format(j.at!)}</span>
+            <span className="td-what">{j.company} · {j.title}</span>
+            <span className="td-meta">{j.region}</span>
+          </Press>
+        ))}
+      </div>
+    </section>
+  )
+}
 
 function Busy({ list, loaded, failed, now }: { list: SessionVM[]; loaded: boolean; failed: boolean; now: number }) {
   const { go } = useShell()
