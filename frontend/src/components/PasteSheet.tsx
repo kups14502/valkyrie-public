@@ -43,6 +43,7 @@ export function PasteSheet({ onSend, onClose }: Props) {
       <textarea
         ref={ref}
         rows={4}
+        autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"
         spellCheck={false}
