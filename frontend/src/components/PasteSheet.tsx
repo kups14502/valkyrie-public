@@ -43,6 +43,7 @@ export function PasteSheet({ onSend, onClose }: Props) {
       <textarea
         ref={ref}
         rows={4}
+        name="vk-search-paste"
         autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"

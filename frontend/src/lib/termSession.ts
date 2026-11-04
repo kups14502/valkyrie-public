@@ -575,8 +575,11 @@ export function useTermSocket(o: TermSocketOptions): TermSocket {
       ta.focus = (f?: FocusOptions) => orig({ preventScroll: true, ...f })
       ta.style.fontSize = '16px'
       // xterm turns off autocorrect, capitals and spellcheck but not AutoFill,
-      // so iOS offered names, addresses and phone numbers over the keyboard
+      // so iOS offered names, addresses and phone numbers over the keyboard.
+      // iOS Safari still offers contacts with autocomplete="off" alone; its
+      // form classifier skips a field whose name says "search".
       ta.setAttribute('autocomplete', 'off')
+      ta.name = 'vk-search-term'
     }
     const releaseSetup = optsRef.current.setup?.(term) ?? null
 

@@ -942,6 +942,9 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
               placeholder={q ? 'Or tell Claude instead' : shell ? 'Command' : 'Message Claude'}
               aria-label={shell ? 'Command for the shell' : 'Message Claude'}
               enterKeyHint={coarse ? 'enter' : 'send'}
+              // iOS Safari offers contact AutoFill despite autocomplete="off";
+              // its form classifier skips a field whose name says "search"
+              name="vk-search-message"
               autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
