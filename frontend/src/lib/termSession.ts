@@ -574,6 +574,9 @@ export function useTermSocket(o: TermSocketOptions): TermSocket {
       const orig = ta.focus.bind(ta)
       ta.focus = (f?: FocusOptions) => orig({ preventScroll: true, ...f })
       ta.style.fontSize = '16px'
+      // xterm turns off autocorrect, capitals and spellcheck but not AutoFill,
+      // so iOS offered names, addresses and phone numbers over the keyboard
+      ta.setAttribute('autocomplete', 'off')
     }
     const releaseSetup = optsRef.current.setup?.(term) ?? null
 

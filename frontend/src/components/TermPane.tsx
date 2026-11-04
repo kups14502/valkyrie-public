@@ -139,6 +139,8 @@ export default function TermPane({ name, font = 13, focused = true, onConn, regi
       const orig = ta.focus.bind(ta)
       ta.focus = (o?: FocusOptions) => orig({ preventScroll: true, ...o })
       ta.style.fontSize = '16px'
+      // no iOS AutoFill (names, addresses, numbers) over the keyboard
+      ta.setAttribute('autocomplete', 'off')
     }
 
     safeFit()

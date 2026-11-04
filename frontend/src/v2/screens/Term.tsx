@@ -942,6 +942,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
               placeholder={q ? 'Or tell Claude instead' : shell ? 'Command' : 'Message Claude'}
               aria-label={shell ? 'Command for the shell' : 'Message Claude'}
               enterKeyHint={coarse ? 'enter' : 'send'}
+              autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
