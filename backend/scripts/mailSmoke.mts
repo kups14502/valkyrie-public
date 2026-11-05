@@ -6,8 +6,8 @@
  * Outlook marks its inbox item read; an error sync is kept as the mailbox's error; validation; and the
  * Cloudflare rule: a private mailbox, its rows and its inbox items (list, count, sources) answer like
  * they do not exist, while a non-private one stays visible. Mail no person wrote (noreply senders,
- * bulk subdomains, meeting replies, ticket notifications) adds no inbox item, and a message in two
- * mailboxes is one item.
+ * bulk subdomains, meeting replies, ticket notifications) adds no inbox item, nor does a job
+ * application receipt (a rejection or an invitation does), and a message in two mailboxes is one item.
  *
  *   VALKYRIE_DATA_DIR=$(mktemp -d) node --import tsx scripts/mailSmoke.mts
  */
@@ -114,6 +114,29 @@ check('people are not automated', !auto('jane.doe@example.com', 'Re: T20261030.0
   msg('n1', { fromAddress: 'newsletter@example.com' }), msg('n2', { subject: 'Accepted: Project kickoff' }),
 ] })
 check('automated mail is kept but adds no inbox item', st === 200 && r.added === 0 && r.known === 0, r)
+
+// job application receipts stay out of the inbox; rejections and invitations do not (2026-11-05)
+const { jobMail } = await import('../src/lib/mailStore.ts')
+const job = (fromAddress: string, subject: string, preview = '') => jobMail({ fromAddress, subject, preview })
+check('application receipts are job mail', job('careers@gemini.com', 'Thank you for applying to Gemini!', 'Hi Brendon, Thanks for applying to Gemini! Your application has been received.')
+  && job('nvidia@myworkday.com', 'Thank you for your interest in NVIDIA', 'We want to confirm that your application for the role has been received.')
+  && job('Kemper@myworkday.com', 'Thank you for your interest in Kemper', 'We are currently reviewing your application for the DevOps Engineer position.')
+  && job('recruiting@jobalerts.careers.hpe.com', 'Your Screening for Engineer has been successfully submitted', 'Thank you! Your results have been successfully submitted!')
+  && job('myHR@airliquide.com', 'Thank you for your application to Airgas!', 'We are pleased to confirm that we have received your application'))
+check('candidate account and security code mail is job mail', job('iqvia@otp.workday.com', 'Verify your candidate account')
+  && job('workday@usaa.com', 'Reset your password for your candidate account') && job('x@example.com', 'Security code for your application to Coinbase'))
+check('rejections and invitations are not job mail', !job('careers@striveworks.us', 'Thank You for Your Interest in Striveworks', 'We appreciate the time you took to apply. Based on your response')
+  && !job('fmr@myworkday.com', 'Candidacy Update', 'Thank you for applying. While we appreciate your interest, you were not selected')
+  && !job('no-reply@appreview.gem.com', 'Your application at Airbnb', 'Thank you for taking the time to apply. Unfortunatel')
+  && !job('no-reply@us.greenhouse-mail.io', 'An Update on Your Application', 'After reviewing your application, we do not see a match for our current needs')
+  && !job('recruiting@example.com', 'Next steps', 'Thank you for applying! We would like to invite you to interview'))
+check('ordinary mail is not job mail', !job('jane.doe@example.com', 'Re: Order received', 'Your payment has been received')
+  && !job('support@example.com', 'Thanks for submitting', 'Our team will review your ticket'))
+;[st, r] = await j('POST', '/mail/sync', { mailbox: work, unread: 2, messages: [
+  msg('jb1', { fromAddress: 'careers@example.com', subject: 'Thank you for applying to Example', preview: 'We have received your application.' }),
+  msg('jb2', { fromAddress: 'careers@example.com', subject: 'Update on your application', preview: 'Unfortunately we will not move forward.' }),
+] })
+check('a receipt adds no inbox item, a rejection does', st === 200 && r.added === 1, r)
 const support = { key: 'support', label: 'Support', source: 'support-mail', private: true }
 const shared = msg('p2', { fromAddress: 'person@example.org', subject: 'Re: shared', receivedAt: ago(1) })
 await j('POST', '/mail/sync', { mailbox: work, unread: 1, messages: [{ ...shared, id: 'p2-work' }] })

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { openDb } from './db.js'
-import { InboxError, markRead, postInbox, setSourcePrivate, SOURCE_RE } from './inboxStore.js'
+import { InboxError, markRead, postInbox, setArchived, setSourcePrivate, SOURCE_RE } from './inboxStore.js'
 
 // Mail, as a list: what a person sees in an inbox row, never the body.
 //
@@ -19,6 +19,7 @@ import { InboxError, markRead, postInbox, setSourcePrivate, SOURCE_RE } from './
 //     statements, newsletters, delivery notices, meeting replies and ticket
 //     notifications, so automated() drops them; they stay in Mail and Today.
 //     A message sitting in two mailboxes (CC'd to both) is one inbox item;
+//   * job application receipts never do either (jobMail(), 2026-11-05);
 //   * a mailbox marked private (work mail) is tailnet only: through Cloudflare
 //     its rows and its inbox items answer like they do not exist.
 
@@ -93,6 +94,29 @@ export function automated(m: { fromAddress: string; subject: string }): boolean 
   return AUTO_SUBJECT_RE.test(m.subject)
 }
 
+// Mail the job runner sets off: "thank you for applying"
+// receipts, candidate-account and security-code mail. Careers inboxes are not
+// no-reply, so automated() lets them through (2026-11-05). A rejection or an
+// invitation stays an inbox item: the preview is checked for those first.
+const JOB_RE = /appl(y|ying|ied|ication)|candida|career|recruit|talent|hiring|workday|greenhouse|ashby|lever\.co|icims|smartrecruiters/i
+const JOB_HOUSEKEEPING_RE = /security code for your application|(verify|reset your password for) your candidate account|candidate (home )?account/i
+const JOB_RECEIPT_RE = /thank(s| you)( so much)? for (applying|your application|submitting)|received your (job )?application|application (received|confirmation)|(has|have) been (successfully )?(received|submitted)|confirms? (the )?receipt|we got it|reviewing your application|will review|tell us about your experience|love your feedback/i
+const JOB_SIGNAL_RE = /(you('re| are)|we'?d like to|would like to|pleased to|happy to) (be )?invit|invit(ed|ation|e you) (you )?to (participate|interview|complete|schedule|a|an|our)|move forward with (you|your)|like to (schedule|set up|arrange)|book (a|an|your) (time|call|interview)|complete (the|this|our|a) (assessment|questionnaire|coding)|unfortunat|not (be )?(moving|move|proceed)|decided (to|not to) (move|pursue|proceed)|other candidates|no longer (being )?considered|regret to inform|not (been )?selected|not (see )?a (match|fit)|offer (letter|of employment)|congratulations/i
+
+/** True for application receipts and candidate-account mail: kept in Mail, never an inbox item. */
+export function jobMail(m: { fromAddress: string; subject: string; preview: string }): boolean {
+  if (JOB_HOUSEKEEPING_RE.test(m.subject)) return true
+  const text = `${m.subject} ${m.fromAddress} ${m.preview}`
+  return JOB_RE.test(text) && !JOB_SIGNAL_RE.test(text) && JOB_RECEIPT_RE.test(text)
+}
+
+// job mail that became an inbox item before jobMail() existed goes to Archive
+{
+  const ids = (db.prepare('SELECT inboxId, fromAddress, subject, preview FROM mail_messages WHERE inboxId IS NOT NULL').all() as Pick<MsgRow, 'inboxId' | 'fromAddress' | 'subject' | 'preview'>[])
+    .filter(jobMail).map((m) => m.inboxId as number)
+  if (ids.length) console.log(`[mail] archived ${setArchived({ ids }, true)} job mail inbox items`)
+}
+
 type SyncInput = {
   mailbox?: { key?: unknown; label?: unknown; source?: unknown; private?: unknown }
   unread?: unknown; total?: unknown; error?: unknown
@@ -151,7 +175,7 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
       .get(key, row.fromAddress, row.subject, row.receivedAt) as { inboxId: number } | undefined
     if (twin) {
       row.inboxId = twin.inboxId
-    } else if (!isRead && row.focused && !automated(row) && Date.now() - Date.parse(row.receivedAt) < INBOX_WINDOW_MS) {
+    } else if (!isRead && row.focused && !automated(row) && !jobMail(row) && Date.now() - Date.parse(row.receivedAt) < INBOX_WINDOW_MS) {
       try {
         const r = await postInbox({
           source, level: row.importance === 'high' ? 'warn' : 'info', push: false,
