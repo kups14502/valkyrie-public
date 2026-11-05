@@ -169,6 +169,35 @@ export function terminalTests() {
           })
           if (t.fails.length) return
 
+          // iOS draws its own form bar over the keyboard (no page can hide it), so with the
+          // keyboard up the phone gives the session bar's height to the terminal; and no
+          // AutoFill on the composer or the grid's textarea (a name that says "search")
+          await t.step('keyboard up: the session bar steps aside; no AutoFill', async () => {
+            const r = await page.eval(async () => {
+              const box = () => document.querySelector('.vsk-termbox')?.getBoundingClientRect().height ?? 0
+              const shown = (el) => !!el && getComputedStyle(el).display !== 'none'
+              const head = document.querySelector('.vsk-head')
+              const before = { head: shown(head), box: box() }
+              document.documentElement.setAttribute('data-kb', '')
+              await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
+              const during = { head: shown(head), box: box() }
+              document.documentElement.removeAttribute('data-kb')
+              await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
+              const ta = document.querySelector('.vsk-input')
+              const grid = document.querySelector('.xterm-helper-textarea')
+              return {
+                before, during, after: { head: shown(head) },
+                input: { ac: ta?.getAttribute('autocomplete'), name: ta?.getAttribute('name') ?? '' },
+                grid: { ac: grid?.getAttribute('autocomplete'), name: grid?.getAttribute('name') ?? '' },
+              }
+            })
+            t.check(r.before.head && !r.during.head && r.after.head, `the session bar shows ${r.before.head}, keyboard up ${r.during.head}, after ${r.after.head}`)
+            t.check(r.during.box > r.before.box + 30, `the terminal box went ${Math.round(r.before.box)} to ${Math.round(r.during.box)} px with the keyboard up`)
+            t.check(r.input.ac === 'off' && /search/.test(r.input.name), `the composer's AutoFill: autocomplete ${r.input.ac}, name "${r.input.name}"`)
+            t.check(r.grid.ac === 'off' && /search/.test(r.grid.name), `the grid textarea's AutoFill: autocomplete ${r.grid.ac}, name "${r.grid.name}"`)
+          })
+          if (t.fails.length) return
+
           await t.step('composer: a line reaches the shell and its output comes back', async () => {
             const from = await sentCount(page)
             await compose(page, 'echo e2e-$((6*7))-ok')
