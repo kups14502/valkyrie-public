@@ -1174,7 +1174,10 @@ html[data-v2win] { --strip-h: 32px; }
   .vl-strip-meter { width: 20px; }
   .vl-strip-name { font-size: 10.5px; letter-spacing: .06em; }
 }
-/* phones: the weekday goes first, then (under 375 px) the date, so the wordmark, hosts, 5h and clock always fit */
+/* phone portrait: no clock, the phone's own status bar shows the time right above it, and with
+   seven hosts the clock ran the date into the last host icon */
+@media (max-width: 639px) { .vl-strip-time, .vl-strip-right b { display: none; } }
+/* phones: the weekday goes first, then (under 375 px) the date, so the wordmark and hosts always fit */
 @media (max-width: 430px) { .vl-strip-wd { display: none; } }
 @media (max-width: 374px) { .vl-strip-date, .vl-strip-right b { display: none; } }
 @media (max-width: 329px) { .vl-strip-name { display: none; } }
@@ -1462,19 +1465,52 @@ html[data-v2win] { --strip-h: 32px; }
 }
 .vl-set::-webkit-scrollbar { display: none; }
 
-/* phone portrait: the tabs share the full width; tighter type */
+/* the phone's icon tabs and the section name that leads its sub-tab row: off on wider screens */
+.vl-tab-icon, .vl-subs-title { display: none; }
+
+/* phone portrait: eight names do not fit 400 px at a size that reads, so the
+   primary tabs are icons sharing the row evenly, the active one lit with the
+   caret under it. Its name leads the row below, before the sub-tabs, so that
+   row stays open on every tab. The names stay in the buttons for screen readers. */
 @media (max-width: 639px) {
-  .vl-head { --tab-h: 40px; --sub-h: 32px; }
+  .vl-head { --tab-h: 44px; --sub-h: 32px; }
+  .vl-nav { --subs-pin: 1; }
   .vl-nav, .vl-setbar { padding: 0 calc(6px + env(safe-area-inset-right)) 0 calc(6px + env(safe-area-inset-left)); }
-  .vl-nav-prims { justify-content: space-between; }
-  .vl-tab-prim { padding: 0 3px; font-size: 11px; letter-spacing: .07em; }
-  .vl-tab-sub { padding: 0 8px; font-size: 10.5px; letter-spacing: .12em; }
+  .vl-nav-prims { justify-content: stretch; }
+  .vl-tab-prim { flex: 1 1 0; min-width: 0; padding: 0; }
+  .vl-tab-icon { display: block; flex: none; transition: color .2s, filter .2s, transform .2s var(--ease); }
+  .vl-tab-prim[data-pressed] .vl-tab-icon { color: var(--fg); transform: scale(.92); }
+  .vl-tab-prim .vl-tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .vl-nav-subs { height: var(--sub-h); }
+  .vl-subs-title {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    padding: 0 8px 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--fg);
+    text-shadow: var(--text-glow);
+    white-space: nowrap;
+  }
+  .vl-subs-title:not(:last-child)::after { content: '·'; margin-left: 8px; font-weight: 600; color: var(--faint); text-shadow: none; }
+  /* tight enough that Media's five sub-tabs fit after its name at 390 px */
+  .vl-tab-sub { min-width: 0; padding: 0 5px; font-size: 10.5px; letter-spacing: .04em; }
   .vl-set { padding-left: env(safe-area-inset-left); }
 }
-/* narrow phones (iPhone mini, SE): the seven tabs still fit 360 px */
+/* narrow phones (iPhone mini, SE) */
 @media (max-width: 380px) {
-  .vl-tab-prim { padding: 0 2px; font-size: 10.5px; letter-spacing: .03em; }
-  .vl-tab-sub { padding: 0 6px; letter-spacing: .08em; }
+  .vl-subs-title { letter-spacing: .1em; padding-right: 6px; }
+  .vl-tab-sub { padding: 0 4px; font-size: 10px; letter-spacing: .03em; }
 }
 /* landscape phone: everything a notch shorter */
 @media (min-width: 640px) and (max-height: 480px) {

@@ -9,7 +9,7 @@ import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
 import { carView } from './car.mjs'
 
-const TABS = ['Dashboard', 'AI', 'Lights', 'Car', 'Media', 'System']
+const TABS = ['Dashboard', 'Messages', 'AI', 'Jobs', 'Lights', 'Car', 'Media', 'System']
 
 /**
  * ready: what live data looks like on the route: `sel` (at least `min`
@@ -83,6 +83,18 @@ export function shellChecks(t, r, route) {
     t.check(!off.length, `${tag}: tabs off screen or hidden: ${off.map((x) => x.label).join(', ')}`)
     const on = r.tabs.find((x) => x.on)
     t.check(on?.label === route.tab, `${tag}: the lit tab is ${on?.label ?? 'none'}, want ${route.tab}`)
+    // Brendon (2026-11-05): eight names squeezed into a phone row did not work, a swipeable row was
+    // worse, the icons are "much better". Phone portrait: icons, the lit tab's name leads the sub-tab
+    // row. Wider screens: the names, no icons.
+    if (r.W < 640) {
+      const plain = r.tabs.filter((x) => !x.icon || x.name).map((x) => x.label)
+      t.check(!plain.length, `${tag}: tabs not drawn as icons on the phone: ${plain.join(', ')}`)
+      t.check(r.subsTitle === route.tab, `${tag}: the sub-tab row is led by "${r.subsTitle ?? 'nothing'}", want "${route.tab}"`)
+    } else {
+      const iconic = r.tabs.filter((x) => x.icon || !x.name).map((x) => x.label)
+      t.check(!iconic.length, `${tag}: tabs without their names at ${r.W}px: ${iconic.join(', ')}`)
+      t.check(r.subsTitle === null, `${tag}: the phone's section name shows at ${r.W}px`)
+    }
     if (route.sub) {
       const s = r.subs.find((x) => x.on)
       t.check(s?.label === route.sub, `${tag}: the lit sub-tab is ${s?.label ?? 'none'}, want ${route.sub}`)
