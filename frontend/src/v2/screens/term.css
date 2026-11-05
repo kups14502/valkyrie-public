@@ -21,6 +21,15 @@ html[data-kb] .vtm .vl-strip { display: none; }
   html[data-kb] .vtm .vsk-meta,
   html[data-kb] .vtm .vsk-act { display: none; }
 }
+/* and the session bar on a phone (portrait, or the short screen of landscape): iOS
+   draws its own form bar (previous, next, done) over the keyboard and no page can
+   turn it off, so the terminal takes this bar's height back while typing. The bar
+   (session list, camera, upload) returns when the keyboard closes. */
+@media (max-width: 759px), (max-height: 500px) {
+  /* one row left: without it the body falls into the head's auto row and the terminal collapses */
+  html[data-kb] .vtm:not([data-standalone]) { grid-template-rows: minmax(0, 1fr); }
+  html[data-kb] .vtm:not([data-standalone]) .vsk-head { display: none; }
+}
 
 /* the height reference the geometry measures: fixed, invisible, 100dvh */
 .vtm-probe {
