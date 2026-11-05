@@ -693,11 +693,13 @@ function Nav({ screens, activeId, sub, go }: {
     const lineLeft = left(lr)
     const nx = Math.max(lineLeft + 8, Math.min(lineLeft + line.offsetWidth - 8, primCenter))
     notch.style.transform = `translate3d(${nx.toFixed(1)}px, ${((lr.top - nr.top) / k - 6).toFixed(1)}px, 0)`
-    // the sub-tabs sit centered under their tab, clamped inside their row; a row too wide scrolls
+    // the sub-tabs sit centered under their tab, clamped inside their row; a row too wide scrolls.
+    // The phone's tabs are icons (--subs-pin in v2.css): its row starts at the left with the section's name.
+    const pin = getComputedStyle(nav).getPropertyValue('--subs-pin').trim() === '1'
     const gw = group.scrollWidth
     const bw = box.clientWidth
     const scroll = gw > bw + 1
-    const gx = scroll ? 0 : Math.max(0, Math.min(bw - gw, primCenter - left(br) - gw / 2))
+    const gx = scroll || pin ? 0 : Math.max(0, Math.min(bw - gw, primCenter - left(br) - gw / 2))
     group.style.transform = `translate3d(${gx.toFixed(1)}px, 0, 0)`
     box.toggleAttribute('data-scroll', scroll)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -728,18 +730,23 @@ function Nav({ screens, activeId, sub, go }: {
   return (
     <nav className="vl-nav" ref={navRef} data-ready={ready || undefined} aria-label="Sections" data-tauri-drag-region={desktopWindow() ? 'deep' : undefined}>
       <div className="vl-nav-prims" ref={primsRef}>
-        {screens.map((s) => (
-          <Press
-            key={s.id}
-            ref={(el) => { primEls.current[s.id] = el }}
-            className="vl-tab vl-tab-prim"
-            data-on={s.id === activeId || undefined}
-            aria-current={s.id === activeId ? 'page' : undefined}
-            onPress={() => go(s.id)}
-          >
-            {s.label}
-          </Press>
-        ))}
+        {screens.map((s) => {
+          const on = s.id === activeId
+          return (
+            <Press
+              key={s.id}
+              ref={(el) => { primEls.current[s.id] = el }}
+              className="vl-tab vl-tab-prim"
+              data-on={on || undefined}
+              aria-current={on ? 'page' : undefined}
+              onPress={() => go(s.id)}
+            >
+              {/* the phone shows the icon and keeps the name for screen readers; wider screens show the name */}
+              <Icon name={s.icon ?? (isIconName(s.id) ? s.id : 'home')} size={20} tone={on ? 'fg' : 'dim'} glow={on} className="vl-tab-icon" />
+              <span className="vl-tab-label">{s.label}</span>
+            </Press>
+          )
+        })}
       </div>
       <div className="vl-nav-line" ref={lineRef} />
       <div className="vl-notch" ref={notchRef} aria-hidden>
@@ -747,6 +754,8 @@ function Nav({ screens, activeId, sub, go }: {
       </div>
       <div className="vl-nav-subs" ref={boxRef} data-on={subs.length ? '' : undefined} role={subs.length ? 'group' : undefined} aria-label={subs.length ? `${def.label} sections` : undefined}>
         <div className="vl-subs-group" ref={groupRef}>
+          {/* the phone's tabs are icons, so the section's name leads this row there (hidden on wider screens) */}
+          <span className="vl-subs-title" aria-hidden>{def.label}</span>
           {subs.map((s) => (
             <Press
               key={s.id}

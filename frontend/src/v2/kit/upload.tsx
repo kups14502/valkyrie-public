@@ -141,8 +141,8 @@ export function UploadRows({ limit }: { limit: number }) {
       {landed.length > 0 && (
         <div className="up-foot">
           {hidden > 0 || all ? (
-            <Press className="up-link" onPress={() => setAll((v) => !v)} aria-expanded={all}>
-              {all ? 'Show fewer' : fresh.length ? `Show all ${landed.length}` : `Recent uploads · ${landed.length}`}
+            <Press className={cx('up-link', !all && !fresh.length && 'up-link-fold')} onPress={() => setAll((v) => !v)} aria-expanded={all}>
+              {all ? 'Show fewer' : fresh.length ? `Show all ${landed.length}` : <>Recent uploads · {landed.length}<Icon name="down" size={11} tone="dim" /></>}
             </Press>
           ) : <span />}
           {shownLanded.size > 0 && <Press className="up-link up-link-dim" onPress={clearLanded}>Clear list</Press>}

@@ -115,6 +115,8 @@
 }
 .up-link::after { content: ''; position: absolute; inset: -7px -4px; }
 .up-link-dim { color: var(--dim); }
+/* the folded list (nothing landed in the last half hour): a quiet line, so it never reads as a section head with nothing under it */
+.up-link-fold { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--dim); }
 .up-link[data-pressed] { color: var(--fg); text-shadow: var(--text-glow); }
 
 /* the toolbar button (AI > Sessions) */
