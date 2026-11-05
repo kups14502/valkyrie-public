@@ -77,7 +77,12 @@ export function layoutReport() {
     }
   }
 
-  const tabs = [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((e) => ({ label: (e.textContent || '').trim(), box: box(e), on: e.getAttribute('aria-current') === 'page', shown: shown(e) }))
+  // the phone shows each tab as its icon (the name stays for screen readers) and the lit tab's name leads the sub-tab row
+  const tabs = [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((e) => ({
+    label: (e.textContent || '').trim(), box: box(e), on: e.getAttribute('aria-current') === 'page', shown: shown(e),
+    icon: shown(e.querySelector('.vl-tab-icon')), name: (e.querySelector('.vl-tab-label')?.getBoundingClientRect().width ?? 0) > 2,
+  }))
+  const subsTitle = document.querySelector('.vl-nav .vl-subs-title')
   const subs = [...document.querySelectorAll('.vl-nav .vl-tab-sub')].map((e) => ({ label: (e.textContent || '').trim(), box: box(e), on: e.getAttribute('aria-current') === 'page', shown: shown(e) }))
   const txt = area ? (area.innerText || '').replace(/\s+/g, ' ').trim() : ''
 
@@ -97,6 +102,7 @@ export function layoutReport() {
     setbar: box(document.querySelector('.vl-setbar')),
     gear: box(document.querySelector('.vl-strip-gear')),
     tabs, subs,
+    subsTitle: shown(subsTitle) ? (subsTitle.textContent || '').trim() : null,
     lamp: box(lamp), lampShown: shown(lamp), lampHit,
     strip: box(strip),
     five: !!document.querySelector('.vl-strip-five') && shown(document.querySelector('.vl-strip-five')),

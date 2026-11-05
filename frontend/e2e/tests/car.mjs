@@ -6,7 +6,7 @@
 //
 //   render    the tab on the phone, the iPad and the desktop at zoom 1.2: the
 //             head (name, Awake, battery, range), the Model Y drawn, the six
-//             groups, the six tabs on screen without touching, nothing wider
+//             groups, the eight tabs on screen without touching, nothing wider
 //             than the screen, no em dash, and the coordinates nowhere in the
 //             page (text or markup) until Map is tapped
 //   controls  every control, each answered first with a failure and then with
@@ -438,14 +438,19 @@ function pick(s, id) {
   return s.quick[id] ?? null
 }
 
-/** The six tabs: each on screen, none touching the next. */
+/** The eight tabs: each on screen, none touching the next (what shows: the icon on the phone, else the name). */
 function tabsReport() {
   const W = document.documentElement.clientWidth
   const tabs = [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((e) => {
     const r = e.getBoundingClientRect()
-    const range = document.createRange()
-    range.selectNodeContents(e)
-    const tr = range.getBoundingClientRect()
+    const icon = e.querySelector('.vl-tab-icon')
+    let tr
+    if (icon && getComputedStyle(icon).display !== 'none') tr = icon.getBoundingClientRect()
+    else {
+      const range = document.createRange()
+      range.selectNodeContents(e.querySelector('.vl-tab-label') ?? e)
+      tr = range.getBoundingClientRect()
+    }
     return { label: (e.textContent || '').trim(), l: r.left, r: r.right, tl: tr.left, tr: tr.right }
   })
   const off = tabs.filter((x) => x.l < -0.5 || x.r > W + 0.5).map((x) => x.label)
@@ -495,7 +500,7 @@ function renderTests() {
         t.check(!r.html.includes('12.345') && !r.html.includes('45.678'), 'the coordinates are in the page before Map was tapped')
         t.check(/Tires Off in Home Assistant/.test(r.text) && /Odometer Off in Home Assistant/.test(r.text), 'tires and odometer do not say they are off in Home Assistant')
         const tabs = await page.eval(tabsReport)
-        t.check(tabs.labels.join() === 'Dashboard,AI,Lights,Car,Media,System', `the tabs are ${tabs.labels.join(', ')}`)
+        t.check(tabs.labels.join() === 'Dashboard,Messages,AI,Jobs,Lights,Car,Media,System', `the tabs are ${tabs.labels.join(', ')}`)
         t.check(!tabs.off.length, `tabs off the screen at ${tabs.W}px: ${tabs.off.join(', ')}`)
         t.check(!tabs.touching.length, `tab labels run into each other at ${tabs.W}px: ${tabs.touching.join(', ')}`)
         t.check(!page.writes.length, 'the Car tab sent a command on its own')
