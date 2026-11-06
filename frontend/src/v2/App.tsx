@@ -7,8 +7,10 @@ import { Palette } from './kit/palette'
 import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
+import { useProfile } from '../lib/deviceMode'
 import Dashboard from './screens/Dashboard'
 import Today from './screens/Today'
+import Hotkeys from './screens/Hotkeys'
 import Claude from './screens/Claude'
 import Lights from './screens/Lights'
 import Car from './screens/Car'
@@ -41,22 +43,28 @@ const ProjectWindow = lazy(() => import('./screens/ProjectWindow'))
 // v2.css is keyed on html[data-v2], which is set only while this is mounted,
 // so the classic pages never change.
 
-// The Dashboard tab: Overview (the dashboard itself, still where the app opens) and Today (the day
-// in one place: capture, the brief, schedule, due tasks, unread inbox, busy sessions).
+// The Dashboard tab: Overview (the dashboard itself, still where the app opens), Today (the day
+// in one place: capture, the brief, schedule, due tasks, unread inbox, busy sessions) and, on the
+// iPad only, Hotkeys (thor's keyboard actions as buttons, for the iPad under the main monitor).
 function DashboardTab(p: ScreenProps) {
-  return p.sub === 'today' ? <Today active={p.active} /> : <Dashboard {...p} />
+  if (p.sub === 'today') return <Today active={p.active} />
+  if (p.sub === 'hotkeys') return <Hotkeys active={p.active} />
+  return <Dashboard {...p} />
 }
+
+const DASH_SUBS = [{ id: 'overview', label: 'Overview' }, { id: 'today', label: 'Today' }]
+const DASH_SUBS_IPAD = [...DASH_SUBS, { id: 'hotkeys', label: 'Hotkeys' }]
 
 // Valkyrie's real sections, in tab order. No screen forces a mode.
 const SCREENS: ScreenDef[] = [
   // Overview draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there;
-  // Today is a list screen and keeps it faint
+  // Today and Hotkeys are list screens and keep it faint
   {
     id: 'dashboard',
     label: 'Dashboard',
-    subs: [{ id: 'overview', label: 'Overview' }, { id: 'today', label: 'Today' }],
+    subs: DASH_SUBS,
     Component: DashboardTab,
-    floor: (sub) => (sub === 'today' ? 'faint' : false),
+    floor: (sub) => (sub === 'today' || sub === 'hotkeys' ? 'faint' : false),
   },
   // Brendon and his AI employees (lib/agents.ts on the backend): channels, proposals, tickets
   { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint' },
@@ -130,8 +138,15 @@ function useV2Document() {
   }, [])
 }
 
-function V2() {
-  return <V2Shell screens={SCREENS} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} />
+const SCREENS_IPAD: ScreenDef[] = SCREENS.map((s) => (s.id === 'dashboard' ? { ...s, subs: DASH_SUBS_IPAD } : s))
+
+/** The tabs for this device: the iPad's Dashboard also has Hotkeys. */
+function useScreens(): ScreenDef[] {
+  return useProfile().resolved === 'ipad' ? SCREENS_IPAD : SCREENS
+}
+
+function V2({ screens }: { screens: ScreenDef[] }) {
+  return <V2Shell screens={screens} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} />
 }
 
 const BASE_AI = '/m/ai'
@@ -179,6 +194,7 @@ function OpenFromAlert() {
 
 export default function V2App() {
   useV2Document()
+  const screens = useScreens()
   return (
     <>
       <Routes>
@@ -194,10 +210,10 @@ export default function V2App() {
         <Route path="meals" element={<MealsPage />} />
         <Route path="inbox" element={<InboxPage />} />
         <Route path="tasks" element={<TasksPage />} />
-        <Route path=":screen/:sub?" element={<V2 />} />
+        <Route path=":screen/:sub?" element={<V2 screens={screens} />} />
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}
-      <Palette screens={SCREENS} />
+      <Palette screens={screens} />
     </>
   )
 }
