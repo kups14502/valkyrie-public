@@ -458,6 +458,36 @@ router.post('/hosts/thor/rgb', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------- hotkeys ----
+// Dashboard > Hotkeys (the iPad under the main monitor): thor's keyboard actions
+// as buttons. Same rule as the routes above: the client sends an action ID from
+// a fixed list, never a key, and thorkeys.ahk runs it out of its own table
+// (Start-LauncherAgent.ps1, POST /hotkey).
+
+const HOTKEY_IDS = new Set(['mic', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'paste', 'play', 'prev', 'next', 'voldown', 'volup', 'volmute'])
+
+router.get('/hosts/thor/hotkeys', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    const r = await callLauncher('/hotkeys', { method: 'GET' })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/hotkey', async (req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  const id = String((req.body ?? {}).id ?? '')
+  if (!HOTKEY_IDS.has(id)) return res.status(400).json({ error: 'unknown hotkey' })
+  try {
+    const r = await callLauncher('/hotkey', { method: 'POST', body: { id } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
 // ---------------------------------------------------------------- uploads ----
 // Photos and videos from the phone into C:\Thor\uploads, so a Claude session on
 // thor can read them by path. The page sends a file in 8 MB chunks
