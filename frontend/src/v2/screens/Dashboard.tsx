@@ -47,6 +47,8 @@ import './dashboard.css'
 // upload, tracker, media with the newest backdrop and a poster grid] [trade,
 // AI, calendar] [lights, this device, hosts]. The equity chart, this device's
 // model and the poster grid take the height that is left, so no box stretches empty.
+// iPad in landscape (the iPad profile only): one screen, no scrolling: [lights,
+// tracker] [AI, calendar] [trade, hosts], the equity chart taking what is left.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -180,9 +182,14 @@ export default function Dashboard({ active }: ScreenProps) {
 
   const box = useRef<HTMLDivElement>(null)
   const width = useBoxWidth(box)
-  const cols = width >= THREE_COLS ? 3 : width >= TWO_COLS ? 2 : 1
+  // the iPad in landscape (the one in the stand under the main monitor): its own one-screen
+  // board, no scrolling, whatever its exact width
+  const { resolved } = useProfile()
+  const landscape = useMedia('(orientation: landscape)')
+  const pad = resolved === 'ipad' && landscape && width >= TWO_COLS
+  const cols = pad || width >= THREE_COLS ? 3 : width >= TWO_COLS ? 2 : 1
   const wide = cols === 3
-  const xl = wide && width >= XL
+  const xl = wide && !pad && width >= XL
   const fillH = useFillHeight(box, wide)
   const fill = fillH > 0
   // the calendar sheet (src/v2/screens/Calendar.tsx): opened from the Calendar block, closed when the tab is left
@@ -205,9 +212,27 @@ export default function Dashboard({ active }: ScreenProps) {
         data-cols={cols}
         data-xl={xl || undefined}
         data-fill={fill || undefined}
+        data-pad={pad || undefined}
         style={fill ? ({ '--hm-h': `${fillH}px` } as Vars) : undefined}
       >
-        {cols === 1 ? (
+        {pad ? (
+          // iPad landscape: what he glances at, one screen. Quick start lives on the Hotkeys
+          // tab; upload, media and this device's model are a tab away.
+          <>
+            <div className="hm-col hm-a">
+              <LightsBox i={1} variant="rows" />
+              <Tracker />
+            </div>
+            <div className="hm-col hm-b">
+              <AiBlock wide i={4} max={4} />
+              <Calendar onOpen={setCal} />
+            </div>
+            <div className="hm-col hm-c">
+              <TradeBox active={active} i={2} fill={fill} />
+              <Systems i={11} />
+            </div>
+          </>
+        ) : cols === 1 ? (
           <>
             <TradeTicker active={active} i={0} />
             <div className="hm-col hm-a">
@@ -1386,7 +1411,7 @@ function resetLabel(iso: string | null, now: number): string {
  * account is the fallback, tagged "busiest"). The head and the rows open
  * AI > Sessions, the meters AI > Usage.
  */
-function AiBlock({ wide, i }: { wide: boolean; i: number }) {
+function AiBlock({ wide, i, max }: { wide: boolean; i: number; max?: number }) {
   const { go } = useShell()
   const usage = useUsage()
   const sw = useSwitchStatus()
@@ -1400,7 +1425,7 @@ function AiBlock({ wide, i }: { wide: boolean; i: number }) {
   const uAge = oldAge(usage, now)
   const dead = u?.accounts.filter((a) => a.dead).length ?? 0
   const list = liveSessions(sessions.data, wide)
-  const shown = list.slice(0, wide ? 8 : 3)
+  const shown = list.slice(0, max ?? (wide ? 8 : 3))
   const lit = aiLit(sessions)
   const open = () => go(AI, 'sessions')
 

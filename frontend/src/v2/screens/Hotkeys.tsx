@@ -1,22 +1,34 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Briefcase, Building2, ClipboardPaste, House, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, SunDim, Volume1, Volume2, VolumeX,
+  AudioLines, Briefcase, Building2, HeadphoneOff, Headphones, House, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker, SunDim, Video,
+  Volume1, Volume2, VolumeX,
 } from 'lucide-react'
 import { Press, Section, cx, toast } from '../kit/ui'
 import { apiErrorText } from '../../lib/api'
-import { fetchHotkeys, pressHotkey, type HotkeyId, type HotkeyState } from '../../lib/hotkeysApi'
+import { fetchHotkeys, fetchSoundboard, playClip, pressHotkey, stopClips, type Clip, type HotkeyId, type HotkeyState } from '../../lib/hotkeysApi'
 import './hotkeys.css'
 
 // Dashboard > Hotkeys (/m/dashboard/hotkeys), on the iPad only: the iPad sits under
 // the main monitor, so this is thor's keyboard as buttons. Each one runs the same
 // action as its key (C:\Thor\scripts\thorkeys.ahk): thor's API agent hands the id
 // to that script, which runs elevated, so a press reaches whatever window has
-// focus on thor, elevated or not. A tap never moves focus on thor, so Paste and
-// Screenshot act on the window in front of Brendon. The mic key shows the real
-// mute state (every mic muted, or one live), polled while the tab is open.
+// focus on thor, elevated or not. A tap never moves focus on thor, so Screenshot
+// acts on the window in front of Brendon. The mic key shows the real mute state
+// (every mic muted, or one live), Output the default playback device, both polled
+// while the tab is open. Discord's keys need its own keybinds (Toggle Mute F19,
+// Toggle Deafen F20); Save clip is NVIDIA Instant Replay's save key.
+//
+// The soundboard row plays clips into thor's mic (an audio plug-in on the Yeti mixes
+// them in, so apps keep the real mic and the voice gets no delay) and on thor's
+// speakers. Clips are the files in thor's soundboard folder, by name.
 
 type Key = { id: HotkeyId; label: string; icon: ReactElement; hint?: string }
+
+const DISCORD: Key[] = [
+  { id: 'discordmute', label: 'Mute', icon: <MicOff />, hint: 'Discord' },
+  { id: 'discorddeafen', label: 'Deafen', icon: <HeadphoneOff />, hint: 'Discord' },
+]
 
 // thor names these (HotkeyState.labels); the generic names show until its first answer
 const CLAUDE: Key[] = [
@@ -28,42 +40,49 @@ const CLAUDE: Key[] = [
 const SCREEN: Key[] = [
   { id: 'dim', label: 'Dim', icon: <SunDim /> },
   { id: 'shot', label: 'Screenshot', icon: <ScanLine />, hint: 'region' },
-  { id: 'paste', label: 'Paste plain', icon: <ClipboardPaste /> },
+  { id: 'clip', label: 'Save clip', icon: <Video />, hint: 'last 5 min' },
 ]
 
 const MEDIA: Key[] = [
   { id: 'prev', label: 'Previous', icon: <SkipBack /> },
   { id: 'play', label: 'Play / pause', icon: <Play /> },
   { id: 'next', label: 'Next', icon: <SkipForward /> },
-  { id: 'voldown', label: 'Volume down', icon: <Volume1 /> },
-  { id: 'volup', label: 'Volume up', icon: <Volume2 /> },
+]
+
+const SOUND: Key[] = [
+  { id: 'output', label: 'Output', icon: <Speaker /> },
+  { id: 'voldown', label: 'Vol down', icon: <Volume1 /> },
+  { id: 'volup', label: 'Vol up', icon: <Volume2 /> },
   { id: 'volmute', label: 'Sound off', icon: <VolumeX /> },
 ]
 
+const secs = (s: number | null) => (s == null ? '' : s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`)
+
 export default function Hotkeys({ active }: { active: boolean }) {
   const qc = useQueryClient()
-  const q = useQuery({
-    queryKey: ['hotkeys'],
-    queryFn: fetchHotkeys,
-    refetchInterval: () => (document.hidden || !active ? false : 4_000),
-  })
+  const poll = () => (document.hidden || !active ? false : 4_000)
+  const q = useQuery({ queryKey: ['hotkeys'], queryFn: fetchHotkeys, refetchInterval: poll })
   const state: HotkeyState | undefined = q.data
   const down = q.isError && !q.data
   const off = down || (!!state && !state.ready)
-  const [sent, setSent] = useState<HotkeyId | null>(null)
+  const [sent, setSent] = useState<string | null>(null)
   const flash = useRef(0)
   useEffect(() => () => window.clearTimeout(flash.current), [])
+
+  const lit = (key: string) => {
+    setSent(key)
+    window.clearTimeout(flash.current)
+    flash.current = window.setTimeout(() => setSent(null), 650)
+  }
 
   // never gated on an earlier press, so volume taps in a row each land
   const press = async (k: Key) => {
     if (off) return
     try {
       await pressHotkey(k.id)
-      setSent(k.id)
-      window.clearTimeout(flash.current)
-      flash.current = window.setTimeout(() => setSent(null), 650)
-      // the mic and the dim change state; thorkeys.ahk rewrites it as soon as the action runs
-      if (k.id === 'mic' || k.id === 'dim') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
+      lit(k.id)
+      // these change state; thor reports the new one as soon as the action runs
+      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
     } catch (err) {
       toast(apiErrorText(err, `${k.label}: thor is not answering`), { ms: 4000 })
     }
@@ -85,6 +104,12 @@ export default function Hotkeys({ active }: { active: boolean }) {
       {(extra ?? k.hint) && <span className="hk-hint">{extra ?? k.hint}</span>}
     </Press>
   )
+
+  const sound = (k: Key) => {
+    if (k.id !== 'output') return tile(k)
+    const headset = state?.output === 'Headset'
+    return tile({ ...k, icon: headset ? <Headphones /> : <Speaker /> }, state?.output ?? (state ? 'other' : undefined))
+  }
 
   return (
     <div className="vl-screen hk">
@@ -114,6 +139,10 @@ export default function Hotkeys({ active }: { active: boolean }) {
             </Press>
           </section>
           <section className="hk-sec">
+            <Section icon={<Headphones size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Discord</Section>
+            <div className="hk-grid hk-grid-2">{DISCORD.map((k) => tile(k))}</div>
+          </section>
+          <section className="hk-sec">
             <Section icon="newSession">New Claude</Section>
             <div className="hk-grid hk-grid-3">{CLAUDE.map((k) => tile({ ...k, label: state?.labels[k.id] ?? k.label }))}</div>
           </section>
@@ -129,8 +158,67 @@ export default function Hotkeys({ active }: { active: boolean }) {
             <Section icon="music">Media</Section>
             <div className="hk-grid hk-grid-3">{MEDIA.map((k) => tile(k))}</div>
           </section>
+          <section className="hk-sec">
+            <Section icon={<Volume2 size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Sound</Section>
+            <div className="hk-grid hk-grid-4">{SOUND.map(sound)}</div>
+          </section>
         </div>
       </div>
+
+      <SoundboardRow active={active} sent={sent} lit={lit} />
     </div>
+  )
+}
+
+/** The clip keys, one per file in thor's soundboard folder, and Stop. */
+function SoundboardRow({ active, sent, lit }: { active: boolean; sent: string | null; lit: (key: string) => void }) {
+  const sb = useQuery({ queryKey: ['soundboard'], queryFn: fetchSoundboard, refetchInterval: () => (document.hidden || !active ? false : 10_000), retry: false })
+  const clips: Clip[] = sb.data?.clips ?? []
+  const down = sb.isError && !sb.data
+
+  const play = async (c: Clip) => {
+    try {
+      await playClip(c.name)
+      lit(`clip:${c.name}`)
+    } catch (err) {
+      toast(apiErrorText(err, `${c.name}: the soundboard is not answering`), { ms: 4000 })
+    }
+  }
+  const stop = async () => {
+    try {
+      await stopClips()
+    } catch (err) {
+      toast(apiErrorText(err, 'Stop: the soundboard is not answering'), { ms: 4000 })
+    }
+  }
+
+  const note = down
+    ? apiErrorText(sb.error, 'The soundboard is not answering')
+    : sb.data && !clips.length
+      ? 'No clips yet: add audio files to C:\\Thor\\tools\\soundboard\\clips'
+      : sb.data && !sb.data.micConnected
+        ? 'No app has the mic open: only you hear clips'
+        : null
+
+  return (
+    <section className="hk-sec hk-sb" aria-label="Soundboard">
+      <Section
+        icon={<AudioLines size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}
+        action={clips.length > 0 && !down ? <Press className="vl-link hk-stop" onPress={() => void stop()}>Stop all</Press> : undefined}
+      >
+        Soundboard
+      </Section>
+      {note && <p className={cx('hk-note', down && 'vl-acc2')}>{note}</p>}
+      {clips.length > 0 && !down && (
+        <div className="hk-grid hk-grid-clips">
+          {clips.map((c) => (
+            <Press key={c.name} className="hk-key hk-clip vl-btn-line" data-sent={sent === `clip:${c.name}` || undefined} onPress={() => void play(c)}>
+              <span className="hk-label">{c.name}</span>
+              {c.seconds != null && <span className="hk-hint">{secs(c.seconds)}</span>}
+            </Press>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

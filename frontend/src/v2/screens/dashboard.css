@@ -45,6 +45,8 @@
   margin-inline: auto;
 }
 .hm-layout[data-cols='3'][data-xl] { max-width: 2000px; column-gap: 26px; }
+/* iPad landscape (Dashboard.tsx pad): the same three columns on a ~1180 px screen, a tighter gap */
+.hm-layout[data-pad] { column-gap: 14px; }
 /* desktop fill: the three columns reach the bottom of the page together. Each column has one
    elastic part (media's poster grid, the equity chart, this device's model) that takes the height left, so
    no box stretches empty; a page shorter than the content scrolls with each at its minimum. */

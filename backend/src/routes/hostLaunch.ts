@@ -464,7 +464,10 @@ router.post('/hosts/thor/rgb', async (req, res) => {
 // a fixed list, never a key, and thorkeys.ahk runs it out of its own table
 // (Start-LauncherAgent.ps1, POST /hotkey).
 
-const HOTKEY_IDS = new Set(['mic', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'paste', 'play', 'prev', 'next', 'voldown', 'volup', 'volmute'])
+const HOTKEY_IDS = new Set([
+  'mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip',
+  'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute',
+])
 
 router.get('/hosts/thor/hotkeys', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
@@ -482,6 +485,42 @@ router.post('/hosts/thor/hotkey', async (req, res) => {
   if (!HOTKEY_IDS.has(id)) return res.status(400).json({ error: 'unknown hotkey' })
   try {
     const r = await callLauncher('/hotkey', { method: 'POST', body: { id } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+// The soundboard keys on the same page: clips mixed into thor's mic. The client
+// names a clip from the list thor sent, never a path; thor checks it again.
+const CLIP_NAME_RE = /^[\w .()'&+-]{1,80}$/
+
+router.get('/hosts/thor/soundboard', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    const r = await callLauncher('/soundboard', { method: 'GET' })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/soundboard/play', async (req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  const name = String((req.body ?? {}).name ?? '')
+  if (!CLIP_NAME_RE.test(name)) return res.status(400).json({ error: 'clip name not allowed' })
+  try {
+    const r = await callLauncher('/soundboard/play', { method: 'POST', body: { name } })
+    return res.status(r.status).json(r.body)
+  } catch (err) {
+    return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
+  }
+})
+
+router.post('/hosts/thor/soundboard/stop', async (_req, res) => {
+  if (!LAUNCHER_TOKEN) return notConfigured(res)
+  try {
+    const r = await callLauncher('/soundboard/stop', { method: 'POST', body: {} })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
