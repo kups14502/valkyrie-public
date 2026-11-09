@@ -10,6 +10,7 @@ export type HotkeyId =
   | 'claude1' | 'claude2' | 'claude3'
   | 'dim' | 'shot' | 'clip'
   | 'play' | 'prev' | 'next' | 'output' | 'voldown' | 'volup' | 'volmute'
+  | 'mode'
 
 export type HotkeyState = {
   /** thorkeys.ahk answered the agent's ping */
@@ -20,6 +21,8 @@ export type HotkeyState = {
   dim: number
   /** thor's default playback device, as the Output key names it (null: some other device) */
   output: string | null
+  /** work mode or game mode: the mouse's and the keyboard's profiles, switched together (null: unknown) */
+  mode: 'work' | 'game' | null
   /**
    * names for the keys whose names are private (the three new-Claude contexts): thor keeps
    * them (Start-LauncherAgent.ps1), so they never sit in this public repo
@@ -33,11 +36,12 @@ export const fetchHotkeys = async (): Promise<HotkeyState> => {
   const labels: HotkeyState['labels'] = {}
   for (const [k, v] of Object.entries(d.labels ?? {})) if (typeof v === 'string' && v) labels[k as HotkeyId] = v.slice(0, 24)
   const output = typeof d.output === 'string' && d.output ? d.output.slice(0, 16) : null
-  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, output, labels }
+  const mode = d.mode === 'work' || d.mode === 'game' ? d.mode : null
+  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, output, mode, labels }
 }
 
 export const pressHotkey = async (id: HotkeyId) =>
-  (await api.post<{ ok: boolean; id: string; output?: string }>('/hosts/thor/hotkey', { id })).data
+  (await api.post<{ ok: boolean; id: string; output?: string; mode?: string }>('/hosts/thor/hotkey', { id })).data
 
 export type Clip = { name: string; seconds: number | null }
 

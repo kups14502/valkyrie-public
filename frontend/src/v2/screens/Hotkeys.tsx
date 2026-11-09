@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AudioLines, Briefcase, Building2, HeadphoneOff, Headphones, House, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker, SunDim, Video,
-  Volume1, Volume2, VolumeX,
+  AudioLines, Briefcase, Building2, Gamepad2, HeadphoneOff, Headphones, House, Keyboard, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker,
+  SunDim, Video, Volume1, Volume2, VolumeX,
 } from 'lucide-react'
 import { Press, Section, cx, toast } from '../kit/ui'
 import { apiErrorText } from '../../lib/api'
@@ -17,7 +17,9 @@ import './hotkeys.css'
 // acts on the window in front of Brendon. The mic key shows the real mute state
 // (every mic muted, or one live), Output the default playback device, both polled
 // while the tab is open. Discord's keys need its own keybinds (Toggle Mute F19,
-// Toggle Deafen F20); Save clip is NVIDIA Instant Replay's save key.
+// Toggle Deafen F20); Save clip is NVIDIA Instant Replay's save key. Mode flips the
+// mouse and the keyboard between work and game profiles together; thor's agent runs it
+// itself (C:\Thor\scripts\GameMode.psm1), so it works while THOR Keys is down.
 //
 // The soundboard row plays clips into thor's mic (an audio plug-in on the Yeti mixes
 // them in, so apps keep the real mic and the voice gets no delay) and on thor's
@@ -77,12 +79,12 @@ export default function Hotkeys({ active }: { active: boolean }) {
 
   // never gated on an earlier press, so volume taps in a row each land
   const press = async (k: Key) => {
-    if (off) return
+    if (k.id === 'mode' ? down : off) return
     try {
       await pressHotkey(k.id)
       lit(k.id)
       // these change state; thor reports the new one as soon as the action runs
-      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
+      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
     } catch (err) {
       toast(apiErrorText(err, `${k.label}: thor is not answering`), { ms: 4000 })
     }
@@ -90,6 +92,8 @@ export default function Hotkeys({ active }: { active: boolean }) {
 
   const muted = state?.mic === 'muted'
   const micWord = !state ? '--' : state.mic === 'muted' ? 'Mic muted' : state.mic === 'live' ? 'Mic live' : 'No mic found'
+  const game = state?.mode === 'game'
+  const modeWord = !state ? '--' : game ? 'Game mode' : state.mode === 'work' ? 'Work mode' : 'Mode unknown'
 
   const tile = (k: Key, extra?: string) => (
     <Press
@@ -122,22 +126,39 @@ export default function Hotkeys({ active }: { active: boolean }) {
 
       <div className="hk-cols">
         <div className="hk-col">
-          <section className="hk-sec">
-            <Section icon={muted ? <MicOff size={14} strokeWidth={1.6} className="vl-icon vl-icon-acc2 vl-icon-glow" /> : <Mic size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Mic</Section>
-            <Press
-              className="hk-key hk-mic vl-btn-line"
-              data-muted={muted || undefined}
-              data-live={state?.mic === 'live' || undefined}
-              data-sent={sent === 'mic' || undefined}
-              aria-label={`${micWord}: toggle`}
-              disabled={off}
-              onPress={() => void press({ id: 'mic', label: 'Mic', icon: <Mic /> })}
-            >
-              <span className="hk-icon" aria-hidden>{muted ? <MicOff /> : <Mic />}</span>
-              <span className="hk-label">{micWord}</span>
-              <span className="hk-hint">{muted ? 'tap to go live' : state?.mic === 'live' ? 'tap to mute every mic' : ''}</span>
-            </Press>
-          </section>
+          <div className="hk-pair">
+            <section className="hk-sec">
+              <Section icon={muted ? <MicOff size={14} strokeWidth={1.6} className="vl-icon vl-icon-acc2 vl-icon-glow" /> : <Mic size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Mic</Section>
+              <Press
+                className="hk-key hk-mic vl-btn-line"
+                data-muted={muted || undefined}
+                data-live={state?.mic === 'live' || undefined}
+                data-sent={sent === 'mic' || undefined}
+                aria-label={`${micWord}: toggle`}
+                disabled={off}
+                onPress={() => void press({ id: 'mic', label: 'Mic', icon: <Mic /> })}
+              >
+                <span className="hk-icon" aria-hidden>{muted ? <MicOff /> : <Mic />}</span>
+                <span className="hk-label">{micWord}</span>
+                <span className="hk-hint">{muted ? 'tap to go live' : state?.mic === 'live' ? 'tap to mute every mic' : ''}</span>
+              </Press>
+            </section>
+            <section className="hk-sec">
+              <Section icon={<Gamepad2 size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Mode</Section>
+              <Press
+                className="hk-key hk-mode vl-btn-line"
+                data-game={game || undefined}
+                data-sent={sent === 'mode' || undefined}
+                aria-label={`${modeWord}: switch mouse and keyboard`}
+                disabled={down}
+                onPress={() => void press({ id: 'mode', label: 'Mode', icon: <Gamepad2 /> })}
+              >
+                <span className="hk-icon" aria-hidden>{game ? <Gamepad2 /> : <Keyboard />}</span>
+                <span className="hk-label">{modeWord}</span>
+                <span className="hk-hint">{game ? 'tap for work' : state?.mode === 'work' ? 'tap for game' : ''}</span>
+              </Press>
+            </section>
+          </div>
           <section className="hk-sec">
             <Section icon={<Headphones size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Discord</Section>
             <div className="hk-grid hk-grid-2">{DISCORD.map((k) => tile(k))}</div>

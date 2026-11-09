@@ -60,6 +60,11 @@
 .hk-key.hk-mic[data-muted] .hk-icon { color: var(--acc2); filter: var(--icon-glow); }
 .hk-key.hk-mic[data-muted] .hk-hint { color: color-mix(in srgb, var(--acc2) 70%, transparent); }
 
+/* Mic and Mode share one row, so the landscape iPad still shows the page without scrolling;
+   game mode lights its icon like a live mic */
+.hk-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.hk-mode[data-game] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
+
 /* the soundboard: shorter keys named by the clip, two lines at most */
 .hk-clip { min-height: 60px; }
 .hk-clip .hk-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
