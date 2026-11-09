@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AudioLines, Briefcase, Building2, Gamepad2, HeadphoneOff, Headphones, House, Keyboard, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker,
+  AudioLines, Briefcase, Glasses, Building2, Gamepad2, HeadphoneOff, Headphones, House, Keyboard, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker,
   SunDim, Video, Volume1, Volume2, VolumeX,
 } from 'lucide-react'
 import { Press, Section, cx, toast } from '../kit/ui'
@@ -19,7 +19,10 @@ import './hotkeys.css'
 // while the tab is open. Discord's keys need its own keybinds (Toggle Mute F19,
 // Toggle Deafen F20); Save clip is NVIDIA Instant Replay's save key. Mode flips the
 // mouse and the keyboard between work and game profiles together; thor's agent runs it
-// itself (C:\Thor\scripts\GameMode.psm1), so it works while THOR Keys is down.
+// itself (C:\Thor\scripts\GameMode.psm1), so it works while THOR Keys is down. VR starts or quits
+// SteamVR and moves thor's default playback and recording to the Frame (Loki) and back to the
+// output used before and the Yeti (C:\Thor\scripts\VrMode.ps1, run by the agent; it polls faster while
+// that runs).
 //
 // The soundboard row plays clips into thor's mic (an audio plug-in on the Yeti mixes
 // them in, so apps keep the real mic and the voice gets no delay) and on thor's
@@ -62,8 +65,11 @@ const secs = (s: number | null) => (s == null ? '' : s < 10 ? `${s.toFixed(1)} s
 
 export default function Hotkeys({ active }: { active: boolean }) {
   const qc = useQueryClient()
-  const poll = () => (document.hidden || !active ? false : 4_000)
-  const q = useQuery({ queryKey: ['hotkeys'], queryFn: fetchHotkeys, refetchInterval: poll })
+  const q = useQuery({
+    queryKey: ['hotkeys'],
+    queryFn: fetchHotkeys,
+    refetchInterval: (query) => (document.hidden || !active ? false : query.state.data?.vr === 'starting' || query.state.data?.vr === 'stopping' ? 1_500 : 4_000),
+  })
   const state: HotkeyState | undefined = q.data
   const down = q.isError && !q.data
   const off = down || (!!state && !state.ready)
@@ -79,12 +85,12 @@ export default function Hotkeys({ active }: { active: boolean }) {
 
   // never gated on an earlier press, so volume taps in a row each land
   const press = async (k: Key) => {
-    if (k.id === 'mode' ? down : off) return
+    if (k.id === 'mode' || k.id === 'vr' ? down : off) return
     try {
       await pressHotkey(k.id)
       lit(k.id)
       // these change state; thor reports the new one as soon as the action runs
-      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
+      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode' || k.id === 'vr') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
     } catch (err) {
       toast(apiErrorText(err, `${k.label}: thor is not answering`), { ms: 4000 })
     }
@@ -94,6 +100,9 @@ export default function Hotkeys({ active }: { active: boolean }) {
   const micWord = !state ? '--' : state.mic === 'muted' ? 'Mic muted' : state.mic === 'live' ? 'Mic live' : 'No mic found'
   const game = state?.mode === 'game'
   const modeWord = !state ? '--' : game ? 'Game mode' : state.mode === 'work' ? 'Work mode' : 'Mode unknown'
+  const vr = state?.vr ?? null
+  const vrBusy = vr === 'starting' || vr === 'stopping'
+  const vrWord = !state ? '--' : vr === 'on' ? 'VR on' : vr === 'starting' ? 'Starting VR' : vr === 'stopping' ? 'Stopping VR' : 'VR off'
 
   const tile = (k: Key, extra?: string) => (
     <Press
@@ -156,6 +165,23 @@ export default function Hotkeys({ active }: { active: boolean }) {
                 <span className="hk-icon" aria-hidden>{game ? <Gamepad2 /> : <Keyboard />}</span>
                 <span className="hk-label">{modeWord}</span>
                 <span className="hk-hint">{game ? 'tap for work' : state?.mode === 'work' ? 'tap for game' : ''}</span>
+              </Press>
+            </section>
+            <section className="hk-sec">
+              <Section icon={<Glasses size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>VR</Section>
+              <Press
+                className="hk-key hk-vr vl-btn-line"
+                data-on={vr === 'on' || undefined}
+                data-busy={vrBusy || undefined}
+                data-sent={sent === 'vr' || undefined}
+                aria-label={`${vrWord}: ${vr === 'on' ? 'quit SteamVR, audio back to thor' : 'start SteamVR, audio to Loki'}`}
+                aria-busy={vrBusy || undefined}
+                disabled={down || vrBusy}
+                onPress={() => void press({ id: 'vr', label: 'VR', icon: <Glasses /> })}
+              >
+                <span className="hk-icon" aria-hidden><Glasses /></span>
+                <span className="hk-label">{vrWord}</span>
+                <span className="hk-hint">{vr === 'on' ? 'audio on Loki' : vrBusy ? 'switching audio' : vr === 'off' ? 'tap for Loki' : ''}</span>
               </Press>
             </section>
           </div>

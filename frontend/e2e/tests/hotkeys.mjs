@@ -2,12 +2,13 @@
 // sub-tab for the iPad under the main monitor, over fakes in the backend's shapes
 // (routes/hostLaunch.ts /hosts/thor/hotkeys). Presses are caught in the browser: nothing reaches thor.
 //
-//   view       the iPad has the sub-tab after Overview and Today, 17 keys, the mic reads live, the
+//   view       the iPad has the sub-tab after Overview and Today, 18 keys, the mic reads live, the
 //              Claude keys take thor's names, no overflow (portrait and landscape)
 //   others     the phone and the desktop have no Hotkeys sub-tab, and its URL lands on Overview
 //   press      a key sends its id; the mic key flips to muted from the next state read; Mode flips
 //              work to game and lights
-//   down       THOR Keys not running: the status line says so and every key but Mode is disabled
+//   down       THOR Keys not running: the status line says so and every key but Mode and VR is disabled
+//   vr         a tap sends vr; the key reads Starting VR and refuses taps while thor switches, then VR on
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -15,13 +16,13 @@ import { quietThor } from '../lib/fixtures.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const ROUTE = '/m/dashboard/hotkeys'
-const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode']
+const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode', 'vr']
 const KEYS = IDS.length
 const CLIPS = [{ name: 'Airhorn', file: 'airhorn.mp3', seconds: 2.4 }, { name: 'Sad trombone', file: 'sad trombone.wav', seconds: 4 }]
 
 function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
-  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', played: [] }
-  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
+  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', vr: 'off', played: [] }
+  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, vr: st.vr, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
   page.mock('/api/hosts/thor/soundboard', () => (player
     ? ok({ clips, mic: { connected: true, rate: 48000, channels: 2, heartbeatAgeMs: 10 } })
     : ok({ error: 'the soundboard is not running on thor' }, 503)))
@@ -36,6 +37,7 @@ function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
     if (w.json.id === 'mic') st.mic = st.mic === 'muted' ? 'live' : 'muted'
     if (w.json.id === 'output') st.output = st.output === 'Headset' ? 'Speakers' : 'Headset'
     if (w.json.id === 'mode') st.mode = st.mode === 'game' ? 'work' : 'game'
+    if (w.json.id === 'vr') { st.vr = st.vr === 'on' ? 'stopping' : 'starting'; setTimeout(() => { st.vr = st.vr === 'stopping' ? 'off' : 'on' }, 1500) }
     return ok({ ok: true, id: w.json.id })
   })
   return st
@@ -153,7 +155,7 @@ export function hotkeysTests() {
       await page.goto(ROUTE)
       await pageUp(page)
       await page.waitFor(() => /THOR Keys is not running on thor/.test(document.querySelector('.hk-status')?.textContent ?? ''), { message: 'no line saying THOR Keys is down' })
-      const live = await page.eval(() => [...document.querySelectorAll('.hk .hk-key:not(.hk-clip):not(.hk-mode)')].filter((k) => !k.disabled).length)
+      const live = await page.eval(() => [...document.querySelectorAll('.hk .hk-key:not(.hk-clip):not(.hk-mode):not(.hk-vr)')].filter((k) => !k.disabled).length)
       t.check(live === 0, `${live} keys still enabled while THOR Keys is down`)
       // Mode runs in thor's agent, not in THOR Keys
       t.check(await page.eval(() => document.querySelector('.hk-mode')?.disabled === false), 'Mode was disabled while THOR Keys is down')
@@ -226,6 +228,28 @@ export function hotkeysTests() {
       await portrait.goto('/m/dashboard/overview')
       await portrait.waitFor(() => !!document.querySelector('.hm-layout[data-cols]'), { timeout: 15_000, message: 'the portrait board did not come up' })
       t.check(!(await portrait.eval(() => !!document.querySelector('.hm-layout[data-pad]'))), 'portrait iPad got the landscape board')
+    },
+  })
+
+  // VR: a tap sends 'vr', the key reads Starting VR (and refuses taps) while thor switches, then VR on
+  tests.push({
+    name: 'hotkeys:vr',
+    group: 'hotkeys',
+    device: 'ipadland',
+    timeout: 40_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      fakes(page)
+      await page.goto(ROUTE)
+      await pageUp(page)
+      await page.waitFor(() => /VR off/.test(document.querySelector('.hk-vr')?.textContent ?? ''), { message: 'the VR key never read off' })
+      await page.tap({ sel: '.hk-vr' })
+      await sleep(200)
+      t.check(page.writes.at(-1)?.json?.id === 'vr', `the VR key sent ${page.writes.at(-1)?.body}`)
+      await page.waitFor(() => /Starting VR/.test(document.querySelector('.hk-vr')?.textContent ?? '') && document.querySelector('.hk-vr')?.disabled, { timeout: 4000, message: 'the VR key never read Starting VR' })
+      await page.waitFor(() => /VR on/.test(document.querySelector('.hk-vr')?.textContent ?? '') && document.querySelector('.hk-vr')?.hasAttribute('data-on'), { timeout: 8000, message: 'the VR key never read on' })
+      await t.shot(page, 'vr-on')
     },
   })
 
