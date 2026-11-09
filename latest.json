@@ -1,15 +1,15 @@
 {
-  "version": "0.3.169",
-  "notes": "ipad: one-screen landscape Overview; Hotkeys gains Discord, clip, output and a soundboard",
-  "pub_date": "2026-11-07T05:57:27Z",
+  "version": "0.3.170",
+  "notes": "hotkeys: Mode key flips mouse and keyboard between work and game",
+  "pub_date": "2026-11-09T18:50:46Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWRad2taanRGZUkrU1ZyZjl1aW5rdlo2QmQ0UUFzSnNnR2MrSzNKQzBYOXJiSEVpZnZsdEEvblV6Y1UxTUUvcFk1UVJsS3NzWTNyUkh5Zk9MOWtnOEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDMwMzk1CWZpbGU6VmFsa3lyaWVfMC4zLjE2OV94NjQtc2V0dXAuZXhlClVOMGVXbjd3OFAwODFxajd3VzBpdzNKbVJRdS92L2xkTWs4S0c2c2pSS3lIN3k1QkYycVVsTVNpaktVdGFiODNSMnBkUG4vTGJvMHJNdENjbk12TUJnPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.169/Valkyrie_0.3.169_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVY1Q1NxSWVSMlpLaG5CU1IxN1diNmIrejl1aTFOZ1ZrdEdnUDQwbkY0STNSWGdBODdyc2NXM2lFbEM2Vzl0eWdZZXhZM1BsVGxGc0F5ZVVSOTRub0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjUwMTI5CWZpbGU6VmFsa3lyaWVfMC4zLjE3MF94NjQtc2V0dXAuZXhlCjhMaDhjSWtFd0dUT0JaZmU4V0lLaFdUL2JHakxUV3pnUHQ2bnVnalJURDJXWXFGMmRuMGw4a2ZnR1dsQXViVVRaZ3hheVdxVEZVWVBsVmFjZTZIT0FnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.170/Valkyrie_0.3.170_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWM3WkZJcm83MEVYOGRiYk1nc2k5bk1jMXRlbWdXT1FCUVJkOFN0MHEvWitPNkxLWlplNUs3SUowbS8vc1JRWVhJbC93NXBTZmFtNHcvbjk4UWwxa2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDMwMjAwCWZpbGU6VmFsa3lyaWVfMC4zLjE2OV9hbWQ2NC5BcHBJbWFnZQpzeWUwTkRZdEE1bnRtN0tiZ0lXMlpBZXZUVlU0QVMxRHBTQVpwakVsR2YxWVhFbGJTK3pCUzM4ZjgwQ2ozUmlLRXhFYmZMdDVtbmRjNHhBbkx5WlhDQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.169/Valkyrie_0.3.169_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVzM1pFZTBEN01tbWVFQXVVNkhwTlg0SkxrakIzTjdJUHJkQlR6K2pFeWUyTDR1aXFXMFZyNEdiTHUwS2xIZDFQVmYxZ1grZUpCR3l0RFlNOXB5WVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjUwMDc1CWZpbGU6VmFsa3lyaWVfMC4zLjE3MF9hbWQ2NC5BcHBJbWFnZQpZMnQ0bXZZcC9PY0RIWGZyd3d6d29PZ1NSWWFKUUpRSEQwVm96NWl0S3BESkVnTC9GWkRrTlZHOG9aSWU0QzZ6L1pjbGlqaFI5VncxemdNRGtscDFCUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.170/Valkyrie_0.3.170_amd64.AppImage"
     }
   }
 }
