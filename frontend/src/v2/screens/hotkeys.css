@@ -60,10 +60,15 @@
 .hk-key.hk-mic[data-muted] .hk-icon { color: var(--acc2); filter: var(--icon-glow); }
 .hk-key.hk-mic[data-muted] .hk-hint { color: color-mix(in srgb, var(--acc2) 70%, transparent); }
 
-/* Mic and Mode share one row, so the landscape iPad still shows the page without scrolling;
-   game mode lights its icon like a live mic */
-.hk-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.hk-mode[data-game] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
+/* Mic, Mode and VR share one row, so the landscape iPad still shows the page without scrolling;
+   game mode and VR on light their icons like a live mic, and VR pulses while it switches */
+.hk-pair { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hk-mode[data-game] .hk-icon, .hk-vr[data-on] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
+.hk-vr[data-on] { color: var(--fg); border-color: var(--fg); }
+.hk-vr[data-busy] { opacity: 1; color: var(--hot); border-color: color-mix(in srgb, var(--hot) 55%, transparent); }
+.hk-vr[data-busy] .hk-icon { color: var(--hot); animation: hk-pulse 1.1s ease-in-out infinite; }
+@keyframes hk-pulse { 50% { opacity: .35; } }
+html[data-motion='reduced'] .hk-vr[data-busy] .hk-icon { animation: none; }
 
 /* the soundboard: shorter keys named by the clip, two lines at most */
 .hk-clip { min-height: 60px; }

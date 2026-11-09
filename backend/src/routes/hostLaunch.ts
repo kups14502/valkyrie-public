@@ -466,7 +466,7 @@ router.post('/hosts/thor/rgb', async (req, res) => {
 
 const HOTKEY_IDS = new Set([
   'mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip',
-  'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode',
+  'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode', 'vr',
 ])
 
 // The hotkeys lane (Start-LauncherAgent.ps1 -Lane hotkeys, thor task Thor-HotkeysLane): a
