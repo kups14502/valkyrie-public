@@ -470,27 +470,11 @@ const HOTKEY_IDS = new Set([
 ])
 
 // The hotkeys lane (Start-LauncherAgent.ps1 -Lane hotkeys, thor task Thor-HotkeysLane): a
-// second copy of the agent serving only these routes. The main agent handles one request at a
-// time and its /sessions, /desk and /threads take seconds, so a tap queued behind them for
-// several seconds. When the lane cannot be reached the main agent still answers; a POST falls
-// back only when the lane never took the connection, so a press is never sent twice.
-const LANE: Launcher = {
-  host: LAUNCHER_HOST,
-  port: Number(process.env.THOR_HOTKEYS_PORT || 8770),
-  token: LAUNCHER_TOKEN,
-  env: 'THOR_LAUNCHER_TOKEN',
-}
-const NOT_REACHED = new Set(['ECONNREFUSED', 'UND_ERR_CONNECT_TIMEOUT', 'EHOSTUNREACH', 'ENETUNREACH'])
-
-async function callLane(path: string, init: { method: string; body?: unknown }): Promise<LauncherResult> {
-  try {
-    return await callHostLauncher(LANE, path, init)
-  } catch (err) {
-    const code = (err as { cause?: { code?: string } }).cause?.code ?? ''
-    if (init.method === 'GET' || NOT_REACHED.has(code)) return callLauncher(path, init)
-    throw err
-  }
-}
+// second copy of the agent serving only these routes, under /lane/ on the agent's own port
+// (http.sys hands it the longer prefix). The main copy handles one request at a time and its
+// /sessions, /desk and /threads take seconds, so a tap queued behind them; through the lane it
+// answers in ~20 ms. While the lane is down the main copy answers /lane/* itself.
+const callLane = (path: string, init: { method: string; body?: unknown }) => callLauncher(`/lane${path}`, init)
 
 router.get('/hosts/thor/hotkeys', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
