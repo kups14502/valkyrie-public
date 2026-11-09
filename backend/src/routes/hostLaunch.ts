@@ -469,10 +469,33 @@ const HOTKEY_IDS = new Set([
   'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode',
 ])
 
+// The hotkeys lane (Start-LauncherAgent.ps1 -Lane hotkeys, thor task Thor-HotkeysLane): a
+// second copy of the agent serving only these routes. The main agent handles one request at a
+// time and its /sessions, /desk and /threads take seconds, so a tap queued behind them for
+// several seconds. When the lane cannot be reached the main agent still answers; a POST falls
+// back only when the lane never took the connection, so a press is never sent twice.
+const LANE: Launcher = {
+  host: LAUNCHER_HOST,
+  port: Number(process.env.THOR_HOTKEYS_PORT || 8770),
+  token: LAUNCHER_TOKEN,
+  env: 'THOR_LAUNCHER_TOKEN',
+}
+const NOT_REACHED = new Set(['ECONNREFUSED', 'UND_ERR_CONNECT_TIMEOUT', 'EHOSTUNREACH', 'ENETUNREACH'])
+
+async function callLane(path: string, init: { method: string; body?: unknown }): Promise<LauncherResult> {
+  try {
+    return await callHostLauncher(LANE, path, init)
+  } catch (err) {
+    const code = (err as { cause?: { code?: string } }).cause?.code ?? ''
+    if (init.method === 'GET' || NOT_REACHED.has(code)) return callLauncher(path, init)
+    throw err
+  }
+}
+
 router.get('/hosts/thor/hotkeys', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
   try {
-    const r = await callLauncher('/hotkeys', { method: 'GET' })
+    const r = await callLane('/hotkeys', { method: 'GET' })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
@@ -484,7 +507,7 @@ router.post('/hosts/thor/hotkey', async (req, res) => {
   const id = String((req.body ?? {}).id ?? '')
   if (!HOTKEY_IDS.has(id)) return res.status(400).json({ error: 'unknown hotkey' })
   try {
-    const r = await callLauncher('/hotkey', { method: 'POST', body: { id } })
+    const r = await callLane('/hotkey', { method: 'POST', body: { id } })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
@@ -498,7 +521,7 @@ const CLIP_NAME_RE = /^[\w .()'&+-]{1,80}$/
 router.get('/hosts/thor/soundboard', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
   try {
-    const r = await callLauncher('/soundboard', { method: 'GET' })
+    const r = await callLane('/soundboard', { method: 'GET' })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
@@ -510,7 +533,7 @@ router.post('/hosts/thor/soundboard/play', async (req, res) => {
   const name = String((req.body ?? {}).name ?? '')
   if (!CLIP_NAME_RE.test(name)) return res.status(400).json({ error: 'clip name not allowed' })
   try {
-    const r = await callLauncher('/soundboard/play', { method: 'POST', body: { name } })
+    const r = await callLane('/soundboard/play', { method: 'POST', body: { name } })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
@@ -520,7 +543,7 @@ router.post('/hosts/thor/soundboard/play', async (req, res) => {
 router.post('/hosts/thor/soundboard/stop', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
   try {
-    const r = await callLauncher('/soundboard/stop', { method: 'POST', body: {} })
+    const r = await callLane('/soundboard/stop', { method: 'POST', body: {} })
     return res.status(r.status).json(r.body)
   } catch (err) {
     return res.status(502).json({ error: 'thor is not answering', detail: (err as Error).message })
