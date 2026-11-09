@@ -2,11 +2,12 @@
 // sub-tab for the iPad under the main monitor, over fakes in the backend's shapes
 // (routes/hostLaunch.ts /hosts/thor/hotkeys). Presses are caught in the browser: nothing reaches thor.
 //
-//   view       the iPad has the sub-tab after Overview and Today, 16 keys, the mic reads live, the
+//   view       the iPad has the sub-tab after Overview and Today, 17 keys, the mic reads live, the
 //              Claude keys take thor's names, no overflow (portrait and landscape)
 //   others     the phone and the desktop have no Hotkeys sub-tab, and its URL lands on Overview
-//   press      a key sends its id; the mic key flips to muted from the next state read
-//   down       THOR Keys not running: the status line says so and every key is disabled
+//   press      a key sends its id; the mic key flips to muted from the next state read; Mode flips
+//              work to game and lights
+//   down       THOR Keys not running: the status line says so and every key but Mode is disabled
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -14,13 +15,13 @@ import { quietThor } from '../lib/fixtures.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const ROUTE = '/m/dashboard/hotkeys'
-const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute']
+const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode']
 const KEYS = IDS.length
 const CLIPS = [{ name: 'Airhorn', file: 'airhorn.mp3', seconds: 2.4 }, { name: 'Sad trombone', file: 'sad trombone.wav', seconds: 4 }]
 
 function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
-  const st = { ready, mic: 'live', dim: 0, output: 'Headset', played: [] }
-  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
+  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', played: [] }
+  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
   page.mock('/api/hosts/thor/soundboard', () => (player
     ? ok({ clips, mic: { connected: true, rate: 48000, channels: 2, heartbeatAgeMs: 10 } })
     : ok({ error: 'the soundboard is not running on thor' }, 503)))
@@ -34,6 +35,7 @@ function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
     if (!IDS.includes(w.json?.id)) return ok({ error: 'unknown hotkey' }, 400)
     if (w.json.id === 'mic') st.mic = st.mic === 'muted' ? 'live' : 'muted'
     if (w.json.id === 'output') st.output = st.output === 'Headset' ? 'Speakers' : 'Headset'
+    if (w.json.id === 'mode') st.mode = st.mode === 'game' ? 'work' : 'game'
     return ok({ ok: true, id: w.json.id })
   })
   return st
@@ -130,6 +132,12 @@ export function hotkeysTests() {
       })
       t.check(colors.mic === colors.acc2, `the muted mic reads ${colors.mic}, not the alarm color ${colors.acc2}`)
       await t.shot(page, 'muted')
+      // Mode: work to game, from the next state read
+      await page.waitFor(() => /Work mode/.test(document.querySelector('.hk-mode')?.textContent ?? ''), { message: 'the Mode key never read work' })
+      await page.tap({ sel: '.hk-mode' })
+      await sleep(200)
+      t.check(page.writes.at(-1)?.json?.id === 'mode', `the Mode key sent ${page.writes.at(-1)?.body}`)
+      await page.waitFor(() => /Game mode/.test(document.querySelector('.hk-mode')?.textContent ?? '') && document.querySelector('.hk-mode')?.hasAttribute('data-game'), { message: 'the Mode key never read game' })
     },
   })
 
@@ -145,8 +153,10 @@ export function hotkeysTests() {
       await page.goto(ROUTE)
       await pageUp(page)
       await page.waitFor(() => /THOR Keys is not running on thor/.test(document.querySelector('.hk-status')?.textContent ?? ''), { message: 'no line saying THOR Keys is down' })
-      const live = await page.eval(() => [...document.querySelectorAll('.hk .hk-key:not(.hk-clip)')].filter((k) => !k.disabled).length)
+      const live = await page.eval(() => [...document.querySelectorAll('.hk .hk-key:not(.hk-clip):not(.hk-mode)')].filter((k) => !k.disabled).length)
       t.check(live === 0, `${live} keys still enabled while THOR Keys is down`)
+      // Mode runs in thor's agent, not in THOR Keys
+      t.check(await page.eval(() => document.querySelector('.hk-mode')?.disabled === false), 'Mode was disabled while THOR Keys is down')
     },
   })
 
