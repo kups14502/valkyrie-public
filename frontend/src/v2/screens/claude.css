@@ -1242,6 +1242,9 @@ html[data-motion='reduced'] .vc-sicon::before { animation: none; opacity: .7; }
 .vc-u-cols > span + span { text-align: right; }
 .vc-u-name { display: flex; flex-direction: column; min-width: 0; line-height: 16px; color: var(--text); }
 .vc-u-name em { font-style: normal; font-size: 10.5px; line-height: 13px; color: var(--dim); }
+/* the 5h and week resets: one line when it fits, the week drops under the 5h when it does not */
+.vc-u-resets { display: flex; flex-wrap: wrap; column-gap: 1.5ch; }
+.vc-u-resets > span { white-space: nowrap; }
 /* the sign-in address under an account, with a copy button; kept on one compact line */
 .vc-u-email { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 10.5px; line-height: 14px; color: var(--dim); }
 .vc-u-email > span { min-width: 0; }

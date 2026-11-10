@@ -1789,7 +1789,7 @@ function UsageView({ now }: { now: number }) {
                 <span className="vc-u-name">
                   <span className="vl-ellipsis">{a.label}</span>
                   {a.email ? <AcctEmail email={a.email} /> : null}
-                  {a.dead ? <em>Sign-in expired</em> : (f || w) ? <em className="vl-ellipsis">{[f && `5h ${f}`, w && `week ${w}`].filter(Boolean).join(' · ')}</em> : null}
+                  {a.dead ? <em>Sign-in expired</em> : (f || w) ? <em className="vc-u-resets">{f && <span>5h {f}</span>}{w && <span>week {w}</span>}</em> : null}
                 </span>
                 {a.dead ? (
                   <span className="vc-u-dead"><Icon name="alert" size={14} tone="acc2" glow />Signed out</span>
