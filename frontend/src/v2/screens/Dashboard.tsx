@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
-  ago, equityAge, fullest, nyDayKey, onAccount, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, useOpenTasks, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
+  ago, equityAge, fullest, nyDayKey, onAccount, resetWhen, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, useOpenTasks, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
   useTrade, useTracker, useUsage,
   type DownloadVM, type EventVM, type HostVM, type Live, type PlexRichVM, type SessionVM, type TargetVM, type TradeSession, type TradeVM,
 } from '../kit/data'
@@ -1399,10 +1399,8 @@ function SessionLine({ s, host, now }: { s: SessionVM; host: string; now: number
 }
 
 function resetLabel(iso: string | null, now: number): string {
-  if (!iso) return ''
-  const t = Date.parse(iso)
-  if (!t || t < now) return ''
-  return t - now < 20 * 3_600_000 ? `Resets ${clock(t)}` : `Resets ${weekday(t)} ${clock(t)}`
+  const at = resetWhen(iso, now)
+  return at ? `Resets ${at}` : ''
 }
 
 /**

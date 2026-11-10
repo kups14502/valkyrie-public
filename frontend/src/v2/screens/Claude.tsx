@@ -11,7 +11,7 @@ import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
 import { Icon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
 import { canDetach, openDetached } from '../kit/windows'
 import {
-  ago, onAccount, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
+  ago, onAccount, resetWhen, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
   type Live, type ProjectVM, type SessionIndex, type SessionVM, type TargetVM,
 } from '../kit/data'
 import { animateSpring, useReducedMotion } from '../kit/motion'
@@ -1668,12 +1668,6 @@ function Summary({ tab, hasBoard, live, asking, board, projects, projCount, proj
   )
 }
 
-/** "6:10 AM" today, "Mon 8:00 PM" this week; null when unknown or past */
-const resetAt = (iso: string | null, now: number): string | null => {
-  if (!iso) return null
-  const t = Date.parse(iso)
-  return Number.isFinite(t) && t > now ? dayClock(t, now) : null
-}
 /** at 85% a window is close to its limit: the alert color */
 const usageHigh = (v: number | null | undefined) => v != null && v >= 85
 
@@ -1689,8 +1683,8 @@ function UsageLine({ now, onOpen }: { now: number; onOpen: () => void }) {
   const on = onAccount(u, sw.data, 'thor')
   const dead = (u?.accounts ?? []).filter((a) => a.dead)
   const high = usageHigh(on.five) || usageHigh(on.week)
-  const fiveAt = resetAt(on.fiveResetsAt, now)
-  const weekAt = resetAt(on.weekResetsAt, now)
+  const fiveAt = resetWhen(on.fiveResetsAt, now)
+  const weekAt = resetWhen(on.weekResetsAt, now)
   return (
     <Press
       className="vc-week vl-panel vl-build"
@@ -1765,8 +1759,8 @@ function UsageView({ now }: { now: number }) {
         </header>
         {u ? (
           <div className="vc-u-big">
-            <BigMeter label="5 hours" value={on.five} ticks={5} reset={resetAt(on.fiveResetsAt, now)} />
-            <BigMeter label="Week" value={on.week} ticks={7} reset={resetAt(on.weekResetsAt, now)} />
+            <BigMeter label="5 hours" value={on.five} ticks={5} reset={resetWhen(on.fiveResetsAt, now)} />
+            <BigMeter label="Week" value={on.week} ticks={7} reset={resetWhen(on.weekResetsAt, now)} />
           </div>
         ) : (
           <div className="vc-u-empty" data-failed={usage.failed || undefined}>
@@ -1788,8 +1782,8 @@ function UsageView({ now }: { now: number }) {
           </header>
           <div className="vc-u-row vc-u-cols" aria-hidden><span /><span>5h</span><span>Week</span></div>
           {u.accounts.map((a, k) => {
-            const f = resetAt(a.fiveResetsAt, now)
-            const w = resetAt(a.weekResetsAt, now)
+            const f = resetWhen(a.fiveResetsAt, now)
+            const w = resetWhen(a.weekResetsAt, now)
             return (
               <div key={a.id} className="vc-u-row vl-build" style={iv(2 + k)} data-dead={a.dead || undefined} data-top={(!a.dead && a.id === onId) || undefined}>
                 <span className="vc-u-name">

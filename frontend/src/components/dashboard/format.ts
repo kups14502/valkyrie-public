@@ -29,7 +29,7 @@ export const fmtUptime = (s: number) => {
 export const fmtUSD = (n: number | null | undefined) =>
   n == null ? '—' : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-// "resets in 42m" / "resets in 3h 10m" / "resets Mon 4 PM": the granularity
+// "resets in 42m" / "resets in 3h 10m" / "resets Nov 16 (6d 3h)": the granularity
 // that reads best for the distance, short enough to sit beside a bar.
 export function fmtResetAt(iso: string | null | undefined): string | undefined {
   if (!iso) return undefined
@@ -37,7 +37,8 @@ export function fmtResetAt(iso: string | null | undefined): string | undefined {
   if (mins <= 0) return 'resets now'
   if (mins < 100) return `resets in ${mins}m`
   if (mins < 48 * 60) return `resets in ${Math.floor(mins / 60)}h ${mins % 60}m`
-  return `resets ${new Date(iso).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })}`
+  const date = new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return `resets ${date} (${Math.floor(mins / 1440)}d ${Math.floor((mins % 1440) / 60)}h)`
 }
 
 // The exact wall-clock reset, for the hover on the countdown.
