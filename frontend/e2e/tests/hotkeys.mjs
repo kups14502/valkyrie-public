@@ -21,8 +21,8 @@ const KEYS = IDS.length
 const CLIPS = [{ name: 'Airhorn', file: 'airhorn.mp3', seconds: 2.4 }, { name: 'Sad trombone', file: 'sad trombone.wav', seconds: 4 }]
 
 function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
-  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', vr: 'off', played: [] }
-  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, vr: st.vr, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
+  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', vr: 'off', discord: { muted: false, deafened: false }, played: [] }
+  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, vr: st.vr, discord: st.discord, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
   page.mock('/api/hosts/thor/soundboard', () => (player
     ? ok({ clips, mic: { connected: true, rate: 48000, channels: 2, heartbeatAgeMs: 10 } })
     : ok({ error: 'the soundboard is not running on thor' }, 503)))
@@ -37,6 +37,8 @@ function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
     if (w.json.id === 'mic') st.mic = st.mic === 'muted' ? 'live' : 'muted'
     if (w.json.id === 'output') st.output = st.output === 'Headset' ? 'Speakers' : 'Headset'
     if (w.json.id === 'mode') st.mode = st.mode === 'game' ? 'work' : 'game'
+    if (w.json.id === 'discorddeafen') st.discord.deafened = !st.discord.deafened
+    if (w.json.id === 'discordmute') st.discord = st.discord.deafened ? { muted: false, deafened: false } : { ...st.discord, muted: !st.discord.muted }
     if (w.json.id === 'vr') { st.vr = st.vr === 'on' ? 'stopping' : 'starting'; setTimeout(() => { st.vr = st.vr === 'stopping' ? 'off' : 'on' }, 1500) }
     return ok({ ok: true, id: w.json.id })
   })
@@ -244,6 +246,34 @@ export function hotkeysTests() {
       await portrait.goto('/m/dashboard/overview')
       await portrait.waitFor(() => !!document.querySelector('.hm-layout[data-cols]'), { timeout: 15_000, message: 'the portrait board did not come up' })
       t.check(!(await portrait.eval(() => !!document.querySelector('.hm-layout[data-pad]'))), 'portrait iPad got the landscape board')
+    },
+  })
+
+  // Discord: Mute goes red with "muted"; Deafen turns both red; Mute while deafened clears both, as Discord does
+  tests.push({
+    name: 'hotkeys:discord',
+    group: 'hotkeys',
+    device: 'ipadland',
+    timeout: 40_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      fakes(page)
+      await page.goto(ROUTE)
+      await pageUp(page)
+      const read = () => page.eval(() => Object.fromEntries([...document.querySelectorAll('.hk-key')].filter((k) => /^(Mute|Deafen)/.test(k.querySelector('.hk-label')?.textContent ?? '')).map((k) => [k.querySelector('.hk-label').textContent, k.dataset.tone ?? 'none'])))
+      await page.waitFor(() => /Discord/.test([...document.querySelectorAll('.hk-key')].find((k) => k.querySelector('.hk-label')?.textContent === 'Mute')?.textContent ?? ''), { message: 'the Mute key never showed' })
+      await page.tap({ sel: '.hk-key', text: /^Mute/ })
+      await page.waitFor(() => /muted/.test([...document.querySelectorAll('.hk-key')].find((k) => k.querySelector('.hk-label')?.textContent === 'Mute')?.textContent ?? ''), { message: 'Mute never read muted' })
+      let r = await read()
+      t.check(r.Mute === 'alarm' && r.Deafen === 'none', `after Mute: ${JSON.stringify(r)}`)
+      await page.tap({ sel: '.hk-key', text: /^Deafen/ })
+      await page.waitFor(() => /deafened/.test([...document.querySelectorAll('.hk-key')].find((k) => k.querySelector('.hk-label')?.textContent === 'Deafen')?.textContent ?? ''), { message: 'Deafen never read deafened' })
+      r = await read()
+      t.check(r.Mute === 'alarm' && r.Deafen === 'alarm', `after Deafen: ${JSON.stringify(r)}`)
+      await t.shot(page, 'discord')
+      await page.tap({ sel: '.hk-key', text: /^Mute/ })
+      await page.waitFor(() => [...document.querySelectorAll('.hk-key')].filter((k) => /^(Mute|Deafen)$/.test(k.querySelector('.hk-label')?.textContent ?? '')).every((k) => !k.dataset.tone), { message: 'Mute while deafened did not clear both' })
     },
   })
 

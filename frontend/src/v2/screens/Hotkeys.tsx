@@ -92,7 +92,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
       await pressHotkey(k.id)
       lit(k.id)
       // these change state; thor reports the new one as soon as the action runs
-      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode' || k.id === 'vr') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
+      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode' || k.id === 'vr' || k.id === 'discordmute' || k.id === 'discorddeafen') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
     } catch (err) {
       toast(apiErrorText(err, `${k.label}: thor is not answering`), { ms: 4000 })
     }
@@ -120,6 +120,14 @@ export default function Hotkeys({ active }: { active: boolean }) {
       {(extra ?? k.hint) && <span className="hk-hint">{extra ?? k.hint}</span>}
     </Press>
   )
+
+  // Discord's state as thor tracks it from these presses: deafened also reads as muted, as in Discord
+  const discordTile = (k: Key) => {
+    const d = state?.discord
+    const on = !!d && (k.id === 'discorddeafen' ? d.deafened : d.muted || d.deafened)
+    const word = k.id === 'discorddeafen' ? 'deafened' : d?.deafened ? 'deafened' : 'muted'
+    return tile(k, on ? word : 'Discord', on ? 'alarm' : undefined)
+  }
 
   const sound = (k: Key) => {
     if (k.id !== 'output') return tile(k)
@@ -193,7 +201,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
           </div>
           <section className="hk-sec">
             <Section icon={<Headphones size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Discord</Section>
-            <div className="hk-grid hk-grid-2">{DISCORD.map((k) => tile(k))}</div>
+            <div className="hk-grid hk-grid-2">{DISCORD.map(discordTile)}</div>
           </section>
           <section className="hk-sec">
             <Section icon="newSession">New Claude</Section>
