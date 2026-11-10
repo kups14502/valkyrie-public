@@ -1,15 +1,15 @@
 {
-  "version": "0.3.171",
-  "notes": "hotkeys: VR key starts or quits SteamVR and moves thor's audio to Loki and back",
-  "pub_date": "2026-11-09T21:09:06Z",
+  "version": "0.3.172",
+  "notes": "hotkeys: state colors on Mic, Mode, VR and Dim",
+  "pub_date": "2026-11-10T00:30:54Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVlvM3BzeU9xUjJXZlZ1cXppQU96d0pmRDh3bTBTWDZmUm5uS0drQm5JcHJqdWc4Yml0d05zdi8wL3B4OXNkeU42TDlLUDJTQ3NNaFAxcUlpRFRrSFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjU4NDUyCWZpbGU6VmFsa3lyaWVfMC4zLjE3MV94NjQtc2V0dXAuZXhlCjlrNDRUK1d4WTBsaFpZcER4eUpidHUvNGg0aFpsWS9sT3E3WkxtcjBuQ21jYW56WW5yV2NaN0JnNnUwSWNKakVOREZPTmtSc3JieURXZ2kzSUUxdUJRPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.171/Valkyrie_0.3.171_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVprV2haeFBiVkxlSWlWZVlIRTMyR3lXZE9FNHVDT3pDdGYxVkVzRzdiU0p0dTcrRUREaVpwZU42eGlJSC92T1BsZnVDaFhFTWtGMkJxUkFWY0FKL2dnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjcwNTM4CWZpbGU6VmFsa3lyaWVfMC4zLjE3Ml94NjQtc2V0dXAuZXhlCmJxYmFsR1BxT0NFYkdQbElTMFNhcEVqMnMrc3l1L1RmSEJoclJnUG5CZTZQYnA1VVVCbmFaNnN1c1c3ODhYYWk1VzNXaWpjUGJuR2RkSWwySnJtUEJnPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.172/Valkyrie_0.3.172_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVh1UHdtMGJxRXpVcEdkd3pWeTBINzUzT1NEc3kwU1JDdVpDbWVHNVdsVm54ZDVzekhsbjVWUzRPMFQ4dTdPL2J5UUJpcXlkU0Fxb0o0OUxDdFJkSXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjU4Mzk3CWZpbGU6VmFsa3lyaWVfMC4zLjE3MV9hbWQ2NC5BcHBJbWFnZQpkdDgyczJLQXFyS0x0V2RiQ0c0bXZWejFBakJ6RmJZMGZ2MnpDM1F1eDFDN0x2MlVwaTBoT1IxbXQyWjFCb3JXaW4rK1RCQzltOUN5VWpHb25DMHhEdz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.171/Valkyrie_0.3.171_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWFYODlDYk81Mlh5V2NPc0ZOdlZSakdwcmxITkVuaXd5T3FCQ1lNbzkxRXFDbmt0V0FaTkN6QUlrcE1oK3pwM3JJbC91TkpCdnpXZnJUTzNWMVdKM3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjcwNDg0CWZpbGU6VmFsa3lyaWVfMC4zLjE3Ml9hbWQ2NC5BcHBJbWFnZQplOEYxR0xMaEYvS2FEYmFPNE5MQXdNYkl4ckxPL1lIbjdsNis5bXZFZDMxMm8yQTZZa3VFcTNWalZPOVFoTDVreEY4bkFhVE1ITVU5dWVWUzNKdU1BZz09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.172/Valkyrie_0.3.172_amd64.AppImage"
     }
   }
 }
