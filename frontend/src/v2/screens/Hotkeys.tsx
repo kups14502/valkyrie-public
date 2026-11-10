@@ -29,6 +29,8 @@ import './hotkeys.css'
 // speakers. Clips are the files in thor's soundboard folder, by name.
 
 type Key = { id: HotkeyId; label: string; icon: ReactElement; hint?: string }
+// a key's state color (hotkeys.css): the accent, yellow, or the alarm red
+type Tone = 'fg' | 'hot' | 'alarm'
 
 const DISCORD: Key[] = [
   { id: 'discordmute', label: 'Mute', icon: <MicOff />, hint: 'Discord' },
@@ -104,10 +106,11 @@ export default function Hotkeys({ active }: { active: boolean }) {
   const vrBusy = vr === 'starting' || vr === 'stopping'
   const vrWord = !state ? '--' : vr === 'on' ? 'VR on' : vr === 'starting' ? 'Starting VR' : vr === 'stopping' ? 'Stopping VR' : 'VR off'
 
-  const tile = (k: Key, extra?: string) => (
+  const tile = (k: Key, extra?: string, tone?: Tone) => (
     <Press
       key={k.id}
       className="hk-key vl-btn-line"
+      data-tone={tone}
       data-sent={sent === k.id || undefined}
       disabled={off}
       onPress={() => void press(k)}
@@ -140,6 +143,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
               <Section icon={muted ? <MicOff size={14} strokeWidth={1.6} className="vl-icon vl-icon-acc2 vl-icon-glow" /> : <Mic size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Mic</Section>
               <Press
                 className="hk-key hk-mic vl-btn-line"
+                data-tone={muted ? 'alarm' : state?.mic === 'live' ? 'fg' : undefined}
                 data-muted={muted || undefined}
                 data-live={state?.mic === 'live' || undefined}
                 data-sent={sent === 'mic' || undefined}
@@ -156,6 +160,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
               <Section icon={<Gamepad2 size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Mode</Section>
               <Press
                 className="hk-key hk-mode vl-btn-line"
+                data-tone={game ? 'hot' : state?.mode === 'work' ? 'fg' : undefined}
                 data-game={game || undefined}
                 data-sent={sent === 'mode' || undefined}
                 aria-label={`${modeWord}: switch mouse and keyboard`}
@@ -171,6 +176,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
               <Section icon={<Glasses size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>VR</Section>
               <Press
                 className="hk-key hk-vr vl-btn-line"
+                data-tone={vrBusy ? 'hot' : vr === 'on' ? 'fg' : undefined}
                 data-on={vr === 'on' || undefined}
                 data-busy={vrBusy || undefined}
                 data-sent={sent === 'vr' || undefined}
@@ -198,7 +204,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
           <section className="hk-sec">
             <Section icon="thor">Screen</Section>
             <div className="hk-grid hk-grid-3">
-              {SCREEN.map((k) => tile(k, k.id === 'dim' ? (state?.dim ? `${state.dim}%` : 'off') : undefined))}
+              {SCREEN.map((k) => (k.id === 'dim' ? tile(k, state?.dim ? `${state.dim}%` : 'off', state?.dim ? 'hot' : undefined) : tile(k)))}
             </div>
           </section>
           <section className="hk-sec">

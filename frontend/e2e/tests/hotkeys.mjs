@@ -140,6 +140,22 @@ export function hotkeysTests() {
       await sleep(200)
       t.check(page.writes.at(-1)?.json?.id === 'mode', `the Mode key sent ${page.writes.at(-1)?.body}`)
       await page.waitFor(() => /Game mode/.test(document.querySelector('.hk-mode')?.textContent ?? '') && document.querySelector('.hk-mode')?.hasAttribute('data-game'), { message: 'the Mode key never read game' })
+      // state colors: game mode reads yellow, the live-to-muted mic red (checked above), work mode the accent
+      await sleep(400)
+      const tones = await page.eval(() => {
+        const probe = (v) => {
+          const i = document.createElement('i')
+          i.style.color = v
+          document.querySelector('.hk').appendChild(i)
+          const c = getComputedStyle(i).color
+          i.remove()
+          return c
+        }
+        const mode = document.querySelector('.hk-mode')
+        return { tone: mode.dataset.tone, color: getComputedStyle(mode).color, hot: probe('var(--hot)') }
+      })
+      t.check(tones.tone === 'hot' && tones.color === tones.hot, `game mode reads ${tones.color} (tone ${tones.tone}), not yellow ${tones.hot}`)
+      await t.shot(page, 'tones')
     },
   })
 
