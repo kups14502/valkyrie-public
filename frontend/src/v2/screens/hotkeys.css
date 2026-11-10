@@ -51,22 +51,29 @@
 .hk-key[data-sent] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
 .hk-key[data-sent] { color: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
 
-/* the mic: one wide key, the live state in the accent, muted in the alarm color (also while the
-   press flash is on, so the doubled class outranks .hk-key[data-sent]) */
 .hk-mic { min-height: 84px; }
-.hk-mic[data-live] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
-.hk-key.hk-mic[data-muted] { color: var(--acc2); border-color: color-mix(in srgb, var(--acc2) 70%, transparent); }
-.hk-key.hk-mic[data-muted][data-sent] { border-color: var(--acc2); box-shadow: 0 0 14px color-mix(in srgb, var(--acc2) 45%, transparent); }
-.hk-key.hk-mic[data-muted] .hk-icon { color: var(--acc2); filter: var(--icon-glow); }
-.hk-key.hk-mic[data-muted] .hk-hint { color: color-mix(in srgb, var(--acc2) 70%, transparent); }
 
-/* Mic, Mode and VR share one row, so the landscape iPad still shows the page without scrolling;
-   game mode and VR on light their icons like a live mic, and VR pulses while it switches */
+/* Mic, Mode and VR share one row, so the landscape iPad still shows the page without scrolling */
 .hk-pair { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.hk-mode[data-game] .hk-icon, .hk-vr[data-on] .hk-icon { color: var(--fg); filter: var(--icon-glow); }
-.hk-vr[data-on] { color: var(--fg); border-color: var(--fg); }
-.hk-vr[data-busy] { opacity: 1; color: var(--hot); border-color: color-mix(in srgb, var(--hot) 55%, transparent); }
-.hk-vr[data-busy] .hk-icon { color: var(--hot); animation: hk-pulse 1.1s ease-in-out infinite; }
+
+/* state colors (data-tone, Hotkeys.tsx): the accent for the everyday state (mic live, work mode,
+   VR on), yellow for a mode that changes how thor behaves (game mode, dim on, VR switching), the
+   alarm red for muted. The whole key takes the color: border, text, icon and a faint fill. The
+   doubled class outranks the press flash, so a key never loses its color while it flashes. */
+.hk-key.hk-key[data-tone] {
+  color: var(--tone);
+  border-color: color-mix(in srgb, var(--tone) 70%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 14%, transparent), color-mix(in srgb, var(--tone) 4%, transparent)), rgba(0, 0, 0, .55);
+}
+.hk-key.hk-key[data-tone] .hk-icon { color: var(--tone); filter: var(--icon-glow); }
+.hk-key.hk-key[data-tone] .hk-hint { color: color-mix(in srgb, var(--tone) 70%, transparent); }
+.hk-key.hk-key[data-tone][data-sent] { border-color: var(--tone); box-shadow: 0 0 14px color-mix(in srgb, var(--tone) 45%, transparent); }
+.hk-key[data-tone='fg'] { --tone: var(--fg); }
+.hk-key[data-tone='hot'] { --tone: var(--hot); }
+.hk-key[data-tone='alarm'] { --tone: var(--acc2); }
+/* VR pulses while VrMode.ps1 switches; the key is disabled then but keeps its full color */
+.hk-vr[data-busy] { opacity: 1; }
+.hk-vr[data-busy] .hk-icon { animation: hk-pulse 1.1s ease-in-out infinite; }
 @keyframes hk-pulse { 50% { opacity: .35; } }
 html[data-motion='reduced'] .hk-vr[data-busy] .hk-icon { animation: none; }
 
