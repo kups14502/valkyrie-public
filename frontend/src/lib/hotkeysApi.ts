@@ -25,6 +25,8 @@ export type HotkeyState = {
   mode: 'work' | 'game' | null
   /** SteamVR and thor's audio on the Frame (Loki): on, off, or VrMode.ps1 still switching (null: unknown) */
   vr: 'on' | 'off' | 'starting' | 'stopping' | null
+  /** Discord mute and deafen as thor tracks them from the keys' presses (Discord itself is not readable) */
+  discord: { muted: boolean; deafened: boolean } | null
   /**
    * names for the keys whose names are private (the three new-Claude contexts): thor keeps
    * them (Start-LauncherAgent.ps1), so they never sit in this public repo
@@ -40,7 +42,8 @@ export const fetchHotkeys = async (): Promise<HotkeyState> => {
   const output = typeof d.output === 'string' && d.output ? d.output.slice(0, 16) : null
   const mode = d.mode === 'work' || d.mode === 'game' ? d.mode : null
   const vr = d.vr === 'on' || d.vr === 'off' || d.vr === 'starting' || d.vr === 'stopping' ? d.vr : null
-  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, output, mode, vr, labels }
+  const discord = d.discord && typeof d.discord === 'object' ? { muted: d.discord.muted === true, deafened: d.discord.deafened === true } : null
+  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, output, mode, vr, discord, labels }
 }
 
 export const pressHotkey = async (id: HotkeyId) =>
