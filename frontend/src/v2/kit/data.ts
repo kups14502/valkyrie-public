@@ -138,6 +138,21 @@ export const ago = (ms: number, now = Date.now()): string => {
   return `${Math.round(h / 24)}d`
 }
 
+/** a usage window's reset: "12:00 AM (3h 4m)" inside a day, "Nov 16 (6d 3h)" past it; null when unknown or past */
+export const resetWhen = (iso: string | null, now = Date.now()): string | null => {
+  const t = iso ? Date.parse(iso) : NaN
+  if (!Number.isFinite(t) || t <= now) return null
+  const m = Math.max(1, Math.floor((t - now) / 60_000))
+  const d = Math.floor(m / 1440)
+  const h = Math.floor((m % 1440) / 60)
+  const left = d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`
+  const at = new Date(t)
+  const when = d
+    ? at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  return `${when} (${left})`
+}
+
 // ---------- hosts ----------
 
 export type HostVM = {
