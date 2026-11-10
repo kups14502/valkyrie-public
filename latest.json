@@ -1,15 +1,15 @@
 {
-  "version": "0.3.173",
-  "notes": "hotkeys: Discord Mute and Deafen show their state in red",
-  "pub_date": "2026-11-10T00:59:57Z",
+  "version": "0.3.174",
+  "notes": "usage: account resets wrap to two lines on the phone",
+  "pub_date": "2026-11-10T02:05:27Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVVHUUthV3FHZUpMM09TdmtaTFE5N3dOR3BaU1FrTy84RHlVRTRsNGlJdGw1TkE4ZUowSVlEOUM5OENtNnRkbnF1dkNvN1ZiMENJTndTb1dsbkhjZ3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjcyMzE0CWZpbGU6VmFsa3lyaWVfMC4zLjE3M194NjQtc2V0dXAuZXhlCmNjTUlleUY0SzY5MHhXTVc1bWtZbTZEYUNNY0VmeHpwd0RmcEtsTEZCU0V6aVB5dzl0TTR4NTNEa2Q5UkFGK1ZHakFnRS9FdlNENGRKV053dFQ5NENBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.173/Valkyrie_0.3.173_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVJ5SmxhSnFjYS8yL3RLRW1ZcXlDTVNFSG5salA0TkU1czhTbzdQcGZaMGhyaENFMnd5eEdNYXJZMDcyZkVXQWRsWmVPUDV2OXdiZ084RlZ6TWE2ancwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mjc2MjI5CWZpbGU6VmFsa3lyaWVfMC4zLjE3NF94NjQtc2V0dXAuZXhlClpsWTZzWmpZbjdXV09EQUpFUEtpWHk0bEFKTTFCTDJxQ1g1QU5GN2Q0bkkwOE1hQ3JJWUJtNitKV05lUENoQnF4djNlMUJ5YjcvOE8xeFErM29uV0RRPT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.174/Valkyrie_0.3.174_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVp0Si8wQ2dTZXRmdlY1VXFEREJzcG1Jblo4NmJXOU9jTmJMZDNGQlgwOGpSd0R0NjUvNzI4Ym5SSTIrVEhXV0FCZzJiWTVSQkRkSEFCSmRuSENsNnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjcyMjYwCWZpbGU6VmFsa3lyaWVfMC4zLjE3M19hbWQ2NC5BcHBJbWFnZQpFU3lpWGd1RUw5SVZLVjUxc0MzOFF0RDA5SnhNWGgva0ZuaHJXdyt6Q1BKbTl6M0V0VHhNTEsvd0hMRnlETlNDcWJRMi84eVlRMVp5NHJrYUM3TGhDZz09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.173/Valkyrie_0.3.173_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWVLY1E5MHV0WXhocWNUZXJOMnAzb0JycUdYTzZyM1psNXlRUHdzN2NhWHRsYzJTYVY3Q3lYVlJOL0p6SjI4UGJvaVhtb3haSTd6RjVld0d1YUZKZFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mjc2MTc0CWZpbGU6VmFsa3lyaWVfMC4zLjE3NF9hbWQ2NC5BcHBJbWFnZQpKd3dRUGU5bVJ6Sk1XcEtmSDNramYrVk1EbmZPQUFhL0JZWEE1dlF2QXNJSUEvWFAwMUdtbTdjczVqczR1Q2plUzloblZHa3JkMkE3NHQrTkk5SU9EUT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.174/Valkyrie_0.3.174_amd64.AppImage"
     }
   }
 }
