@@ -10,7 +10,7 @@ export type HotkeyId =
   | 'claude1' | 'claude2' | 'claude3'
   | 'dim' | 'shot' | 'clip'
   | 'play' | 'prev' | 'next' | 'output' | 'voldown' | 'volup' | 'volmute'
-  | 'mode' | 'vr'
+  | 'mode' | 'vr' | 'lock'
 
 export type HotkeyState = {
   /** thorkeys.ahk answered the agent's ping */
@@ -19,6 +19,8 @@ export type HotkeyState = {
   mic: 'muted' | 'live' | 'unknown'
   /** the dim overlay, percent (0 = off) */
   dim: number
+  /** the Win lock: the Win keys, Alt+Tab, Alt+Esc, Ctrl+Esc, Alt+F4 and the menu key do nothing */
+  lock: boolean
   /** thor's default playback device, as the Output key names it (null: some other device) */
   output: string | null
   /** work mode or game mode: the mouse's and the keyboard's profiles, switched together (null: unknown) */
@@ -43,7 +45,7 @@ export const fetchHotkeys = async (): Promise<HotkeyState> => {
   const mode = d.mode === 'work' || d.mode === 'game' ? d.mode : null
   const vr = d.vr === 'on' || d.vr === 'off' || d.vr === 'starting' || d.vr === 'stopping' ? d.vr : null
   const discord = d.discord && typeof d.discord === 'object' ? { muted: d.discord.muted === true, deafened: d.discord.deafened === true } : null
-  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, output, mode, vr, discord, labels }
+  return { ready: d.ready === true, mic, dim: typeof d.dim === 'number' ? d.dim : 0, lock: d.lock === true, output, mode, vr, discord, labels }
 }
 
 export const pressHotkey = async (id: HotkeyId) =>

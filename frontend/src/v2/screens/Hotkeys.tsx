@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AudioLines, Briefcase, Glasses, Building2, Gamepad2, HeadphoneOff, Headphones, House, Keyboard, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker,
+  AudioLines, Briefcase, Glasses, Building2, Gamepad2, HeadphoneOff, Headphones, House, Keyboard, Lock, LockOpen, Mic, MicOff, Play, ScanLine, SkipBack, SkipForward, Speaker,
   SunDim, Video, Volume1, Volume2, VolumeX,
 } from 'lucide-react'
 import { Press, Section, cx, toast } from '../kit/ui'
@@ -22,7 +22,8 @@ import './hotkeys.css'
 // itself (C:\Thor\scripts\GameMode.psm1), so it works while THOR Keys is down. VR starts or quits
 // SteamVR and moves thor's default playback and recording to the Frame (Loki) and back to the
 // output used before and the Yeti (C:\Thor\scripts\VrMode.ps1, run by the agent; it polls faster while
-// that runs).
+// that runs). Lock is the Win lock: while on, the Win keys, Alt+Tab, Alt+Esc, Ctrl+Esc, Alt+F4 and the
+// menu key do nothing on thor, so nothing on the keyboard pulls focus off a game.
 //
 // The soundboard row plays clips into thor's mic (an audio plug-in on the Yeti mixes
 // them in, so apps keep the real mic and the voice gets no delay) and on thor's
@@ -92,7 +93,7 @@ export default function Hotkeys({ active }: { active: boolean }) {
       await pressHotkey(k.id)
       lit(k.id)
       // these change state; thor reports the new one as soon as the action runs
-      if (k.id === 'mic' || k.id === 'dim' || k.id === 'output' || k.id === 'mode' || k.id === 'vr' || k.id === 'discordmute' || k.id === 'discorddeafen') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
+      if (k.id === 'mic' || k.id === 'dim' || k.id === 'lock' || k.id === 'output' || k.id === 'mode' || k.id === 'vr' || k.id === 'discordmute' || k.id === 'discorddeafen') window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['hotkeys'] }), 300)
     } catch (err) {
       toast(apiErrorText(err, `${k.label}: thor is not answering`), { ms: 4000 })
     }
@@ -105,6 +106,8 @@ export default function Hotkeys({ active }: { active: boolean }) {
   const vr = state?.vr ?? null
   const vrBusy = vr === 'starting' || vr === 'stopping'
   const vrWord = !state ? '--' : vr === 'on' ? 'VR on' : vr === 'starting' ? 'Starting VR' : vr === 'stopping' ? 'Stopping VR' : 'VR off'
+  const locked = !!state?.lock
+  const lockWord = !state ? '--' : locked ? 'Win locked' : 'Win unlocked'
 
   const tile = (k: Key, extra?: string, tone?: Tone) => (
     <Press
@@ -196,6 +199,21 @@ export default function Hotkeys({ active }: { active: boolean }) {
                 <span className="hk-icon" aria-hidden><Glasses /></span>
                 <span className="hk-label">{vrWord}</span>
                 <span className="hk-hint">{vr === 'on' ? 'audio on Loki' : vrBusy ? 'switching audio' : vr === 'off' ? 'tap for Loki' : ''}</span>
+              </Press>
+            </section>
+            <section className="hk-sec">
+              <Section icon={<Lock size={14} strokeWidth={1.6} className="vl-icon vl-icon-fg vl-icon-glow" />}>Lock</Section>
+              <Press
+                className="hk-key hk-lock vl-btn-line"
+                data-tone={locked ? 'hot' : undefined}
+                data-sent={sent === 'lock' || undefined}
+                aria-label={`${lockWord}: ${locked ? 'let the Win key and Alt+Tab work again' : 'block the Win key, Alt+Tab and Alt+F4'}`}
+                disabled={off}
+                onPress={() => void press({ id: 'lock', label: 'Lock', icon: <Lock /> })}
+              >
+                <span className="hk-icon" aria-hidden>{locked ? <Lock /> : <LockOpen />}</span>
+                <span className="hk-label">{lockWord}</span>
+                <span className="hk-hint">{locked ? 'Alt+Tab blocked too' : state ? 'tap to block' : ''}</span>
               </Press>
             </section>
           </div>

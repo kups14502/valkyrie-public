@@ -53,8 +53,8 @@
 
 .hk-mic { min-height: 84px; }
 
-/* Mic, Mode and VR share one row, so the landscape iPad still shows the page without scrolling */
-.hk-pair { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+/* Mic, Mode, VR and Lock share one row, so the landscape iPad still shows the page without scrolling */
+.hk-pair { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 
 /* state colors (data-tone, Hotkeys.tsx): the accent for the everyday state (mic live, work mode,
    VR on), yellow for a mode that changes how thor behaves (game mode, dim on, VR switching), the
