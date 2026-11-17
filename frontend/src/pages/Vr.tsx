@@ -20,6 +20,7 @@ import {
 import { readText as readClipboard } from '../lib/clipboard'
 import { PasteSheet } from '../components/PasteSheet'
 import { isEmbedded } from '../lib/embed'
+import { FONT_KEY, FONT_MAX, FONT_MIN, PAGES, loadFont } from '../lib/vr'
 
 // The VR workspace, at /vr. Built for the Steam Frame, which runs SteamOS and
 // shows a browser as a flat window floating in the headset, so this page IS
@@ -50,10 +51,6 @@ import { isEmbedded } from '../lib/embed'
 
 const PANES_KEY = 'valkyrie-vr-panes'
 const COLS_KEY = 'valkyrie-vr-cols'
-const FONT_KEY = 'valkyrie-vr-font'
-const FONT_MIN = 12
-const FONT_MAX = 32
-const FONT_DEFAULT = 18
 const MAX_PANES = 6
 
 type TermPane = { id: string; kind: 'term'; name: string }
@@ -69,22 +66,6 @@ type PaneApi = {
   reconnect: () => void
   focus: () => void
 }
-
-// Pages worth a screen of their own in the headset. The terminal and the
-// workspace itself are left out: one is a pane already, the other would nest.
-const PAGES: { path: string; label: string }[] = [
-  { path: '/sessions', label: 'session board' },
-  { path: '/projects', label: 'projects' },
-  { path: '/dashboard', label: 'dashboard' },
-  { path: '/calendar', label: 'calendar' },
-  { path: '/meals', label: 'meals' },
-  { path: '/lights', label: 'lights' },
-  { path: '/plex', label: 'plex' },
-  { path: '/trade', label: 'trades' },
-  { path: '/slop', label: 'slop' },
-  { path: '/activity', label: 'activity' },
-  { path: '/services', label: 'services' },
-]
 
 const EMPTY: TermSession[] = []
 
@@ -115,11 +96,6 @@ function loadCols(): Cols {
   return v === 1 || v === 2 || v === 3 ? v : 0
 }
 
-function loadFont(): number {
-  const v = Number(localStorage.getItem(FONT_KEY))
-  return v >= FONT_MIN && v <= FONT_MAX ? v : FONT_DEFAULT
-}
-
 const autoCols = (n: number) => (n <= 1 ? 1 : n <= 3 ? n : n === 4 ? 2 : 3)
 
 const BTN = 'inline-flex min-h-10 items-center justify-center gap-1.5 border border-[var(--color-border)] px-3 text-[12px] uppercase tracking-[0.12em] text-[var(--color-text-dim)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text)] active:border-[var(--color-accent)] active:text-[var(--color-accent)] disabled:opacity-40'
@@ -130,7 +106,7 @@ const HEAD = 'flex h-11 shrink-0 select-none items-center gap-2 border-b border-
 
 // ------------------------------------------------------------ terminal pane --
 
-function VrTermPane({
+export function VrTermPane({
   id, name, session, missing, font, focused, ctrlRef, onCtrlUsed, onFocus, onHide, onEnd, onSwap, register,
 }: {
   id: string
@@ -432,7 +408,7 @@ function VrTermPane({
 // A Valkyrie page as a screen. The iframe asks for "/" with ?go= and lets the
 // app route from there (see RootRedirect in App.tsx); the embedded copy draws
 // no header of its own.
-function VrPagePane({ id, path, focused, onFocus, onHide, onSwap }: {
+export function VrPagePane({ id, path, focused, onFocus, onHide, onSwap }: {
   id: string
   path: string
   focused: boolean
@@ -485,6 +461,173 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+// ---------------------------------------------------------------- picker --
+
+// What can go on a screen: a session already running, a new one on thor, a
+// conversation resumed from the board, or a page. Shared by the desk here and
+// by a panel of the Steam Frame app (Xr.tsx). `shown` names the sessions that
+// already have a screen; `grid` is the size a new session starts at.
+export function ScreenPicker({ title, shown, grid, onTerm, onPage, onClose }: {
+  title: string
+  shown: Set<string>
+  grid: () => { cols: number; rows: number }
+  onTerm: (name: string) => void
+  onPage: (path: string) => void
+  onClose?: () => void
+}) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Same query keys as the phone terminal and the board, so the three never
+  // disagree about what is running.
+  const sessions = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions })
+  const targets = useQuery({
+    queryKey: ['launchTargets', 'thor'],
+    queryFn: () => fetchLaunchTargets('thor'),
+    staleTime: 60_000,
+  })
+  const recent = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, staleTime: 10_000 })
+  const list = sessions.data ?? EMPTY
+  const available = list.filter((s) => !shown.has(s.name))
+  // Every target thor knows, not only the phone's three: the headset is a
+  // desk, and Remote-Session.ps1 resolves any key in launch-targets.json. The
+  // phone's favorites lead.
+  const launchTargets = [...(targets.data ?? [])]
+    .filter((t) => t.exists)
+    .sort((a, b) => Number(b.phone) - Number(a.phone))
+  const resumable = recent.data?.installed
+    ? recent.data.sessions.filter((s) => !s.live && !s.done).slice(0, 40)
+    : []
+
+  // The pane's socket sends the exact size the moment it attaches, so the
+  // grid only has to be close.
+  const open = async (body: TermOpen) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const data = await openTermSession({ ...body, ...grid() })
+      await qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+      onTerm(data.name)
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="panel mx-auto max-w-4xl space-y-5 p-4">
+      <div className="flex items-center">
+        <div className="text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">&gt; {title}</div>
+        {onClose && (
+          <button type="button" onClick={onClose} className={`${ICON} ml-auto`} aria-label="Close">
+            <X size={16} />
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div onClick={() => setError(null)} title="dismiss" className="cursor-pointer border border-[var(--color-danger)]/60 px-4 py-3 text-[13px] text-[var(--color-danger)]">
+          {error}
+        </div>
+      )}
+
+      {/* Pages and what is already running lead: starting something new is
+          the long list (every launch target twice), so it comes after. */}
+      <Section title="valkyrie page">
+        {PAGES.map((p) => (
+          <button key={p.path} type="button" onClick={() => onPage(p.path)} className={BTN}>
+            <AppWindow size={13} /> {p.label}
+          </button>
+        ))}
+      </Section>
+
+      <Section title="already running">
+        {available.map((s) => (
+          <button key={s.name} type="button" onClick={() => onTerm(s.name)} className={BTN}>
+            <TerminalIcon size={13} /> {s.label}
+            <span className={`text-[10px] tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
+              {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
+              {s.activityAt ? ` · ${relative(s.activityAt)}` : ''}
+            </span>
+          </button>
+        ))}
+        {sessions.isSuccess && available.length === 0 && (
+          <div className="text-[12px] text-[var(--color-text-faint)]">
+            {list.length ? 'everything running is already on a screen' : 'nothing is running'}
+          </div>
+        )}
+      </Section>
+
+      <Section title="new claude session on thor in">
+        {launchTargets.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            disabled={busy}
+            onClick={() => void open({ mode: 'new', target: t.key, label: t.label })}
+            className={BTN}
+          >
+            <Plus size={13} /> {t.label}
+          </button>
+        ))}
+        {targets.isSuccess && launchTargets.length === 0 && (
+          <div className="text-[12px] text-[var(--color-text-faint)]">thor offers no launch targets; it may be asleep.</div>
+        )}
+      </Section>
+
+      <Section title="plain powershell on thor in">
+        {launchTargets.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            disabled={busy}
+            onClick={() => void open({ mode: 'shell', target: t.key, label: `${t.label} sh` })}
+            className={BTN}
+          >
+            <TerminalIcon size={13} /> {t.label}
+          </button>
+        ))}
+      </Section>
+
+      <div>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
+          &gt; resume a conversation from thor
+        </div>
+        {recent.isLoading && (
+          <div className="text-[12px] text-[var(--color-text-faint)]">reading the board…</div>
+        )}
+        {recent.data && !recent.data.installed && (
+          <div className="text-[12px] text-[var(--color-accent-2)]">
+            the session board answered {recent.data.status}; thor may be asleep
+          </div>
+        )}
+        <div className="space-y-1">
+          {resumable.map((r) => (
+            <button
+              key={r.sessionId}
+              type="button"
+              disabled={busy}
+              onClick={() => void open({ mode: 'resume', sessionId: r.sessionId, label: r.title })}
+              className="flex min-h-11 w-full items-center gap-3 border border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:border-[var(--color-accent)]/50 active:border-[var(--color-accent)] disabled:opacity-40"
+            >
+              <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">{r.project}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-text-dim)]">{r.title}</span>
+              <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{relIso(r.lastActivityUtc)}</span>
+            </button>
+          ))}
+          {recent.data?.installed && resumable.length === 0 && (
+            <div className="text-[12px] text-[var(--color-text-faint)]">
+              nothing on the board to resume. A session that is open on thor has to be stopped there first.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- the page --
 
 // A page screen is this app in an iframe, and nothing stops a link inside it
@@ -517,7 +660,11 @@ function Workspace() {
   // handoff arrives (the board is another route, so it always mounts this
   // one); the effect below only strips the parameter afterward.
   const [panes, setPanes] = useState<Pane[]>(() => {
-    const saved = loadPanes()
+    // The desk opens on the dashboard, first screen, whatever else was saved.
+    // Hiding it holds until the next launch.
+    const saved = loadPanes().filter((p) => !(p.kind === 'page' && p.path === '/dashboard'))
+    saved.unshift({ id: uid(), kind: 'page', path: '/dashboard' })
+    saved.splice(MAX_PANES)
     const s = new URLSearchParams(window.location.search).get('s') ?? ''
     if (TERM_NAME_RE.test(s) && !saved.some((p) => p.kind === 'term' && p.name === s) && saved.length < MAX_PANES) {
       saved.push({ id: uid(), kind: 'term', name: s })
@@ -530,35 +677,13 @@ function Workspace() {
   const [picker, setPicker] = useState<{ replace: string | null } | null>(null)
   const [zen, setZen] = useState(false)
   const [full, setFull] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [paste, setPaste] = useState(false)
 
-  // Same query keys as the phone terminal and the board, so the three never
-  // disagree about what is running.
+  // Same query key as the picker, the phone terminal and the board.
   const sessions = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions })
-  const targets = useQuery({
-    queryKey: ['launchTargets', 'thor'],
-    queryFn: () => fetchLaunchTargets('thor'),
-    staleTime: 60_000,
-  })
-  const recent = useQuery({
-    queryKey: ['sessionList'],
-    queryFn: fetchSessionList,
-    enabled: picker !== null,
-    staleTime: 10_000,
-  })
   const list = sessions.data ?? EMPTY
-  // Every target thor knows, not only the phone's three: the headset is a
-  // desk, and Remote-Session.ps1 resolves any key in launch-targets.json. The
-  // phone's favorites lead.
-  const launchTargets = [...(targets.data ?? [])]
-    .filter((t) => t.exists)
-    .sort((a, b) => Number(b.phone) - Number(a.phone))
-  const resumable = recent.data?.installed
-    ? recent.data.sessions.filter((s) => !s.live && !s.done).slice(0, 40)
-    : []
 
   useEffect(() => {
     try {
@@ -678,8 +803,7 @@ function Workspace() {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
-  // The grid the session is created at. Close is enough: the pane's socket
-  // sends the exact size the moment it attaches.
+  // The grid a new session is created at, from the cell it is about to fill.
   const guessGrid = (replace: string | null) => {
     const n = Math.max(1, panes.length + (replace ? 0 : 1))
     const c = cols || autoCols(n)
@@ -692,25 +816,10 @@ function Workspace() {
     }
   }
 
-  const open = async (body: TermOpen, replace: string | null) => {
-    setBusy(true)
-    setError(null)
-    try {
-      const data = await openTermSession({ ...body, ...guessGrid(replace) })
-      await qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
-      placeTerm(data.name, replace)
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const n = panes.length
   const c = cols || autoCols(n)
   const byName = new Map(list.map((s) => [s.name, s]))
   const shown = new Set(panes.filter((p): p is TermPane => p.kind === 'term').map((p) => p.name))
-  const available = list.filter((s) => !shown.has(s.name))
   // Never off a list that is still loading, or a reload would flash every
   // pane as gone.
   const settled = sessions.isSuccess && !sessions.isFetching
@@ -824,106 +933,14 @@ function Workspace() {
 
         {picker && (
           <div className="absolute inset-0 z-30 overflow-y-auto bg-black/90 p-3">
-            <div className="panel mx-auto max-w-4xl space-y-5 p-4">
-              <div className="flex items-center">
-                <div className="text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-                  &gt; {picker.replace ? 'show here instead' : 'add a screen'}
-                </div>
-                <button type="button" onClick={() => setPicker(null)} className={`${ICON} ml-auto`} aria-label="Close">
-                  <X size={16} />
-                </button>
-              </div>
-
-              <Section title="already running">
-                {available.map((s) => (
-                  <button key={s.name} type="button" onClick={() => placeTerm(s.name, picker.replace)} className={BTN}>
-                    <TerminalIcon size={13} /> {s.label}
-                    <span className={`text-[10px] tracking-[0.14em] ${s.dead ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-faint)]'}`}>
-                      {s.dead ? 'ended' : s.mode === 'shell' ? 'sh' : 'claude'}
-                      {s.activityAt ? ` · ${relative(s.activityAt)}` : ''}
-                    </span>
-                  </button>
-                ))}
-                {sessions.isSuccess && available.length === 0 && (
-                  <div className="text-[12px] text-[var(--color-text-faint)]">
-                    {list.length ? 'everything running is already on a screen' : 'nothing is running'}
-                  </div>
-                )}
-              </Section>
-
-              <Section title="new claude session on thor in">
-                {launchTargets.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void open({ mode: 'new', target: t.key, label: t.label }, picker.replace)}
-                    className={BTN}
-                  >
-                    <Plus size={13} /> {t.label}
-                  </button>
-                ))}
-                {targets.isSuccess && launchTargets.length === 0 && (
-                  <div className="text-[12px] text-[var(--color-text-faint)]">thor offers no launch targets; it may be asleep.</div>
-                )}
-              </Section>
-
-              <Section title="plain powershell on thor in">
-                {launchTargets.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void open({ mode: 'shell', target: t.key, label: `${t.label} sh` }, picker.replace)}
-                    className={BTN}
-                  >
-                    <TerminalIcon size={13} /> {t.label}
-                  </button>
-                ))}
-              </Section>
-
-              <div>
-                <div className="mb-2 text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-faint)]">
-                  &gt; resume a conversation from thor
-                </div>
-                {recent.isLoading && (
-                  <div className="text-[12px] text-[var(--color-text-faint)]">reading the board…</div>
-                )}
-                {recent.data && !recent.data.installed && (
-                  <div className="text-[12px] text-[var(--color-accent-2)]">
-                    the session board answered {recent.data.status}; thor may be asleep
-                  </div>
-                )}
-                <div className="space-y-1">
-                  {resumable.map((r) => (
-                    <button
-                      key={r.sessionId}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void open({ mode: 'resume', sessionId: r.sessionId, label: r.title }, picker.replace)}
-                      className="flex min-h-11 w-full items-center gap-3 border border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:border-[var(--color-accent)]/50 active:border-[var(--color-accent)] disabled:opacity-40"
-                    >
-                      <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">{r.project}</span>
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-text-dim)]">{r.title}</span>
-                      <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">{relIso(r.lastActivityUtc)}</span>
-                    </button>
-                  ))}
-                  {recent.data?.installed && resumable.length === 0 && (
-                    <div className="text-[12px] text-[var(--color-text-faint)]">
-                      nothing on the board to resume. A session that is open on thor has to be stopped there first.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <Section title="valkyrie page">
-                {PAGES.map((p) => (
-                  <button key={p.path} type="button" onClick={() => placePage(p.path, picker.replace)} className={BTN}>
-                    <AppWindow size={13} /> {p.label}
-                  </button>
-                ))}
-              </Section>
-            </div>
+            <ScreenPicker
+              title={picker.replace ? 'show here instead' : 'add a screen'}
+              shown={shown}
+              grid={() => guessGrid(picker.replace)}
+              onTerm={(name) => placeTerm(name, picker.replace)}
+              onPage={(path) => placePage(path, picker.replace)}
+              onClose={() => setPicker(null)}
+            />
           </div>
         )}
       </div>

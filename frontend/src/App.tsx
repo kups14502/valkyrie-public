@@ -110,6 +110,7 @@ const Sessions = lazyRoute('sessions', () => import('./pages/Sessions'))
 const Projects = lazyRoute('projects', () => import('./pages/Projects'))
 const Terminal = lazyRoute('terminal', () => import('./pages/Terminal'))
 const Vr = lazyRoute('vr', () => import('./pages/Vr'))
+const Xr = lazyRoute('xr', () => import('./pages/Xr'))
 const Calendar = lazyRoute('calendar', () => import('./pages/Calendar'))
 const Meals = lazyRoute('meals', () => import('./pages/Meals'))
 // Valkyrie v2 (src/v2): its own shell at /m/*, outside the classic Shell below.
@@ -137,11 +138,16 @@ function PageFallback() {
 // by name (?go=/calendar). The VR workspace uses that instead of a deep link
 // because "/" is the one path every build serves: the Tauri asset protocol has
 // no SPA fallback for /calendar, while index.html at the root always loads.
+// Any other parameters ride along to the page, which is how the Steam Frame app
+// opens a panel on one session: /?go=/xr&s=vk-ab12 lands on /xr?s=vk-ab12.
 function RootRedirect() {
   const [params] = useSearchParams()
   const go = params.get('go') ?? ''
   const to = /^\/[a-z0-9/_-]*$/i.test(go) && !go.startsWith('//') ? go : '/dashboard'
-  return <Navigate to={to} replace />
+  const rest = new URLSearchParams(params)
+  rest.delete('go')
+  const query = rest.toString()
+  return <Navigate to={query ? `${to}?${query}` : to} replace />
 }
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev'
@@ -326,8 +332,9 @@ function Shell() {
   // renders. Layout effect, not effect, so the menu is already closed in the
   // paint that first shows the terminal.
   // The VR workspace (/vr) is pinned for the same reason: its panes own the
-  // height and a scrolling main would let a laser-pointer drag shift them.
-  const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr'
+  // height and a scrolling main would let a laser-pointer drag shift them. So
+  // is a panel of the Steam Frame app (/xr), which is one pane of its own.
+  const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr' || location.pathname === '/xr'
   useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
   useEffect(() => { if (location.pathname !== '/sessions/terminal') setTabUi('classic') }, [location.pathname])
 
@@ -453,6 +460,8 @@ function Shell() {
             <Route path="/terminal" element={<Navigate to="/sessions/terminal" replace />} />
             {/* The VR workspace: bare like the terminal, its panes fill main. */}
             <Route path="/vr" element={<Vr />} />
+            {/* One panel of the Steam Frame app (xr/ in the repo), bare like /vr. */}
+            <Route path="/xr" element={<Xr />} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />
