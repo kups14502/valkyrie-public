@@ -1,15 +1,15 @@
 {
-  "version": "0.3.177",
-  "notes": "vr: open on the dashboard, pages first; xr: a native Steam Frame app",
-  "pub_date": "2026-11-17T01:10:21Z",
+  "version": "0.3.178",
+  "notes": "vr: the headset opens v2, with a Desk tab for sessions side by side",
+  "pub_date": "2026-11-18T16:43:30Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZZelpTT3JhdkxFblplaVhZNlI3eWVEWllRWDFqYzRKY3JieFF2c0EyWkM0bjl1VDBCMmtzUkVXTkJxNXg3MEVKK055dWFnZVlyTG1XUEs2aTQxS1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODc3NTg5CWZpbGU6VmFsa3lyaWVfMC4zLjE3N194NjQtc2V0dXAuZXhlCjBWdWhnU1UrbEJoQmFJZUxucjU4ZTVJaHU5SEJFd1VSeFMrR1N6Tm5hR3ZHUGxwbWNsUDR6NFRpTHVLaml6LzltUmt4U2VkeUxJUFR0VlU3MGtFTkJBPT0K",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.177/Valkyrie_0.3.177_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVV5NUZ4N0JvOVErN2N3dmF3OHdRUHhWclM1VWFKZ2p3a1R6ZnA4NjF1SlJ1dzlaVm5kc0ZvdDNRQisvdTZxQTNpbUEvQ2RXN0lYNTgzbUtIWlh3aUFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDIwMDc0CWZpbGU6VmFsa3lyaWVfMC4zLjE3OF94NjQtc2V0dXAuZXhlCk0xRjk2UmpiQXljYVcxUnljWEt3QXdiaEN2d05kTUJBRC9kSndDVEc4dG9wanVEeHNGRXlLWVFrTjZFUWdPcFFQOE0vTlZmbTRQMVAzb1QzWWpaWEN3PT0K",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.178/Valkyrie_0.3.178_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUWNnV1NadHhvY0lad0EreXl0Z1VsZUV0V2FydlN2ckJkSTRFNlc5TmduR3FCd0ZzZXZzYnVoeW0yUy9FZlJuUmJTV2o0aXJpRW1xK1Z5ajZ0V0dvSXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODc3NDc1CWZpbGU6VmFsa3lyaWVfMC4zLjE3N19hbWQ2NC5BcHBJbWFnZQpIRWNDNHBjMzAxWnJFc2V4MnRQcUk1VHZKWFU4cHVQK1RkLzhkMU9TOFdwZTVqYkppV0hBTlphcXZXUGlQYlY0MnUvbk9GcnBNSUp5N0lVTUNlTU9DQT09Cg==",
-      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.177/Valkyrie_0.3.177_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRWtnSWhKZjZtUVZjY3VZVUVJeHhpQVgzRGNwVE9OS0NDU3pjVkZRbmxmMHFSdFZxczUwQ29Kb1ZCbTJUUEtFd0xQa2xNMS9lVEtEUkxFeEt3aEJubi8rYmpaQVpaemdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDIwMDA1CWZpbGU6VmFsa3lyaWVfMC4zLjE3OF9hbWQ2NC5BcHBJbWFnZQpMcGliS2NRMS9idHFkbW5yUURRck1qWG1yQUd2TDNtalhLajVqalB4VktZSUJQQ0txaW5IQmk1UkFEMFJ5WlhKcFFjbUxzSjIvNlFMUUkvMy9MM1BCQT09Cg==",
+      "url": "https://github.com/kups14502/valkyrie/releases/download/app-v0.3.178/Valkyrie_0.3.178_amd64.AppImage"
     }
   }
 }
