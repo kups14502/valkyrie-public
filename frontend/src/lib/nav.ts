@@ -1,14 +1,15 @@
 import {
-  LayoutDashboard, Lightbulb, TrendingUp, Film, Clapperboard, Tablet, Settings as SettingsIcon, Smartphone,
+  LayoutDashboard, Lightbulb, TrendingUp, Clapperboard, Tablet, Settings as SettingsIcon, Smartphone,
   Terminal as TerminalIcon, CalendarDays, UtensilsCrossed, Glasses, FolderKanban, type LucideIcon,
 } from 'lucide-react'
+import { classicPages } from '../features/apply'
 
 export type NavItem = { to: string; label: string; icon: LucideIcon }
 
 // Services, Vault, and Activity were pulled from the nav (unused day to day);
 // they stay routable and remain in the Ctrl+K palette. The menu grid is 8 wide
 // at lg, so the tail wraps onto a second row. Brendon's order: the five he
-// uses most first, settings always last.
+// uses most first, then the pages features add (src/features), settings always last.
 const navItems: NavItem[] = [
   { to: '/dashboard', label: 'dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'sessions', icon: TerminalIcon },
@@ -19,7 +20,7 @@ const navItems: NavItem[] = [
   { to: '/calendar', label: 'calendar', icon: CalendarDays },
   { to: '/meals', label: 'meals', icon: UtensilsCrossed },
   { to: '/vr', label: 'vr', icon: Glasses },
-  { to: '/slop', label: 'slop', icon: Film },
+  ...classicPages().flatMap((p) => (p.nav ? [{ to: p.path, label: p.nav.label, icon: p.nav.icon }] : [])),
 ]
 const settingsItem: NavItem = { to: '/settings', label: 'settings', icon: SettingsIcon }
 
@@ -32,3 +33,7 @@ export function navFor(resolved: 'desktop' | 'iphone' | 'ipad' | 'vr'): NavItem[
   if (resolved === 'iphone') return [...navItems, { to: '/phone', label: 'phone home', icon: Smartphone }, settingsItem]
   return [...navItems, settingsItem]
 }
+
+/** The home screens' extra tiles (pages/Pad.tsx, pages/Phone.tsx): the feature pages that ask for one. */
+export const featureTiles = (): NavItem[] =>
+  classicPages().flatMap((p) => (p.nav?.tiles ? [{ to: p.path, label: p.nav.label, icon: p.nav.icon }] : []))

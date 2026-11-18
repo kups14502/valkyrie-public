@@ -3,17 +3,11 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { trackedRepos } from '../lib/trackedRepos.js'
 
 const exec = promisify(execFile)
 const router = Router()
 
-const PROJECTS = [
-  '/home/brendon/valkyrie',
-  '/home/brendon/msp-platform',
-  '/home/brendon/slop-factory',
-  '/home/brendon/trading',
-  '/home/brendon/infra',
-]
 const TRADE_LOG = '/home/brendon/trading/trade.log'
 const VAULT_BACKUPS = '/home/brendon/vaultwarden-backups'
 const CACHE_TTL_MS = 60_000
@@ -31,7 +25,7 @@ let cache: { at: number; data: Activity[] } | null = null
 
 async function readGitActivity(): Promise<Activity[]> {
   const results: Activity[] = []
-  await Promise.all(PROJECTS.map(async (p) => {
+  await Promise.all(trackedRepos().map(async (p) => {
     try {
       const { stdout } = await exec('git', [
         '-C', p, 'log', '--since=7 days ago', '--pretty=format:%H%x09%ct%x09%s', '-n', '20',

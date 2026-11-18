@@ -3,17 +3,10 @@ import { promises as fs } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { trackedRepos } from '../lib/trackedRepos.js'
 
 const exec = promisify(execFile)
 const router = Router()
-
-const TRACKED = [
-  '/home/brendon/valkyrie',
-  '/home/brendon/msp-platform',
-  '/home/brendon/slop-factory',
-  '/home/brendon/trading',
-  '/home/brendon/infra',
-]
 
 const HOUR = 1000 * 60 * 60
 const CACHE_TTL_MS = 60_000
@@ -111,7 +104,7 @@ router.get('/projects', async (_req, res) => {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
     return res.json(cache.data)
   }
-  const out = await Promise.all(TRACKED.map(readProject))
+  const out = await Promise.all(trackedRepos().map(readProject))
   const filtered = out.filter((p): p is ProjectInfo => Boolean(p))
   filtered.sort((a, b) => {
     const aRank = a.status === 'active' ? 0 : a.status === 'paused' ? 1 : 2

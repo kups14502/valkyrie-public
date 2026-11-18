@@ -8,6 +8,7 @@ import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
 import { useProfile } from '../lib/deviceMode'
+import { featureRoutes, useFeatureScreens, withFeatures } from '../features/apply'
 import Dashboard from './screens/Dashboard'
 import Today from './screens/Today'
 import Hotkeys from './screens/Hotkeys'
@@ -21,7 +22,6 @@ import { CalendarPage } from './screens/Calendar'
 import MealsPage from './screens/Meals'
 import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
-import Jobs, { JOB_SUBS } from './screens/Jobs'
 import Messages from './screens/Messages'
 import Desk from './screens/Desk'
 import './v2.css'
@@ -56,8 +56,9 @@ function DashboardTab(p: ScreenProps) {
 const DASH_SUBS = [{ id: 'overview', label: 'Overview' }, { id: 'today', label: 'Today' }]
 const DASH_SUBS_IPAD = [...DASH_SUBS, { id: 'hotkeys', label: 'Hotkeys' }]
 
-// Valkyrie's real sections, in tab order. No screen forces a mode.
-const SCREENS: ScreenDef[] = [
+// Valkyrie's real sections, in tab order. No screen forces a mode. Features
+// (src/features) add their tabs in place: SCREENS is this list with theirs.
+const BASE_SCREENS: ScreenDef[] = [
   // Overview draws its own 3D floor (the hero's WireScene), so the shell's 2D floor fades out there;
   // Today and Hotkeys are list screens and keep it faint
   {
@@ -71,8 +72,6 @@ const SCREENS: ScreenDef[] = [
   { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint' },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
-  // the auto-apply runner's applications (screens/Jobs.tsx), a list screen
-  { id: 'jobs', label: 'Jobs', subs: JOB_SUBS, Component: Jobs, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
   // the car's controls under its Model Y; the model draws its own floor in its box, so the page floor stays faint
@@ -92,6 +91,7 @@ const SCREENS: ScreenDef[] = [
   },
   { id: 'system', label: 'System', subs: [{ id: 'hosts', label: 'Hosts' }, { id: 'services', label: 'Services' }, { id: 'trades', label: 'Trades' }], Component: System, floor: 'faint' },
 ]
+const SCREENS = withFeatures(BASE_SCREENS)
 
 // Old URLs (bookmarks, the home screen icon, screens still saying go('claude')) land on the new tabs
 const LEGACY: LegacyMap = (screen, sub) => {
@@ -144,11 +144,13 @@ const SCREENS_IPAD: ScreenDef[] = SCREENS.map((s) => (s.id === 'dashboard' ? { .
 // The headset has the room for several sessions at once: Desk (screens/Desk.tsx) sits after Dashboard
 const SCREENS_VR: ScreenDef[] = [SCREENS[0], { id: 'desk', label: 'Desk', Component: Desk, floor: 'faint' }, ...SCREENS.slice(1)]
 
-/** The tabs for this device: the iPad's Dashboard also has Hotkeys, the headset has Desk. */
+/** The tabs for this device: the iPad's Dashboard also has Hotkeys, the headset has Desk, and features drop tabs outside their profiles. */
 function useScreens(): ScreenDef[] {
   const device = useProfile().resolved
-  return device === 'ipad' ? SCREENS_IPAD : device === 'vr' ? SCREENS_VR : SCREENS
+  return useFeatureScreens(device === 'ipad' ? SCREENS_IPAD : device === 'vr' ? SCREENS_VR : SCREENS, device)
 }
+
+const FEATURE_ROUTES = featureRoutes()
 
 function V2({ screens }: { screens: ScreenDef[] }) {
   return <V2Shell screens={screens} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} />
@@ -215,6 +217,7 @@ export default function V2App() {
         <Route path="meals" element={<MealsPage />} />
         <Route path="inbox" element={<InboxPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        {FEATURE_ROUTES.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
         <Route path=":screen/:sub?" element={<V2 screens={screens} />} />
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}

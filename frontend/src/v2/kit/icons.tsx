@@ -1,6 +1,6 @@
-import type { CSSProperties, ReactElement } from 'react'
+import { isValidElement, type CSSProperties, type ReactElement } from 'react'
 import {
-  Activity, ArrowRight, Battery, Briefcase, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
+  Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
   House, Inbox, LayoutDashboard, MessagesSquare, Laptop, Lightbulb, LightbulbOff, ListChecks, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
@@ -48,7 +48,6 @@ export const ICONS = {
   inbox: Inbox,
   messages: MessagesSquare,
   tasks: ListChecks,
-  jobs: Briefcase,
   projects: FolderKanban,
   // opening something in a window of its own
   popout: SquareArrowOutUpRight,
@@ -143,6 +142,9 @@ export const ICONS = {
 
 export type IconName = keyof typeof ICONS
 
+/** A name from ICONS, or a lucide component a feature brings (features never add names here). */
+export type IconRef = IconName | LucideIcon
+
 export type IconTone = 'fg' | 'dim' | 'faint' | 'hot' | 'acc2' | 'ink'
 
 /**
@@ -151,7 +153,7 @@ export type IconTone = 'fg' | 'dim' | 'faint' | 'hot' | 'acc2' | 'ink'
  * "this is on / selected". `ink` is for an icon sitting on a solid lit plate.
  */
 export function Icon({ name, size = 16, tone = 'fg', glow = false, className, style, title }: {
-  name: IconName
+  name: IconRef
   size?: number
   tone?: IconTone
   glow?: boolean
@@ -159,7 +161,7 @@ export function Icon({ name, size = 16, tone = 'fg', glow = false, className, st
   style?: CSSProperties
   title?: string
 }) {
-  const C = ICONS[name]
+  const C = typeof name === 'string' ? ICONS[name] : name
   return (
     <C
       size={size}
@@ -179,8 +181,11 @@ export const hostIcon = (id: string): IconName => (id.startsWith('car-') ? 'car'
 
 export const isIconName = (v: unknown): v is IconName => typeof v === 'string' && Object.prototype.hasOwnProperty.call(ICONS, v)
 
-/** An icon slot on a primitive: a name from ICONS (drawn here) or any element (drawn as given). */
-export type IconSlot = IconName | ReactElement
+/** An icon slot on a primitive: a name from ICONS or a lucide component (drawn here), or any element (drawn as given). */
+export type IconSlot = IconRef | ReactElement
+
+/** A stable key for an icon: its name, or a component's display name. */
+export const iconKey = (icon: IconRef): string => (typeof icon === 'string' ? icon : icon.displayName ?? 'icon')
 
 /**
  * Draws an IconSlot the way the HUD does: `lit` = full color with the glow
@@ -195,6 +200,6 @@ export function SlotIcon({ icon, lit = false, tone, size = 15, className }: {
   className?: string
 }) {
   if (icon === undefined) return null
-  if (!isIconName(icon)) return icon
+  if (isValidElement(icon)) return icon
   return <Icon name={icon} size={size} tone={tone ?? (lit ? 'fg' : 'dim')} glow={lit && tone !== 'ink'} className={className} />
 }

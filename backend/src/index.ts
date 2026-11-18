@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import helmet from 'helmet'
-import { requireAuth } from './middleware/auth.js'
+import { addMediaTokenPaths, requireAuth, viaCloudflare } from './middleware/auth.js'
 import { hostGuard, isAllowedOrigin } from './middleware/origin.js'
 import authRoute from './routes/auth.js'
 import updatesRoute from './routes/updates.js'
@@ -19,7 +19,6 @@ import vaultRoute from './routes/vault.js'
 import lightsRoute from './routes/lights.js'
 import tradingRoute from './routes/trading.js'
 import tradebotRoute from './routes/tradebot.js'
-import slopfactoryRoute from './routes/slopfactory.js'
 import activityRoute from './routes/activity.js'
 import servicesRoute from './routes/services.js'
 import launcherRoute from './routes/launcher.js'
@@ -39,7 +38,6 @@ import devicesRoute from './routes/devices.js'
 import vehiclesRoute from './routes/vehicles.js'
 import inboxRoute from './routes/inbox.js'
 import tasksRoute from './routes/tasks.js'
-import jobsRoute from './routes/jobs.js'
 import todayRoute from './routes/today.js'
 import mailRoute from './routes/mail.js'
 import msgRoute from './routes/msg.js'
@@ -50,6 +48,9 @@ import { startBrief } from './lib/brief.js'
 import { startAgents } from './lib/agents.js'
 import { startWorkFeeds } from './lib/workFeeds.js'
 import { resumeCaptures } from './lib/capture.js'
+import { addTrackedRepos } from './lib/trackedRepos.js'
+import { addMailFilters } from './lib/mailStore.js'
+import { FEATURES } from './features.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
 // exception (e.g. a transient error inside a poller) would otherwise kill the
@@ -81,7 +82,7 @@ app.use(helmet({
 // Ahead of everything under /api, preflights included. The lists and the
 // reasons are in middleware/origin.ts, shared with the terminal websocket.
 app.use('/api', hostGuard)
-app.use(cors((req, callback) => {
+app.use(cors<express.Request>((req, callback) => {
   const origin = req.headers.origin
   if (!origin || isAllowedOrigin(origin, req)) return callback(null, { origin: true, credentials: true })
   console.warn('[cors] blocked origin', { origin })
@@ -92,7 +93,7 @@ app.use(cors((req, callback) => {
 // ever ran.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonLarge = express.json({ limit: '12mb' })
-const LARGE_BODY_PATHS = new Set(['/api/meals/estimate'])
+const LARGE_BODY_PATHS = new Set(['/api/meals/estimate', ...FEATURES.flatMap((f) => f.largeBodyPaths ?? [])])
 app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? jsonLarge : jsonSmall)(req, res, next))
 
 app.use((req, _res, next) => {
@@ -112,6 +113,11 @@ app.use((req, _res, next) => {
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
+// Features (features.ts): their auth lists, repos and mail filters, before any route runs.
+addMediaTokenPaths(FEATURES.flatMap((f) => f.mediaTokenPaths ?? []))
+addTrackedRepos(FEATURES.flatMap((f) => f.repos ?? []))
+addMailFilters(FEATURES.flatMap((f) => f.mailFilters ?? []))
+
 // Public endpoints (no token required): auth (login/setup/status) and the
 // desktop app's auto-update mirror.
 app.use('/api', authRoute)
@@ -119,6 +125,8 @@ app.use('/api', updatesRoute)
 // The phone and tablet's battery reports (an iOS Shortcut): authenticated by
 // a per-device token inside the route, so it sits ahead of requireAuth.
 app.use('/api', devicesRoute)
+// a feature's routes that check their own callers
+for (const f of FEATURES) if (f.openRouter) app.use('/api', f.openRouter)
 
 app.use('/api', requireAuth)
 app.use('/api', systemRoute)
@@ -131,7 +139,6 @@ app.use('/api', lightsRoute)
 app.use('/api', vehiclesRoute)
 app.use('/api', tradingRoute)
 app.use('/api', tradebotRoute)
-app.use('/api', slopfactoryRoute)
 app.use('/api', activityRoute)
 app.use('/api', servicesRoute)
 app.use('/api', launcherRoute)
@@ -149,15 +156,26 @@ app.use('/api', accountSwitchRoute)
 app.use('/api', accountSigninRoute)
 app.use('/api', inboxRoute)
 app.use('/api', tasksRoute)
-app.use('/api', jobsRoute)
 app.use('/api', todayRoute)
 app.use('/api', mailRoute)
 app.use('/api', msgRoute)
 app.use('/api', agentMcpRoute)
+// every feature's own routes, behind requireAuth like the ones above
+for (const f of FEATURES) if (f.router) app.use('/api', f.router)
+
+// The tunnel hostnames carry the API and nothing else. cloudflared routes them
+// here with no Access in front, so the static frontend below (index.html and
+// every lazy chunk) would be an anonymous download. Pages serves the web UI
+// behind Access, and the desktop and Android apps bundle their own copy.
+app.use((req, res, next) => {
+  if (!viaCloudflare(req)) return next()
+  res.status(404).type('text/plain').send('Not found')
+})
 
 // Serve the built web frontend when it's present (odin serves the app to
 // tailnet devices this way — same origin as the API, so iPhone/iPad hit
 // http://<odin tailscale ip>:8420 and everything just works with no login).
+// Never through Cloudflare: the guard above answers those first.
 // FRONTEND_DIST overrides; the default resolves to ../frontend/dist from
 // backend/dist/index.js as well as from backend/src via tsx.
 const distCandidates = [
@@ -216,6 +234,7 @@ server.listen(PORT, BIND, () => {
     startAgents()
     startWorkFeeds()
   }
+  for (const f of FEATURES) f.start?.()
 })
 
 // Optional second listener on the tailscale interface: tailnet devices talk to

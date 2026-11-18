@@ -10,7 +10,7 @@ import {
 import { useHosts, useInboxCount, useLights, useTick, type HostVM, type MediaVM } from './data'
 import { Search } from 'lucide-react'
 import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, openPalette, paletteOpen, toast, type DotFloorHandle, type ToastOptions } from './ui'
-import { Icon, hostIcon, isIconName, type IconName } from './icons'
+import { Icon, hostIcon, iconKey, isIconName, type IconRef } from './icons'
 import { musicImg, type MusicTrack } from '../../lib/api'
 import { isTauri, isTauriMobile } from '../../lib/auth'
 import { useLightsControl } from '../../lib/lights'
@@ -48,7 +48,7 @@ export type ScreenDef = {
   subs?: { id: string; label: string }[]
   Component: ComponentType<ScreenProps>
   /** the rail's icon for this screen; defaults to the ICONS entry named like the id */
-  icon?: IconName
+  icon?: IconRef
   /**
    * the shell's 2D dot floor behind this screen: true (default), 'faint' for
    * list screens (dimmed so rows never sit on bright dots), false when the
@@ -413,7 +413,7 @@ function Rail({ getScroller, activeKey, icon, label }: {
   getScroller: () => HTMLElement | null
   activeKey: string
   /** the active screen's icon (the reference's lit car icon in the rail) */
-  icon: IconName
+  icon: IconRef
   label: string
 }) {
   const railRef = useRef<HTMLElement>(null)
@@ -496,7 +496,7 @@ function Rail({ getScroller, activeKey, icon, label }: {
         title={label}
         onPress={() => getScroller()?.scrollTo({ top: 0, behavior: isReducedMotion() ? 'auto' : 'smooth' })}
       >
-        <Icon key={icon} name={icon} size={17} tone="fg" glow />
+        <Icon key={iconKey(icon)} name={icon} size={17} tone="fg" glow />
       </Press>
       <div
         ref={trackRef}

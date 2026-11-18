@@ -19,6 +19,7 @@ import {
   currentSubscriptionId, disablePush, enablePush, fetchPushStatus, forgetPushDevice, isStandalone, pushBlockedReason, sendPushTest,
 } from '../../lib/push'
 import { Hero, useHeroId, type HeroId } from '../kit/hero'
+import { classicPages } from '../../features/apply'
 import './settings.css'
 
 // Settings (/m/settings, the strip's gear): glass plates for Valkyrie's own
@@ -27,8 +28,8 @@ import './settings.css'
 // its color dot, plus a custom hex, stored under Valkyrie's 'valkyrie-accent'.
 // Then font, motion, hero, density and this device's profile, the classic
 // header menu's functions as rows (Notifications with this device on or off and
-// the device list, Build with the version, the Plex link test, Classic, Slop,
-// Sign out), then Speed: how fast real data reached the
+// the device list, Build with the version, the Plex link test, Classic, the
+// rows features add, Sign out), then Speed: how fast real data reached the
 // screen and what every Valkyrie source costs right now. Icons glow only when
 // lit; the rest stay dim. SettingsScreen is the shell's full screen: the small
 // hero sits in the gutter beside the two-cell plates, so Appearance morphs it in view.
@@ -735,11 +736,14 @@ function useArm(): [string | null, (key: string, run: () => void) => void] {
   return [armed, press]
 }
 
+// the Settings rows features add: a classic page each, opened from here
+const FEATURE_ROWS = classicPages().flatMap((p) => (p.settings ? [{ path: p.path, ...p.settings }] : []))
+
 /**
  * The classic header menu's functions, natively: notifications on this device
  * (on, off, the device list with Forget, the reasons it cannot), the version
  * and build id with Reload, the Plex link test, the classic UI, the classic
- * Slop page, and Sign out.
+ * pages features add, and Sign out.
  */
 function DeviceRows({ i }: { i: number }) {
   const navigate = useNavigate()
@@ -939,13 +943,15 @@ function DeviceRows({ i }: { i: number }) {
         {/* ?classic=1 keeps this tab in the classic UI until its menu's "new ui" */}
         <Press className="vl-link vl-hit st-row-act" onPress={() => navigate(`${profile.classicHome}?classic=1`)}>Open</Press>
       </div>
-      {/* the slop factory's publisher was retired 2026-09-25; its classic page stays for the curator's moments */}
-      <div className="st-row">
-        <Icon name="movie" size={15} tone="dim" className="st-row-icon" />
-        <span className="st-row-label">Slop</span>
-        <span className="st-row-value vl-ellipsis">Classic page</span>
-        <Press className="vl-link vl-hit st-row-act" aria-label="Open classic Slop" onPress={() => navigate('/slop')}>Open</Press>
-      </div>
+      {/* classic pages features add (src/features), each with a link to it */}
+      {FEATURE_ROWS.map((r) => (
+        <div key={r.path} className="st-row">
+          <Icon name={r.icon} size={15} tone="dim" className="st-row-icon" />
+          <span className="st-row-label">{r.label}</span>
+          <span className="st-row-value vl-ellipsis">{r.value}</span>
+          <Press className="vl-link vl-hit st-row-act" aria-label={r.aria} onPress={() => navigate(r.path)}>Open</Press>
+        </div>
+      ))}
       {/* the classic menu's sign out: forget this device's app token; the sign-in screen takes over */}
       <div className="st-row">
         <span className="st-row-icon st-row-glyph" aria-hidden><Glyph name="exit" size={13} /></span>

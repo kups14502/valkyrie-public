@@ -1,22 +1,53 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { execFileSync } from 'node:child_process'
 import { Readable } from 'node:stream'
+import { viaCloudflare } from '../middleware/auth.js'
+import { tailnetOriginFor } from '../middleware/origin.js'
 
-// Public mirror of the Tauri auto-update release.
+// Mirror of the Tauri auto-update release.
 //
-// The desktop apps fetch their update manifest anonymously, but the GitHub repo
-// (and thus its release assets) is private. This route re-serves the latest
+// The desktop apps fetch their update manifest without a token, but the GitHub
+// repo (and thus its release assets) is private. This route re-serves the latest
 // release's `latest.json` — with the per-platform download URLs rewritten to
 // point back here — and proxies the installer binaries, using a server-side
-// GitHub token. Net effect: source stays private; only the (non-sensitive) app
-// binaries are publicly downloadable, which is all the updater needs.
+// GitHub token.
 //
 // Mounted BEFORE requireAuth so the updater can reach it without a token.
+// The desktop app checks over the tailnet first: release.sh gives it the
+// `tailscale serve` https name, which stays out of the repo. Its fallback, and
+// the only endpoint of builds from before that change, is the Cloudflare name,
+// where these files are anonymous downloads. So the Cloudflare path answers 404
+// unless UPDATES_VIA_CLOUDFLARE=1, which keeps it open only while old builds
+// still need it: an .env without the line closes it.
 
 const router = Router()
 const OWNER = 'kups14502'
 const REPO = 'valkyrie'
 const PUBLIC_BASE = process.env.PUBLIC_API_URL || 'https://valkyrie-api.brendonkupsch.com'
+const CLOUDFLARE_OPEN = process.env.UPDATES_VIA_CLOUDFLARE === '1'
+if (CLOUDFLARE_OPEN) console.warn('[updates] UPDATES_VIA_CLOUDFLARE=1: installers are anonymous downloads through Cloudflare')
+
+// One line per updater request, to tell when the Cloudflare path has no users
+// left: `via` says which path and `ip` names the tailnet device. `current` is
+// the version a build since the tailnet change reports in its query string, so
+// a Cloudflare line that carries it is such a build failing to reach the
+// tailnet. It is logged before the 404, so it shows after the close too.
+router.use('/updates', (req, res, next) => {
+  const via = viaCloudflare(req) ? 'cloudflare' : 'tailnet'
+  console.log('[updates] ' + JSON.stringify({
+    path: req.originalUrl.split('?')[0], via, ip: req.ip, current: req.query.current, target: req.query.target,
+  }))
+  if (via === 'cloudflare' && !CLOUDFLARE_OPEN) return res.status(404).type('text/plain').send('Not found')
+  next()
+})
+
+// Download URLs point back at the origin the manifest came from, so an app
+// that checks over the tailnet downloads over it too. hostGuard has already
+// checked the Host of every request that did not come through Cloudflare.
+function assetBase(req: Request): string {
+  if (viaCloudflare(req)) return PUBLIC_BASE
+  return tailnetOriginFor(req) ?? `${req.protocol}://${req.headers.host}`
+}
 
 let tokenCache = ''
 function ghToken(): string {
@@ -46,7 +77,7 @@ function assetResponse(asset: Asset): Promise<Response> {
 }
 
 // The Tauri updater manifest, with download URLs pointed back at this mirror.
-router.get('/updates/latest.json', async (_req, res) => {
+router.get('/updates/latest.json', async (req, res) => {
   try {
     const rel = await latestRelease()
     const manifestAsset = rel.assets.find((a) => a.name === 'latest.json')
@@ -54,10 +85,11 @@ router.get('/updates/latest.json', async (_req, res) => {
     const mr = await assetResponse(manifestAsset)
     if (!mr.ok) return res.status(502).json({ error: 'manifest fetch failed', status: mr.status })
     const manifest = (await mr.json()) as { platforms?: Record<string, { url: string; signature: string }> }
+    const base = assetBase(req)
     for (const key of Object.keys(manifest.platforms ?? {})) {
       const p = manifest.platforms![key]
       const name = decodeURIComponent((p.url.split('/').pop() || '').split('?')[0])
-      if (name) p.url = `${PUBLIC_BASE}/api/updates/asset/${encodeURIComponent(name)}`
+      if (name) p.url = `${base}/api/updates/asset/${encodeURIComponent(name)}`
     }
     res.setHeader('Cache-Control', 'no-store')
     res.json(manifest)
@@ -78,6 +110,9 @@ router.get('/updates/asset/:name', async (req, res) => {
     const len = ar.headers.get('content-length')
     if (len) res.setHeader('Content-Length', len)
     res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`)
+    // Cloudflare caches .exe and .apk at the edge by default, which would keep
+    // serving them after the Cloudflare path closes.
+    res.setHeader('Cache-Control', 'no-store')
     Readable.fromWeb(ar.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res)
   } catch (e) {
     res.status(502).json({ error: 'asset unavailable', detail: (e as Error).message })
@@ -97,6 +132,7 @@ router.get('/updates/android.apk', async (_req, res) => {
     const len = ar.headers.get('content-length')
     if (len) res.setHeader('Content-Length', len)
     res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`)
+    res.setHeader('Cache-Control', 'no-store')
     Readable.fromWeb(ar.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res)
   } catch (e) {
     res.status(502).json({ error: 'apk unavailable', detail: (e as Error).message })

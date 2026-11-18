@@ -2,21 +2,25 @@ import { isTauri, isTauriMobile } from '../../lib/auth'
 import { closeXrPanel, deskHost, isXrPanel } from '../../lib/embed'
 import { TERM_NAME_RE } from '../../lib/term'
 import { toast } from './ui'
+import { featureWindow } from '../../features/apply'
 
 // Pop-out windows: one project or one session in a window of its own, beside
 // the main one. The window shows a standalone page with no tab bar (src/v2/App.tsx
 // routes /m/w/project/<id> and /m/w/term/<name>), whose status strip is the
 // frameless window's title bar, as it is in the main window.
 //
+// A feature's window (src/features, FeatureWindow) is { kind: 'feature', id }:
+// its page, title, size and stay-on-top come from the registry.
+//
 // In the desktop app a pop-out is a real app window, labeled by its target
-// (project-<id>, session-<name>), so asking for one that is already open
+// (project-<id>, session-<name>, feature-<id>), so asking for one that is already open
 // brings that window forward instead of opening a second copy. The label glob
 // is granted its permissions in src-tauri/capabilities/default.json. In a
 // browser it is window.open with a named target, so the same target lands in
 // the same window. The Android app has no second window: the target opens in
 // place, at its usual page.
 
-export type DetachTarget = { kind: 'project'; id: string } | { kind: 'session'; name: string; title?: string }
+export type DetachTarget = { kind: 'project'; id: string } | { kind: 'session'; name: string; title?: string } | { kind: 'feature'; id: string }
 
 /** Where the standalone pages live. */
 export const DETACHED_BASE = '/m/w'
@@ -29,22 +33,33 @@ const SIZE = {
   session: { width: 1100, height: 760, minWidth: 420, minHeight: 480 },
 } as const
 
-const valid = (t: DetachTarget): boolean => (t.kind === 'project' ? PROJECT_ID_RE.test(t.id) : TERM_NAME_RE.test(t.name))
+const sizeOf = (t: DetachTarget) => (t.kind === 'feature' ? featureWindow(t.id)!.size : SIZE[t.kind])
+
+const valid = (t: DetachTarget): boolean =>
+  t.kind === 'project' ? PROJECT_ID_RE.test(t.id) : t.kind === 'session' ? TERM_NAME_RE.test(t.name) : !!featureWindow(t.id)
 
 /** The standalone page for a target, null for an id or name that is not one. */
 export function detachedPath(t: DetachTarget): string | null {
   if (!valid(t)) return null
+  if (t.kind === 'feature') return featureWindow(t.id)!.route
   return t.kind === 'project' ? `${DETACHED_BASE}/project/${t.id}` : `${DETACHED_BASE}/term/${t.name}`
 }
 
 /** The target's usual page in the main UI (the Android app, and a pop-out that cannot open). */
 function inAppPath(t: DetachTarget): string {
+  if (t.kind === 'feature') return featureWindow(t.id)?.inApp ?? '/m/dashboard'
   return t.kind === 'project' ? `/m/ai/projects?p=${encodeURIComponent(t.id)}` : `/m/ai/term/${encodeURIComponent(t.name)}`
 }
 
 /** One window per target: the desktop app's window label, and the browser's window name. */
 export function windowLabel(t: DetachTarget): string {
+  if (t.kind === 'feature') return `feature-${t.id}`
   return t.kind === 'project' ? `project-${t.id}` : `session-${t.name}`
+}
+
+function windowTitle(t: DetachTarget): string {
+  if (t.kind === 'feature') return featureWindow(t.id)?.title ?? 'Valkyrie'
+  return t.kind === 'session' && t.title ? `${t.title} · Valkyrie` : 'Valkyrie'
 }
 
 const desktopApp = (): boolean => isTauri() && !isTauriMobile()
@@ -98,8 +113,10 @@ async function openAppWindow(t: DetachTarget, path: string): Promise<void> {
     }
     const w = new WebviewWindow(label, {
       url: path,
-      title: t.kind === 'session' && t.title ? `${t.title} · Valkyrie` : 'Valkyrie',
-      ...SIZE[t.kind],
+      title: windowTitle(t),
+      ...sizeOf(t),
+      // a feature window that asks for it stays above the others; set at creation, so no permission is needed
+      alwaysOnTop: t.kind === 'feature' && !!featureWindow(t.id)?.onTop,
       center: true,
       resizable: true,
       // the strip is the title bar (src/v2 StatusStrip, data-tauri-drag-region), as in the main window
@@ -137,7 +154,7 @@ function openBrowserWindow(t: DetachTarget, path: string): void {
     had.focus()
     return
   }
-  const { width, height } = SIZE[t.kind]
+  const { width, height } = sizeOf(t)
   const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2))
   const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2))
   // same origin on purpose (no noopener): the pop-out shares the sign-in, and this page keeps its handle
@@ -158,7 +175,7 @@ function openBrowserWindow(t: DetachTarget, path: string): void {
 export function openDetached(target: DetachTarget): void {
   const path = detachedPath(target)
   if (!path) {
-    toast(target.kind === 'project' ? 'That is not a project id' : 'That is not a session name')
+    toast(target.kind === 'project' ? 'That is not a project id' : target.kind === 'session' ? 'That is not a session name' : 'That window is not in this build')
     return
   }
   if (desktopApp()) {

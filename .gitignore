@@ -6,6 +6,12 @@ build/
 .env.*.local
 .env.bak*
 *.env.bak*
+# every other .env.* name is a copy or a backup (backend/.env.pre-<date>), never
+# committed; the two templates below are the only tracked ones
+.env.*
+!.env.example
+!.env.production
+*.env.pre-*
 *.log
 .DS_Store
 .vite/

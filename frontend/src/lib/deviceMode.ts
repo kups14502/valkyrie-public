@@ -130,7 +130,7 @@ const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 /**
  * The v2 screen for a classic URL, or null when v2 has no such screen (Vault,
- * Slop, Activity): those stay classic pages. Used for entries only (a page load, a bookmark, an alert),
+ * Activity): those stay classic pages. Used for entries only (a page load, a bookmark, an alert),
  * never for a link v2 itself follows to a classic page.
  */
 export function classicToV2(pathname: string, search = ''): string | null {

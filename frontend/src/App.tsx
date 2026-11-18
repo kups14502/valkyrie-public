@@ -15,6 +15,7 @@ import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
 import { setTabUi, tabWantsV2, useProfile } from './lib/deviceMode'
 import { TERM_NAME_RE, v2TermPath } from './lib/term'
 import { navFor } from './lib/nav'
+import { classicPages } from './features/apply'
 import { isEmbedded } from './lib/embed'
 import PlayerBar from './components/PlayerBar'
 import Dashboard from './pages/Dashboard'
@@ -99,7 +100,6 @@ function lazyRoute(name: string, load: () => Promise<{ default: ComponentType }>
 const Lights = lazyRoute('lights', () => import('./pages/Lights'))
 const Vault = lazyRoute('vault', () => import('./pages/Vault'))
 const TradeBot = lazyRoute('trade', () => import('./pages/TradeBot'))
-const SlopFactory = lazyRoute('slop', () => import('./pages/SlopFactory'))
 const Services = lazyRoute('services', () => import('./pages/Services'))
 const Activity = lazyRoute('activity', () => import('./pages/Activity'))
 const Plex = lazyRoute('plex', () => import('./pages/Plex'))
@@ -115,6 +115,8 @@ const Calendar = lazyRoute('calendar', () => import('./pages/Calendar'))
 const Meals = lazyRoute('meals', () => import('./pages/Meals'))
 // Valkyrie v2 (src/v2): its own shell at /m/*, outside the classic Shell below.
 const V2 = lazyRoute('v2', () => import('./v2/App'))
+// classic pages features add (src/features), each its own chunk like the ones above
+const FEATURE_PAGES = classicPages().map((p) => ({ path: p.path, Page: lazyRoute(p.chunk, p.load) }))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -464,12 +466,12 @@ function Shell() {
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />
             <Route path="/trade" element={<PageContainer><TradeBot /></PageContainer>} />
-            <Route path="/slop" element={<PageContainer><SlopFactory /></PageContainer>} />
             <Route path="/activity" element={<PageContainer><Activity /></PageContainer>} />
             <Route path="/plex" element={<PageContainer><Plex /></PageContainer>} />
             <Route path="/pad" element={<Pad />} />
             <Route path="/settings" element={<PageContainer><Settings /></PageContainer>} />
             <Route path="/phone" element={<Phone />} />
+            {FEATURE_PAGES.map(({ path, Page }) => <Route key={path} path={path} element={<PageContainer><Page /></PageContainer>} />)}
           </Routes>
           </ErrorBoundary>
         </Suspense>

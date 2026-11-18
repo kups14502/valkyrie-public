@@ -8,8 +8,8 @@
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
 import { carView } from './car.mjs'
-
-const TABS = ['Dashboard', 'Messages', 'AI', 'Jobs', 'Lights', 'Car', 'Media', 'System']
+import { extraRoutes } from './extra.mjs'
+import { tabsFor } from './tabs.mjs'
 
 /**
  * ready: what live data looks like on the route: `sel` (at least `min`
@@ -36,6 +36,8 @@ export const ROUTES = [
   // the full pages outside the tabs (Calendar.tsx PageFrame): the strip and a bar back to the Dashboard
   { path: '/m/calendar', page: true, ready: { sel: '.cal-view', text: /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/ } },
   { path: '/m/meals', page: true, ready: { sel: '.ml-totals[data-ready]', text: /calories/i } },
+  // the routes features add (extra.mjs)
+  ...extraRoutes,
 ]
 
 /** The routes whose screen shows thor's session board (the Dashboard's AI block, AI > Sessions, Projects, Usage). */
@@ -76,6 +78,7 @@ export function shellChecks(t, r, route) {
   } else {
     t.check(r.nav && r.nav.t < Math.min(90, r.H * 0.25), `${tag}: the tabs are not at the top (nav top ${r.nav ? Math.round(r.nav.t) : 'missing'})`)
     const labels = r.tabs.map((x) => x.label)
+    const TABS = tabsFor(t.test.device)
     t.check(TABS.every((l) => labels.includes(l)), `${tag}: tabs are ${JSON.stringify(labels)}, want ${JSON.stringify(TABS)}`)
     const off = r.tabs.filter((x) => !x.shown || x.box.l < -0.5 || x.box.r > r.W + 0.5 || x.box.t > r.H * 0.25)
     t.check(!off.length, `${tag}: tabs off screen or hidden: ${off.map((x) => x.label).join(', ')}`)

@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { BASE, SETTINGS_ID, playerActions, requestIntent, usePlayerNow, type ScreenDef } from './shell'
 import { useSessionIndex } from './data'
-import { Icon, isIconName, type IconName } from './icons'
+import { Icon, isIconName, type IconName, type IconRef } from './icons'
 import { PALETTE_EVENT, paletteState, toast } from './ui'
 import { getMotionSetting, setMotionSetting } from './motion'
 import { fetchTermSessions, termLabel, type TermSession } from '../../lib/api'
@@ -12,6 +12,7 @@ import { clearToken, setAuthSkipped } from '../../lib/auth'
 import { resolveProfile } from '../../lib/deviceMode'
 import { v2TermPath } from '../../lib/term'
 import { applyZoom, getZoom } from '../../lib/zoom'
+import { classicPages, placeAfter } from '../../features/apply'
 
 // The command palette (Ctrl+K, or the strip's search button): one box that
 // jumps to every v2 tab, sub-tab and screen, opens a running session by name,
@@ -25,7 +26,7 @@ type Cmd = {
   id: string
   label: string
   group: 'Go to' | 'Sessions' | 'Actions' | 'Classic'
-  icon: IconName
+  icon: IconRef
   /** extra words it answers to */
   keys?: string
   /** dim text at the right end */
@@ -57,14 +58,14 @@ const SCREEN_KEYS: Record<string, string> = {
 }
 
 // classic pages with no v2 screen; following one marks the tab classic until "new ui"
-const CLASSIC_PAGES: { to: string; label: string; icon: IconName; keys: string }[] = [
+type ClassicCmd = { to: string; label: string; icon: IconRef; keys: string; after?: string }
+const CLASSIC_PAGES: ClassicCmd[] = placeAfter<ClassicCmd>([
   { to: '/sessions', label: 'All sessions', icon: 'claude', keys: 'snapshots restore closed history' },
   { to: '/projects', label: 'Projects board', icon: 'projects', keys: 'notes files' },
   { to: '/vault', label: 'Vault', icon: 'container', keys: 'passwords backups' },
   { to: '/activity', label: 'Activity', icon: 'timer', keys: 'log events' },
-  { to: '/slop', label: 'Slop factory', icon: 'movie', keys: 'moments' },
   { to: '/vr', label: 'VR workspace', icon: 'frame', keys: 'headset' },
-]
+], classicPages().flatMap((p) => (p.palette ? [{ to: p.path, ...p.palette }] : [])), (p) => p.to, (p) => p.after)
 
 const ZOOM_STEP = 0.1
 const pct = (z: number) => `${Math.round(z * 100)}%`
@@ -146,7 +147,7 @@ function PaletteBox({ screens, onClose }: { screens: ScreenDef[]; onClose: () =>
 
     // ---- every tab and sub-tab, Settings, the terminal preview ----
     for (const s of screens) {
-      const icon: IconName = s.icon ?? (isIconName(s.id) ? s.id : 'home')
+      const icon: IconRef = s.icon ?? (isIconName(s.id) ? s.id : 'home')
       if (!s.subs?.length) {
         out.push({ id: `go:${s.id}`, label: s.label, group: 'Go to', icon, keys: SCREEN_KEYS[s.id], run: () => go(`${BASE}/${s.id}`) })
         continue

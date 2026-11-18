@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
-import type { IncomingHttpHeaders } from 'node:http'
-import { viaCloudflare } from './auth.js'
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
+import { viaCloudflare, isLoopbackReq, isTailnetReq } from './auth.js'
 
 // Which browser origins may call the API, and which Host names a request may
 // carry when it is trusted by its socket address. One module, so the CORS
@@ -17,6 +17,7 @@ import { viaCloudflare } from './auth.js'
 //   ALLOWED_HOSTS    any further Host names a tailnet or loopback request uses
 
 type WithHeaders = { headers: IncomingHttpHeaders }
+type SocketReq = Pick<IncomingMessage, 'socket' | 'headers'>
 
 const list = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 
@@ -60,15 +61,33 @@ export function isAllowedHost(req: WithHeaders): boolean {
   return h !== null && ALLOWED_HOSTS.has(h)
 }
 
-export function isAllowedOrigin(origin: string, req: WithHeaders): boolean {
-  if (ALLOWED_ORIGINS.includes(origin) || TAILNET_ORIGINS.includes(origin)) return true
-  if (TAURI_ORIGINS.has(origin) || PAGES_RE.test(origin)) return true
+export function isAllowedOrigin(origin: string, req: SocketReq): boolean {
+  if (TAILNET_ORIGINS.includes(origin) || TAURI_ORIGINS.has(origin)) return true
   // The app this backend serves, calling its own API: a browser sends Origin
   // on a same-origin POST too. The Host it matches has passed isAllowedHost.
   try {
     if (new URL(origin).host === String(req.headers.host ?? '').toLowerCase()) return true
   } catch { /* 'null' and other opaque origins */ }
+  // A request trusted by its socket address carries no credential, so a page
+  // that may read it reads every route. Only the app's own origins above get
+  // that. The web deployments below call the API through Cloudflare with a
+  // token, and a name in ALLOWED_ORIGINS can change hands.
+  if (isLoopbackReq(req) || isTailnetReq(req)) return DEV_ANY_ORIGIN
+  if (ALLOWED_ORIGINS.includes(origin) || PAGES_RE.test(origin)) return true
   return DEV_ANY_ORIGIN
+}
+
+// The TAILNET_ORIGINS entry whose host a request names, so a response can
+// point back at the exact origin `tailscale serve` answers on.
+export function tailnetOriginFor(req: WithHeaders): string | null {
+  const host = String(req.headers.host ?? '').toLowerCase()
+  for (const o of TAILNET_ORIGINS) {
+    try {
+      const u = new URL(o)
+      if (u.host === host) return u.origin
+    } catch { /* not a URL */ }
+  }
+  return null
 }
 
 const warned = new Set<string>()

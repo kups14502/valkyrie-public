@@ -118,6 +118,16 @@ export function isTailnetReq(req: SocketReq): boolean {
   return TRUSTED_TAILNET.has(normIP(req.socket.remoteAddress || ''))
 }
 
+// The address of the device behind a request that did not come through
+// Cloudflare: the socket peer, or the client `tailscale serve` forwarded for
+// over loopback (the last X-Forwarded-For entry). Null through Cloudflare. For
+// a route that admits only some devices on top of requireAuth.
+export function tailnetClientIp(req: SocketReq): string | null {
+  if (viaCloudflare(req)) return null
+  if (socketIsLoopback(req) && proxiedLocally(req)) return forwardedClient(req)
+  return normIP(req.socket.remoteAddress || '') || null
+}
+
 // Verify a Cloudflare Access JWT (RS256, JWKS-backed). Returns payload or null.
 async function verifyCfAccessToken(token: string | undefined): Promise<jwt.JwtPayload | null> {
   if (!token || !TEAM_DOMAIN || !AUD) return null
@@ -132,8 +142,13 @@ async function verifyCfAccessToken(token: string | undefined): Promise<jwt.JwtPa
 }
 
 // Routes a media-scoped token (see auth/token.ts signImgToken) may open. Both
-// stream bytes to a browser element that cannot send headers.
+// stream bytes to a browser element that cannot send headers. A feature adds
+// its own at startup (index.ts, BackendFeature.mediaTokenPaths).
 const MEDIA_TOKEN_PATHS = new Set(['/plex/img', '/plex/music/stream'])
+
+export function addMediaTokenPaths(paths: string[]): void {
+  for (const p of paths) MEDIA_TOKEN_PATHS.add(p)
+}
 
 function bearer(req: Pick<IncomingMessage, 'headers'>): string | undefined {
   const h = String(req.headers['authorization'] || '')

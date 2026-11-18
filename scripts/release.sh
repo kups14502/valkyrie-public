@@ -50,15 +50,40 @@ restore_branch() {
 trap restore_branch EXIT
 git checkout main
 git pull --ff-only
-# Every commit also goes to the public mirror (the `public` remote,
-# kups14502/valkyrie-public), so refuse before anything is tagged, pushed or
-# built. The guard reads a private denylist and fails closed without it.
-git fetch -q public main || echo "note: could not fetch the public remote; the guard scans from an older base" >&2
-"$ROOT/scripts/public-guard.sh" HEAD
+# The desktop updater checks odin over the tailnet first, through `tailscale
+# serve` with real https: a network that answers for odin's address cannot
+# offer an older signed installer as an update. The endpoints in
+# tauri.conf.json follow it as fallbacks. The tailnet name must stay out of the
+# repo (public-guard), so it comes from TAILNET_ORIGINS in this box's
+# backend/.env and reaches the build through --config. No name, no release.
+UPDATER_TAILNET_ORIGIN="${UPDATER_TAILNET_ORIGIN:-$(sed -n 's/^TAILNET_ORIGINS=//p' "$ROOT/backend/.env" 2>/dev/null \
+  | tr -d '"\047 \r' | tr ',' '\n' | grep -m1 -E '\.ts\.net$' || true)}"
+if [[ ! "$UPDATER_TAILNET_ORIGIN" =~ ^https://[a-z0-9.-]+\.ts\.net$ ]]; then
+  echo "no https *.ts.net origin in TAILNET_ORIGINS ($ROOT/backend/.env) or UPDATER_TAILNET_ORIGIN: refusing to build an app without its tailnet updater endpoint" >&2
+  exit 1
+fi
+UPDATER_ENDPOINT="$UPDATER_TAILNET_ORIGIN/api/updates/latest.json"
+UPDATER_PATCH="$(mktemp --suffix=.json)"
+trap 'rm -f "$UPDATER_PATCH"; restore_branch' EXIT
+node - "$TAURI_CONF" "$UPDATER_ENDPOINT" "$UPDATER_PATCH" <<'NODE'
+const fs = require('fs');
+const [file, endpoint, out] = process.argv.slice(2);
+const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+const fallbacks = (c.plugins && c.plugins.updater && c.plugins.updater.endpoints) || [];
+const first = `${endpoint}?current={{current_version}}&target={{target}}&arch={{arch}}`;
+fs.writeFileSync(out, JSON.stringify({ plugins: { updater: { endpoints: [first, ...fallbacks] } } }));
+NODE
+# Nothing here pushes to the public repo. After the private release is out, the
+# public export below publishes one curated snapshot commit there.
+# Credentials never go to GitHub, the private repo included: check what this
+# release adds before it is tagged, so a refusal leaves no local tag behind
+# for the next ship to number past. A tag push that fails takes its tag back.
+if [[ -x "$ROOT/public-export/secrets-check.sh" ]]; then
+  "$ROOT/public-export/secrets-check.sh" HEAD --not --remotes=origin
+fi
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   git tag "$TAG"
-  git push origin "$TAG"
-  git push public "$TAG" || echo "warning: $TAG did not reach the public repo; run: git push public $TAG" >&2
+  git push origin "$TAG" || { git tag -d "$TAG" >/dev/null; echo "the $TAG push to origin failed; the local tag is removed" >&2; exit 1; }
 fi
 
 cd "$FRONTEND"
@@ -82,14 +107,14 @@ NODE
 # Linux AppImage build. APPIMAGE_EXTRACT_AND_RUN avoids FUSE dependency on headless servers.
 export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
-npx tauri build --bundles appimage
+npx tauri build --bundles appimage --config "$UPDATER_PATCH"
 
 # Windows NSIS cross-build
 rustup target add x86_64-pc-windows-msvc
 if ! command -v cargo-xwin >/dev/null 2>&1; then
   cargo install --locked cargo-xwin
 fi
-npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
+npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis --config "$UPDATER_PATCH"
 
 # Select this build's artifacts by exact version name. The bundle dirs keep
 # every past build, so a glob + `sort | tail -1` grabbed the wrong file once
@@ -103,6 +128,10 @@ SETUP_EXE="$FRONTEND/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis
 SETUP_SIG="$SETUP_EXE.sig"
 for f in "$APPIMAGE" "$APPIMAGE_SIG" "$SETUP_EXE" "$SETUP_SIG"; do
   [[ -f "$f" ]] || { echo "missing expected artifact: $f" >&2; exit 1; }
+done
+# Both apps carry the tailnet updater endpoint, or nothing is published.
+for f in "$FRONTEND/src-tauri/target/release/valkyrie" "$FRONTEND/src-tauri/target/x86_64-pc-windows-msvc/release/valkyrie.exe"; do
+  grep -qaF "$UPDATER_ENDPOINT?current=" "$f" || { echo "the tailnet updater endpoint is missing from $f" >&2; exit 1; }
 done
 
 # Android APK (arm64), for the Steam Frame and the phone. Sideloaded, so it is
@@ -156,7 +185,6 @@ App version bump and updater manifest from the v${VERSION} desktop build.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" || true
 git push origin main
-git push public main || echo "warning: main did not reach the public repo; run: git push public main" >&2
 
 # Rebuild the WEB dist last. `tauri build` runs `npm run build` as its
 # beforeBuildCommand with TAURI_ENV_PLATFORM set, and vite.config.ts disables
@@ -174,5 +202,32 @@ else
   echo "WARNING: frontend/dist/sw.js is missing, push notifications are off" >&2
 fi
 
+# The public export (public-export/export.sh): one snapshot commit of this
+# release, minus everything private, onto the public repo's main, tagged $TAG.
+# It never stops the ship. A failure prints "public: SKIPPED" with the reason
+# and a retry command, and the next ship exports whatever accumulated. Every
+# line here is guarded, so `set -e` cannot end the script before "manifest:".
+PUBLIC_LINE=""
+if [[ -x "$ROOT/public-export/export.sh" ]]; then
+  RELEASE_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+  EXPORT_DIR="${VALKYRIE_EXPORT_WORK:-$HOME/.cache/valkyrie-export}"
+  mkdir -p "$EXPORT_DIR" 2>/dev/null || true
+  EXPORT_LOG="$EXPORT_DIR/export-$VERSION.log"
+  RETRY="public-export/export.sh --push --from $RELEASE_SHA $VERSION"
+  EXPORT_RC=0
+  # the log can hold denylist hits, so only this user reads it
+  { : >"$EXPORT_LOG" && chmod 600 "$EXPORT_LOG"; } 2>/dev/null || true
+  timeout --kill-after=30 900 "$ROOT/public-export/export.sh" --push --from "$RELEASE_SHA" "$VERSION" >"$EXPORT_LOG" 2>&1 || EXPORT_RC=$?
+  if [[ "$EXPORT_RC" -eq 0 ]]; then
+    PUBLIC_LINE="$(grep '^public:' "$EXPORT_LOG" 2>/dev/null | tail -1 || true)"
+    [[ -n "$PUBLIC_LINE" ]] || PUBLIC_LINE="public: SKIPPED, the export printed no result (log $EXPORT_LOG); retry: $RETRY"
+  else
+    REASON="$(grep -E '^(export|public-guard):' "$EXPORT_LOG" 2>/dev/null | tail -1 || true)"
+    [[ "$EXPORT_RC" -eq 124 || "$EXPORT_RC" -eq 137 ]] && REASON="export: timed out after 15 minutes"
+    PUBLIC_LINE="public: SKIPPED, ${REASON:-export failed with exit $EXPORT_RC} (log $EXPORT_LOG); retry: $RETRY"
+  fi
+fi
+
 echo "release: https://github.com/$REPO/releases/tag/$TAG"
+[[ -n "$PUBLIC_LINE" ]] && echo "$PUBLIC_LINE"
 echo "manifest: $MANIFEST"

@@ -6,8 +6,9 @@
  * Outlook marks its inbox item read; an error sync is kept as the mailbox's error; validation; and the
  * Cloudflare rule: a private mailbox, its rows and its inbox items (list, count, sources) answer like
  * they do not exist, while a non-private one stays visible. Mail no person wrote (noreply senders,
- * bulk subdomains, meeting replies, ticket notifications) adds no inbox item, nor does a job
- * application receipt (a rejection or an invitation does), and a message in two mailboxes is one item.
+ * bulk subdomains, meeting replies, ticket notifications) adds no inbox item, nor does mail a
+ * feature's filter matches (addMailFilters, which also archives what such mail made before), and a
+ * message in two mailboxes is one item.
  *
  *   VALKYRIE_DATA_DIR=$(mktemp -d) node --import tsx scripts/mailSmoke.mts
  */
@@ -115,28 +116,20 @@ check('people are not automated', !auto('jane.doe@example.com', 'Re: T20261030.0
 ] })
 check('automated mail is kept but adds no inbox item', st === 200 && r.added === 0 && r.known === 0, r)
 
-// job application receipts stay out of the inbox; rejections and invitations do not (2026-11-05)
-const { jobMail } = await import('../src/lib/mailStore.ts')
-const job = (fromAddress: string, subject: string, preview = '') => jobMail({ fromAddress, subject, preview })
-check('application receipts are job mail', job('careers@example.com', 'Thank you for applying to Example!', 'Hi there, Thanks for applying to Example! Your application has been received.')
-  && job('acme@myworkday.com', 'Thank you for your interest in Acme', 'We want to confirm that your application for the role has been received.')
-  && job('globex@myworkday.com', 'Thank you for your interest in Globex', 'We are currently reviewing your application for the DevOps Engineer position.')
-  && job('recruiting@jobalerts.careers.example.com', 'Your Screening for Engineer has been successfully submitted', 'Thank you! Your results have been successfully submitted!')
-  && job('myHR@example.org', 'Thank you for your application to Initech!', 'We are pleased to confirm that we have received your application'))
-check('candidate account and security code mail is job mail', job('initech@otp.workday.com', 'Verify your candidate account')
-  && job('workday@example.net', 'Reset your password for your candidate account') && job('x@example.com', 'Security code for your application to Hooli'))
-check('rejections and invitations are not job mail', !job('careers@example.us', 'Thank You for Your Interest in Umbrella', 'We appreciate the time you took to apply. Based on your response')
-  && !job('umbrella@myworkday.com', 'Candidacy Update', 'Thank you for applying. While we appreciate your interest, you were not selected')
-  && !job('no-reply@appreview.gem.com', 'Your application at Vandelay', 'Thank you for taking the time to apply. Unfortunatel')
-  && !job('no-reply@us.greenhouse-mail.io', 'An Update on Your Application', 'After reviewing your application, we do not see a match for our current needs')
-  && !job('recruiting@example.com', 'Next steps', 'Thank you for applying! We would like to invite you to interview'))
-check('ordinary mail is not job mail', !job('jane.doe@example.com', 'Re: Order received', 'Your payment has been received')
-  && !job('support@example.com', 'Thanks for submitting', 'Our team will review your ticket'))
+// a feature's mail filter keeps the mail it matches out of the inbox, and archives the items that mail made before
+const { addMailFilters } = await import('../src/lib/mailStore.ts')
+;[st, r] = await j('POST', '/mail/sync', { mailbox: work, unread: 2, messages: [msg('q0', { subject: '[quiet] before the filter' })] })
+check('mail is an inbox item before a filter matches it', st === 200 && r.added === 1, r)
+const q0 = (await j('GET', '/inbox?source=work-mail'))[1].items.find((i: any) => i.title === 'Sender q0: [quiet] before the filter')
+addMailFilters([(m) => m.subject.startsWith('[quiet]')])
+check('a new filter archives the items its mail made', Boolean(q0)
+  && !(await j('GET', '/inbox?source=work-mail'))[1].items.some((i: any) => i.id === q0.id)
+  && (await j('GET', '/inbox?source=work-mail&view=archive'))[1].items.some((i: any) => i.id === q0.id), q0)
 ;[st, r] = await j('POST', '/mail/sync', { mailbox: work, unread: 2, messages: [
-  msg('jb1', { fromAddress: 'careers@example.com', subject: 'Thank you for applying to Example', preview: 'We have received your application.' }),
-  msg('jb2', { fromAddress: 'careers@example.com', subject: 'Update on your application', preview: 'Unfortunately we will not move forward.' }),
+  msg('q1', { subject: '[quiet] kept in Mail' }), msg('q2', { subject: 'Next steps' }),
 ] })
-check('a receipt adds no inbox item, a rejection does', st === 200 && r.added === 1, r)
+check('filtered mail adds no inbox item, other mail does', st === 200 && r.added === 1, r)
+check('filtered mail stays in Mail', (await j('GET', '/mail'))[1].unread.some((m: any) => m.subject === '[quiet] kept in Mail'))
 const support = { key: 'support', label: 'Support', source: 'support-mail', private: true }
 const shared = msg('p2', { fromAddress: 'person@example.org', subject: 'Re: shared', receivedAt: ago(1) })
 await j('POST', '/mail/sync', { mailbox: work, unread: 1, messages: [{ ...shared, id: 'p2-work' }] })

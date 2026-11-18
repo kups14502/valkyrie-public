@@ -4,15 +4,22 @@
 
 import { sleep } from '../lib/cdp.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
+import { extraPrims } from './extra.mjs'
+import { placeAfter } from './tabs.mjs'
 
-const PRIMS = [
-  { label: 'AI', id: 'ai' },
-  { label: 'Lights', id: 'lights' },
-  { label: 'Car', id: 'car' },
-  { label: 'Media', id: 'media' },
-  { label: 'System', id: 'system' },
+// the tap tour, Dashboard last so it ends at home; a feature tab (extra.mjs:
+// { label, id, after?, devices? }) with no anchor goes just before it
+const primsFor = (device) => [
+  ...placeAfter([
+    { label: 'AI', id: 'ai' },
+    { label: 'Lights', id: 'lights' },
+    { label: 'Car', id: 'car' },
+    { label: 'Media', id: 'media' },
+    { label: 'System', id: 'system' },
+  ], extraPrims.filter((p) => !p.devices || p.devices.includes(device)), (p) => p.id, (p) => p.after),
   { label: 'Dashboard', id: 'dashboard' },
 ]
+const PRIMS = primsFor('phone')
 
 const tabSel = (label) => ({ sel: '.vl-nav .vl-tab-prim', text: new RegExp(`^\\s*${label}\\s*$`) })
 const subSel = (label) => ({ sel: '.vl-nav .vl-tab-sub', text: new RegExp(`^\\s*${label}\\s*$`) })
@@ -76,7 +83,7 @@ export function navigationTests() {
         const page = await t.page()
         await page.goto('/m/dashboard')
         await shellUp(page)
-        for (const p of PRIMS) {
+        for (const p of primsFor(device)) {
           await t.step(`tap ${p.label}`, async () => {
             await page.tap(tabSel(p.label))
             await page.waitPath(new RegExp(`^/m/${p.id}(/[a-z]+)?$`))

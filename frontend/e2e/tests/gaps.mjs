@@ -10,7 +10,7 @@
 //                   reminders, edit the next action
 //   Dashboard       the tracker's day stepping and the other-day line, hold to
 //                   skip Exercise, the calendar sheet
-//   Settings        Hero picks the gutter model, the classic Slop row
+//   Settings        Hero picks the gutter model
 //   System > Hosts  a model-only device (the tablet) shows its x-ray model
 //   Lights          Custom color for one bulb and for the room (one command per pick)
 //   Media           Open Plex and Spotify at the top of the Media dashboard
@@ -563,7 +563,7 @@ function dashboardTests() {
 function settingsTests() {
   return [
     {
-      name: 'gap:settings:hero-slop',
+      name: 'gap:settings:hero',
       group: 'gaps',
       device: 'phone',
       timeout: 45_000,
@@ -577,8 +577,6 @@ function settingsTests() {
         t.check((await page.eval(() => localStorage.getItem('v2.hero'))) === 'phone', 'Hero > Phone was not stored')
         t.check(await page.eval(() => document.querySelector('.st-hero-slot [data-hero]')?.getAttribute('data-hero') === 'phone'), 'the gutter hero is not the phone')
         await t.shot(page, 'hero')
-        await page.tap({ sel: '.vl-set .st-row-act', text: /Open classic Slop/ })
-        await page.waitPath('/slop')
         t.check(!page.writes.length, 'Settings wrote something')
       },
     },

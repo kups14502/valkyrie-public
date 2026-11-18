@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Cast, Clapperboard, Film, FolderKanban, Music, Server, SquareTerminal, TrendingUp } from 'lucide-react'
+import { Cast, Clapperboard, FolderKanban, Music, Server, SquareTerminal, TrendingUp } from 'lucide-react'
 import {
   openInApp, plexAppHomeLink, plexWebHomeLink, shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
@@ -10,6 +10,7 @@ import { DailyTrackerCard } from '../components/DailyTrackerCard'
 import { TodayCard } from '../components/TodayCard'
 import { QuickSessions } from '../components/QuickSessions'
 import { ThorUploadPanel } from '../components/ThorUpload'
+import { featureTiles } from '../lib/nav'
 
 // iPhone home screen. Same panels as the iPad's (components/HomePanels.tsx) but
 // laid out for one hand on a 390px screen: a single column, two tiles per row,
@@ -22,7 +23,7 @@ const TILES = [
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
-  { to: '/slop', label: 'slop', icon: Film },
+  ...featureTiles(),
 ]
 
 const TILE = 'flex min-h-20 flex-col items-center justify-center gap-1.5 border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.08)]'

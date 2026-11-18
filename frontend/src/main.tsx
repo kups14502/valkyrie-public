@@ -45,7 +45,7 @@ if (isTauri()) {
 // The device profile decides the landing screen and the UI, so rewrite the URL
 // before the router reads it. Done here, not in a React effect, so it happens
 // exactly once per page load and can't refire when the gate remounts. A page
-// load is the only entry: a link v2 follows to a classic page (Settings > Slop,
+// load is the only entry: a link v2 follows to a classic page (a Settings row,
 // "All sessions (classic)") is an in-app navigation and is never rewritten.
 //
 // A tab that wants v2 (it was in v2, or it is fresh on a desktop, phone or iPad

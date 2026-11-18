@@ -30,6 +30,7 @@
 import { sleep } from '../lib/cdp.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
 import { carHost } from './hosts.mjs'
+import { tabsFor } from './tabs.mjs'
 
 const ID = 'car-car_a'
 const VIEW = `/api/vehicles/${ID}`
@@ -500,7 +501,7 @@ function renderTests() {
         t.check(!r.html.includes('12.345') && !r.html.includes('45.678'), 'the coordinates are in the page before Map was tapped')
         t.check(/Tires Off in Home Assistant/.test(r.text) && /Odometer Off in Home Assistant/.test(r.text), 'tires and odometer do not say they are off in Home Assistant')
         const tabs = await page.eval(tabsReport)
-        t.check(tabs.labels.join() === 'Dashboard,Messages,AI,Jobs,Lights,Car,Media,System', `the tabs are ${tabs.labels.join(', ')}`)
+        t.check(tabs.labels.join() === tabsFor(device).join(), `the tabs are ${tabs.labels.join(', ')}, want ${tabsFor(device).join(', ')}`)
         t.check(!tabs.off.length, `tabs off the screen at ${tabs.W}px: ${tabs.off.join(', ')}`)
         t.check(!tabs.touching.length, `tab labels run into each other at ${tabs.W}px: ${tabs.touching.join(', ')}`)
         t.check(!page.writes.length, 'the Car tab sent a command on its own')

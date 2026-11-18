@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { Cast, Clapperboard, Film, Music, Server, TrendingUp } from 'lucide-react'
+import { Cast, Clapperboard, Music, Server, TrendingUp } from 'lucide-react'
 import {
   openInApp, plexAppHomeLink, plexWebHomeLink, shouldDeferAppClick, spotifyAppLink, spotifyWebLink,
 } from '../lib/api'
 import { Clock, DownloadsPanel, LightsPanel, RecentStrip, SystemChips } from '../components/HomePanels'
 import { useProfile } from '../lib/deviceMode'
 import { DailyTrackerCard } from '../components/DailyTrackerCard'
+import { featureTiles } from '../lib/nav'
 
 // iPad home screen: a big-touch dashboard for the wall/coffee-table iPad.
 // Everything is a large target, nothing depends on hover or a keyboard. Lights
@@ -13,13 +14,13 @@ import { DailyTrackerCard } from '../components/DailyTrackerCard'
 // AirPlay to the TV. The iPhone equivalent is pages/Phone.tsx; both compose the
 // same panels from components/HomePanels.tsx.
 
-// Six tiles in a three-wide grid: two even rows. Two open native apps (below),
-// these four navigate. Everything else stays in the nav menu.
+// Tiles in a three-wide grid. Two open native apps (below), these navigate,
+// then any a feature adds (src/features). Everything else stays in the nav menu.
 const TILES = [
   { to: '/plex', label: 'plex', icon: Clapperboard },
   { to: '/trade', label: 'trades', icon: TrendingUp },
   { to: '/services', label: 'services', icon: Server },
-  { to: '/slop', label: 'slop', icon: Film },
+  ...featureTiles(),
 ]
 
 const TILE = 'flex min-h-28 flex-col items-center justify-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors active:border-[var(--color-accent)] active:bg-[rgba(var(--color-accent-rgb),0.08)]'
