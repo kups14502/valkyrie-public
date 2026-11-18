@@ -439,7 +439,10 @@ export class Page {
     }
   }
 
-  /** Mock a GET: `match` is a path string (exact, query ignored), a RegExp on the path, or fn(path, url). */
+  /**
+   * Mock a GET: `match` is a path string (exact, query ignored), a RegExp on the path, or fn(path, url).
+   * The handler answers { status, body, type? } (type: the content type, JSON by default; a string body goes as is).
+   */
   mock(match, handler) {
     this.mocks.unshift({ match, handler })
   }
@@ -517,7 +520,7 @@ export class Page {
         if (!out) continue
         rec.mocked = true
         if (out.status >= 400) this.expectedFail.add(out.status)
-        await fulfill(out.status, out.body)
+        await fulfill(out.status, out.body, out.type)
         return
       }
       await this.send('Fetch.continueRequest', { requestId }).catch(() => {})

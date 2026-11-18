@@ -14,6 +14,8 @@ import { tabsFor } from './tabs.mjs'
 /**
  * ready: what live data looks like on the route: `sel` (at least `min`
  * matches inside the active screen) and/or `text` (the screen's text matches).
+ * mock: fn(page), set up before the page opens, for a route whose reads come
+ * from a fake backend in the browser (a row a feature adds through extra.mjs).
  */
 export const ROUTES = [
   { path: '/m/dashboard', tab: 'Dashboard', ready: { sel: '.hm-hrow', text: /\$/ } },
@@ -82,6 +84,12 @@ export function shellChecks(t, r, route) {
     t.check(TABS.every((l) => labels.includes(l)), `${tag}: tabs are ${JSON.stringify(labels)}, want ${JSON.stringify(TABS)}`)
     const off = r.tabs.filter((x) => !x.shown || x.box.l < -0.5 || x.box.r > r.W + 0.5 || x.box.t > r.H * 0.25)
     t.check(!off.length, `${tag}: tabs off screen or hidden: ${off.map((x) => x.label).join(', ')}`)
+    // every tab keeps a fingertip of width (the phone's icons share its whole row) and none runs into the next
+    const row = [...r.tabs].sort((a, b) => a.box.l - b.box.l)
+    const thin = row.filter((x) => x.box.w < 40).map((x) => `${x.label} ${Math.round(x.box.w)} px`)
+    const hit = row.filter((x, i) => i > 0 && x.box.l < row[i - 1].box.r - 0.5).map((x) => x.label)
+    t.check(!thin.length, `${tag}: tabs narrower than 40 px: ${thin.join(', ')}`)
+    t.check(!hit.length, `${tag}: tabs overlap their left neighbor: ${hit.join(', ')}`)
     const on = r.tabs.find((x) => x.on)
     t.check(on?.label === route.tab, `${tag}: the lit tab is ${on?.label ?? 'none'}, want ${route.tab}`)
     // Brendon (2026-11-05): eight names squeezed into a phone row did not work, a swipeable row was
@@ -162,6 +170,8 @@ export function routeTests() {
           }
           // the Car tab's controls view: a fixture for the live car (no command is ever sent from a route test)
           if (route.mockCar) page.mock(/^\/api\/vehicles\/car-[a-z0-9_]+$/, ({ path }) => ({ status: 200, body: carView({ id: path.split('/').pop() }) }))
+          // a feature's own fake backend for its route (extra.mjs), answered in the browser
+          if (route.mock) route.mock(page)
           const t0 = Date.now()
           await page.goto(route.path)
           const spec = { sel: route.ready.sel, min: route.ready.min, text: route.ready.text ? { re: route.ready.text.source, flags: route.ready.text.flags } : null }

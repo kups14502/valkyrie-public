@@ -43,6 +43,11 @@ export const ASSIST_MODEL = process.env.ASSIST_MODEL || 'claude-sonnet-5'
 
 /** Pull the JSON object out of an answer that may be fenced or padded. */
 export function extractJson(text: string): unknown | null {
+  // bare JSON first: the CLI envelope of a fenced answer holds the fence inside its escaped result string
+  try {
+    const whole = JSON.parse(text.trim()) as unknown
+    if (whole && typeof whole === 'object' && !Array.isArray(whole)) return whole
+  } catch { /* not bare JSON */ }
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)
   const body = fenced ? fenced[1] : text
   const first = body.indexOf('{')
@@ -90,6 +95,8 @@ export async function askClaude(prompt: string, opts: { model?: string; timeoutM
           // nothing to act with: the answer is all it gives
           '--disallowed-tools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task',
           '--output-format', 'json',
+          // a signed-in profile would otherwise keep the prompt as a session transcript
+          '--no-session-persistence',
         ], {
           cwd: work,
           timeout: opts.timeoutMs ?? 120_000,

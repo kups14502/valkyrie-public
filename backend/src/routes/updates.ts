@@ -16,28 +16,23 @@ import { tailnetOriginFor } from '../middleware/origin.js'
 // The desktop app checks over the tailnet first: release.sh gives it the
 // `tailscale serve` https name, which stays out of the repo. Its fallback, and
 // the only endpoint of builds from before that change, is the Cloudflare name,
-// where these files are anonymous downloads. So the Cloudflare path answers 404
-// unless UPDATES_VIA_CLOUDFLARE=1, which keeps it open only while old builds
-// still need it: an .env without the line closes it.
+// where these files would be anonymous downloads. So the Cloudflare path
+// always answers 404.
 
 const router = Router()
 const OWNER = 'kups14502'
 const REPO = 'valkyrie'
-const PUBLIC_BASE = process.env.PUBLIC_API_URL || 'https://valkyrie-api.brendonkupsch.com'
-const CLOUDFLARE_OPEN = process.env.UPDATES_VIA_CLOUDFLARE === '1'
-if (CLOUDFLARE_OPEN) console.warn('[updates] UPDATES_VIA_CLOUDFLARE=1: installers are anonymous downloads through Cloudflare')
 
-// One line per updater request, to tell when the Cloudflare path has no users
-// left: `via` says which path and `ip` names the tailnet device. `current` is
-// the version a build since the tailnet change reports in its query string, so
-// a Cloudflare line that carries it is such a build failing to reach the
-// tailnet. It is logged before the 404, so it shows after the close too.
+// One line per updater request: `via` says which path and `ip` names the
+// tailnet device. `current` is the version a build since the tailnet change
+// reports in its query string, so a Cloudflare line that carries it is such a
+// build failing to reach the tailnet. It is logged before the 404.
 router.use('/updates', (req, res, next) => {
   const via = viaCloudflare(req) ? 'cloudflare' : 'tailnet'
   console.log('[updates] ' + JSON.stringify({
     path: req.originalUrl.split('?')[0], via, ip: req.ip, current: req.query.current, target: req.query.target,
   }))
-  if (via === 'cloudflare' && !CLOUDFLARE_OPEN) return res.status(404).type('text/plain').send('Not found')
+  if (via === 'cloudflare') return res.status(404).type('text/plain').send('Not found')
   next()
 })
 
@@ -45,7 +40,6 @@ router.use('/updates', (req, res, next) => {
 // that checks over the tailnet downloads over it too. hostGuard has already
 // checked the Host of every request that did not come through Cloudflare.
 function assetBase(req: Request): string {
-  if (viaCloudflare(req)) return PUBLIC_BASE
   return tailnetOriginFor(req) ?? `${req.protocol}://${req.headers.host}`
 }
 

@@ -2,9 +2,7 @@
  * What the tunnel hostnames may serve (index.ts, routes/updates.ts), and which
  * origins may read a request trusted by its socket (middleware/origin.ts).
  *
- * Boots the real src/index.ts in a child process, twice: once with
- * UPDATES_VIA_CLOUDFLARE=1 (the transition) and once without it (the default,
- * closed). Each run gets scratch ports, a scratch HOME,
+ * Boots the real src/index.ts in a child process with scratch ports, a scratch HOME,
  * data dir and frontend dist, stub binaries first on PATH, a dead proxy for
  * axios, and a fetch stub that stands in for GitHub's release API and refuses
  * every other host, so nothing leaves the box. Linux only (shell stubs); run it
@@ -87,7 +85,6 @@ const TOKEN = jwt.sign({ sub: 'owner', kind: 'app' }, SECRET, { expiresIn: '10m'
 const PEER = '100.100.100.100'
 const SERVE_HOST = 'valkyrie-smoke.example.ts.net'
 const TUNNEL_HOSTS = ['valkyrie-api.brendonkupsch.com', 'api.brendonkupsch.com', 'master-control-api.brendonkupsch.com']
-const PUBLIC_BASE = 'https://valkyrie-api.brendonkupsch.com'
 const LISTED = 'https://valkyrie.example.invalid'
 const PAGES = 'https://smoke1234.master-control-72u.pages.dev'
 const SERVE_ORIGIN = `https://${SERVE_HOST}`
@@ -196,7 +193,7 @@ const urls = (r: Res): string[] => {
 }
 const updateLines = (run: Run) => run.logs.filter((l) => l.startsWith('[updates] {')).map((l) => JSON.parse(l.slice(10)) as Record<string, string>)
 
-async function transition(run: Run): Promise<void> {
+async function tunnel(run: Run): Promise<void> {
   const { port } = run
   // Cloudflare: no frontend on any tunnel hostname
   for (const host of TUNNEL_HOSTS) {
@@ -246,16 +243,11 @@ async function transition(run: Run): Promise<void> {
   r = await get(port, '/api/system', serve({ 'cf-ray': 'spoofed' }))
   check('serve + added cf-ray: loses tailnet trust (401)', r.status === 401, r.status)
 
-  // updater, Cloudflare path open: both paths answer, each pointing downloads at itself
+  // updater over the tailnet: downloads point back at the origin that asked
   r = await get(port, '/api/updates/latest.json', cf(TUNNEL_HOSTS[0], { accept: '*/*' }))
-  let u = urls(r)
-  check('cloudflare latest.json 200 (path open)', r.status === 200 && u.length === 2, [r.status, r.body.slice(0, 120)])
-  check('cloudflare latest.json downloads stay on the public name', u.length === 2 && u.every((x) => x.startsWith(`${PUBLIC_BASE}/api/updates/asset/`)), u)
-  r = await get(port, `/api/updates/asset/${EXE}`, cf(TUNNEL_HOSTS[0], { accept: '*/*' }))
-  check('cloudflare asset 200 (path open)', r.status === 200 && r.body === 'EXE-BYTES', r.status)
-  check('installers are never edge-cached', r.cache.includes('no-store'), r.cache)
+  check('cloudflare latest.json 404', notFound(r), r.status)
   r = await get(port, '/api/updates/latest.json?current=0.3.200&target=windows&arch=x86_64', serve({ accept: '*/*' }))
-  u = urls(r)
+  let u = urls(r)
   check('serve latest.json 200', r.status === 200 && u.length === 2, r.status)
   check('serve latest.json downloads point at the serve origin', u.length === 2 && u.every((x) => x.startsWith(`https://${SERVE_HOST}/api/updates/asset/`)), u)
   const noProto: Record<string, string> = serve({ accept: '*/*' })
@@ -269,14 +261,12 @@ async function transition(run: Run): Promise<void> {
   const exeUrl = new URL(u.find((x) => x.endsWith(encodeURIComponent(EXE))) ?? 'http://127.0.0.1/none')
   r = await get(Number(exeUrl.port) || 1, exeUrl.pathname, direct(run, { accept: '*/*' })).catch(() => ({ status: 0, type: '', cache: '', acao: '', body: '' }))
   check('the direct download URL works', r.status === 200 && r.body === 'EXE-BYTES', r.status)
+  check('installers are never cached', r.cache.includes('no-store'), r.cache)
 
   await new Promise((r) => setTimeout(r, 300))
   const lines = updateLines(run)
   check('[updates] logs a Cloudflare check', lines.some((l) => l.via === 'cloudflare' && l.path === '/api/updates/latest.json'), lines)
   check('[updates] logs the tailnet check with its version and peer', lines.some((l) => l.via === 'tailnet' && l.current === '0.3.200' && l.ip === PEER), lines)
-  check('startup warns that the Cloudflare updater path is open', run.logs.some((l) => l.includes('[updates] UPDATES_VIA_CLOUDFLARE=1')), run.logs.slice(0, 20))
-
-  await origins(run)
 }
 
 // CORS and the terminal websocket. A request trusted by its socket address
@@ -357,18 +347,13 @@ async function closed(run: Run): Promise<void> {
   await new Promise((r) => setTimeout(r, 300))
   const lines = updateLines(run)
   check('closed: a Cloudflare check from a tailnet-era build is logged with its version', lines.some((l) => l.via === 'cloudflare' && l.current === '0.3.200'), lines)
-  check('closed: no startup warning', !run.logs.some((l) => l.includes('UPDATES_VIA_CLOUDFLARE')), run.logs.slice(0, 20))
   await origins(run)
 }
 
 let run: Run | null = null
 try {
-  console.log('-- transition (UPDATES_VIA_CLOUDFLARE=1)')
-  run = await boot({ UPDATES_VIA_CLOUDFLARE: '1' })
-  await transition(run)
-  await stop(run)
-  console.log('-- default (UPDATES_VIA_CLOUDFLARE unset: closed)')
   run = await boot({})
+  await tunnel(run)
   await closed(run)
 } catch (err) {
   failures++
