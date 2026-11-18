@@ -19,3 +19,30 @@ export const isEmbedded: boolean = isXrPanel || (() => {
     return true
   }
 })()
+
+// True only inside another page's iframe (a screen of a desk), never for a
+// Steam Frame panel, which is a window of its own.
+export const isFramed: boolean = isEmbedded && !isXrPanel
+
+// The v2 Desk (v2/screens/Desk.tsx) puts this on its window so the sessions in
+// its screens can ask it for things a pop-out window would do for itself.
+export type DeskHost = {
+  open: (name: string, from: Window) => void
+  close: (from: Window) => void
+}
+
+/** The desk this copy is a screen of, or null. */
+export function deskHost(): DeskHost | null {
+  if (!isFramed) return null
+  try {
+    return (window.parent as Window & { valkyrieDesk?: DeskHost }).valkyrieDesk ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Tells the Steam Frame app to close the panel this copy is in. */
+export function closeXrPanel(): void {
+  const bind = (window as { valkyrieXr?: (payload: string) => void }).valkyrieXr
+  bind?.(JSON.stringify({ op: 'close' }))
+}

@@ -9,8 +9,8 @@ import { TERM_NAME_RE, v2TermPath } from './term'
 // header's home button goes), and whether touch controls on the classic pages
 // render at the large "pad" size. Nothing here is cosmetic-only.
 
-// 'vr' is the Steam Frame (or any headset browser): it opens on the VR
-// workspace and gets the pad-sized controls, because a laser pointer wants
+// 'vr' is the Steam Frame (or any headset browser): it opens v2 with the Desk
+// tab added and gets the pad-sized controls, because a laser pointer wants
 // targets as big as a finger does. Never auto-detected; a headset browser looks
 // like a desktop to every media query.
 export type DeviceMode = 'auto' | 'desktop' | 'iphone' | 'ipad' | 'vr'
@@ -51,11 +51,11 @@ function detect(): Exclude<DeviceMode, 'auto'> {
 export type Profile = {
   mode: DeviceMode
   resolved: Exclude<DeviceMode, 'auto'>
-  /** where this device opens: v2's dashboard, or the VR workspace on a headset */
+  /** where this device opens: v2's dashboard on every device */
   home: string
   /** the classic UI's own home for this device (the classic header's home button, Settings > Classic) */
   classicHome: string
-  /** which UI a fresh tab opens in: v2 everywhere but the headset */
+  /** which UI a fresh tab opens in: v2 on every device */
   ui: TabUi
   size: 'normal' | 'pad'
 }
@@ -66,10 +66,11 @@ const CLASSIC_HOME: Record<Exclude<DeviceMode, 'auto'>, string> = {
 
 export function resolveProfile(mode: DeviceMode = getDeviceMode()): Profile {
   const resolved = mode === 'auto' ? detect() : mode
-  // v2 (src/v2, /m/*) is the UI on the desktop, the phone and the iPad; the
-  // headset keeps its VR workspace, which is a classic page. The classic homes
-  // stay reachable from v2 Settings > Classic, the classic menu and ?classic=1.
-  const ui: TabUi = resolved === 'vr' ? 'classic' : 'v2'
+  // v2 (src/v2, /m/*) is the UI on every device. The headset also gets v2's
+  // Desk tab, several sessions side by side; the classic VR workspace it
+  // replaced is its classic home. The classic homes stay reachable from v2
+  // Settings > Classic, the classic menu and ?classic=1.
+  const ui: TabUi = 'v2'
   return {
     mode,
     resolved,
@@ -129,7 +130,7 @@ const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 /**
  * The v2 screen for a classic URL, or null when v2 has no such screen (Vault,
- * Slop, Activity, the VR workspace): those stay classic pages. Used for entries only (a page load, a bookmark, an alert),
+ * Slop, Activity): those stay classic pages. Used for entries only (a page load, a bookmark, an alert),
  * never for a link v2 itself follows to a classic page.
  */
 export function classicToV2(pathname: string, search = ''): string | null {
@@ -150,6 +151,8 @@ export function classicToV2(pathname: string, search = ''): string | null {
     case '/settings': return '/m/settings'
     case '/calendar': return '/m/calendar'
     case '/meals': return '/m/meals'
+    // the headset's multi-screen desk is the v2 Desk tab now
+    case '/vr': return '/m/desk'
     case '/sessions/terminal':
     case '/terminal': {
       // only a named session: the v2 terminal never picks one itself

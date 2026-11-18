@@ -18,6 +18,7 @@ import { readText as readClipboard } from '../../lib/clipboard'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { uploadLine, useThorUpload } from '../../lib/useThorUpload'
 import { BASE, StatusStrip, desktopWindow } from '../kit/shell'
+import { isFramed } from '../../lib/embed'
 import { Button, Glyph, IconButton, Press, ToastHost, cx, toast } from '../kit/ui'
 import { closeDetached, openDetached, setDetachedTitle } from '../kit/windows'
 import { Icon, hostIcon } from '../kit/icons'
@@ -684,7 +685,8 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     <div ref={rootRef} className="vsk vtm" data-term-root data-phase={phase} data-view={chat ? 'chat' : 'term'} data-direct={direct || undefined} data-standalone={standalone || undefined}>
       {up.inputs}
       <header className="vsk-head">
-        <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />
+        {/* a screen of the Desk sits under the desk's own strip */}
+        {!isFramed && <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />}
         {/* in a pop-out the bar is title bar too: its empty parts drag the window as the strip's do */}
         <div className="vsk-bar" data-tauri-drag-region={standalone && desktopWindow() ? 'deep' : undefined}>
           {!standalone && (

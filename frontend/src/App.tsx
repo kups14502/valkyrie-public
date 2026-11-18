@@ -138,8 +138,8 @@ function PageFallback() {
 // by name (?go=/calendar). The VR workspace uses that instead of a deep link
 // because "/" is the one path every build serves: the Tauri asset protocol has
 // no SPA fallback for /calendar, while index.html at the root always loads.
-// Any other parameters ride along to the page, which is how the Steam Frame app
-// opens a panel on one session: /?go=/xr&s=vk-ab12 lands on /xr?s=vk-ab12.
+// Any other parameters ride along to the page: /?go=/xr&s=vk-ab12 lands on
+// /xr?s=vk-ab12, the address an older Steam Frame app layout still names.
 function RootRedirect() {
   const [params] = useSearchParams()
   const go = params.get('go') ?? ''
@@ -332,9 +332,8 @@ function Shell() {
   // renders. Layout effect, not effect, so the menu is already closed in the
   // paint that first shows the terminal.
   // The VR workspace (/vr) is pinned for the same reason: its panes own the
-  // height and a scrolling main would let a laser-pointer drag shift them. So
-  // is a panel of the Steam Frame app (/xr), which is one pane of its own.
-  const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr' || location.pathname === '/xr'
+  // height and a scrolling main would let a laser-pointer drag shift them.
+  const pinned = location.pathname === '/sessions/terminal' || location.pathname === '/vr'
   useLayoutEffect(() => { if (pinned) setMenuOpen(false) }, [pinned])
   useEffect(() => { if (location.pathname !== '/sessions/terminal') setTabUi('classic') }, [location.pathname])
 
@@ -460,7 +459,7 @@ function Shell() {
             <Route path="/terminal" element={<Navigate to="/sessions/terminal" replace />} />
             {/* The VR workspace: bare like the terminal, its panes fill main. */}
             <Route path="/vr" element={<Vr />} />
-            {/* One panel of the Steam Frame app (xr/ in the repo), bare like /vr. */}
+            {/* Older Steam Frame app panel addresses, forwarded to v2 (pages/Xr.tsx). */}
             <Route path="/xr" element={<Xr />} />
             <Route path="/services" element={<PageContainer><Services /></PageContainer>} />
             <Route path="/vault" element={<PageContainer><Vault /></PageContainer>} />

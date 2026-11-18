@@ -1,0 +1,105 @@
+/* The Desk (Desk.tsx), the headset's tab at /m/desk inside the v2 shell's .vl-page. It fills the
+   page instead of scrolling it: a line of text controls, then the screens in a grid, each a
+   hairline frame with its name and two text actions over the terminal. Text tabs, no boxes
+   around controls; the picker is the same rows and chips the list screens use. */
+
+.dk {
+  position: absolute;
+  inset: 0 0 var(--foot-pad) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 14px 0;
+}
+
+/* ---------- the line of controls ---------- */
+
+.dk-bar { flex: none; display: flex; align-items: center; gap: 18px; min-height: 34px; }
+.dk-add {
+  padding: 5px 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+  border-bottom: 1px solid transparent;
+}
+.dk-count { font-size: 12px; color: var(--dim); }
+.dk-cols { display: flex; gap: 14px; margin-left: auto; }
+.dk-k-row .dk-cols { margin-left: 0; }
+.dk-col { padding: 4px 0; font-size: 12px; color: var(--dim); border-bottom: 1px solid transparent; }
+.dk-col[data-on] { color: var(--fg); border-bottom-color: var(--fg); text-shadow: var(--text-glow); }
+@media (hover: hover) and (pointer: fine) {
+  .dk-add:hover { border-bottom-color: var(--fg); }
+  .dk-col:not([data-on]):hover { color: var(--text); }
+  .dk-pane-act:hover { color: var(--fg); }
+}
+
+/* ---------- the screens ---------- */
+
+.dk-stage { position: relative; flex: 1; min-height: 0; }
+.dk-grid { position: absolute; inset: 0; display: grid; grid-auto-rows: minmax(0, 1fr); gap: 8px; }
+.dk-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); }
+.dk-pane:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 35%, transparent); }
+.dk-pane[data-gone] { border-color: color-mix(in srgb, var(--hot) 45%, transparent); }
+.dk-pane-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.dk-pane-name { flex: 1; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text); }
+.dk-pane:focus-within .dk-pane-name { color: var(--fg); text-shadow: var(--text-glow); }
+.dk-pane-state { font-size: 11px; color: var(--hot); }
+.dk-pane-act { padding: 4px 0; font-size: 11.5px; color: var(--dim); }
+.dk-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: #000; }
+
+.dk-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.dk-empty p { margin: 0; font-size: 13px; color: var(--dim); }
+
+/* ---------- the picker, over the screens ---------- */
+
+.dk-pick {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgba(0, 0, 0, .94);
+}
+.dk-pick-in { max-width: 980px; margin: 0 auto; padding: 6px 2px 30px; display: flex; flex-direction: column; gap: 18px; }
+.dk-pick-head { display: flex; align-items: baseline; justify-content: space-between; }
+.dk-pick-head h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); }
+.dk-k-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.dk-k {
+  margin: 0 0 4px;
+  padding: 0 2px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--fg);
+  border-bottom: 1px solid var(--line-strong);
+}
+.dk-k-row .dk-k { flex: 1; }
+.dk-n { margin-left: 6px; font-weight: 600; letter-spacing: 0; color: var(--dim); }
+.dk-quiet { margin: 6px 2px; font-size: 12.5px; color: var(--dim); }
+
+.dk-rows > * + * { border-top: 1px solid var(--line); }
+.dk-row { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 6px 2px; text-align: left; }
+.dk-row-main { flex: 1; font-size: 13.5px; color: var(--ink-hi); }
+.dk-row-meta { flex: none; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.dk-row[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.dk-row:disabled { opacity: .5; }
+
+.dk-chips { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 6px 2px 0; }
+.dk-chip { min-height: 32px; padding: 4px 0; font-size: 13px; color: var(--text); border-bottom: 1px solid transparent; }
+.dk-chip:disabled { opacity: .5; }
+@media (hover: hover) and (pointer: fine) {
+  .dk-row:not(:disabled):hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+  .dk-chip:not(:disabled):hover { color: var(--fg); border-bottom-color: var(--fg); }
+}

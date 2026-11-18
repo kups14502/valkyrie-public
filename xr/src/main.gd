@@ -9,8 +9,10 @@ extends Node3D
 ## into the panel clicked last (keys.gd). The layout is saved and comes back.
 ##
 ## Controls: trigger clicks, grip carries (stick pushes/pulls and resizes while
-## carrying), stick scrolls, A opens a new panel with the picker in front of you,
-## B brings every panel back in front of you.
+## carrying), stick scrolls, A opens a new panel on AI > Sessions in front of you,
+## B closes the panel the right laser is on, or with the laser on nothing brings
+## every panel back in front of you. Every panel is a v2 page; opening a session
+## in its own window (v2's pop-out) puts it on a new panel beside that one.
 ##
 ## Command line, after "--": --cdp-port=9233 --base=https://host
 ## --panels=punch|front|mesh --passthrough=on|off
@@ -181,7 +183,11 @@ func _buttons() -> void:
 	_a_down = a
 	var b := right.is_button_pressed("by_button")
 	if b and not _b_down:
-		_bring_all_here()
+		if right.hover:
+			_close_panel(right.hover)
+			trigger_haptic(right)
+		else:
+			_bring_all_here()
 	_b_down = b
 
 
@@ -207,8 +213,8 @@ func _notification(what: int) -> void:
 
 # ----------------------------------------------------------------- panels --
 
-## Opens a new panel in front of the head: the picker, or the page in route.
-func new_panel(route := "/xr") -> void:
+## Opens a new panel in front of the head: AI > Sessions, or the page in route.
+func new_panel(route := "/m/ai/sessions") -> void:
 	if panels.size() >= MAX_PANELS:
 		_say("%d panels is the cap. Close one first." % MAX_PANELS, 3.0)
 		return
@@ -219,7 +225,8 @@ func new_panel(route := "/xr") -> void:
 	_save_soon()
 
 
-func _spawn(spec: Dictionary) -> XrPanel:
+## adopt: the id of a tab that already exists (a pop-out), shown instead of a new one.
+func _spawn(spec: Dictionary, adopt := "") -> XrPanel:
 	var p := XrPanel.new()
 	if not spec.is_empty():
 		p.apply_spec(spec)
@@ -230,7 +237,7 @@ func _spawn(spec: Dictionary) -> XrPanel:
 	origin.add_child(p)
 	panels.append(p)
 	if cdp.is_open:
-		p.open_tab()
+		p.open_tab(adopt)
 	return p
 
 
@@ -329,7 +336,7 @@ func _restore() -> void:
 			_spawn(s)
 	print("[xr] restored %d panels" % panels.size())
 	if panels.is_empty():
-		new_panel("/xr?page=/dashboard")
+		new_panel("/m/dashboard")
 
 
 func _save_soon() -> void:
@@ -349,6 +356,8 @@ func _save() -> void:
 
 func _on_cdp_connected() -> void:
 	_say("")
+	# targetCreated for every new tab, which is how a pop-out from a panel is seen
+	cdp.send("Target.setDiscoverTargets", {"discover": true})
 	for p in panels:
 		p.open_tab()
 
@@ -361,11 +370,48 @@ func _on_cdp_disconnected() -> void:
 
 func _on_cdp_event(session: String, method: String, params: Dictionary) -> void:
 	if session == "":
+		_on_browser_event(method, params)
 		return
 	for p in panels:
 		if p.session == session:
 			p.on_event(method, params)
 			return
+
+
+## A page a panel opened with window.open (v2's pop-out window, kit/windows.ts)
+## becomes a panel of its own beside that one; a panel whose page closed itself
+## goes away.
+func _on_browser_event(method: String, params: Dictionary) -> void:
+	match method:
+		"Target.targetCreated":
+			var info: Dictionary = params.targetInfo
+			var opener := str(info.get("openerId", ""))
+			if info.get("type") != "page" or opener == "" or _panel_for(info.targetId):
+				return
+			var from := _panel_for(opener)
+			if not from:
+				return
+			if panels.size() >= MAX_PANELS:
+				cdp.send("Target.closeTarget", {"targetId": info.targetId})
+				_say("%d panels is the cap. Close one first." % MAX_PANELS, 3.0)
+				return
+			var p := _spawn({"route": "/m/ai/sessions"}, info.targetId)
+			var right := from.global_basis.x.normalized()
+			p.global_transform = Transform3D(from.global_basis, from.global_position + right * (from.width + p.width) * 0.53)
+			_focus(p)
+			_save_soon()
+		"Target.targetDestroyed":
+			var p := _panel_for(str(params.targetId))
+			if p:
+				p.target_id = ""
+				_close_panel(p)
+
+
+func _panel_for(target_id: String) -> XrPanel:
+	for p in panels:
+		if p.target_id == target_id:
+			return p
+	return null
 
 
 # ------------------------------------------------------------------- note --

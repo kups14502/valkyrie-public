@@ -136,9 +136,12 @@ func apply_spec(s: Dictionary) -> void:
 		transform = t
 
 
-## The URL the tab opens. "/" is the one path every Valkyrie host serves, and
-## RootRedirect in App.tsx routes ?go= from there and keeps the other parameters.
+## The URL the tab opens. A v2 page (/m/...) loads as itself: odin serves the app
+## for any path. Anything else goes through "/", where RootRedirect in App.tsx
+## routes ?go= and keeps the other parameters.
 func url() -> String:
+	if route.begins_with("/m/"):
+		return base_url + route
 	var path := route
 	var query := ""
 	var q := route.find("?")
@@ -151,17 +154,22 @@ func url() -> String:
 	return u
 
 
-func open_tab() -> void:
+## adopt: a tab that already exists (a page a panel opened), shown as it is
+## instead of a new tab navigated to url().
+func open_tab(adopt := "") -> void:
 	if _opening or not cdp.is_open:
 		return
 	_opening = true
 	session = ""
-	var r := await cdp.request("Target.createTarget", {"url": "about:blank"})
-	if r.has("error"):
-		_opening = false
-		return
-	target_id = r.result.targetId
-	r = await cdp.request("Target.attachToTarget", {"targetId": target_id, "flatten": true})
+	if adopt != "":
+		target_id = adopt
+	else:
+		var made := await cdp.request("Target.createTarget", {"url": "about:blank"})
+		if made.has("error"):
+			_opening = false
+			return
+		target_id = made.result.targetId
+	var r := await cdp.request("Target.attachToTarget", {"targetId": target_id, "flatten": true})
 	if r.has("error"):
 		_opening = false
 		return
@@ -174,7 +182,15 @@ func open_tab() -> void:
 	}, session)
 	cdp.send("Emulation.setFocusEmulationEnabled", {"enabled": true}, session)
 	cdp.send("Emulation.setScrollbarsHidden", {"hidden": true}, session)
-	cdp.send("Page.navigate", {"url": url()}, session)
+	if adopt == "":
+		cdp.send("Page.navigate", {"url": url()}, session)
+	else:
+		# it loaded before this panel listened, so ask where it is
+		var tree := await cdp.request("Page.getFrameTree", {}, session)
+		if tree.has("result"):
+			var f: Dictionary = tree.result.frameTree.frame
+			_frame_id = f.id
+			_route_from(f.url)
 	cdp.send("Page.startScreencast", {
 		"format": "png", "everyNthFrame": 1, "maxWidth": _view.size.x, "maxHeight": _view.size.y,
 	}, session)

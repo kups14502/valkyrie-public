@@ -1,4 +1,5 @@
 import { isTauri, isTauriMobile } from '../../lib/auth'
+import { closeXrPanel, deskHost, isXrPanel } from '../../lib/embed'
 import { TERM_NAME_RE } from '../../lib/term'
 import { toast } from './ui'
 
@@ -164,6 +165,12 @@ export function openDetached(target: DetachTarget): void {
     void openAppWindow(target, path)
     return
   }
+  // a screen of the headset's Desk: the session gets a screen beside this one
+  const desk = deskHost()
+  if (desk && target.kind === 'session') {
+    desk.open(target.name, window)
+    return
+  }
   if (!canDetach()) {
     goInPlace(inAppPath(target))
     return
@@ -176,6 +183,16 @@ export function openDetached(target: DetachTarget): void {
  * window.close(), so after a moment it goes to `fallback` instead.
  */
 export function closeDetached(fallback = '/m/ai/sessions'): void {
+  // a Desk screen leaves the desk; a Steam Frame panel asks the app to drop it
+  const desk = deskHost()
+  if (desk) {
+    desk.close(window)
+    return
+  }
+  if (isXrPanel) {
+    closeXrPanel()
+    return
+  }
   if (desktopApp()) {
     void import('@tauri-apps/api/window')
       .then(({ getCurrentWindow }) => getCurrentWindow().close())

@@ -78,9 +78,9 @@ const DEVICE: Opt<DeviceMode>[] = [
   { value: 'vr', label: 'VR', icon: 'frame' },
 ]
 const DEVICE_NAME: Record<Exclude<DeviceMode, 'auto'>, string> = { desktop: 'Desktop', iphone: 'iPhone', ipad: 'iPad', vr: 'VR' }
-// v2 is the UI on the desktop, the phone and the iPad; the headset keeps its VR workspace (lib/deviceMode)
+// v2 is the UI on every device; the headset also gets the Desk tab (lib/deviceMode)
 const OPENS_ON: Record<Exclude<DeviceMode, 'auto'>, string> = {
-  desktop: 'the dashboard', iphone: 'the dashboard', ipad: 'the dashboard', vr: 'the VR workspace, large controls',
+  desktop: 'the dashboard', iphone: 'the dashboard', ipad: 'the dashboard', vr: 'the dashboard, with the Desk tab and large controls',
 }
 // Settings > Classic: the classic UI's own home for this device
 const CLASSIC_NOTE: Record<Exclude<DeviceMode, 'auto'>, string> = {
@@ -92,7 +92,7 @@ function deviceNote(mode: DeviceMode): { long: string; short: string | null } {
   const opens = `opens on ${OPENS_ON[p.resolved]}`
   // Auto is the lit cell beside it, so the note only names what it resolved to
   if (mode === 'auto') return { long: `${DEVICE_NAME[p.resolved]} · ${opens}`, short: `Auto: ${DEVICE_NAME[p.resolved]}` }
-  return { long: opens[0].toUpperCase() + opens.slice(1), short: p.resolved === 'vr' ? 'VR workspace' : null }
+  return { long: opens[0].toUpperCase() + opens.slice(1), short: p.resolved === 'vr' ? 'VR desk' : null }
 }
 
 // ---------- speed probes (module scope, so they see the boot before React does) ----------

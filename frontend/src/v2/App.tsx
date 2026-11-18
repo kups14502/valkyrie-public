@@ -23,6 +23,7 @@ import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
 import Jobs, { JOB_SUBS } from './screens/Jobs'
 import Messages from './screens/Messages'
+import Desk from './screens/Desk'
 import './v2.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
@@ -140,9 +141,13 @@ function useV2Document() {
 
 const SCREENS_IPAD: ScreenDef[] = SCREENS.map((s) => (s.id === 'dashboard' ? { ...s, subs: DASH_SUBS_IPAD } : s))
 
-/** The tabs for this device: the iPad's Dashboard also has Hotkeys. */
+// The headset has the room for several sessions at once: Desk (screens/Desk.tsx) sits after Dashboard
+const SCREENS_VR: ScreenDef[] = [SCREENS[0], { id: 'desk', label: 'Desk', Component: Desk, floor: 'faint' }, ...SCREENS.slice(1)]
+
+/** The tabs for this device: the iPad's Dashboard also has Hotkeys, the headset has Desk. */
 function useScreens(): ScreenDef[] {
-  return useProfile().resolved === 'ipad' ? SCREENS_IPAD : SCREENS
+  const device = useProfile().resolved
+  return device === 'ipad' ? SCREENS_IPAD : device === 'vr' ? SCREENS_VR : SCREENS
 }
 
 function V2({ screens }: { screens: ScreenDef[] }) {
