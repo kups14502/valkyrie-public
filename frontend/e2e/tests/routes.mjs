@@ -7,7 +7,6 @@
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
-import { carView } from './car.mjs'
 import { extraRoutes } from './extra.mjs'
 import { tabsFor } from './tabs.mjs'
 
@@ -24,16 +23,14 @@ export const ROUTES = [
   { path: '/m/ai/usage', tab: 'AI', sub: 'Usage', ready: { text: /\d+\s*%/ } },
   { path: '/m/ai/skin', shell: false, ready: { sel: '.xterm-rows', text: /Claude Code/ } },
   { path: '/m/lights', tab: 'Lights', ready: { text: /\d+\s*of\s*\d+\s*on|No bulbs reported/i } },
-  // the live car from /api/hosts; its controls view is a fixture (tests/car.mjs), answered in the browser
-  { path: '/m/car', tab: 'Car', ready: { sel: '.car-grp', min: 6, text: /\d+\s*%/ }, mockCar: true },
   { path: '/m/media/dashboard', tab: 'Media', sub: 'Dashboard', ready: { text: /\b(new|newest|added)\b/i } },
   { path: '/m/media/movies', tab: 'Media', sub: 'Movies', ready: { text: /\d[\d,]*\s*titles/i } },
   { path: '/m/media/shows', tab: 'Media', sub: 'Shows', ready: { text: /\d[\d,]*\s*titles/i } },
   { path: '/m/media/music', tab: 'Media', sub: 'Music', ready: { text: /\d[\d,]*\s*artists/i } },
   { path: '/m/media/requests', tab: 'Media', sub: 'Requests', ready: { sel: '.vm-stats', text: /request/i } },
   { path: '/m/system/hosts', tab: 'System', sub: 'Hosts', ready: { text: /\d+\s*\/\s*\d+\s*online/i } },
-  { path: '/m/system/services', tab: 'System', sub: 'Services', ready: { text: /\d+\s*up/i } },
   { path: '/m/system/trades', tab: 'System', sub: 'Trades', ready: { sel: '.sys-trade-eq', text: /\$\d/ } },
+  { path: '/m/system/services', tab: 'System', sub: 'Services', ready: { text: /\d+\s*up/i } },
   { path: '/m/settings', settings: true, ready: { text: /appearance/i } },
   // the full pages outside the tabs (Calendar.tsx PageFrame): the strip and a bar back to the Dashboard
   { path: '/m/calendar', page: true, ready: { sel: '.cal-view', text: /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/ } },
@@ -173,8 +170,6 @@ export function routeTests() {
             page.mock('/api/session-board', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
             page.mock('/api/hosts/thor/sessions', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
           }
-          // the Car tab's controls view: a fixture for the live car (no command is ever sent from a route test)
-          if (route.mockCar) page.mock(/^\/api\/vehicles\/car-[a-z0-9_]+$/, ({ path }) => ({ status: 200, body: carView({ id: path.split('/').pop() }) }))
           // a feature's own fake backend for its route (extra.mjs), answered in the browser
           if (route.mock) route.mock(page)
           const t0 = Date.now()

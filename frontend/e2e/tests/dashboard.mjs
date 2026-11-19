@@ -18,7 +18,9 @@
 //            stays put.
 //   trade    the trade box (two columns and up): the ticker as its head, the
 //            equity labeled by its real age (Live for a fresh broker read, Last
-//            read, Day-open), the chart; the phone keeps the ticker only.
+//            read, Day-open), the chart at its own short height (120 to 170
+//            layout px, never stretched to fill a column); the phone keeps the
+//            ticker only.
 //            System > Trades says Live for a fresh read, never "Unchanged
 //            since", and says All cash when cash is the whole total.
 //   media    posters in the desktop app: over the Tauri stand-in, the app finds
@@ -31,9 +33,23 @@
 //            the ticker) and the upright iPad, the middle column's head on a
 //            monitor (the middle column the widest, AI and the hosts side by
 //            side under it); three columns on a monitor that fill the page with
-//            no scroll; the newest-addition banner on a 2560 px monitor only; no
-//            apartment anywhere on the Dashboard (the one model it draws is
-//            This device's).
+//            no scroll, the calendar left and the trade box right (between
+//            lights and media); the landscape iPad's board (calendar left,
+//            trade right) with no scroll; the newest-addition banner on a 2560
+//            px monitor only; no apartment anywhere on the Dashboard (the one
+//            model it draws is This device's).
+//   calendar the Calendar block over a made-up week: day headings (Today,
+//            Tomorrow, then weekday and date) with empty days left out, the
+//            head says ET and the times are New York time, the next event
+//            leads with "in N min" (a live one with Now and when it ends), a
+//            day's all-day events on one line, a meeting's Join link (Teams in
+//            the notes, Zoom in the location) and a plain location otherwise,
+//            a day heading opening the calendar on that day; on a monitor and
+//            the landscape iPad the block keeps its natural height inside its
+//            column and folds the rest into "+N more this week", the next event
+//            always kept; no horizontal overflow. A week of 70 events folds
+//            the same way on a monitor (no crash); an event over midnight
+//            leads once, its end named with its day.
 //   device   This device, the stage: the model of the machine the page runs on
 //            (the desktop app's machine name over the Tauri stand-in, held back
 //            1.2 s so a guess drawn before it answers shows, else the device
@@ -563,6 +579,9 @@ function tradeBoxRead() {
     what: (box?.querySelector('.hm-trade-what')?.textContent || '').replace(/\s+/g, ' ').trim(),
     eq: (box?.querySelector('.hm-trade-eq')?.textContent || '').trim(),
     chart,
+    // layout px (offsetHeight is not scaled by the desktop app's UI zoom)
+    chartH: box?.querySelector('.hm-trade-chart')?.offsetHeight ?? 0,
+    grow: !!box?.classList.contains('hm-grow'),
     text: (box?.innerText || '').replace(/\s+/g, ' '),
   }
 }
@@ -597,6 +616,9 @@ function tradeTests() {
         t.check(r.eq.startsWith(want), `the equity reads "${r.eq}", want ${want}`)
         t.check(r.chart >= 1, 'the trade box has no equity chart')
         t.check(!/Unchanged since/i.test(r.text), `the trade box says "Unchanged since": ${r.text.slice(0, 200)}`)
+        // "way too tall" (2026-11-19): a short chart of its own, never stretched to fill its column
+        t.check(r.chartH >= 118 && r.chartH <= 172, `the equity chart is ${r.chartH} layout px tall, want 120 to 170`)
+        t.check(!r.grow, 'the trade box stretches to fill its column')
         await t.shot(page, 'live')
 
         // an old read and the day-open fallback are labeled as what they are
@@ -823,7 +845,7 @@ function pageFit() {
 
 function layoutTests() {
   const out = []
-  for (const device of ['phone', 'ipad', 'desktop', 'desk1080', 'desk1440']) {
+  for (const device of ['phone', 'ipad', 'ipadland', 'desktop', 'desk1080', 'desk1440']) {
     out.push({
       name: `dash:layout:${device}`,
       group: 'dashboard',
@@ -834,7 +856,8 @@ function layoutTests() {
         quietThor(page)
         await page.goto('/m/dashboard')
         await shellUp(page)
-        await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-lights') && document.querySelector('.vl-page[data-active] .hm-media'), { timeout: 12_000, message: 'the Dashboard did not draw its blocks' })
+        // the landscape iPad's board has no media block (a tab away)
+        await page.waitFor((pad) => document.querySelector('.vl-page[data-active] .hm-lights') && (pad || document.querySelector('.vl-page[data-active] .hm-media')), { timeout: 12_000, args: [device === 'ipadland'], message: 'the Dashboard did not draw its blocks' })
         await sleep(2500)
         const r = await page.eval(() => {
           const root = document.querySelector('.vl-page[data-active]')
@@ -846,7 +869,8 @@ function layoutTests() {
           }
           // every block of the Dashboard as drawn (the columns dissolve on the phone), by area, largest first
           const area = (el) => { const b = el.getBoundingClientRect(); return Math.round(b.width * b.height) }
-          const blocks = [...lay.querySelectorAll(':scope > .hm-stage, :scope > .hm-tk, .hm-col > *, .hm-pair > *')].filter((e) => !e.classList.contains('hm-pair'))
+          // the calendar's slot (a fill layout) is the column's room, not a block: the box inside it is
+          const blocks = [...lay.querySelectorAll(':scope > .hm-stage, :scope > .hm-tk, .hm-col > *, .hm-pair > *, .hm-cal-slot .hm-cal')].filter((e) => !e.classList.contains('hm-pair') && !e.classList.contains('hm-cal-slot'))
           const stage = root.querySelector('.hm-stage')
           const sb = stage?.getBoundingClientRect()
           const lb = lay.getBoundingClientRect()
@@ -871,6 +895,8 @@ function layoutTests() {
             } : null,
             colW,
             banner: !!root.querySelector('.hm-ban'),
+            pad: !!lay.hasAttribute('data-pad'),
+            tradeChart: root.querySelector('.hm-trade-chart')?.offsetHeight ?? null,
             H: innerHeight,
           }
         })
@@ -886,11 +912,19 @@ function layoutTests() {
             t.check(r.stage.top >= 0 && r.stage.bottom <= r.H, `the stage is not whole on the first screen (${r.stage.top} to ${r.stage.bottom} of ${r.H})`)
           }
         }
+        if (device === 'ipadland') {
+          t.check(r.pad && r.cols === '3', `the landscape iPad has ${r.cols} columns${r.pad ? '' : ' and not its own board'}`)
+          t.check(r.where.lights === 'hm-a' && r.where.cal === 'hm-a' && r.where.stage === 'hm-b' && r.where.ai === 'hm-b' && r.where.trade === 'hm-c' && r.where.sys === 'hm-c',
+            `blocks sit in ${JSON.stringify(r.where)}, want lights and the calendar left, the stage and AI in the middle, trade and the hosts right`)
+          t.check(r.scrollH <= r.clientH + 2, `the landscape iPad board scrolls (${r.scrollH} > ${r.clientH})`)
+        }
+        // the trade chart keeps its own short height wherever the box shows (the phone has the ticker only)
+        if (r.tradeChart !== null) t.check(r.tradeChart >= 118 && r.tradeChart <= 172, `the equity chart is ${r.tradeChart} layout px tall, want 120 to 170`)
         if (desk) {
           t.check(r.cols === '3', `a monitor Dashboard has ${r.cols} columns, want 3`)
           const xl = device === 'desk1440'
-          t.check(r.where.trade === 'hm-a' && r.where.stage === 'hm-b' && r.where.lights === 'hm-c' && r.where.media === 'hm-c' && r.where.cal === (xl ? 'hm-a' : 'hm-c'),
-            `blocks sit in ${JSON.stringify(r.where)}, want trade left, the stage in the middle, lights and media right, the calendar ${xl ? 'left' : 'right'}`)
+          t.check(r.where.cal === 'hm-a' && r.where.stage === 'hm-b' && r.where.lights === 'hm-c' && r.where.trade === 'hm-c' && r.where.media === 'hm-c',
+            `blocks sit in ${JSON.stringify(r.where)}, want the calendar left, the stage in the middle, lights, trade and media right`)
           t.check(r.stage?.pair && r.where.ai === 'hm-b' && r.where.sys === 'hm-b', `AI and the hosts are not side by side under the stage (${JSON.stringify(r.where)})`)
           t.check(r.colW.length === 3 && r.colW[1] > r.colW[0] * 1.4 && Math.abs(r.colW[0] - r.colW[2]) <= 2, `the columns are ${JSON.stringify(r.colW)} px wide, want the stage's the widest by half and the other two equal`)
           t.check(r.banner === xl, xl ? 'a 2560 px monitor lost the newest-addition banner' : 'the newest-addition banner is back on a 1920x1080 Dashboard')
@@ -904,6 +938,266 @@ function layoutTests() {
     })
   }
   return out
+}
+
+// ---------- calendar: the week under day headings, New York time ----------
+
+const NY_KEY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+const NY_TIME = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
+const NY_HEAD = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
+const keyPlus = (key, n) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+/** the instant New York's day `key` starts */
+const nyStart = (key) => {
+  const [y, m, d] = key.split('-').map(Number)
+  const t = Date.UTC(y, m - 1, d, 5)
+  return NY_KEY.format(t - 3_600_000) === key ? t - 3_600_000 : t
+}
+/** `h:m` New York wall time on the day `n` days after today */
+const nyAt = (n, h, m = 0) => nyStart(keyPlus(NY_KEY.format(Date.now()), n)) + (h * 60 + m) * 60_000
+
+/**
+ * A made-up week in /api/calendar/events' shape, generic names only. Today: an all-day event and
+ * "Team sync" (a Teams link in its notes) 25 minutes out; tomorrow: two all-day events, "Standup"
+ * at 9:30 (a Zoom link as its location) and "Budget review" at 2:00 PM in Room 4; three days on a
+ * haircut; nothing on the other days. `live`: a focus block on now. `busy`: more rows than fit.
+ * `long`: ten hour blocks on each of the seven days, a week far past any column (the line fitting
+ * once crashed the Dashboard on one). `overnight`: a migration from soon to 3:00 AM tomorrow.
+ */
+function calWeek({ live = false, busy = false, long = false, overnight = false } = {}) {
+  const now = Date.now()
+  const t0 = NY_KEY.format(now)
+  const day = (n) => nyStart(keyPlus(t0, n))
+  const soon = Math.ceil((now + 25 * 60_000) / 60_000) * 60_000
+  const ev = (uid, summary, start, end, extra = {}) => ({
+    uid, summary, location: '', description: '', organizer: '', status: '', start: iso(start), end: iso(end),
+    allDay: false, recurring: false, url: '', sourceId: 'work', sourceLabel: 'Work', color: '#44aaff', ...extra,
+  })
+  const events = [
+    ev('e-allday', 'Trash day', day(0), day(1), { allDay: true, sourceLabel: 'Personal', color: '#00ff41' }),
+    ev('e-sync', 'Team sync', soon, soon + 30 * 60_000, {
+      location: 'Microsoft Teams Meeting',
+      description: 'Join the meeting now <https://teams.microsoft.com/l/meetup-join/19%3ameeting_e2e%40thread.v2/0?context=e2e>\nMeeting options <https://teams.microsoft.com/meetingOptions/?organizerId=e2e>',
+    }),
+    ev('e-off1', 'Office closed', day(1), day(2), { allDay: true }),
+    ev('e-off2', 'Filter change', day(1), day(2), { allDay: true, sourceLabel: 'Personal', color: '#00ff41' }),
+    ev('e-standup', 'Standup', nyAt(1, 9, 30), nyAt(1, 9, 45), { location: 'https://us02web.zoom.us/j/1234567890?pwd=e2e' }),
+    ev('e-budget', 'Budget review', nyAt(1, 14), nyAt(1, 15), { location: 'Room 4' }),
+    ev('e-hair', 'Haircut', nyAt(3, 11), nyAt(3, 11, 45), { sourceLabel: 'Personal', color: '#00ff41' }),
+  ]
+  if (live) events.push(ev('e-focus', 'Focus block', now - 10 * 60_000, now + 50 * 60_000))
+  if (busy) {
+    for (let k = 0; k < 6; k++) events.push(ev(`e-busy${k}`, `Planning block ${k + 1}`, nyAt(5, 8 + k), nyAt(5, 8 + k, 45)))
+  }
+  if (long) {
+    // today's blocks start after Team sync ends, so none is on now and Team sync stays the next event at any hour
+    for (let d = 0; d < 7; d++) for (let k = 0; k < 10; k++) {
+      if (d === 0 && nyAt(d, 8 + k) < soon + 30 * 60_000) continue
+      events.push(ev(`e-long${d}-${k}`, `Block ${d}.${k}`, nyAt(d, 8 + k), nyAt(d, 8 + k, 45)))
+    }
+  }
+  if (overnight) events.push(ev('e-night', 'Server migration', soon + 60 * 60_000, nyAt(1, 3), { location: 'Remote' }))
+  return { events, t0, soon }
+}
+
+function calMocks(page, st) {
+  page.mock('/api/calendar/events', () => ok({ events: st.week.events, tz: 'America/New_York', sources: [] }))
+  // one overdue task, so the block's tasks line is the same on every run
+  page.mock('/api/tasks', () => ok({
+    view: 'open', today: st.week.t0, projects: [], areas: ['personal'],
+    tasks: [{ ref: { kind: 'loose', id: 'e2etask00001' }, text: 'Send the invoice', due: keyPlus(st.week.t0, -1), done: false, doneAt: null, area: 'personal', project: null, list: null, createdAt: null }],
+  }))
+}
+
+/** The Calendar block as drawn. */
+function calRead() {
+  const root = document.querySelector('.vl-page[data-active]')
+  const cal = root?.querySelector('.hm-cal')
+  const txt = (el) => (el?.textContent || '').replace(/\s+/g, ' ').trim()
+  const next = cal?.querySelector('.hm-cnext')
+  const rows = [...(cal?.querySelectorAll('.hm-crow') ?? [])].map((r) => ({
+    day: r.closest('.hm-cday')?.querySelector('.hm-cday-name')?.textContent ?? null,
+    time: txt(r.querySelector('.hm-ctime')),
+    title: txt(r.querySelector('.hm-ctitle')),
+    place: txt(r.querySelector('.hm-cplace')),
+    join: r.querySelector('a.hm-join')?.getAttribute('href') ?? null,
+    allDay: r.hasAttribute('data-allday'),
+  }))
+  const slot = root?.querySelector('.hm-cal-slot')
+  const b = (el) => (el ? el.getBoundingClientRect() : null)
+  return {
+    found: !!cal,
+    tz: txt(cal?.querySelector('.hm-cal-tz')),
+    value: txt(cal?.querySelector('.hm-g-value')),
+    heads: [...(cal?.querySelectorAll('.hm-cday') ?? [])].map((d) => ({ name: d.querySelector('.hm-cday-name')?.textContent ?? '', date: d.querySelector('.hm-cday-date')?.textContent ?? null })),
+    next: next ? {
+      day: next.closest('.hm-cday')?.querySelector('.hm-cday-name')?.textContent ?? null,
+      title: txt(next.querySelector('.hm-cnext-title')),
+      when: txt(next.querySelector('.hm-cnext-when')),
+      meta: txt(next.querySelector('.hm-cnext-meta')),
+      join: next.querySelector('a.hm-join')?.getAttribute('href') ?? null,
+      live: next.hasAttribute('data-live'),
+    } : null,
+    rows,
+    soon: txt(cal?.querySelector('.hm-csoon')),
+    more: txt(cal?.querySelector('.hm-cmore')),
+    tasks: !!cal?.querySelector('.hm-tasks-head'),
+    text: (cal?.innerText || '').replace(/\s+/g, ' '),
+    slot: slot ? { calBottom: Math.round(b(cal).bottom), slotBottom: Math.round(b(slot).bottom) } : null,
+    scrollH: root?.scrollHeight ?? 0,
+    clientH: root?.clientHeight ?? 0,
+  }
+}
+
+function calendarTests() {
+  const out = []
+  for (const device of ['phone', 'desktop', 'ipadland']) {
+    out.push({
+      name: `dash:calendar:${device}`,
+      group: 'dashboard',
+      device,
+      timeout: 60_000,
+      async run(t) {
+        const page = await t.page()
+        quietThor(page)
+        const st = { week: calWeek() }
+        calMocks(page, st)
+        await page.goto('/m/dashboard')
+        await shellUp(page)
+        await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-cal .hm-cnext'), { timeout: 15_000, message: 'the Calendar block never showed the next event' })
+        await sleep(900)
+        let r = await page.eval(calRead)
+        const { t0, soon } = st.week
+        const k3 = keyPlus(t0, 3)
+        const fit = device !== 'phone'
+
+        // the head says the zone once; the next event leads, 25 minutes out, its time range in ET and its Join link
+        t.check(r.tz === 'ET', `the Calendar head reads "${r.tz}" for its zone, want ET`)
+        // (run in the last 25 minutes of a New York day, the sync lands tomorrow)
+        const wantLeft = soon < nyStart(keyPlus(t0, 1)) ? /^1 left today\b/ : /^Nothing left today\b/
+        t.check(wantLeft.test(r.value), `the head value reads "${r.value}", want ${wantLeft}`)
+        t.check(r.next?.title === 'Team sync' && /^in 2[4-6] min$/.test(r.next.when), `the next event reads ${JSON.stringify(r.next)}, want Team sync in 25 min`)
+        // "9:30 to 10:00 AM ET", "11:45 AM to 12:15 PM ET" (Intl may put a narrow space before AM; the read folds spaces)
+        const [ta, tb] = [NY_TIME.format(soon), NY_TIME.format(soon + 30 * 60_000)]
+        const range = `${ta.slice(-2) === tb.slice(-2) ? ta.slice(0, -3) : ta} to ${tb} ET`.replace(/\s+/g, ' ')
+        t.check(r.next?.meta === range, `the next event's time reads "${r.next?.meta}", want "${range}"`)
+        t.check(/^https:\/\/teams\.microsoft\.com\/l\/meetup-join\//.test(r.next?.join ?? ''), `the Teams meeting's Join goes to ${r.next?.join}, want its meetup-join link`)
+        t.check(!/Microsoft Teams Meeting/.test(r.text), 'the block repeats "Microsoft Teams Meeting" next to its Join link')
+        t.check(!/meetingOptions/.test(r.next?.join ?? ''), 'Join opens the meeting options page')
+
+        // day headings: Today, Tomorrow, then weekday and date; empty days left out
+        if (!fit) {
+          const want = ['Today', 'Tomorrow', NY_HEAD.format(nyStart(k3) + 12 * 3_600_000)]
+          t.check(r.heads.map((h) => h.name).join('|') === want.join('|'), `the day headings read ${JSON.stringify(r.heads.map((h) => h.name))}, want ${JSON.stringify(want)} (empty days left out)`)
+          t.check(r.heads[0]?.date === NY_HEAD.format(nyStart(t0) + 12 * 3_600_000), `Today's heading carries "${r.heads[0]?.date}", want its date`)
+          // tomorrow: both all-day events on one line, then the timed rows in New York time
+          const tm = r.rows.filter((x) => x.day === 'Tomorrow')
+          t.check(tm[0]?.allDay && tm[0].title === 'Office closed · Filter change' && tm[0].time === 'All day', `tomorrow's all-day line reads ${JSON.stringify(tm[0])}`)
+          const standup = tm.find((x) => x.title === 'Standup')
+          t.check(standup?.time === '9:30 AM' && /^https:\/\/us02web\.zoom\.us\/j\//.test(standup.join ?? '') && !standup.place, `Standup reads ${JSON.stringify(standup)}, want 9:30 AM with a Zoom Join and no bare link`)
+          const budget = tm.find((x) => x.title === 'Budget review')
+          t.check(budget?.time === '2:00 PM' && budget.place === 'Room 4' && !budget.join, `Budget review reads ${JSON.stringify(budget)}, want 2:00 PM in Room 4`)
+          t.check(r.rows.some((x) => x.title === 'Trash day' && x.allDay && x.day === 'Today'), 'today\'s all-day event has no line of its own')
+        } else {
+          // a fill layout: the box ends inside its column, nothing scrolls
+          t.check(r.slot && r.slot.calBottom <= r.slot.slotBottom + 1, `the Calendar box runs past its column (${JSON.stringify(r.slot)})`)
+          t.check(r.scrollH <= r.clientH + 2, `the Dashboard scrolls (${r.scrollH} > ${r.clientH}) with the calendar's week on it`)
+          t.check(r.heads[0]?.name === 'Today', `the first day heading reads "${r.heads[0]?.name}", want Today`)
+          t.check(!r.heads.some((h) => h.name === NY_HEAD.format(nyStart(keyPlus(t0, 2)) + 12 * 3_600_000)), 'an empty day has a heading')
+        }
+        t.check(r.tasks, 'the block lost its tasks line')
+        const lr = await page.eval(layoutReport)
+        t.check(lr.docSW <= lr.W + 1, `the Dashboard is wider than the screen (${lr.docSW} > ${lr.W})`)
+        await t.shot(page, 'week')
+
+        // a meeting on now leads with Now and when it ends; the next one says when it starts
+        st.week = calWeek({ live: true, busy: fit })
+        await page.goto('/m/dashboard')
+        await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-cal .hm-cnext[data-live]'), { timeout: 15_000, message: 'an event on now does not lead the block' })
+        await sleep(900)
+        r = await page.eval(calRead)
+        t.check(r.next?.title === 'Focus block' && r.next.when === 'Now' && /^Until \d{1,2}:\d{2} [AP]M ET$/.test(r.next.meta), `the live event reads ${JSON.stringify(r.next)}, want Focus block, Now, Until ... ET`)
+        if (!fit) t.check(/^in 2[4-6] min$/.test(r.soon), `the next event after it says "${r.soon}", want in 25 min`)
+        if (fit) {
+          // more than fits: the rest folds into one line, the event on now stays
+          t.check(/^\+\d+ more this week$/.test(r.more), `a busy week ends with "${r.more}", want "+N more this week"`)
+          t.check(r.slot && r.slot.calBottom <= r.slot.slotBottom + 1 && r.scrollH <= r.clientH + 2, `a busy week runs past the column (${JSON.stringify(r.slot)}, ${r.scrollH} > ${r.clientH})`)
+        }
+        await t.shot(page, 'live')
+
+        // a day heading opens the calendar on that day: the sheet on the phone, the Calendar page on a wide
+        // screen (the landscape iPad's short column may end before tomorrow: then today's heading)
+        const target = r.heads.some((h) => h.name === 'Tomorrow') ? 'Tomorrow' : 'Today'
+        const tomorrow = target === 'Tomorrow' ? keyPlus(t0, 1) : t0
+        await page.tap({ sel: '.vl-page[data-active] .hm-cday-head', text: new RegExp(`^${target}`) })
+        if (device === 'phone') {
+          await page.waitFor(() => document.querySelector('.cal-root[data-shown] .cal-ui[data-layout="sheet"]'), { timeout: 12_000, message: 'the Tomorrow heading did not open the calendar sheet' })
+          await sleep(500)
+          t.check(await page.eval(() => /Tomorrow/i.test(document.querySelector('.cal-root .cal-bar-rel')?.textContent ?? '')), 'the sheet did not open on tomorrow')
+        } else {
+          await page.waitFor(() => location.pathname === '/m/calendar', { timeout: 12_000, message: 'the Tomorrow heading did not open the Calendar page' })
+          const q = await page.eval(() => location.search)
+          t.check(new URLSearchParams(q).get('date') === tomorrow, `the ${target} heading opened the Calendar page on ${q}, want date=${tomorrow}`)
+        }
+      },
+    })
+  }
+  return out
+}
+
+/**
+ * The Calendar block's edges: a week far longer than the monitor's column folds into "+N more" in
+ * a few renders (no "Maximum update depth" crash: a console error fails the test by itself), and
+ * a timed event over midnight leads once, its end named with its day.
+ */
+function calendarEdgeTests() {
+  return [{
+    name: 'dash:calendar:long-week:desk1080',
+    group: 'dashboard',
+    device: 'desk1080',
+    timeout: 60_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      const st = { week: calWeek({ long: true }) }
+      calMocks(page, st)
+      await page.goto('/m/dashboard')
+      await shellUp(page)
+      await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-cal .hm-cmore'), { timeout: 15_000, message: 'a long week never folded into "+N more"' })
+      await sleep(900)
+      const r = await page.eval(calRead)
+      t.check(r.next?.title === 'Team sync', `the next event reads ${JSON.stringify(r.next)}, want Team sync kept`)
+      t.check(/^\+\d+ more this week$/.test(r.more), `a long week ends with "${r.more}", want "+N more this week"`)
+      t.check(r.slot && r.slot.calBottom <= r.slot.slotBottom + 1 && r.scrollH <= r.clientH + 2, `a long week runs past the column (${JSON.stringify(r.slot)}, ${r.scrollH} > ${r.clientH})`)
+      await t.shot(page, 'long')
+    },
+  }, {
+    name: 'dash:calendar:overnight:phone',
+    group: 'dashboard',
+    device: 'phone',
+    timeout: 60_000,
+    async run(t) {
+      const page = await t.page()
+      quietThor(page)
+      const st = { week: calWeek({ overnight: true }) }
+      st.week.events = st.week.events.filter((e) => e.uid !== 'e-sync')
+      calMocks(page, st)
+      await page.goto('/m/dashboard')
+      await shellUp(page)
+      await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-cal .hm-cnext'), { timeout: 15_000, message: 'the Calendar block never showed the next event' })
+      await sleep(900)
+      const r = await page.eval(calRead)
+      const n = await page.eval(() => document.querySelectorAll('.vl-page[data-active] .hm-cal .hm-cnext').length)
+      t.check(n === 1, `${n} events lead the block, want 1 (an event over midnight leads once)`)
+      // (run in the last 85 minutes of a New York day, the migration starts tomorrow: only the count holds)
+      if (st.week.soon + 3_600_000 >= nyStart(keyPlus(st.week.t0, 1))) return
+      const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(nyAt(1, 3))
+      t.check(r.next?.title === 'Server migration' && r.next.meta.includes(`to ${wd} 3:00 AM ET`), `the overnight event reads ${JSON.stringify(r.next)}, want its end as "${wd} 3:00 AM ET"`)
+      t.check(r.rows.some((x) => x.title === 'Server migration' && x.time === 'Cont.'), 'the overnight event has no Cont. row on its second day')
+    },
+  }]
 }
 
 // ---------- this device: the model of the machine the page runs on ----------
@@ -1121,6 +1415,7 @@ function deviceTests() {
       else t.check(r.inCol === null && /^(ticker>)?stage>col>col$/.test(r.order.join('>')), `the layout reads ${r.order.join(' > ')}, want the stage across the top (under the ticker on the phone), then the columns`)
       checkNoRoom(t, await page.eval(dashboardScenes))
       // a monitor (and the app's window) shows the whole Dashboard: no scroll, the three columns ending together
+      // (the left one ends with the calendar's slot: the room the block lists its days in)
       if (desk && !c.storage && !c.pad) {
         const f = await page.eval(pageFit)
         t.check(f.scrollH <= f.clientH + 2, `the Dashboard scrolls (${f.scrollH} > ${f.clientH}) with This device in the right column`)
@@ -1242,5 +1537,5 @@ function carTests() {
 }
 
 export function dashboardTests() {
-  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...deviceTests(), ...carTests()]
+  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...calendarTests(), ...calendarEdgeTests(), ...deviceTests(), ...carTests()]
 }

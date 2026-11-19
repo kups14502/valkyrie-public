@@ -366,8 +366,7 @@ html[data-density='comfortable'] .hm-tick-alt { min-height: 34px; }
 html[data-density='comfortable'] .hm-step-btn { width: 34px; height: 32px; }
 html[data-density='comfortable'] .hm-start,
 html[data-density='comfortable'] .hm-chip { min-height: 50px; }
-html[data-density='comfortable'] .hm-evrow { min-height: 42px; }
-html[data-density='comfortable'] .hm-day .hm-evrow { min-height: 46px; }
+html[data-density='comfortable'] .hm-cnext-main { min-height: 54px; }
 html[data-density='comfortable'] .hm-g-row { min-height: 52px; }
 html[data-density='comfortable'] .hm-dayhead { min-height: 40px; }
 

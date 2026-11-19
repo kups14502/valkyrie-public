@@ -1,5 +1,6 @@
 import type { Router } from 'express'
 import type { MailFilter } from './lib/mailStore.js'
+import type { RavenToolGroup } from './lib/raven/types.js'
 
 // What a feature adds to the API. Features are listed in features.ts and
 // mounted by index.ts, the only file that reads that list, so no shared route
@@ -20,4 +21,9 @@ export type BackendFeature = {
   mailFilters?: MailFilter[]
   /** runs once the API is listening (timers, pollers) */
   start?: () => void
+  /** what the feature adds to Raven, Brendon's assistant (lib/raven): MCP tools, and a plain-words status line for its prompt */
+  raven?: {
+    tools?: RavenToolGroup
+    status?: () => string | Promise<string>
+  }
 }

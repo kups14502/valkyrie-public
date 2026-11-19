@@ -11,6 +11,7 @@ import { usePalette } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
 import { WireScene, apartment, apartmentView, parseColor, type CameraPose, type Light, type Model, type RGB } from '../kit/three'
 import { setThorRgb, type LightUpdate } from '../../lib/api'
+import { useProfile } from '../../lib/deviceMode'
 import { PRESETS, brightnessFromPct, hexToRgb, lightColor, pctFromBrightness, presetSwatchStyle, rgbToHex, useLightsControl } from '../../lib/lights'
 import './lights.css'
 
@@ -23,6 +24,8 @@ import './lights.css'
 // what was asked at once and falls back to the bulb's real state when the call
 // fails, and the apartment re-lights from that same state.
 // Phone: one column. Landscape and desktop: master + presets | bulbs | apartment + Thor RGB.
+// The pad profile (an iPad, the headset) gets its own two layouts, everything a size up with
+// touch targets of 48 px or more (see usePadShape and lights.css "the pad profile").
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 /** raw: Home Assistant's 0-255 brightness, sent back with a color pick so the bulb keeps its level */
@@ -135,8 +138,38 @@ function useMedia(q: string): boolean {
   return m
 }
 
-/** the room panel's header band: the plan fits under it */
+/** the room panel's header band: the plan fits under it (the pad's larger header needs more) */
 const ROOM_HD = 24
+const ROOM_HD_PAD = 34
+/** a room label's width per character: 11 px mono, and the pad's 13 px (lights.css --wire-label) */
+const LABEL_CH = 6.8
+const LABEL_CH_PAD = 8.3
+
+/**
+ * The pad profile's layout, from the screen's real width (the UI zoom hides from media queries):
+ * 'tall' (upright) puts the apartment across the top, 'wide' (on its side) gives the apartment
+ * and the controls a half each. A pad window too narrow for either (Split View) keeps the phone
+ * column, and so does every other profile ('base').
+ */
+type Shape = 'base' | 'tall' | 'wide'
+function usePadShape(box: RefObject<HTMLElement | null>, pad: boolean): Shape {
+  const [shape, setShape] = useState<Shape>('base')
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!pad || !el) return
+    const measure = () => {
+      const w = el.clientWidth
+      const next: Shape = w < 600 ? 'base' : w >= 960 && window.innerWidth > window.innerHeight ? 'wide' : 'tall'
+      setShape(next)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
+  }, [box, pad])
+  return pad ? shape : 'base'
+}
 /** a lit bulb's pool of light on the floor, plan meters (about one room's width) */
 const POOL_M = 1.5
 /** the dot floor reaches just past the apartment's walls, so the plan's outline reads */
@@ -255,6 +288,12 @@ export default function Lights({ active }: ScreenProps) {
   const palette = usePalette()
   const reduced = useReducedMotion()
   const wide = useMedia('(min-width: 1100px)')
+  const pad = useProfile().size === 'pad'
+  const layoutRef = useRef<HTMLDivElement>(null)
+  const shape = usePadShape(layoutRef, pad)
+  const big = shape !== 'base'
+  // a wide screen and the pad's large room label every bulb
+  const labelAll = wide || big
   const now = useTick(5000)
 
   const { all, lights, busy, send } = useBulbs()
@@ -359,19 +398,21 @@ export default function Lights({ active }: ScreenProps) {
   // and the floor stay put.
   const litKey = lit.map((b) => b.id).join('|')
   const sceneModel = useMemo<Model>(() => {
-    if (wide) return model
+    if (labelAll) return model
     const litIds = litKey ? litKey.split('|') : []
     const show = new Set(shownSel ? [shownSel] : litIds.length <= 2 ? litIds : [])
     return { ...model, hotspots: model.hotspots.map((h) => (show.has(h.id) ? h : { ...h, label: '' })) }
-  }, [model, wide, litKey, shownSel])
+  }, [model, labelAll, litKey, shownSel])
 
   // The plan fills the box under its header band. A wide screen labels every bulb, so the fit keeps
-  // each label (11 px mono, starting 18 px right of its diamond) inside the box too.
+  // each label (11 px mono, 13 on the pad, starting 18 px right of its diamond) inside the box too.
   const view = useMemo<CameraPose | null>(() => {
     if (!size) return null
-    const labels = wide ? Object.fromEntries(model.hotspots.map((h) => [h.id, 24 + h.label.length * 6.8])) : undefined
-    return apartmentView(model, size.w, size.h, { top: ROOM_HD, right: 6, bottom: 6, left: 6, labels })
-  }, [model, size, wide])
+    const ch = big ? LABEL_CH_PAD : LABEL_CH
+    const labels = labelAll ? Object.fromEntries(model.hotspots.map((h) => [h.id, 24 + h.label.length * ch])) : undefined
+    const side = big ? 10 : 6
+    return apartmentView(model, size.w, size.h, { top: big ? ROOM_HD_PAD : ROOM_HD, right: side, bottom: side, left: side, labels })
+  }, [model, size, labelAll, big])
   const pose = useMemo<CameraPose | null>(() => {
     if (!view) return null
     // hidden: wait a little wider and lower, so opening the tab dollies into the apartment
@@ -401,163 +442,183 @@ export default function Lights({ active }: ScreenProps) {
   // rows build in on half steps inside their panel, so no empty frame paints on a warm open
   const rowI = (j: number) => 3.4 + j * 0.4
 
-  return (
-    <div className="lt-layout vl-screen">
-      <div className="lt-col lt-col-a">
-        {/* ALL LIGHTS: the power plate toggles everything, the bar sets the lit bulbs */}
-        <Panel
-          className="lt-p-master"
-          icon="lights"
-          lit={anyOn}
-          label="All lights"
-          value={!lights.has || !all.length ? undefined : allNA
-            ? <span className="lt-count-na"><Icon name="alert" size={13} tone="acc2" />All unavailable</span>
-            : <span className="lt-count" data-stale={lights.failed || undefined}><b>{lit.length}</b> of {avail.length} on</span>}
-          i={0}
+  // ALL LIGHTS: the power plate toggles everything, the bar sets the lit bulbs
+  const masterPanel = (
+    <Panel
+      key="master"
+      className="lt-p-master"
+      icon="lights"
+      lit={anyOn}
+      label="All lights"
+      value={!lights.has || !all.length ? undefined : allNA
+        ? <span className="lt-count-na"><Icon name="alert" size={13} tone="acc2" />All unavailable</span>
+        : <span className="lt-count" data-stale={lights.failed || undefined}><b>{lit.length}</b> of {avail.length} on</span>}
+      i={0}
+    >
+      <div className="lt-master">
+        <Press
+          className="lt-mpwr"
+          data-on={anyOn || undefined}
+          aria-pressed={anyOn}
+          aria-label={anyOn ? 'Turn all lights off' : 'Turn all lights on'}
+          aria-busy={availBusy || undefined}
+          data-busy={availBusy || undefined}
+          disabled={!avail.length}
+          onPress={toggleAll}
         >
-          <div className="lt-master">
-            <Press
-              className="lt-mpwr"
-              data-on={anyOn || undefined}
-              aria-pressed={anyOn}
-              aria-label={anyOn ? 'Turn all lights off' : 'Turn all lights on'}
-              aria-busy={availBusy || undefined}
-              data-busy={availBusy || undefined}
-              disabled={!avail.length}
-              onPress={toggleAll}
-            >
-              <Icon name="power" size={22} tone={anyOn ? 'ink' : 'dim'} glow={anyOn} />
-              <span className="lt-mpwr-cap">{anyOn ? 'On' : 'Off'}</span>
-            </Press>
-            <Slider
-              size="lg"
-              label="All lights brightness"
-              value={anyOn ? avg : 0}
-              readout={avg !== null}
-              disabled={!avail.length}
-              onStart={startMaster}
-              onCommit={setMaster}
-            />
-          </div>
-          {allNA && <div className="lt-note">Home Assistant cannot reach the bulbs. Cync may need re-auth.</div>}
-        </Panel>
+          <Icon name="power" size={22} tone={anyOn ? 'ink' : 'dim'} glow={anyOn} />
+          <span className="lt-mpwr-cap">{anyOn ? 'On' : 'Off'}</span>
+        </Press>
+        <Slider
+          size="lg"
+          label="All lights brightness"
+          value={anyOn ? avg : 0}
+          readout={avg !== null}
+          disabled={!avail.length}
+          onStart={startMaster}
+          onCommit={setMaster}
+        />
+      </div>
+      {allNA && <div className="lt-note">Home Assistant cannot reach the bulbs. Cync may need re-auth.</div>}
+    </Panel>
+  )
 
-        {/* PRESETS: the real list from src/lib/lights.ts */}
-        <Panel className="lt-p-presets" icon="color" lit={!!activePreset || !!roomCustom} label="Presets" value={presetValue} i={1}>
-          <PresetPlates
-            active={activePreset}
-            custom={roomCustom}
-            idle={!anyOn}
-            busy={anyOn && litBusy}
-            onPick={applyPreset}
-            onCustom={applyCustom}
+  // PRESETS: the real list from src/lib/lights.ts
+  const presetsPanel = (
+    <Panel key="presets" className="lt-p-presets" icon="color" lit={!!activePreset || !!roomCustom} label="Presets" value={presetValue} i={1}>
+      <PresetPlates
+        active={activePreset}
+        custom={roomCustom}
+        idle={!anyOn}
+        busy={anyOn && litBusy}
+        onPick={applyPreset}
+        onCustom={applyCustom}
+      />
+    </Panel>
+  )
+
+  // BULBS: one icon-led row each, unavailable ones dim at the bottom
+  const bulbsPanel = (
+    <Panel
+      key="bulbs"
+      className="lt-p-bulbs"
+      icon="bulb"
+      label="Bulbs"
+      value={lights.has ? (
+        <span className="lt-bulbs-val">
+          {lights.failed
+            ? <span className="lt-age" data-bad>unreachable · {ago(lights.updatedAt, now)}</span>
+            : <span className="lt-age">{ago(lights.updatedAt, now)}</span>}
+        </span>
+      ) : undefined}
+      i={3}
+    >
+      <div className="lt-bulbs">
+        {ordered.map((b, j) => (
+          <BulbRow
+            key={b.id}
+            b={b}
+            i={rowI(j)}
+            selected={shownSel === b.id}
+            busy={!!busy[b.id]}
+            rowRef={(el) => { rowEls.current[b.id] = el }}
+            onSelect={() => setSel((cur) => (cur === b.id ? null : b.id))}
+            onToggle={() => toggleBulb(b)}
+            onPct={(v) => setBulbPct(b, v)}
+            onColor={(p) => colorBulb(b, p)}
+            onCustom={(rgb) => customBulb(b, rgb)}
           />
-        </Panel>
+        ))}
+        {!lights.has && <div className="lt-empty">{lights.failed ? 'Lights unreachable' : 'Loading lights'}</div>}
+        {lights.has && !all.length && <div className="lt-empty">No bulbs reported</div>}
       </div>
+    </Panel>
+  )
 
-      <div className="lt-col lt-col-b">
-        {/* BULBS: one icon-led row each, unavailable ones dim at the bottom */}
-        <Panel
-          className="lt-p-bulbs"
-          icon="bulb"
-          label="Bulbs"
-          value={lights.has ? (
-            <span className="lt-bulbs-val">
-              {lights.failed
-                ? <span className="lt-age" data-bad>unreachable · {ago(lights.updatedAt, now)}</span>
-                : <span className="lt-age">{ago(lights.updatedAt, now)}</span>}
-            </span>
-          ) : undefined}
-          i={3}
+  // APARTMENT: each bulb where it is in its real color; a diamond finds its row
+  const roomPanel = (
+    <section key="room" className="vl-panel vl-build lt-p-room" style={{ '--i': 2 } as Vars}>
+      <div ref={roomBox} className="lt-room">
+        {pose && (
+          <WireScene
+            className="h-full w-full"
+            model={sceneModel}
+            pose={pose}
+            palette={palette}
+            heat={heat}
+            lights={sceneLights}
+            floorExtent={FLOOR_EXTENT}
+            orbit
+            orbitArea="model"
+            paused={!active}
+            motion={reduced ? 'reduced' : 'full'}
+            activeHotspot={shownSel}
+            hotspotLabels
+            onHotspot={(id) => selectFromRoom(id)}
+          />
+        )}
+        <div className="lt-room-hd" aria-hidden>
+          <span className="lt-room-label"><Icon name="home" size={14} tone="dim" className="lt-hd-ic" />Apartment</span>
+          {selBulb && <span className="lt-room-sel">{selBulb.name}</span>}
+        </div>
+      </div>
+    </section>
+  )
+
+  // THOR RGB
+  const rgbPanel = (
+    <Panel key="rgb" className="lt-p-rgb" i={4} dense>
+      <div className="lt-rgb">
+        <div className="lt-rgb-text min-w-0 flex-1">
+          <div className="lt-rgb-name">
+            <Icon name="thor" size={15} tone={rgb === 'relight' ? 'fg' : 'dim'} glow={rgb === 'relight'} className="lt-hd-ic" />
+            Thor RGB
+          </div>
+          <div className="lt-rgb-state">
+            {rgbLine.bad && <span className="lt-bad"><Icon name="alert" size={12} tone="acc2" />{rgbLine.bad}</span>}
+            {rgbLine.bad && rgbLine.text && SEP}
+            {/* each part wraps as a unit, its dot kept at the end of the line */}
+            {rgbLine.text.split(' · ').flatMap((p, k, all) => [
+              <span key={k} className="lt-part">{p}{k < all.length - 1 ? ' ·' : ''}</span>,
+              k < all.length - 1 ? ' ' : null,
+            ])}
+          </div>
+        </div>
+        {/* a press in flight locks both plates and marks the one pressed until thor agrees */}
+        <div
+          className="lt-rgb-ctl"
+          data-locked={!rgbUsable || undefined}
+          data-pending={rgbPress.pending ?? undefined}
+          aria-busy={!!rgbPress.pending || undefined}
+          inert={!rgbUsable || !!rgbPress.pending}
         >
-          <div className="lt-bulbs">
-            {ordered.map((b, j) => (
-              <BulbRow
-                key={b.id}
-                b={b}
-                i={rowI(j)}
-                selected={shownSel === b.id}
-                busy={!!busy[b.id]}
-                rowRef={(el) => { rowEls.current[b.id] = el }}
-                onSelect={() => setSel((cur) => (cur === b.id ? null : b.id))}
-                onToggle={() => toggleBulb(b)}
-                onPct={(v) => setBulbPct(b, v)}
-                onColor={(p) => colorBulb(b, p)}
-                onCustom={(rgb) => customBulb(b, rgb)}
-              />
-            ))}
-            {!lights.has && <div className="lt-empty">{lights.failed ? 'Lights unreachable' : 'Loading lights'}</div>}
-            {lights.has && !all.length && <div className="lt-empty">No bulbs reported</div>}
-          </div>
-        </Panel>
+          <Segmented<RgbPick>
+            className={cx('lt-rgb-seg', rgb === null && 'lt-seg-none')}
+            options={RGB_OPTS}
+            // no known state: a value that matches no option, so no cell claims to be on
+            value={(rgb ?? '') as RgbPick}
+            onChange={rgbPress.press}
+          />
+        </div>
       </div>
+    </Panel>
+  )
 
-      <div className="lt-col lt-col-c">
-        {/* APARTMENT: compact, each bulb where it is in its real color; a diamond finds its row */}
-        <section className="vl-panel vl-build lt-p-room" style={{ '--i': 2 } as Vars}>
-          <div ref={roomBox} className="lt-room">
-            {pose && (
-              <WireScene
-                className="h-full w-full"
-                model={sceneModel}
-                pose={pose}
-                palette={palette}
-                heat={heat}
-                lights={sceneLights}
-                floorExtent={FLOOR_EXTENT}
-                orbit
-                orbitArea="model"
-                paused={!active}
-                motion={reduced ? 'reduced' : 'full'}
-                activeHotspot={shownSel}
-                hotspotLabels
-                onHotspot={(id) => selectFromRoom(id)}
-              />
-            )}
-            <div className="lt-room-hd" aria-hidden>
-              <span className="lt-room-label"><Icon name="home" size={14} tone="dim" className="lt-hd-ic" />Apartment</span>
-              {selBulb && <span className="lt-room-sel">{selBulb.name}</span>}
-            </div>
-          </div>
-        </section>
+  // The columns by layout. The apartment always lives in column c, so a pad turning between
+  // its two layouts moves the panels around it and never rebuilds the 3D scene.
+  //   base: master + presets | bulbs | apartment + Thor RGB (the phone stacks them, see lights.css)
+  //   tall: the apartment across the top; master + Thor RGB beside the presets; the bulbs across the bottom
+  //   wide: master, apartment, Thor RGB | presets, bulbs
+  const col = (id: 'a' | 'b' | 'c' | 'd', kids: ReactNode[]) => <div key={id} className={`lt-col lt-col-${id}`}>{kids}</div>
+  const cols = shape === 'wide'
+    ? [col('c', [masterPanel, roomPanel, rgbPanel]), col('b', [presetsPanel, bulbsPanel])]
+    : shape === 'tall'
+      ? [col('c', [roomPanel]), col('a', [masterPanel, rgbPanel]), col('d', [presetsPanel]), col('b', [bulbsPanel])]
+      : [col('a', [masterPanel, presetsPanel]), col('b', [bulbsPanel]), col('c', [roomPanel, rgbPanel])]
 
-        {/* THOR RGB */}
-        <Panel className="lt-p-rgb" i={4} dense>
-          <div className="lt-rgb">
-            <div className="lt-rgb-text min-w-0 flex-1">
-              <div className="lt-rgb-name">
-                <Icon name="thor" size={15} tone={rgb === 'relight' ? 'fg' : 'dim'} glow={rgb === 'relight'} className="lt-hd-ic" />
-                Thor RGB
-              </div>
-              <div className="lt-rgb-state">
-                {rgbLine.bad && <span className="lt-bad"><Icon name="alert" size={12} tone="acc2" />{rgbLine.bad}</span>}
-                {rgbLine.bad && rgbLine.text && SEP}
-                {/* each part wraps as a unit, its dot kept at the end of the line */}
-                {rgbLine.text.split(' · ').flatMap((p, k, all) => [
-                  <span key={k} className="lt-part">{p}{k < all.length - 1 ? ' ·' : ''}</span>,
-                  k < all.length - 1 ? ' ' : null,
-                ])}
-              </div>
-            </div>
-            {/* a press in flight locks both plates and marks the one pressed until thor agrees */}
-            <div
-              className="lt-rgb-ctl"
-              data-locked={!rgbUsable || undefined}
-              data-pending={rgbPress.pending ?? undefined}
-              aria-busy={!!rgbPress.pending || undefined}
-              inert={!rgbUsable || !!rgbPress.pending}
-            >
-              <Segmented<RgbPick>
-                className={cx('lt-rgb-seg', rgb === null && 'lt-seg-none')}
-                options={RGB_OPTS}
-                // no known state: a value that matches no option, so no cell claims to be on
-                value={(rgb ?? '') as RgbPick}
-                onChange={rgbPress.press}
-              />
-            </div>
-          </div>
-        </Panel>
-      </div>
+  return (
+    <div ref={layoutRef} className="lt-layout vl-screen" data-shape={big ? shape : undefined}>
+      {cols}
     </div>
   )
 }

@@ -471,6 +471,8 @@ function carReport() {
     nomodel: d.hasAttribute('data-nomodel'),
     plates: [...d.querySelectorAll('.sys-gauge')].map((g) => ({ id: g.getAttribute('data-plate'), aria: g.getAttribute('aria-label'), text: txt(g), lit: g.hasAttribute('data-lit'), bar: !!g.querySelector('.vl-bar') })),
     facts: [...d.querySelectorAll('.sys-car-fact')].map((f) => ({ id: f.getAttribute('data-fact'), text: txt(f), lit: f.hasAttribute('data-lit') })),
+    // the Car tab is gone (the Tesla app has the controls): nothing here links to it
+    openCar: /Open Car/.test(txt(d)) || [...d.querySelectorAll('a[href], [aria-label]')].some((e) => /\/m\/car|Open Car/.test(`${e.getAttribute('href') ?? ''} ${e.getAttribute('aria-label') ?? ''}`)),
     // a diamond is active when it carries its label (WireScene adds a third span)
     active: [...d.querySelectorAll('[data-hotspot]')].filter((b) => b.children.length >= 3).map((b) => b.getAttribute('data-hotspot')),
     spots: [...d.querySelectorAll('[data-hotspot]')].map((b) => b.getAttribute('data-hotspot')),
@@ -534,6 +536,7 @@ function carTests() {
         const facts = r.facts.map((f) => f.text)
         t.check(facts[0] === 'Locked' && facts[1] === 'Home' && /66°F inside · 64°F out/.test(facts[2] ?? ''), `Car A's facts read ${JSON.stringify(facts)}, want Locked, Home, 66°F inside · 64°F out`)
         t.check(!/[—]/.test(JSON.stringify(r)), 'an em dash in the car detail')
+        t.check(!r.openCar, 'the car detail still links to the removed Car tab')
 
         // each diamond lights its plate, each plate its diamond
         const tapSpot = async (id) => { await page.tap({ sel: `.vl-page[data-active] .sys-car-detail [data-hotspot="${id}"]` }); await sleep(350) }

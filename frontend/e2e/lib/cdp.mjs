@@ -499,7 +499,7 @@ export class Page {
         const body = postBody(request)
         let parsed
         try { parsed = body ? JSON.parse(body) : undefined } catch { parsed = undefined }
-        const w = { method, path, url: request.url, body, json: parsed, at: Date.now() }
+        const w = { method, path, url: request.url, body, json: parsed, at: Date.now(), headers: request.headers ?? {} }
         this.writes.push(w)
         rec.mocked = true
         const out = this.writeHandler ? await this.writeHandler(w) : undefined

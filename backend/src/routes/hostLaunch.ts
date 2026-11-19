@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import express, { Router } from 'express'
 import { Agent, fetch as undiciFetch } from 'undici'
 import { sessionArea } from '../lib/projectAreas.js'
@@ -377,17 +378,44 @@ router.get('/session-hosts', async (_req, res) => {
   res.json({ hosts })
 })
 
+export type LaunchTargetInfo = { key: string; label: string; exists: boolean; phone: boolean; project: boolean }
+
+// thor's launch targets as its agent lists them (Raven's main terminals are
+// the phone ones that are not project targets). null when thor cannot say.
+export async function launchTargets(host = 'thor', timeoutMs = 10_000): Promise<LaunchTargetInfo[] | null> {
+  const launcher = LAUNCHERS[host]
+  if (!launcher?.token) return null
+  try {
+    const r = await callHostLauncher(launcher, '/launch-targets', { method: 'GET' }, timeoutMs)
+    const targets = (r.body as { targets?: unknown } | null)?.targets
+    if (r.status !== 200 || !Array.isArray(targets)) return null
+    return targets.map((raw) => {
+      const t = (raw ?? {}) as Record<string, unknown>
+      const key = String(t.key ?? '')
+      return { key, label: typeof t.label === 'string' && t.label ? t.label : key, exists: t.exists !== false, phone: t.phone === true, project: t.project === true }
+    }).filter((t) => TARGET_RE.test(t.key))
+  } catch {
+    return null
+  }
+}
+
 // The keys thor will launch a session in, for a session creating a project:
 // a project on a key thor does not have could never start a session. null
 // when thor cannot say, so a sleeping thor does not block the create.
 export async function launchTargetKeys(host = 'thor'): Promise<string[] | null> {
-  const launcher = LAUNCHERS[host]
-  if (!launcher?.token) return null
+  return (await launchTargets(host))?.map((t) => t.key) ?? null
+}
+
+// thor's session board rows, as GET /session-board has them for thor (area
+// mapped the same way). null when thor cannot say.
+export async function boardSessions(timeoutMs = 60_000): Promise<BoardRow[] | null> {
+  const launcher = LAUNCHERS.thor
+  if (!launcher.token) return null
   try {
-    const r = await callHostLauncher(launcher, '/launch-targets', { method: 'GET' }, 10_000)
-    const targets = (r.body as { targets?: unknown } | null)?.targets
-    if (r.status !== 200 || !Array.isArray(targets)) return null
-    return targets.map((t) => String((t as { key?: unknown })?.key ?? '')).filter(Boolean)
+    const r = await callHostLauncher(launcher, '/sessions', { method: 'GET' }, timeoutMs)
+    const body = (r.body ?? {}) as { sessions?: unknown }
+    if (r.status !== 200 || !Array.isArray(body.sessions)) return null
+    return (body.sessions as BoardRow[]).map((row) => ({ ...row, host: 'thor', area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null) }))
   } catch {
     return null
   }
@@ -586,6 +614,43 @@ router.post(
     }
   },
 )
+
+// The same upload from inside the API (Raven hands a DM attachment to a
+// session on thor): the chunks the page would send, and the path thor saved
+// it under. Throws with thor's own words when it refuses the file.
+export async function uploadToThor(name: string, data: Buffer): Promise<{ path: string; name: string; size: number }> {
+  if (!LAUNCHER_TOKEN) throw new Error('THOR_LAUNCHER_TOKEN is not set on the api host')
+  if (!data.length || data.length > UPLOAD_MAX) throw new Error('the file is empty or too large for thor')
+  const id = randomBytes(16).toString('hex')
+  for (let offset = 0; ;) {
+    const chunk = data.subarray(offset, offset + UPLOAD_CHUNK_MAX)
+    const qs = new URLSearchParams({ id, name: name.slice(0, 255), offset: String(offset), total: String(data.length) })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 60_000)
+    let status: number
+    let body: Record<string, unknown> | null = null
+    try {
+      const r = await undiciFetch(`${BASE}/upload?${qs}`, {
+        method: 'POST',
+        signal: controller.signal,
+        dispatcher: agent,
+        headers: { Authorization: `Bearer ${LAUNCHER_TOKEN}`, 'Content-Type': 'application/octet-stream' },
+        body: chunk,
+      })
+      status = r.status
+      try { body = (await r.json()) as Record<string, unknown> } catch { body = null }
+    } catch (err) {
+      throw new Error(`thor is not answering (${(err as Error).message})`)
+    } finally {
+      clearTimeout(timer)
+    }
+    if (status !== 200 || !body) throw new Error(String(body?.error ?? `thor answered ${status}`))
+    if (body.done === true && typeof body.path === 'string') return { path: body.path, name: String(body.name ?? name), size: Number(body.size) || data.length }
+    const received = Number(body.received)
+    if (!Number.isSafeInteger(received) || received <= offset) throw new Error('thor did not take the chunk')
+    offset = received
+  }
+}
 
 // --------------------------------------------------------------- sessions ----
 // The list the page draws: real sessions, newest first, one row per session.

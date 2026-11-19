@@ -1,5 +1,6 @@
 import { openDb } from './db.js'
 import type { Franchise, Ticket } from './psa.js'
+import type { RavenMeta } from './raven/types.js'
 
 // The work agents' data: the agents themselves, the channels Brendon and they
 // talk in, messages, proposals waiting on his approval, the action queue thor
@@ -190,6 +191,17 @@ const db = openDb('agents', `
   );
 `)
 
+// Added with Raven (lib/raven): what a message carries beyond its text, as
+// JSON (RavenMeta). ADD COLUMN with a constant default fills existing rows
+// with '{}' in place; the guard makes a second start a no-op.
+export function ensureMessageMeta(): boolean {
+  const cols = db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]
+  if (cols.some((c) => c.name === 'meta')) return false
+  db.exec("ALTER TABLE messages ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'")
+  return true
+}
+ensureMessageMeta()
+
 export const nowIso = () => new Date().toISOString()
 const parse = <T>(s: string | null | undefined, fallback: T): T => {
   if (!s) return fallback
@@ -341,20 +353,28 @@ export type Ref =
 
 type MessageRow = {
   id: number; channelId: string; author: string; text: string; refs: string; mentions: string; notify: 0 | 1
-  hop: number; proposalId: number | null; createdAt: string
+  hop: number; proposalId: number | null; createdAt: string; meta: string
 }
-export type Message = Omit<MessageRow, 'refs' | 'mentions' | 'notify'> & { refs: Ref[]; mentions: string[]; notify: boolean }
+/** meta is read by Raven's DM (#raven); other channels carry '{}' and ignore it. */
+export type Message = Omit<MessageRow, 'refs' | 'mentions' | 'notify' | 'meta'> & { refs: Ref[]; mentions: string[]; notify: boolean; meta: RavenMeta }
 
-const toMessage = (r: MessageRow): Message => ({ ...r, refs: parse<Ref[]>(r.refs, []), mentions: parse<string[]>(r.mentions, []), notify: r.notify === 1 })
+const toMeta = (s: string | null | undefined): RavenMeta => {
+  const m = parse<unknown>(s, {})
+  return m && typeof m === 'object' && !Array.isArray(m) ? m as RavenMeta : {}
+}
+
+const toMessage = (r: MessageRow): Message => ({
+  ...r, refs: parse<Ref[]>(r.refs, []), mentions: parse<string[]>(r.mentions, []), notify: r.notify === 1, meta: toMeta(r.meta),
+})
 
 export const MAX_TEXT = 12_000
 
-export function addMessage(m: { channelId: string; author: string; text: string; refs?: Ref[]; mentions?: string[]; notify?: boolean; hop?: number; proposalId?: number | null }): Message {
+export function addMessage(m: { channelId: string; author: string; text: string; refs?: Ref[]; mentions?: string[]; notify?: boolean; hop?: number; proposalId?: number | null; meta?: RavenMeta }): Message {
   const at = nowIso()
-  const r = db.prepare(`INSERT INTO messages (channelId, author, text, refs, mentions, notify, hop, proposalId, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const r = db.prepare(`INSERT INTO messages (channelId, author, text, refs, mentions, notify, hop, proposalId, createdAt, meta)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(m.channelId, m.author, m.text.slice(0, MAX_TEXT), JSON.stringify(m.refs ?? []), JSON.stringify(m.mentions ?? []),
-      m.notify ? 1 : 0, m.hop ?? 0, m.proposalId ?? null, at)
+      m.notify ? 1 : 0, m.hop ?? 0, m.proposalId ?? null, at, JSON.stringify(m.meta ?? {}))
   db.prepare('UPDATE channels SET lastMessageAt = ? WHERE id = ?').run(at, m.channelId)
   bump()
   return getMessage(Number(r.lastInsertRowid))!
@@ -460,10 +480,12 @@ export function runsSince(agentId: string, iso: string): number {
   return (db.prepare('SELECT COUNT(*) AS n FROM runs WHERE agentId = ? AND startedAt >= ?').get(agentId, iso) as { n: number }).n
 }
 
-/** A run left 'running' by a restart never finishes: close it, and give its events one more try. */
-export function failStaleRuns(): number {
-  const ids = (db.prepare("SELECT id FROM runs WHERE status = 'running'").all() as { id: string }[]).map((r) => r.id)
-  db.prepare("UPDATE runs SET status = 'failed', endedAt = ?, error = 'Valkyrie restarted during the run' WHERE status = 'running'").run(nowIso())
+/** A run left 'running' by a restart never finishes: close it, and give its events one more try. agentId limits it to one runner. */
+export function failStaleRuns(agentId?: string): number {
+  const only = agentId ? ' AND agentId = ?' : ''
+  const args = agentId ? [agentId] : []
+  const ids = (db.prepare(`SELECT id FROM runs WHERE status = 'running'${only}`).all(...args) as { id: string }[]).map((r) => r.id)
+  db.prepare(`UPDATE runs SET status = 'failed', endedAt = ?, error = 'Valkyrie restarted during the run' WHERE status = 'running'${only}`).run(nowIso(), ...args)
   for (const id of ids) releaseEvents(id)
   return ids.length
 }

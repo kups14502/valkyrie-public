@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
-import { viaCloudflare } from '../middleware/auth.js'
+import { isLoopbackReq } from '../middleware/auth.js'
 import {
   AgentError, getAgent, getChannel, getMail, listChannels, listMail, listMessages, listTeams, listTracked, mailInConversation,
   patchAgent, routeMail, setMailState, trackedTicket, trackNote, type Agent, type Channel, type Ref,
@@ -18,6 +18,7 @@ import { getProject, getProjectDoc, getTab, tabItem, updateProject, updateTab } 
 import { addTask } from '../lib/tasksStore.js'
 import { ProjError, type Ctx } from '../lib/projectTypes.js'
 import { franchiseConf } from '../lib/workConfig.js'
+import { RAVEN_CHANNEL } from '../lib/raven/types.js'
 
 // The tools a work agent acts with (lib/agents.ts starts each run with an
 // --mcp-config naming this endpoint and the run's token). Loopback only: the
@@ -31,8 +32,9 @@ const router = Router()
 type Loc = { agent: Agent; run: RunCtx }
 
 function guard(req: Request, res: Response, next: NextFunction) {
-  const peer = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
-  if (!['127.0.0.1', '::1'].includes(peer) || viaCloudflare(req) || req.headers.origin) {
+  // loopback with no proxy in between: `tailscale serve` also reaches us over loopback, with
+  // X-Forwarded-For and its own Host, and Cloudflare adds its headers (isLoopbackReq refuses both)
+  if (!isLoopbackReq(req) || req.headers.origin) {
     return res.status(403).json({ error: 'agent tools are for agent runs on this host only' })
   }
   const run = runForToken(String(req.headers['x-agent-token'] ?? ''))
@@ -82,6 +84,8 @@ async function thorFile(kind: 'tree' | 'file', target: string, rel: string): Pro
 const brief = (t: { body: string }) => (t.body.length > 1500 ? { ...t, body: `${t.body.slice(0, 1500)}…`, bodyTruncated: true } : t)
 
 function canRead(agent: Agent, ch: Channel): boolean {
+  // an agent may answer in Raven's thread but never read it: it relays every area
+  if (ch.id === RAVEN_CHANNEL) return false
   return canPost(agent, ch) || (ch.kind === 'home' && getAgent(ch.agentIds[0] ?? '')?.area === agent.area)
 }
 

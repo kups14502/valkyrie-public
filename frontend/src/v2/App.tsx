@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
 import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef, type ScreenProps } from './kit/shell'
 import { Palette } from './kit/palette'
+import { RavenBadge, RavenFab, RavenQuick } from './kit/raven'
 import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
@@ -14,7 +15,6 @@ import Today from './screens/Today'
 import Hotkeys from './screens/Hotkeys'
 import Claude from './screens/Claude'
 import Lights from './screens/Lights'
-import Car from './screens/Car'
 import Media from './screens/Media'
 import System from './screens/System'
 import { SettingsScreen } from './screens/Settings'
@@ -68,14 +68,12 @@ const BASE_SCREENS: ScreenDef[] = [
     Component: DashboardTab,
     floor: (sub) => (sub === 'today' || sub === 'hotkeys' ? 'faint' : false),
   },
-  // Brendon and his AI employees (lib/agents.ts on the backend): channels, proposals, tickets
-  { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint' },
+  // the one conversation with Raven, his assistant (lib/raven on the backend); the badge counts Raven's unread
+  { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint', badge: RavenBadge },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
   { id: 'lights', label: 'Lights', Component: Lights, floor: false },
-  // the car's controls under its Model Y; the model draws its own floor in its box, so the page floor stays faint
-  { id: 'car', label: 'Car', Component: Car, floor: 'faint' },
   {
     id: 'media',
     label: 'Media',
@@ -89,14 +87,16 @@ const BASE_SCREENS: ScreenDef[] = [
     Component: Media,
     floor: 'faint',
   },
-  { id: 'system', label: 'System', subs: [{ id: 'hosts', label: 'Hosts' }, { id: 'services', label: 'Services' }, { id: 'trades', label: 'Trades' }], Component: System, floor: 'faint' },
+  { id: 'system', label: 'System', subs: [{ id: 'hosts', label: 'Hosts' }, { id: 'trades', label: 'Trades' }, { id: 'services', label: 'Services' }], Component: System, floor: 'faint' },
 ]
 const SCREENS = withFeatures(BASE_SCREENS)
 
-// Old URLs (bookmarks, the home screen icon, screens still saying go('claude')) land on the new tabs
+// Old URLs (bookmarks, the home screen icon, screens still saying go('claude')) land on the new tabs.
+// The Car tab is gone (the Tesla app has the controls): the car stays on System > Hosts.
 const LEGACY: LegacyMap = (screen, sub) => {
   if (screen === 'home') return sub === 'settings' ? 'settings' : sub === 'today' ? 'dashboard/today' : 'dashboard'
   if (screen === 'claude') return sub ? `ai/${sub}` : 'ai'
+  if (screen === 'car') return 'system/hosts'
   return null
 }
 
@@ -153,7 +153,7 @@ function useScreens(): ScreenDef[] {
 const FEATURE_ROUTES = featureRoutes()
 
 function V2({ screens }: { screens: ScreenDef[] }) {
-  return <V2Shell screens={screens} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} />
+  return <V2Shell screens={screens} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} corner={<RavenFab />} />
 }
 
 const BASE_AI = '/m/ai'
@@ -222,6 +222,8 @@ export default function V2App() {
       </Routes>
       {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}
       <Palette screens={screens} />
+      {/* Raven's quick sheet: the corner button, Ctrl+Shift+Space and the palette open it on every v2 screen */}
+      <RavenQuick />
     </>
   )
 }

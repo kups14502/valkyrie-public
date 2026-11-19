@@ -61,6 +61,8 @@ export type ScreenDef = {
    * (and the room comes back) while something plays.
    */
   foot?: boolean
+  /** a small count drawn in the tab after its name (on the phone, on its icon's corner); renders nothing when there is none */
+  badge?: ComponentType
 }
 
 export type FloorSetting = boolean | 'faint'
@@ -738,6 +740,7 @@ function Nav({ screens, activeId, sub, go }: {
       <div className="vl-nav-prims" ref={primsRef}>
         {screens.map((s) => {
           const on = s.id === activeId
+          const Badge = s.badge
           return (
             <Press
               key={s.id}
@@ -750,6 +753,7 @@ function Nav({ screens, activeId, sub, go }: {
               {/* the phone shows the icon and keeps the name for screen readers; wider screens show the name */}
               <Icon name={s.icon ?? (isIconName(s.id) ? s.id : 'home')} size={20} tone={on ? 'fg' : 'dim'} glow={on} className="vl-tab-icon" />
               <span className="vl-tab-label">{s.label}</span>
+              {Badge && <Badge />}
             </Press>
           )
         })}
@@ -832,9 +836,11 @@ function tabPath(def: ScreenDef, sub: string): string {
   return `${BASE}/${def.id}${s ? `/${s}` : ''}`
 }
 
-export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, legacy }: {
+export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, legacy, corner }: {
   screens: ScreenDef[]
   initial?: string
+  /** a floating button for the bottom-right corner (App passes Raven's); the lights button keeps the left */
+  corner?: ReactNode
   /** extra layer behind the pager (e.g. a shared WireScene); the CSS dot floor is always under it */
   backdrop?: ReactNode
   /** the Settings screen, opened by the strip's gear at /m/settings; no gear without it */
@@ -1167,6 +1173,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
         </div>
         <PlayerSync />
         <Foot />
+        {corner}
       </div>
     </ShellCtx.Provider>
   )

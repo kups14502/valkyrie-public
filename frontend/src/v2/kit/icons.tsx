@@ -5,7 +5,7 @@ import {
   House, Inbox, LayoutDashboard, MessagesSquare, Laptop, Lightbulb, LightbulbOff, ListChecks, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
   Smartphone, Sparkles, SquareTerminal, SquareArrowOutUpRight, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
-  UtensilsCrossed, Cctv, Fan, Snowflake, Armchair, Package, Blinds, Flashlight, Megaphone, Sunrise, MapPinned, CircleDot, CloudDownload, KeyRound,
+  UtensilsCrossed, MapPinned, CloudDownload, KeyRound,
   createLucideIcon, type LucideIcon,
 } from 'lucide-react'
 
@@ -14,15 +14,6 @@ const RgbCircles = createLucideIcon('rgb-circles', [
   ['circle', { cx: '12', cy: '8.6', r: '5.2', key: 'r' }],
   ['circle', { cx: '8.6', cy: '14.6', r: '5.2', key: 'g' }],
   ['circle', { cx: '15.4', cy: '14.6', r: '5.2', key: 'b' }],
-])
-
-// The Car tab's steering wheel heater: a rim, a hub and three spokes, in the same line style (lucide has none).
-const SteeringWheel = createLucideIcon('steering-wheel', [
-  ['circle', { cx: '12', cy: '12', r: '9', key: 'rim' }],
-  ['circle', { cx: '12', cy: '12', r: '2.2', key: 'hub' }],
-  ['path', { d: 'M9.8 12H3.2', key: 'left' }],
-  ['path', { d: 'M14.2 12h6.6', key: 'right' }],
-  ['path', { d: 'M12 14.2v6.6', key: 'down' }],
 ])
 
 // local join: ui.tsx imports this file, so nothing is imported back from it
@@ -68,19 +59,8 @@ export const ICONS = {
   unlocked: LockOpen,
   away: MapPin,
   temp: Thermometer,
-  // the Car tab's controls
-  sentry: Cctv,
-  fan: Fan,
-  defrost: Snowflake,
-  seat: Armchair,
-  wheel: SteeringWheel,
-  cargo: Package,
-  windows: Blinds,
-  flash: Flashlight,
-  honk: Megaphone,
-  wake: Sunrise,
+  // places, updates and sign-ins
   map: MapPinned,
-  tire: CircleDot,
   update: CloudDownload,
   key: KeyRound,
   // metrics

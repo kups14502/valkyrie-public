@@ -3,7 +3,7 @@
 
 import { extraTabs } from './extra.mjs'
 
-const BASE_TABS = ['Dashboard', 'Messages', 'AI', 'Lights', 'Car', 'Media', 'System']
+const BASE_TABS = ['Dashboard', 'Messages', 'AI', 'Lights', 'Media', 'System']
 
 /**
  * The base list with each extra placed right after the item whose key is its

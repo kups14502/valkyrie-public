@@ -1073,7 +1073,8 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   margin: 0 -4px 0 8px;
   color: var(--dim);
 }
-.vl-strip-gear::after { content: ''; position: absolute; inset: -10px -11px -10px -11px; }
+/* the target leans left: it sits 6 px from the edge, and a target past the edge widens the shell, which a tap then scrolls sideways */
+.vl-strip-gear::after { content: ''; position: absolute; inset: -10px -6px -10px -16px; }
 .vl-strip-gear .vl-icon { vertical-align: 0; transition: color .2s, filter .2s, transform .3s var(--ease); }
 .vl-strip-gear[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); transform: rotate(30deg); }
 .vl-strip-gear[data-on] .vl-icon { transform: rotate(60deg); }

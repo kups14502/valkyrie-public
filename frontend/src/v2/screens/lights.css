@@ -468,6 +468,13 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
   .lt-rgb-seg { width: 100%; }
   /* room for "Kitchen Light" beside its color icon */
   .lt-bulb-id { width: 140px; }
+  /* finger-sized: every press 48 px or more (the power box, the bar, the plates and swatches with their hit edges) */
+  .lt-bulb, .lt-bulb-id { min-height: 48px; }
+  .lt-sl { height: 48px; }
+  .lt-tg { width: 46px; height: 36px; }
+  .lt-tg::after { inset: -6px -2px; }
+  .lt-pre { height: 44px; }
+  .lt-sw { height: 40px; }
 }
 
 @media (min-width: 1100px) {
@@ -498,4 +505,125 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
   .lt-count b { font-size: 22px; }
   .lt-strip { padding: 0 0 4px; }
   .lt-sw { height: 30px; }
+}
+
+/* ---------- the pad profile (an iPad, the headset) ----------
+   Lights.tsx sets data-shape from the screen's real width and places the panels in columns for it:
+   'tall' (upright): the apartment across the top, All lights + Thor RGB beside the presets, the
+   bulbs across the bottom; 'wide' (on its side): All lights, the apartment and Thor RGB on the left,
+   the presets and the bulbs on the right. Everything is a size up, every press 48 px or more, and
+   the apartment takes the height the controls leave on the screen. Panels keep their natural
+   height. */
+.lt-layout[data-shape] {
+  display: grid;
+  gap: 10px 16px;
+  align-items: start;
+  align-content: start;
+  padding-top: 12px;
+  grid-template-rows: none;
+}
+.lt-layout[data-shape] .lt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  transform: none;
+  grid-area: auto;
+  container: ltc / inline-size;
+}
+.lt-layout[data-shape] .lt-col > * { order: 0; }
+.lt-layout[data-shape='tall'] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: 'c c' 'a d' 'b b';
+}
+.lt-layout[data-shape='tall'] .lt-col-a { grid-area: a; }
+.lt-layout[data-shape='tall'] .lt-col-b { grid-area: b; }
+.lt-layout[data-shape='tall'] .lt-col-c { grid-area: c; }
+.lt-layout[data-shape='tall'] .lt-col-d { grid-area: d; }
+/* the room: as wide as the screen, as tall as the controls under it leave (half its width at most) */
+.lt-layout[data-shape='tall'] .lt-room { aspect-ratio: auto; height: clamp(260px, calc(100dvh - 830px), 50cqw); }
+.lt-layout[data-shape='wide'] {
+  grid-template-columns: repeat(2, minmax(0, 640px));
+  grid-template-areas: none;
+  justify-content: center;
+}
+/* the controls lean toward the room on their left (f005), the room column stays square-on */
+.lt-layout[data-shape='wide'] .lt-col-b { transform: perspective(1400px) rotateY(-5deg); transform-origin: 100% 50%; }
+.lt-layout[data-shape='wide'] .lt-room { aspect-ratio: auto; height: clamp(280px, calc(100dvh - 420px), 80cqw); }
+
+/* panels: roomier, a larger label and value */
+.lt-layout[data-shape] .vl-panel { --ch: 8px; padding: 12px 14px 14px; }
+.lt-layout[data-shape] .vl-panel[data-dense] { padding: 12px 14px; }
+.lt-layout[data-shape] .lt-p-room.vl-panel { padding: 0; }
+.lt-layout[data-shape] .vl-panel-body { margin-top: 10px; }
+.lt-layout[data-shape] .vl-panel-label { font-size: 13px; line-height: 18px; }
+.lt-layout[data-shape] .vl-panel-value { font-size: 16px; line-height: 18px; }
+.lt-layout[data-shape] .vl-panel-icon { width: 18px; height: 18px; }
+.lt-layout[data-shape] .lt-count { font-size: 16px; gap: 6px; }
+.lt-layout[data-shape] .lt-count b { font-size: 32px; line-height: 24px; }
+.lt-layout[data-shape] .lt-count-na { font-size: 16px; }
+.lt-layout[data-shape] .lt-age { font-size: 13px; }
+.lt-layout[data-shape] .lt-note { margin-top: 8px; font-size: 14px; line-height: 19px; }
+
+/* all lights: a bigger power plate and bar */
+.lt-layout[data-shape] .lt-master { gap: 12px; }
+.lt-layout[data-shape] .lt-mpwr { width: 108px; height: 76px; gap: 7px; }
+.lt-layout[data-shape] .lt-mpwr .vl-icon { width: 30px; height: 30px; }
+.lt-layout[data-shape] .lt-mpwr-cap { font-size: 11px; }
+.lt-layout[data-shape] .lt-sl[data-size='lg'] { --h: 76px; height: 76px; }
+.lt-layout[data-shape] .lt-sl-read { right: 16px; font-size: 22px; }
+.lt-layout[data-shape] .lt-sl-read small { font-size: 14px; }
+
+/* presets */
+.lt-layout[data-shape] .lt-pres { gap: 8px; }
+.lt-layout[data-shape] .lt-pre { height: 58px; gap: 10px; padding: 0 12px 0 14px; }
+.lt-layout[data-shape] .lt-chip { width: 14px; height: 14px; }
+.lt-layout[data-shape] .lt-pre-name { font-size: 15.5px; }
+.lt-layout[data-shape] .lt-pre-ic { width: 18px; height: 18px; }
+/* a half-width column (the pad upright): the chip becomes a cap line over a centered name, no sun / moon */
+@container (max-width: 440px) {
+  .lt-layout[data-shape] .lt-pre { justify-content: center; padding: 4px 6px 0; }
+  .lt-layout[data-shape] .lt-chip { position: absolute; left: 0; right: 0; top: 0; width: auto; height: 4px; box-shadow: none; }
+  .lt-layout[data-shape] .lt-pre[data-on] .lt-chip { box-shadow: 0 0 8px var(--sw); }
+  .lt-layout[data-shape] .lt-pre-name { flex: 0 1 auto; text-align: center; }
+  .lt-layout[data-shape] .lt-pre-ic { display: none; }
+}
+
+/* bulbs: tall rows, a long bar, a big power box */
+.lt-layout[data-shape] .lt-bulb { min-height: 60px; gap: 12px; }
+.lt-layout[data-shape] .lt-bulb-wrap::before { inset: 0 -14px; }
+.lt-layout[data-shape] .lt-bulb-id { width: 200px; min-height: 60px; gap: 12px; }
+.lt-layout[data-shape] .lt-bulb-ic { width: 24px; height: 24px; }
+.lt-layout[data-shape] .lt-bulb-name { font-size: 17px; }
+.lt-layout[data-shape] .lt-bulb-more { width: 16px; height: 16px; margin-left: -4px; }
+.lt-layout[data-shape] .lt-sl { --h: 32px; height: 56px; }
+.lt-layout[data-shape] .lt-sl[data-look='line'] .lt-sl-bar { transform: scaleY(calc(2 / 32)); }
+.lt-layout[data-shape] .lt-pct { width: 50px; font-size: 16px; }
+.lt-layout[data-shape] .lt-pct small { font-size: 11px; }
+.lt-layout[data-shape] .lt-tg { width: 64px; height: 48px; }
+.lt-layout[data-shape] .lt-tg::after { inset: -6px -4px; }
+.lt-layout[data-shape] .lt-tg .vl-icon { width: 21px; height: 21px; }
+.lt-layout[data-shape] .lt-na { gap: 7px; font-size: 14px; }
+.lt-layout[data-shape] .lt-empty { min-height: 48px; font-size: 15px; }
+.lt-layout[data-shape] .lt-strip { padding: 4px 0 12px; }
+.lt-layout[data-shape] .lt-sws { gap: 8px; }
+.lt-layout[data-shape] .lt-sw { height: 48px; }
+.lt-layout[data-shape] .lt-sw-ic { width: 19px; height: 19px; }
+
+/* the apartment's header and its bulb labels (scene.tsx reads --wire-label) */
+.lt-layout[data-shape] .lt-room { --wire-label: 13px; }
+.lt-layout[data-shape] .lt-room-hd { left: 14px; right: 14px; top: 10px; font-size: 15px; line-height: 20px; }
+.lt-layout[data-shape] .lt-room-label { font-size: 13px; }
+.lt-layout[data-shape] .lt-room-label .lt-hd-ic { width: 17px; height: 17px; vertical-align: -3px; }
+
+/* Thor RGB: status beside a bigger pair of plates; a narrow column stacks them */
+.lt-layout[data-shape] .lt-rgb { gap: 14px; min-height: 52px; }
+.lt-layout[data-shape] .lt-rgb-name { font-size: 13px; line-height: 20px; }
+.lt-layout[data-shape] .lt-rgb-name .lt-hd-ic { width: 18px; height: 18px; margin-right: 9px; }
+.lt-layout[data-shape] .lt-rgb-state { padding-left: 27px; margin-top: 2px; font-size: 13.5px; line-height: 18px; }
+.lt-layout[data-shape] .lt-rgb-seg { width: 260px; height: 52px; font-size: 15px; }
+.lt-layout[data-shape] .lt-rgb-seg .vl-icon { width: 18px; height: 18px; }
+@container ltc (max-width: 400px) {
+  .lt-layout[data-shape] .lt-rgb { flex-direction: column; align-items: stretch; gap: 10px; }
+  .lt-layout[data-shape] .lt-rgb-seg { width: 100%; }
 }

@@ -123,6 +123,14 @@ function clean(text: string): string {
 
 let running: Promise<Brief | null> | null = null
 
+type BriefListener = (day: string, text: string) => void
+const listeners: BriefListener[] = []
+
+/** Called after each brief is written. Raven posts the day's first one in its thread (lib/raven/run.ts). */
+export function onBriefWritten(fn: BriefListener): void {
+  listeners.push(fn)
+}
+
 /** Write today's brief now (or join the run already going). */
 export function writeBrief(): Promise<Brief | null> {
   if (running) return running
@@ -135,6 +143,9 @@ export function writeBrief(): Promise<Brief | null> {
       const text = clean(await askClaude(prompt(await facts()), { timeoutMs: 150_000 }))
       if (!text) throw new Error('Claude wrote nothing')
       db.prepare("UPDATE briefs SET status = 'done', text = ?, error = NULL, updatedAt = ? WHERE day = ?").run(text, nowIso(), day)
+      for (const fn of listeners) {
+        try { fn(day, text) } catch (e) { console.error('[brief] listener:', (e as Error).message) }
+      }
     } catch (err) {
       const msg = (err as Error).message.slice(0, 300)
       console.error('[brief] failed:', msg)

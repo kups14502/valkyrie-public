@@ -29,7 +29,7 @@ export type WireSceneProps = {
   style?: CSSProperties
   /** highlights one diamond and shows its label */
   activeHotspot?: string | null
-  /** show every hotspot's label, not just the active one */
+  /** show every hotspot's label, not just the active one (11 px; a page sets --wire-label on an ancestor to size them) */
   hotspotLabels?: boolean
   /** 'reduced': no spin, no flow, no blade spin, no pulse, 120 ms camera moves. Default follows prefers-reduced-motion. */
   motion?: 'full' | 'reduced'
@@ -476,7 +476,7 @@ export function WireScene(props: WireSceneProps) {
                   <span
                     style={{
                       position: 'absolute', left: 40, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap',
-                      font: '500 11px/1 var(--font)', letterSpacing: '.02em', color: fg,
+                      font: '500 var(--wire-label, 11px)/1 var(--font)', letterSpacing: '.02em', color: fg,
                       textShadow: `0 0 3px #000, 0 0 8px rgba(${fgRgb}, .55)`, pointerEvents: 'none',
                     }}
                   >

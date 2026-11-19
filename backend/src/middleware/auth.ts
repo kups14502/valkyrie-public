@@ -145,9 +145,16 @@ async function verifyCfAccessToken(token: string | undefined): Promise<jwt.JwtPa
 // stream bytes to a browser element that cannot send headers. A feature adds
 // its own at startup (index.ts, BackendFeature.mediaTokenPaths).
 const MEDIA_TOKEN_PATHS = new Set(['/plex/img', '/plex/music/stream'])
+// Same, for one path segment under a prefix: a Raven attachment by id, shown in an <img>.
+const MEDIA_TOKEN_PREFIXES = ['/raven/files/']
 
 export function addMediaTokenPaths(paths: string[]): void {
   for (const p of paths) MEDIA_TOKEN_PATHS.add(p)
+}
+
+function isMediaTokenPath(p: string): boolean {
+  if (MEDIA_TOKEN_PATHS.has(p)) return true
+  return MEDIA_TOKEN_PREFIXES.some((pre) => p.startsWith(pre) && /^[\w-]{1,64}$/.test(p.slice(pre.length)))
 }
 
 function bearer(req: Pick<IncomingMessage, 'headers'>): string | undefined {
@@ -164,7 +171,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   //     why it's a separate short-lived token that grants nothing but these
   //     routes (and why the full app token is never accepted from a query
   //     string).
-  if (req.method === 'GET' && MEDIA_TOKEN_PATHS.has(req.path)
+  if (req.method === 'GET' && isMediaTokenPath(req.path)
     && typeof req.query.token === 'string' && verifyImgToken(req.query.token)) {
     return next()
   }

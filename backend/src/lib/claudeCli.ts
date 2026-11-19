@@ -23,10 +23,11 @@ import { poolTokensByRoom } from './accountSwitch.js'
  * execFile with stdin closed at once: an open stdin makes `claude -p` wait 3 s
  * for piped input before it starts.
  */
-function run(file: string, args: string[], opts: { cwd: string; timeout: number; env: NodeJS.ProcessEnv }): Promise<{ stdout: string }> {
+function run(file: string, args: string[], opts: { cwd: string; timeout: number; env: NodeJS.ProcessEnv; signal?: AbortSignal }): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
-    const child = execFile(file, args, { ...opts, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
-      if (err) reject(Object.assign(err, { stdout: String(stdout ?? '') }))
+    const { signal, ...rest } = opts
+    const child = execFile(file, args, { ...rest, ...(signal ? { signal } : {}), maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(Object.assign(err, { stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }))
       else resolve({ stdout: String(stdout) })
     })
     child.stdin?.end()
@@ -76,18 +77,31 @@ function creds(scratch: string): Cred[] {
   return [...pool, ...profiles].slice(0, 3)
 }
 
-export class ClaudeCliError extends Error {}
+/** detail: what the CLI itself printed on each failure (stdout or stderr), for a caller that must tell one failure from another. */
+export class ClaudeCliError extends Error {
+  detail = ''
+}
+
+const cliError = (message: string, detail: string[] = []) => Object.assign(new ClaudeCliError(message), { detail: detail.join('\n').slice(0, 4000) })
+// a failed execFile: what it printed, never its message (the whole command line, prompt included);
+// anything else (an is_error answer, an empty one): the message
+const said = (e: { stdout?: string; stderr?: string; code?: unknown; signal?: unknown; message: string }) =>
+  e.stdout !== undefined || e.stderr !== undefined
+    ? [e.stdout, e.stderr].filter(Boolean).join('\n').slice(0, 1500) || `the CLI exited (${String(e.code ?? e.signal ?? 'no output')})`
+    : e.message.slice(0, 1500)
 
 /** Claude's answer text for one prompt. Throws ClaudeCliError when no profile answered. */
-export async function askClaude(prompt: string, opts: { model?: string; timeoutMs?: number } = {}): Promise<string> {
+export async function askClaude(prompt: string, opts: { model?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<string> {
   const cli = CLI_CANDIDATES.find((c) => existsSync(c))
   if (!cli) throw new ClaudeCliError('the claude CLI is not installed on this host')
   const dir = await mkdtemp(path.join(tmpdir(), 'valkyrie-assist-'))
   const work = path.join(dir, 'work')
   await mkdir(work)
   const errors: string[] = []
+  const details: string[] = []
   try {
     for (const p of creds(dir)) {
+      if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
       try {
         const { stdout } = await run(cli, [
           '-p', prompt,
@@ -107,6 +121,7 @@ export async function askClaude(prompt: string, opts: { model?: string; timeoutM
             ANTHROPIC_API_KEY: '',
             ANTHROPIC_AUTH_TOKEN: '',
           },
+          signal: opts.signal,
         })
         const envelope = extractJson(stdout) as { result?: unknown; is_error?: unknown } | null
         if (envelope && envelope.is_error === true) throw new Error(String(envelope.result ?? 'the CLI reported an error').slice(0, 200))
@@ -114,12 +129,14 @@ export async function askClaude(prompt: string, opts: { model?: string; timeoutM
         if (!answer.trim()) throw new Error('empty answer')
         return answer
       } catch (err) {
-        const e = err as Error & { killed?: boolean; code?: string; stdout?: string }
-        const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : (e.stdout ? String(e.stdout).slice(0, 200) : e.message.slice(0, 200))
+        if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
+        const e = err as Error & { killed?: boolean; code?: string; stdout?: string; stderr?: string }
+        const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : said(e).slice(0, 200)
         errors.push(`${p.id}: ${why}`)
+        details.push(said(e))
       }
     }
-    throw new ClaudeCliError(`no Claude profile answered (${errors.join('; ')})`)
+    throw cliError(`no Claude profile answered (${errors.join('; ')})`, details)
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
@@ -132,18 +149,25 @@ export type CliRun = { text: string; cred: string; costUsd: number | null; turns
  * passes every flag but the credential, in a working directory it owns. A
  * credential that fails is followed by the next only while retryable() says
  * the run has not acted yet, so a run that already posted or proposed is
- * never repeated under another account.
+ * never repeated under another account. retryable() gets the failure in
+ * words, so a caller can stop on an error no other account would fix.
+ *
+ * signal (optional) stops the run: the child is killed and the call throws
+ * ClaudeCliError('stopped'), with no further credential tried.
  */
-export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: () => boolean }): Promise<CliRun> {
+export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: (why: string) => boolean; signal?: AbortSignal }): Promise<CliRun> {
   const cli = CLI_CANDIDATES.find((c) => existsSync(c))
   if (!cli) throw new ClaudeCliError('the claude CLI is not installed on this host')
   const errors: string[] = []
+  const details: string[] = []
   for (const p of creds(opts.scratch)) {
+    if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
     try {
       const { stdout } = await run(cli, args, {
         cwd: opts.cwd,
         timeout: opts.timeoutMs,
         env: { ...process.env, ...p.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' },
+        signal: opts.signal,
       })
       const env = extractJson(stdout) as { result?: unknown; is_error?: unknown; total_cost_usd?: unknown; num_turns?: unknown; duration_ms?: unknown } | null
       if (env && env.is_error === true) throw new Error(String(env.result ?? 'the CLI reported an error').slice(0, 300))
@@ -156,13 +180,16 @@ export async function runClaude(args: string[], opts: { cwd: string; scratch: st
         durationMs: num(env?.duration_ms),
       }
     } catch (err) {
-      const e = err as Error & { killed?: boolean; code?: string; stdout?: string }
-      const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : (e.stdout ? String(e.stdout).slice(0, 300) : e.message.slice(0, 300))
+      if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
+      const e = err as Error & { killed?: boolean; code?: string; stdout?: string; stderr?: string }
+      // never e.message for a failed execFile: it is the whole command line, the prompt included
+      const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : said(e).slice(0, 300)
       errors.push(`${p.id}: ${why}`)
-      if (!opts.retryable() || why === 'timed out') break
+      details.push(said(e))
+      if (!opts.retryable(`${why}\n${said(e)}`) || why === 'timed out') break
     }
   }
-  throw new ClaudeCliError(errors.join('; ') || 'no Claude profile answered')
+  throw cliError(errors.join('; ') || 'no Claude profile answered', details)
 }
 
 // ---------------------------------------------------------- New York time ----

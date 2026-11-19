@@ -195,11 +195,14 @@ const run1 = store.listRuns('groceries')[0]
 check('run recorded done', run1?.status === 'done' && run1.turns === 1, run1)
 const last = JSON.parse(fs.readFileSync(path.join(stub, 'last-groceries.json'), 'utf8'))
 check('run is locked down', last.args.includes('--strict-mcp-config') && last.args.join(' ').includes('Bash,Edit,Write,Read'), last.args)
+check('run has no built-in tools (--tools "")', last.args.includes('--tools') && last.args[last.args.indexOf('--tools') + 1] === '', last.args)
 check('prompt carries the message', last.prompt.includes('chicken breast for the tomato pasta'), last.prompt.slice(0, 400))
 check('groceries gets the browser server', fs.existsSync(path.join(stub, 'last-groceries.json')))
+// the badge is Raven's thread now: a post that wants Brendon is mirrored there and counted once
 let [, cnt] = await j('GET', '/msg/count')
-check('unread counts agent messages', cnt.unread >= 1 && cnt.notify >= 1, cnt)
-await j('POST', '/msg/channels/groceries/read', {})
+check('unread counts the mirrored agent post', cnt.unread >= 1 && cnt.notify >= 1, cnt)
+check('mirror carries the agent and its message', store.listMessages('raven').some((m) => m.author === 'groceries' && m.meta.relay?.sourceMessageId === gm?.id), store.listMessages('raven'))
+await j('POST', '/msg/channels/raven/read', {})
 ;[, cnt] = await j('GET', '/msg/count')
 check('read clears the count', cnt.unread === 0, cnt)
 

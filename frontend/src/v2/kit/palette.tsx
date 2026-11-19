@@ -6,6 +6,7 @@ import { BASE, SETTINGS_ID, playerActions, requestIntent, usePlayerNow, type Scr
 import { useSessionIndex } from './data'
 import { Icon, isIconName, type IconName, type IconRef } from './icons'
 import { PALETTE_EVENT, paletteState, toast } from './ui'
+import { openRavenQuick } from './ravenStore'
 import { getMotionSetting, setMotionSetting } from './motion'
 import { fetchTermSessions, termLabel, type TermSession } from '../../lib/api'
 import { clearToken, setAuthSkipped } from '../../lib/auth'
@@ -190,6 +191,8 @@ function PaletteBox({ screens, onClose }: { screens: ScreenDef[]; onClose: () =>
     }
 
     // ---- quick actions ----
+    // Raven's quick sheet (kit/raven.tsx); on Messages it focuses the conversation's box instead
+    out.push({ id: 'act:raven', label: 'Message Raven', group: 'Actions', icon: 'messages', hint: 'Ctrl+Shift+Space', keys: 'raven assistant ask send note quick', run: openRavenQuick })
     out.push({ id: 'act:new', label: 'New AI session', group: 'Actions', icon: 'newSession', keys: 'start claude launch', run: () => navigate(`${BASE}/ai/sessions?new=1`, { replace: onTab }) })
     // the shell's round lights button does the switching (and its Undo); no button, no row
     if (document.querySelector('.vl-lamp')) {

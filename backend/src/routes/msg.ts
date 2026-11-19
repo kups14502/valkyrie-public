@@ -10,6 +10,8 @@ import { actionResult, approveProposal, declineProposal } from '../lib/agentActi
 import { feedStatus, ingestMail, ingestTeams } from '../lib/workFeeds.js'
 import { PsaError, type Franchise } from '../lib/psa.js'
 import { franchiseConf } from '../lib/workConfig.js'
+import { RAVEN_CHANNEL } from '../lib/raven/types.js'
+import { brendonToRaven } from '../lib/raven/run.js'
 
 // Valkyrie Messages: Brendon and his agents (lib/agents.ts). The UI reads and
 // posts here; thor's Work-Bridge.ps1 feeds mail and Teams in and runs the mail
@@ -79,11 +81,13 @@ router.get('/msg/overview', h((req, res) => {
   })
 }))
 
+// The Messages tab is Raven's thread now, and every post that wants Brendon is
+// mirrored into it, so its badge counts that thread alone (the agent channels
+// would count each mirrored post twice). Through Cloudflare the thread is hidden.
 router.get('/msg/count', h((req, res) => {
   const visible = new Set(listChannels().filter((c) => !hiddenArea(req, c.area)).map((c) => c.id))
-  let n = 0, k = 0
-  for (const [c, v] of unreadCounts()) if (visible.has(c)) { n += v.unread; k += v.notify }
-  res.json({ unread: n, notify: k, pending: pendingProposals().filter((p) => visible.has(p.channelId)).length })
+  const raven = visible.has(RAVEN_CHANNEL) ? unreadCounts().get(RAVEN_CHANNEL) : undefined
+  res.json({ unread: raven?.unread ?? 0, notify: raven?.notify ?? 0, pending: pendingProposals().filter((p) => visible.has(p.channelId)).length })
 }))
 
 router.get('/msg/changes', h(async (req, res) => {
@@ -111,6 +115,11 @@ router.get('/msg/channels/:id', h((req, res) => {
 router.post('/msg/channels/:id/messages', h((req, res) => {
   const ch = channelFor(req)
   const text = typeof req.body?.text === 'string' ? req.body.text : ''
+  // an app from before Raven posting in its thread: Raven answers it
+  if (ch.id === RAVEN_CHANNEL) {
+    res.json({ ok: true, message: messagesView([brendonToRaven({ text })])[0], woke: ['raven'] })
+    return
+  }
   const r = brendonPost(ch.id, text)
   res.json({ ok: true, message: messagesView([r.message])[0], woke: r.woke })
 }))

@@ -11,12 +11,15 @@ import {
 import { runClaude, nyNowLine } from './claudeCli.js'
 import { listProjects, getProject } from './projectsStore.js'
 import { listTasks, nyToday } from './tasksStore.js'
-import { pushToAll } from '../routes/push.js'
 import { briefFor } from './agentBriefs.js'
 import type { Franchise } from './psa.js'
 import { franchiseConf, workConf } from './workConfig.js'
 import { AREAS } from './projectAreas.js'
 import { MIXABLE_AREAS } from './projectTypes.js'
+import { RAVEN_CHANNEL } from './raven/types.js'
+import { wakeRavenWith } from './raven/hooks.js'
+import { ravenPush } from './raven/push.js'
+import { ensureRavenChannel } from './raven/channel.js'
 
 // Valkyrie's work agents: AI employees that work on their own and talk to
 // Brendon (and each other) in Valkyrie Messages.
@@ -51,8 +54,8 @@ const DELAY_SCALE = Number(process.env.AGENTS_DELAY_SCALE || 1)
 
 /** The areas that are separate client businesses (odin's project-areas.json), never mixed with another. */
 export const clientAreas = (): string[] => AREAS.filter((a) => !MIXABLE_AREAS.includes(a))
-/** Areas whose channels stay on the tailnet: every client area, plus team and two-area DMs. */
-export const hiddenAreas = (): Set<string> => new Set([...clientAreas(), 'team'])
+/** Areas whose channels stay on the tailnet: every client area, plus team, two-area DMs and Raven's thread (it relays every area). */
+export const hiddenAreas = (): Set<string> => new Set([...clientAreas(), 'team', 'raven'])
 
 // ------------------------------------------------------------- roster ----
 
@@ -127,37 +130,45 @@ export function mentionsIn(text: string): string[] {
   return [...out]
 }
 
-const firstLine = (s: string) => s.split('\n').map((l) => l.replace(/[*_`#>]/g, '').trim()).find(Boolean)?.slice(0, 160) ?? ''
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
-/** Channels an agent may post in: its own, the team channel, and DMs it belongs to. */
+/** Channels an agent may post in: its own, the team channel, DMs it belongs to, and Raven's thread with Brendon. */
 export function canPost(agent: Agent, ch: Channel): boolean {
   if (ch.archivedAt) return false
-  if (ch.id === agent.channelId || ch.kind === 'team') return true
+  if (ch.id === agent.channelId || ch.kind === 'team' || ch.id === RAVEN_CHANNEL) return true
   return ch.kind === 'dm' && ch.agentIds.includes(agent.id)
 }
 
-const lastPush = new Map<string, number>()
-
-function pushFor(channelId: string, title: string, body: string): void {
-  // one buzz per channel per minute; the tag folds the rest on the phone anyway
-  const last = lastPush.get(channelId) ?? 0
-  if (Date.now() - last < 60_000) return
-  lastPush.set(channelId, Date.now())
-  void pushToAll({ title, body, tag: `msg-${channelId}`, url: `/m/messages?c=${encodeURIComponent(channelId)}` })
+/**
+ * Brendon reads everything in Raven's thread now: a post that wants him
+ * (notify or @brendon) anywhere else is mirrored there, proposal card and
+ * all, and buzzes the phone from there (one push, not two). It does not wake
+ * Raven.
+ */
+function mirrorToRaven(agent: Agent, msg: Message): void {
+  ensureRavenChannel()
+  addMessage({
+    channelId: RAVEN_CHANNEL, author: agent.id, text: msg.text, refs: msg.refs, notify: true, hop: msg.hop, proposalId: msg.proposalId,
+    meta: { relay: { kind: 'agent', from: agent.id, label: agent.name, sourceMessageId: msg.id } },
+  })
+  ravenPush(agent.name, msg.text)
 }
 
 /** A message from an agent. Mentions and DMs wake the agents they name, one hop deeper. */
 export function agentPost(agent: Agent, channelId: string, text: string, opts: { refs?: Ref[]; notify?: boolean; hop?: number; proposalId?: number } = {}): Message {
   const ch = getChannel(channelId)
   if (!ch) throw new AgentError(404, `no channel ${channelId}`)
-  if (!canPost(agent, ch)) throw new AgentError(403, `you cannot post in #${ch.id}; use your own channel, team, or dm`)
+  if (!canPost(agent, ch)) throw new AgentError(403, `you cannot post in #${ch.id}; use your own channel, team, dm, or raven`)
   const body = text.trim()
   if (!body) throw new AgentError(400, 'empty message')
   const mentions = mentionsIn(body).filter((m) => m !== agent.id)
   const notify = Boolean(opts.notify) || mentions.includes('brendon')
   const hop = opts.hop ?? 0
-  const msg = addMessage({ channelId, author: agent.id, text: body, refs: opts.refs, mentions, notify, hop, proposalId: opts.proposalId ?? null })
+  const inRaven = ch.id === RAVEN_CHANNEL
+  const msg = addMessage({
+    channelId, author: agent.id, text: body, refs: opts.refs, mentions, notify, hop, proposalId: opts.proposalId ?? null,
+    meta: inRaven ? { relay: { kind: 'agent', from: agent.id, label: agent.name } } : undefined,
+  })
   const targets = new Set(mentions.filter((m) => m !== 'brendon'))
   if (ch.kind === 'dm') for (const id of ch.agentIds) if (id !== agent.id) targets.add(id)
   if (hop < MAX_HOP) {
@@ -168,7 +179,13 @@ export function agentPost(agent: Agent, channelId: string, text: string, opts: {
       wake(id, 20_000, `message from ${agent.name}`)
     }
   }
-  if (notify) pushFor(channelId, agent.name, firstLine(body))
+  if (inRaven) {
+    // Raven passes it on, acts on it, or lets it be: (no reply)
+    if (hop < MAX_HOP) wakeRavenWith('agent_reply', { messageId: msg.id, from: agent.id, name: agent.name, text: clip(body, 3000), hop: hop + 1 })
+    if (notify) ravenPush(agent.name, body)
+  } else if (notify) {
+    mirrorToRaven(agent, msg)
+  }
   return msg
 }
 
@@ -340,7 +357,9 @@ async function runAgent(agentId: string): Promise<void> {
       '--output-format', 'json',
       '--strict-mcp-config', `--mcp-config=${mcpFile}`,
       '--permission-mode', 'bypassPermissions',
-      // the valkyrie tools (and the browser for Groceries) are all an agent acts with
+      // the valkyrie tools (and the browser for Groceries) are all an agent acts with: no built-in tool at all
+      // (the deny list alone leaves Monitor, which runs shell commands, and the tools that message other sessions)
+      '--tools', '',
       '--disallowed-tools', 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite',
       '--no-session-persistence',
     ], { cwd: work, scratch: dir, timeoutMs: RUN_TIMEOUT_MS, retryable: () => ctx.acted === 0 })
@@ -387,6 +406,11 @@ function renderEvent(e: AgentEvent): string {
     case 'teams':
       return `- Teams message in "${s('chat')}" from ${s('from')}, ${etLabel(s('createdAt'))}: ${s('text')}${retry}`
     case 'message':
+      if (s('channelId') === RAVEN_CHANNEL) {
+        const who = s('from') === 'brendon' ? 'Brendon' : s('from') === 'raven' ? "Raven (Brendon's assistant)" : `@${s('from')}`
+        return `- In #raven (Raven's thread with Brendon), ${who} wrote to you (message ${s('messageId')}): ${s('text')}. `
+          + `Answer there: post with channel "raven". Keep other work areas' client details out of it.${retry}`
+      }
       return `- In #${s('channelId')}, ${s('from') === 'brendon' ? 'Brendon' : `@${s('from')}`} wrote (message ${s('messageId')}): ${s('text')}${retry}`
     case 'proposal':
       return `- Your proposal #${s('id')} "${s('title')}" is ${s('status')}${p.result ? `: ${s('result')}` : ''}${p.reason ? `. Brendon's reason: ${s('reason')}` : ''}.`
@@ -402,9 +426,10 @@ function renderEvent(e: AgentEvent): string {
 }
 
 function roster(self: Agent): string {
-  return listAgents().filter((a) => a.enabled && a.id !== self.id)
-    .map((a) => `- @${a.id}: ${a.name} (${a.area}). ${a.role}`)
-    .join('\n')
+  return [
+    ...listAgents().filter((a) => a.enabled && a.id !== self.id).map((a) => `- @${a.id}: ${a.name} (${a.area}). ${a.role}`),
+    "- Raven: Brendon's assistant, in #raven. When it asks you something, answer there.",
+  ].join('\n')
 }
 
 function renderChannel(ch: Channel, limit: number): string {
@@ -420,7 +445,8 @@ function buildPrompt(agent: Agent, events: AgentEvent[]): { system: string; prom
   const channels = new Set<string>([agent.channelId])
   for (const e of events) {
     const c = (e.payload as { channelId?: unknown }).channelId
-    if (typeof c === 'string') channels.add(c)
+    // Raven's thread holds every area's relays: never shown to one agent
+    if (typeof c === 'string' && c !== RAVEN_CHANNEL) channels.add(c)
   }
   const history = [...channels].map((id) => getChannel(id)).filter((c): c is Channel => Boolean(c))
     .map((c) => renderChannel(c, c.id === agent.channelId ? 20 : 12)).join('\n\n')

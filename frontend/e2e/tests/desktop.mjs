@@ -293,8 +293,8 @@ function paletteTests() {
           await page.goto('/m/lights')
           await shellUp(page)
           await page.key('ArrowRight')
-          // the tab after Lights is Car (it was Media before the Car tab)
-          await page.waitPath(/^\/m\/car(\/|$)/)
+          // the tab after Lights is Media
+          await page.waitPath(/^\/m\/media(\/|$)/)
         })
         t.check(!page.writes.length, `the palette wrote something: ${page.writes.map((w) => `${w.method} ${w.path}`).join(', ')}`)
       },

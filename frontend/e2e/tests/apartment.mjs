@@ -12,6 +12,13 @@
 //                      selects that bulb (the panel's header names it, its row
 //                      is marked), a second tap lets go, and nothing is sent.
 //
+//   lights:size        the Lights tab's sizes per device: the pad profile gets its
+//                      own layout (upright: the apartment across the top; on its
+//                      side: two halves), 48 px presses, larger type and a room
+//                      that uses the screen, with every bulb in view unscrolled;
+//                      the phone's bulb rows, bars and power boxes take a 48 px
+//                      press; the desktop keeps its three columns.
+//
 // It reads the scene's engine, which WireScene hangs on its element in dev
 // builds only (the probe is one). Every write is answered in the browser and
 // any write fails the test.
@@ -213,7 +220,9 @@ function lightsTabTests() {
       name: `lights:apartment:${device}`,
       group: 'lights',
       device,
-      timeout: 75_000,
+      // six diamond taps, each waiting for the scene to hold still; the phone's 48 px rows put the
+      // picked row below the fold more often, so its scroll-into-view moves the room between taps
+      timeout: 150_000,
       async run(t) {
         const page = await t.page()
         quietThor(page)
@@ -268,8 +277,102 @@ function lightsTabTests() {
   return out
 }
 
+/** Every size the device check reads, in CSS px (a press's hit edge included where it has one). */
+function sizeReport() {
+  const P = document.querySelector('.vl-page[data-active]')
+  const L = P?.querySelector('.lt-layout')
+  if (!L) return { error: 'no Lights layout on the active page' }
+  const box = (el) => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height } }
+  // a press's ::after hit edge (inset with negative offsets) adds to its box
+  const hit = (el) => {
+    const r = box(el)
+    const a = getComputedStyle(el, '::after')
+    if (a.content === 'none' || a.position !== 'absolute') return r
+    const px = (v) => Math.max(0, -(parseFloat(v) || 0))
+    return { w: r.w + px(a.left) + px(a.right), h: r.h + px(a.top) + px(a.bottom) }
+  }
+  const all = (sel) => [...L.querySelectorAll(sel)]
+  const minOf = (sel, f) => { const v = all(sel).map(f); return v.length ? { n: v.length, w: Math.min(...v.map((x) => x.w)), h: Math.min(...v.map((x) => x.h)) } : null }
+  const fs = (sel) => { const el = L.querySelector(sel); return el ? parseFloat(getComputedStyle(el).fontSize) : null }
+  const room = L.querySelector('.lt-room')
+  return {
+    shape: L.dataset.shape ?? 'base',
+    layoutW: L.clientWidth,
+    room: room ? box(room) : null,
+    toggles: minOf('.lt-tg', hit),
+    bars: minOf('.lt-bulb .lt-sl', box),
+    rows: minOf('.lt-bulb', box),
+    plates: minOf('.lt-pre', hit),
+    power: minOf('.lt-mpwr', hit),
+    rgb: minOf('.lt-rgb-seg .vl-seg-cell', hit),
+    nameFs: fs('.lt-bulb-name'),
+    presetFs: fs('.lt-pre-name'),
+    labelFs: fs('.vl-panel-label'),
+    scroll: { h: P.scrollHeight, client: P.clientHeight },
+    overflowX: P.scrollWidth > P.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1,
+  }
+}
+
+function lightsSizeTests() {
+  const out = []
+  for (const device of ['phone', 'ipad', 'ipadland', 'desktop']) {
+    out.push({
+      name: `lights:size:${device}`,
+      group: 'lights',
+      device,
+      timeout: 60_000,
+      async run(t) {
+        // the pad layouts are the iPad profile's own: set it the way Settings does, not through the auto-detect
+        const page = await t.page(device.startsWith('ipad') ? { storage: { 'valkyrie-device-mode': 'ipad' } } : {})
+        quietThor(page)
+        fakeLights(page)
+        await page.goto('/m/lights')
+        await page.waitFor(() => document.querySelectorAll('.vl-page[data-active] .lt-bulb-wrap').length >= 5, { timeout: 15_000, message: 'Lights did not list the five bulbs' })
+        await sleep(1500)
+        const r = await page.eval(sizeReport)
+        if (r.error) throw new Error(r.error)
+        t.note(`${device}: ${r.shape}, room ${Math.round(r.room?.w)}x${Math.round(r.room?.h)}, toggles ${Math.round(r.toggles?.w)}x${Math.round(r.toggles?.h)}, bars ${Math.round(r.bars?.h)}, plates ${Math.round(r.plates?.h)}, names ${r.nameFs} px, scroll ${r.scroll.h}/${r.scroll.client}`)
+        t.check(!r.overflowX, `${device}: the Lights tab runs out of the screen sideways`)
+        const atLeast = (what, v, min) => t.check(v != null && v >= min - 0.5, `${device}: ${what} is ${v == null ? 'missing' : Math.round(v * 10) / 10} px, want ${min} or more`)
+        if (device.startsWith('ipad')) {
+          const want = device === 'ipad' ? 'tall' : 'wide'
+          t.check(r.shape === want, `${device}: the layout is "${r.shape}", want the pad's "${want}"`)
+          for (const [what, m] of [['a bulb power box', r.toggles], ['a brightness bar', r.bars], ['a preset plate', r.plates], ['the all-lights power plate', r.power], ['a Thor RGB plate', r.rgb]]) {
+            atLeast(`${what}'s press height`, m?.h, 48)
+            atLeast(`${what}'s press width`, m?.w, 48)
+          }
+          atLeast('a bulb row', r.rows?.h, 56)
+          atLeast('a bulb name', r.nameFs, 16)
+          atLeast('a preset name', r.presetFs, 15)
+          atLeast('a panel label', r.labelFs, 13)
+          if (device === 'ipad') {
+            atLeast('the apartment\'s width', r.room?.w, r.layoutW * 0.85)
+            atLeast('the apartment\'s height', r.room?.h, 300)
+          } else {
+            atLeast('the apartment\'s height', r.room?.h, 360)
+          }
+          // the five bulbs, the presets and the room all fit the screen with nothing selected
+          t.check(r.scroll.h <= r.scroll.client + 1, `${device}: the tab scrolls (${r.scroll.h} px for a ${r.scroll.client} px page) with nothing selected`)
+        } else {
+          t.check(r.shape === 'base', `${device}: the layout is "${r.shape}", the pad's layouts are for the pad profile only`)
+        }
+        if (device === 'phone') {
+          atLeast('a bulb power box\'s press height', r.toggles?.h, 48)
+          atLeast('a bulb power box\'s press width', r.toggles?.w, 48)
+          atLeast('a brightness bar', r.bars?.h, 48)
+          atLeast('a bulb row', r.rows?.h, 48)
+          atLeast('a preset plate\'s press height', r.plates?.h, 48)
+        }
+        await t.shot(page)
+        t.check(!page.writes.length, `${device}: reading the sizes sent ${page.writes.length} write(s)`)
+      },
+    })
+  }
+  return out
+}
+
 export function apartmentTests() {
-  return lightsTabTests()
+  return [...lightsTabTests(), ...lightsSizeTests()]
 }
 
 export { apartmentReport }

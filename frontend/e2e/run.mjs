@@ -34,7 +34,6 @@ import { dashboardTests } from './tests/dashboard.mjs'
 import { sessionTests } from './tests/sessions.mjs'
 import { windowTests } from './tests/windows.mjs'
 import { hostTests } from './tests/hosts.mjs'
-import { carTests } from './tests/car.mjs'
 import { apartmentTests } from './tests/apartment.mjs'
 import { unitTests } from './tests/unit.mjs'
 import { inboxTests } from './tests/inbox.mjs'
@@ -42,6 +41,7 @@ import { tasksTests } from './tests/tasks.mjs'
 import { todayTests } from './tests/today.mjs'
 import { hotkeysTests } from './tests/hotkeys.mjs'
 import { extraTests } from './tests/extra.mjs'
+import { ravenTests } from './tests/raven.mjs'
 import { killLeftovers } from './lib/odin.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -63,7 +63,7 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- the tests ----------
 
-const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...carTests(), ...apartmentTests(), ...unitTests(), ...inboxTests(), ...tasksTests(), ...todayTests(), ...hotkeysTests(), ...extraTests()]
+const all = [...freshnessTests(), ...terminalTests(), ...chatTests(), ...routeTests(), ...navigationTests(), ...writeTests(), ...uploadTests(), ...gapTests(), ...desktopTests(), ...parityTests(), ...accountTests(), ...schemeTests(), ...dashboardTests(), ...sessionTests(), ...windowTests(), ...hostTests(), ...apartmentTests(), ...unitTests(), ...inboxTests(), ...tasksTests(), ...todayTests(), ...hotkeysTests(), ...ravenTests(), ...extraTests()]
 const wanted = opt.only ? opt.only.split(',').map((s) => s.trim()).filter(Boolean) : []
 const groups = opt.group ? opt.group.split(',').map((s) => s.trim()).filter(Boolean) : []
 const tests = all.filter((t) => (!wanted.length || wanted.some((w) => t.name.includes(w) || t.group === w)) && (!groups.length || groups.includes(t.group)))
@@ -82,7 +82,8 @@ if (!tests.length) {
 // Told apart by address only: probing it with a write method would send that
 // write to a live backend whenever --base is one. The in-browser answer to
 // every write is what keeps odin safe either way.
-const probeCheck = (base) => /^https?:\/\/(127\.0\.0\.1|localhost):5197$/.test(base)
+// the build lanes' previews (C:\Thor\var\vk-lanes, 5301 to 5308) refuse writes the same way
+const probeCheck = (base) => /^https?:\/\/(127\.0\.0\.1|localhost):(5197|530[1-8])$/.test(base)
 
 async function main() {
   const base = opt.base.replace(/\/+$/, '')

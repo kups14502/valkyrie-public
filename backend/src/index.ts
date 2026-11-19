@@ -42,10 +42,13 @@ import todayRoute from './routes/today.js'
 import mailRoute from './routes/mail.js'
 import msgRoute from './routes/msg.js'
 import agentMcpRoute from './routes/agentMcp.js'
+import ravenRoute, { RAVEN_UPLOAD_PATH } from './routes/raven.js'
+import ravenMcpRoute from './routes/ravenMcp.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
 import { startBrief } from './lib/brief.js'
 import { startAgents } from './lib/agents.js'
+import { startRaven } from './lib/raven/run.js'
 import { startWorkFeeds } from './lib/workFeeds.js'
 import { resumeCaptures } from './lib/capture.js'
 import { addTrackedRepos } from './lib/trackedRepos.js'
@@ -94,7 +97,11 @@ app.use(cors<express.Request>((req, callback) => {
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonLarge = express.json({ limit: '12mb' })
 const LARGE_BODY_PATHS = new Set(['/api/meals/estimate', ...FEATURES.flatMap((f) => f.largeBodyPaths ?? [])])
-app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? jsonLarge : jsonSmall)(req, res, next))
+app.use((req, res, next) => {
+  // a Raven attachment upload is the raw file (up to 50 MB), streamed to disk by its route
+  if (req.method === 'POST' && req.path === RAVEN_UPLOAD_PATH) return next()
+  return (LARGE_BODY_PATHS.has(req.path) ? jsonLarge : jsonSmall)(req, res, next)
+})
 
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api')) {
@@ -160,6 +167,8 @@ app.use('/api', todayRoute)
 app.use('/api', mailRoute)
 app.use('/api', msgRoute)
 app.use('/api', agentMcpRoute)
+app.use('/api', ravenRoute)
+app.use('/api', ravenMcpRoute)
 // every feature's own routes, behind requireAuth like the ones above
 for (const f of FEATURES) if (f.router) app.use('/api', f.router)
 
@@ -235,6 +244,10 @@ server.listen(PORT, BIND, () => {
     startWorkFeeds()
   }
   for (const f of FEATURES) f.start?.()
+  // Raven, Brendon's assistant in the Messages tab, with what each feature gives it; RAVEN_OFF=1 keeps it idle
+  if (process.env.RAVEN_OFF !== '1') {
+    startRaven(FEATURES.flatMap((f) => (f.raven ? [{ id: f.id, tools: f.raven.tools, status: f.raven.status }] : [])))
+  }
 })
 
 // Optional second listener on the tailscale interface: tailnet devices talk to

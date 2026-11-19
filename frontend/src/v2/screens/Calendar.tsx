@@ -10,6 +10,7 @@ import { StatusStrip, desktopWindow } from '../kit/shell'
 import { Button, DotFloor, Glyph, IconButton, Press, Segmented, ToastHost, cx } from '../kit/ui'
 import { Icon, SlotIcon, type IconSlot } from '../kit/icons'
 import { useTick, type EventVM } from '../kit/data'
+import { RavenFab } from '../kit/raven'
 import { apiErrorText } from '../../lib/api'
 import {
   addCalendarSource, createLocalEvent, deleteCalendarSource, deleteLocalEvent, fetchCalendarEvents, fetchCalendarSources,
@@ -1769,6 +1770,8 @@ export function PageFrame({ id, title, icon, scroll = false, children }: {
         <main className="vpg-main" data-scroll={scroll || undefined}>{children}</main>
         <ToastHost className="vpg-toasts" />
       </div>
+      {/* Raven's button on the pages that scroll (they keep room for it); the calendar fills the window */}
+      {scroll && <RavenFab />}
     </div>
   )
 }

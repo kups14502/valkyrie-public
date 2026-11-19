@@ -13,7 +13,6 @@ const primsFor = (device) => [
   ...placeAfter([
     { label: 'AI', id: 'ai' },
     { label: 'Lights', id: 'lights' },
-    { label: 'Car', id: 'car' },
     { label: 'Media', id: 'media' },
     { label: 'System', id: 'system' },
   ], extraPrims.filter((p) => !p.devices || p.devices.includes(device)), (p) => p.id, (p) => p.after),
@@ -106,7 +105,7 @@ export function navigationTests() {
       const plan = [
         ['ai', ['Projects', 'Usage', 'Sessions']],
         ['media', ['Movies', 'Shows', 'Music', 'Requests', 'Dashboard']],
-        ['system', ['Services', 'Trades', 'Hosts']],
+        ['system', ['Trades', 'Services', 'Hosts']],
       ]
       for (const [id, subs] of plan) {
         const label = PRIMS.find((p) => p.id === id).label
@@ -269,7 +268,7 @@ export function navigationTests() {
     timeout: 60_000,
     async run(t) {
       const page = await t.page()
-      for (const [from, to] of [['/m/home/today', '/m/dashboard/today'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions']]) {
+      for (const [from, to] of [['/m/home/today', '/m/dashboard/today'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions'], ['/m/car', '/m/system/hosts']]) {
         await t.step(`${from} -> ${to}`, async () => {
           await page.goto(from)
           await page.waitPath(to, 8000)

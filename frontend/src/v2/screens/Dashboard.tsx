@@ -28,7 +28,7 @@ import { useQuickSessions } from '../../lib/quickSessions'
 import { UpIcon, UploadRows } from '../kit/upload'
 import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } from '../kit/uploads'
 import { clockOf, dueLabel, dueState } from '../../lib/taskDue'
-import { taskKey } from '../../lib/tasksApi'
+import { taskKey, type Task } from '../../lib/tasksApi'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
 import './dashboard.css'
 
@@ -41,18 +41,19 @@ import './dashboard.css'
 // the session just started), lights (one bar for all of them, every bulb, a tap
 // switches one, the presets, a plate that switches them all), the daily tracker
 // (day stepping, the other day's line, hold Exercise to skip), the calendar
-// (today first, then the next six days; a tap opens the calendar sheet), AI
+// (the week by day, the next event first; a tap opens the calendar sheet), AI
 // (live and asking sessions, usage meters), media (playing or newest added,
 // downloads) and every host (CPU / Mem / Disk, battery where the host has one).
 // From 600 px: the stage across the top, two columns under it, the ticker
 // becomes the head of a Trade box (equity, the 3D equity chart) and the presets
 // get their names.
 // Desktop: three columns that reach the bottom of the page, the middle one
-// wider: [quick start, upload, tracker, trade] [the stage, then AI and the
-// hosts side by side] [lights, calendar, media]. The stage, the equity chart
-// and the poster grid take the height that is left, so no box stretches empty.
-// A 2560 px monitor has the calendar under the trade box and the newest
-// addition as a banner over the posters.
+// wider: [quick start, upload, tracker, calendar] [the stage, then AI and the
+// hosts side by side] [lights, trade, media]. The trade box keeps its own
+// short height; the stage and the poster grid take the height that is left,
+// and the calendar lists as many days as its column has room for, so no box
+// stretches empty. A 2560 px monitor has the newest addition as a banner over
+// the posters.
 // iPad in landscape (the iPad profile only): one screen, no scrolling: [lights,
 // tracker, calendar] [the stage, AI] [trade, hosts].
 
@@ -228,14 +229,14 @@ export default function Dashboard({ active }: ScreenProps) {
             <div className="hm-col hm-a">
               <LightsBox i={2} variant="rows" />
               <Tracker />
-              <Calendar onOpen={setCal} />
+              <Calendar onOpen={setCal} fit={fill} />
             </div>
             <div className="hm-col hm-b">
               <DeviceStage id={device} active={active} i={0} fill={fill} />
               <AiBlock wide i={4} max={3} />
             </div>
             <div className="hm-col hm-c">
-              <TradeBox active={active} i={3} fill={fill} />
+              <TradeBox active={active} i={3} />
               <Systems i={11} />
             </div>
           </>
@@ -279,8 +280,7 @@ export default function Dashboard({ active }: ScreenProps) {
               <QuickStart />
               <UploadBlock wide />
               <Tracker />
-              <TradeBox active={active} i={5} fill={fill} />
-              {xl && <Calendar onOpen={setCal} />}
+              <Calendar onOpen={setCal} fit={fill} />
             </div>
             <div className="hm-col hm-b">
               <DeviceStage id={device} active={active} i={0} fill={fill} />
@@ -292,7 +292,7 @@ export default function Dashboard({ active }: ScreenProps) {
             </div>
             <div className="hm-col hm-c">
               <LightsBox i={3} variant="rows" />
-              {!xl && <Calendar onOpen={setCal} />}
+              <TradeBox active={active} i={5} />
               <MediaBox i={10} banner={xl} fill={fill} />
             </div>
           </>
@@ -336,23 +336,8 @@ function Old({ age }: { age: string | null }) {
 
 // ---------- time helpers ----------
 
-const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime() }
-const addDays = (ms: number, n: number) => { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime() }
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-const weekday = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short' })
-/** "Sat 18" */
-const dayTag = (ms: number) => `${weekday(ms)} ${new Date(ms).getDate()}`
 
-function until(ms: number): string {
-  const m = Math.max(1, Math.round(ms / 60_000))
-  if (m < 60) return `in ${m}m`
-  const h = Math.floor(m / 60)
-  if (h >= 24) return `in ${Math.round(m / 1440)}d`
-  const r = m % 60
-  return r && h < 6 ? `in ${h}h ${r}m` : `in ${h}h`
-}
-
-const touches = (e: EventVM, from: number, to: number) => e.start < to && e.end > from
 const NBSP = String.fromCharCode(160)
 const cap = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
@@ -559,9 +544,11 @@ function useEquityChart(t: TradeVM | undefined, fetchedAt: number): EquityChartV
  * online, 7 days; opens Trades), the equity big with what it really is (a live
  * broker read and its age, an older read, or the day-open figure, never
  * dressed up as live), the market and the last trade, and the 3D equity chart
- * (drag turns it). `fill`: the chart takes the height the column has left.
+ * (drag turns it). The box keeps its own short height on every screen: the
+ * chart is 120 to 170 px tall with the box's width (dashboard.css), never
+ * stretched to fill a column.
  */
-function TradeBox({ active, i, fill }: { active: boolean; i: number; fill?: boolean }) {
+function TradeBox({ active, i }: { active: boolean; i: number }) {
   const trade = useTrade(active)
   const palette = usePalette()
   const reduced = useReducedMotion()
@@ -586,7 +573,7 @@ function TradeBox({ active, i, fill }: { active: boolean; i: number; fill?: bool
         : 'Equity'
 
   return (
-    <Panel className={cx('hm-glance hm-trade', fill && 'hm-grow')} i={i} dense lit={online && !readAge}>
+    <Panel className="hm-glance hm-trade" i={i} dense lit={online && !readAge}>
       <TradeTicker active={active} boxed />
       <div className="hm-trade-top">
         <div className="hm-trade-main">
@@ -998,167 +985,376 @@ function Check() {
   )
 }
 
-// ---------- calendar: today first, then the next six days ----------
+// ---------- calendar: the week by day, the next event first, every time in New York time ----------
 
-const AHEAD = 6
-/** events listed per coming day before "+N more" */
-const PER_DAY = 3
-
-type DayRow = { i: number; from: number; list: EventVM[] }
-type DayGroup = { kind: 'day'; d: DayRow } | { kind: 'free'; a: DayRow; b: DayRow }
-
-function useDays(events: EventVM[] | undefined, now: number, first: number, count: number): DayRow[] {
-  const day0 = startOfDay(now)
-  return useMemo(() => Array.from({ length: count }, (_, k) => {
-    const i = first + k
-    const from = addDays(day0, i)
-    const to = addDays(day0, i + 1)
-    const list = (events ?? []).filter((e) => touches(e, from, to))
-      .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start - b.start)
-    return { i, from, list }
-  }), [events, day0, first, count])
+const NY_CLOCK = new Intl.DateTimeFormat('en-US', { timeZone: NY, hour: 'numeric', minute: '2-digit' })
+const NY_DAYHEAD = new Intl.DateTimeFormat('en-US', { timeZone: NY, weekday: 'short', month: 'short', day: 'numeric' })
+/** "9:30 AM", New York time */
+const etClock = (ms: number) => NY_CLOCK.format(ms)
+const NY_WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: NY, weekday: 'short' })
+/** "3:00 AM", or "Fri 3:00 AM" when it falls on another New York day than `from` (an end at midnight stays on its day) */
+const etEnd = (b: number, from: number) => (nyDayKey(b - 1) === nyDayKey(from) ? etClock(b) : `${NY_WEEKDAY.format(b)} ${etClock(b)}`)
+/** "9:30 to 10:00 AM ET", "11:30 AM to 12:15 PM ET", "11:00 PM to Fri 3:00 AM ET" */
+function etRange(a: number, b: number): string {
+  const x = etClock(a), y = etEnd(b, a)
+  const ax = x.slice(-2), by = y.slice(-2)
+  return `${ax === by && y === etClock(b) ? x.slice(0, -3) : x} to ${y} ET`
 }
 
-/** Days with events stay; a run of free days folds into one row. */
-function groupDays(days: DayRow[]): DayGroup[] {
-  const out: DayGroup[] = []
+/** "2026-11-21" two days after "2026-11-19" */
+const keyPlus = (key: string, n: number) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+/** the instant New York's day `key` starts: 05:00 UTC in winter, 04:00 UTC in summer */
+function nyStart(key: string): number {
+  const [y, m, d] = key.split('-').map(Number)
+  const t = Date.UTC(y, m - 1, d, 5)
+  return nyDayKey(t - 3_600_000) === key ? t - 3_600_000 : t
+}
+/** the day the calendar screen opens on: local midnight of the same date */
+const localDay = (key: string) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).getTime()
+}
+
+/** "in 25 min", "in 1 h 5 min", "in 16 h", "in 2 days" */
+function startsIn(ms: number): string {
+  const m = Math.max(1, Math.round(ms / 60_000))
+  if (m < 60) return `in ${m} min`
+  const h = Math.floor(m / 60)
+  if (h >= 24) return `in ${plural(Math.round(m / 1440), 'day')}`
+  const r = m % 60
+  return r && h < 6 ? `in ${h} h ${r} min` : `in ${h} h`
+}
+
+/** where an event is, said plainly: no bare link, no "Microsoft Teams Meeting" next to its own Join */
+function placeOf(e: EventVM): string {
+  const loc = e.location.trim()
+  if (/^https?:\/\//i.test(loc)) return ''
+  if (e.join && /^(microsoft teams( meeting)?|teams meeting|zoom( meeting)?|google meet|webex( meeting)?)$/i.test(loc)) return ''
+  return loc
+}
+
+const DAYS = 7
+
+type CalDay = {
+  key: string
+  /** "Today", "Tomorrow", "Sat, Nov 22" */
+  name: string
+  /** the date after Today and Tomorrow, else null */
+  date: string | null
+  allDay: EventVM[]
+  /** today: only what has not ended */
+  timed: EventVM[]
+  /** today: how many timed events are over */
+  past: number
+}
+/** one line of the block: a day's all-day events together, or one timed event */
+type CalLine = { day: CalDay; e: EventVM | null }
+
+/** `nextLine`: the line that leads, so an event over midnight leads once, not on each of its days */
+type CalView = { days: CalDay[]; lines: CalLine[]; next: EventVM | null; nextLine: CalLine | null; today: CalDay; left: number }
+
+function calendarView(events: EventVM[], now: number): CalView {
+  const t0 = nyDayKey(now)
+  const days: CalDay[] = Array.from({ length: DAYS }, (_, k) => {
+    const key = keyPlus(t0, k)
+    const from = nyStart(key)
+    const to = nyStart(keyPlus(key, 1))
+    const on = events.filter((e) => e.start < to && e.end > from)
+    const timed = on.filter((e) => !e.allDay).sort((a, b) => a.start - b.start)
+    const mid = from + 12 * 3_600_000
+    return {
+      key,
+      name: k === 0 ? 'Today' : k === 1 ? 'Tomorrow' : NY_DAYHEAD.format(mid),
+      date: k < 2 ? NY_DAYHEAD.format(mid) : null,
+      allDay: on.filter((e) => e.allDay),
+      timed: k === 0 ? timed.filter((e) => e.end > now) : timed,
+      past: k === 0 ? timed.filter((e) => e.end <= now).length : 0,
+    }
+  })
+  const lines: CalLine[] = []
   for (const d of days) {
-    const last = out[out.length - 1]
-    if (d.list.length) out.push({ kind: 'day', d })
-    else if (last?.kind === 'free') last.b = d
-    else out.push({ kind: 'free', a: d, b: d })
+    if (d.allDay.length) lines.push({ day: d, e: null })
+    for (const e of d.timed) lines.push({ day: d, e })
   }
-  return out
+  // the event on now, else the next to start: the first timed one that has not ended
+  const nextLine = lines.find((l) => l.e && l.e.end > now) ?? null
+  return { days, lines, next: nextLine?.e ?? null, nextLine, today: days[0], left: days[0].timed.length }
 }
 
-function NextEvent({ e, meta, when, live, onPress }: { e: EventVM; meta: ReactNode; when: ReactNode; live?: boolean; onPress: () => void }) {
-  return (
-    <Press className="hm-next" onPress={onPress} aria-label={`${e.title || 'Busy'}, open its details`}>
-      <span className="min-w-0 flex-1">
-        <span className="hm-next-title">{e.title || 'Busy'}</span>
-        <span className="hm-next-meta vl-ellipsis">{meta}</span>
-      </span>
-      <span className={cx('hm-next-when', live && 'hm-live')}>{when}</span>
-    </Press>
-  )
+type Fit = { total: number; lo: number; hi: number; n: number }
+/** a new search for the most lines that fit: all of them first, the usual case */
+const fitAll = (total: number): Fit => ({ total, lo: 0, hi: total, n: total })
+
+/**
+ * One step of the search, after `f.n` lines drew and did or did not fit: `lo`
+ * is the most known to fit (0 at worst), `hi` the most that still might. Halving
+ * the range settles a week of 80 lines in 8 renders; one line per render ran
+ * past React's 50 nested updates and crashed the Dashboard.
+ */
+function fitStep(f: Fit, fits: boolean): Fit {
+  if (f.lo === f.hi && f.n === f.lo) {
+    // settled: the content grew since (a title wrapped, a task came in): search below
+    return fits || f.n === 0 ? f : { ...f, lo: 0, hi: f.n - 1, n: Math.ceil((f.n - 1) / 2) }
+  }
+  const lo = fits ? f.n : f.lo
+  const hi = Math.max(lo, fits ? f.hi : f.n - 1)
+  return { ...f, lo, hi, n: lo === hi ? lo : Math.ceil((lo + hi) / 2) }
 }
 
 /**
- * Today first (the event on now or next, then the rest of today), then the
- * next six days as compact rows. The head opens the calendar sheet on today's
- * day view; an event opens it on its day with its details; a free row or
- * "+N more" opens that day.
+ * How many lines fit: in a fill layout the block sits in a slot that takes
+ * the height its column has left (the slot's own size ignores its content).
+ * After each draw (before paint) the box is held against the slot and the
+ * count searched down until the box fits, so the box keeps its natural height
+ * and never runs past the page. A slot that changes size starts over.
+ * `content`: changes when the lines' content does (a settled count is checked
+ * again). Off: every line.
  */
-function Calendar({ onOpen }: { onOpen: (o: CalendarOpen) => void }) {
-  const cal = useCalendar(7)
-  const now = useTick(30_000)
-  const events = cal.data
-  const day0 = startOfDay(now)
-  const day1 = addDays(day0, 1)
-  const days = useDays(events, now, 1, AHEAD)
+function useFitLines(slot: RefObject<HTMLElement | null>, box: RefObject<HTMLElement | null>, total: number, on: boolean, content: unknown): number {
+  const [fit, setFit] = useState(() => fitAll(total))
+  if (fit.total !== total) setFit(fitAll(total))
+  const n = fit.total === total ? fit.n : total
+  // after each step and each new content: does this count fit? (a settled fit that still fits sets nothing)
+  useLayoutEffect(() => {
+    const s = slot.current, b = box.current
+    if (!on || !s || !b || s.clientHeight <= 0) return
+    const check = () => {
+      const fits = b.offsetHeight <= s.clientHeight + 1
+      setFit((f) => (f.total === total ? fitStep(f, fits) : f))
+    }
+    check()
+  }, [slot, box, on, total, fit, content])
+  // the slot resized (the window, the blocks above it): search again from all of them
+  useLayoutEffect(() => {
+    const s = slot.current
+    if (!on || !s) return
+    let last = s.clientHeight
+    const ro = new ResizeObserver(() => {
+      const h = s.clientHeight
+      if (Math.abs(h - last) <= 1) return
+      last = h
+      setFit((f) => fitAll(f.total))
+    })
+    ro.observe(s)
+    return () => ro.disconnect()
+  }, [slot, on])
+  return on ? Math.min(n, total) : total
+}
 
-  const view = useMemo(() => {
-    const todays = (events ?? []).filter((e) => touches(e, day0, day1))
-    const allDay = todays.filter((e) => e.allDay)
-    const timed = todays.filter((e) => !e.allDay)
-    const live = timed.filter((e) => e.start <= now && e.end > now)
-    const upcoming = timed.filter((e) => e.start > now)
-    const past = timed.filter((e) => e.end <= now)
-    const featured = live[0] ?? upcoming[0] ?? null
-    const rest = [...live, ...upcoming].filter((e) => e !== featured)
-    return { allDay, featured, rest, past, left: live.length + upcoming.length }
-  }, [events, now, day0, day1])
-
-  const { allDay, featured, rest, past, left } = view
-  const isLive = !!featured && featured.start <= now
-  // nothing left today: the first timed event of the coming days carries the countdown
-  const next = featured ? null : days.flatMap((d) => d.list).find((e) => !e.allDay && e.start > now) ?? null
-  const age = cal.failed ? oldAge(cal, now) : null
-  const open = (dayMs: number, focus?: string) => onOpen({ day: dayMs, focus: focus ?? null })
-
+/** A meeting's Join link: opens the meeting, never the row. */
+function Join({ href, title }: { href: string; title: string }) {
   return (
+    <a className="hm-join" href={href} target="_blank" rel="noopener noreferrer" aria-label={`Join ${title}`}>Join</a>
+  )
+}
+
+/** task rows the block lists at most (the head counts the rest) */
+const TASK_ROWS = 3
+
+/**
+ * What to keep when the block has room for only `n` of its lines, most useful
+ * first: the event on now or next, the first due task, the rest of today, the
+ * other due tasks, then the coming days in order. Returns the lines kept (shown
+ * in their own order) and how many task rows.
+ */
+function keepLines(view: CalView, tasks: number, n: number): { kept: Set<CalLine>; taskRows: number } {
+  const order: (CalLine | 'task')[] = []
+  const first = view.nextLine
+  if (first) order.push(first)
+  if (tasks > 0) order.push('task')
+  for (const l of view.lines) if (l !== first && l.day === view.today) order.push(l)
+  for (let k = 1; k < tasks; k++) order.push('task')
+  for (const l of view.lines) if (l !== first && l.day !== view.today) order.push(l)
+  const kept = new Set<CalLine>()
+  let taskRows = 0
+  for (const x of order.slice(0, n)) {
+    if (x === 'task') taskRows++
+    else kept.add(x)
+  }
+  return { kept, taskRows }
+}
+
+/**
+ * The calendar block: the coming seven days under day headings (Today,
+ * Tomorrow, then the weekday and date), empty days left out. A day's all-day
+ * events share one line; a timed event is one row: its New York time, its
+ * title, where it is or a Join link when it is a meeting. The event on now or
+ * the next to start leads its day, larger, with "Now" or "in 25 min". Today's
+ * due tasks follow today. A day heading opens the calendar on that day; an
+ * event opens it there with its details. `fit` (a monitor or the landscape
+ * iPad): as many lines as the column has room for (keepLines picks which),
+ * then "+N more"; otherwise up to `max` events.
+ */
+function Calendar({ onOpen, fit, max = 10 }: { onOpen: (o: CalendarOpen) => void; fit?: boolean; max?: number }) {
+  const cal = useCalendar(DAYS)
+  const now = useTick(30_000)
+  const due = useDueTasks(now)
+  const events = cal.data
+  const view = useMemo(() => (events ? calendarView(events, now) : null), [events, now])
+  const slot = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const taskMax = Math.min(TASK_ROWS, due?.due.length ?? 0)
+  const total = view?.lines.length ?? 0
+  const room = useFitLines(slot, box, total + taskMax, !!fit && !!view, view)
+  const keep = view ? (fit ? keepLines(view, taskMax, room) : { kept: keepLines(view, 0, max).kept, taskRows: taskMax }) : null
+  const taskRows = keep?.taskRows ?? taskMax
+  const age = cal.failed ? oldAge(cal, now) : null
+  const open = (key: string, focus?: string) => onOpen({ day: localDay(key), focus: focus ?? null })
+  const todayKey = nyDayKey(now)
+  const next = view?.next ?? null
+  const isLive = !!next && next.start <= now
+  const firstUp = view && isLive ? view.lines.find((l) => l.e && l.e !== next && l.e.start > now)?.e ?? null : null
+
+  const lines = view?.lines ?? []
+  const hidden = lines.filter((l) => !keep?.kept.has(l))
+  const byDay = new Map<string, CalLine[]>()
+  for (const l of lines) if (keep?.kept.has(l)) byDay.set(l.day.key, [...(byDay.get(l.day.key) ?? []), l])
+  const today = view?.today
+
+  const value = !view ? null
+    : view.left > 0 ? <><b>{view.left}</b> left today</>
+      : today && (today.past > 0 || today.allDay.length) ? 'Nothing left today' : 'Nothing today'
+
+  const row = (l: CalLine) => {
+    const d = l.day
+    if (!l.e) {
+      const titles = d.allDay.map((e) => e.title || 'Busy')
+      return (
+        <div key={`${d.key}-all`} className="hm-crow" data-allday="">
+          <Press className="hm-crow-main" onPress={() => open(d.key, d.allDay.length === 1 ? d.allDay[0].id : undefined)} aria-label={`${d.name}, all day: ${titles.join(', ')}. Open the day`}>
+            <span className="hm-ctime">All day</span>
+            <span className="hm-ctitle">{titles.join(' · ')}</span>
+          </Press>
+        </div>
+      )
+    }
+    const e = l.e
+    const title = e.title || 'Busy'
+    const place = placeOf(e)
+    const live = e.start <= now && e.end > now
+    if (l === view?.nextLine) {
+      return (
+        <div key={e.id} className="hm-cnext" data-live={live || undefined} data-join={e.join ? '' : undefined}>
+          <Press className="hm-cnext-main" onPress={() => open(d.key, e.id)} aria-label={`${title}, ${live ? `on now until ${etEnd(e.end, now)} ET` : `${startsIn(e.start - now)}, ${etRange(e.start, e.end)}`}. Open its details`}>
+            <span className="hm-cnext-top">
+              <span className="hm-cnext-title">{title}</span>
+              <span className="hm-cnext-when">{live ? 'Now' : startsIn(e.start - now)}</span>
+            </span>
+            <span className="hm-cnext-meta">
+              {live ? `Until ${etEnd(e.end, now)} ET` : etRange(e.start, e.end)}
+              {place && <span className="hm-cplace"> · {place}</span>}
+            </span>
+          </Press>
+          {e.join && <Join href={e.join} title={title} />}
+        </div>
+      )
+    }
+    return (
+      <div key={e.id} className="hm-crow">
+        <Press className="hm-crow-main" onPress={() => open(d.key, e.id)} aria-label={`${title}, ${d.name} ${e.start < nyStart(d.key) ? 'continued' : `at ${etClock(e.start)} ET`}${place ? `, ${place}` : ''}. Open its details`}>
+          <span className="hm-ctime" style={e.color ? { borderLeftColor: e.color } : undefined} title={e.source || undefined}>
+            {e.start < nyStart(d.key) ? 'Cont.' : etClock(e.start)}
+          </span>
+          <span className="hm-ctitle">{title}</span>
+          {place && <span className="hm-cplace">{place}</span>}
+          {live ? <span className="hm-cnow">Now</span> : e === firstUp ? <span className="hm-csoon">{startsIn(e.start - now)}</span> : null}
+        </Press>
+        {e.join && <Join href={e.join} title={title} />}
+      </div>
+    )
+  }
+
+  const dayGroup = (d: CalDay) => {
+    const lines = byDay.get(d.key)
+    if (!lines) return null
+    return (
+      <div key={d.key} className="hm-cday">
+        <Press className="hm-cday-head" onPress={() => open(d.key)} aria-label={`${d.name}${d.date ? `, ${d.date}` : ''}. Open the day`}>
+          <span className="hm-cday-name">{d.name}</span>
+          {d.date && <span className="hm-cday-date">{d.date}</span>}
+        </Press>
+        {lines.map(row)}
+        {d.key === todayKey && d.past > 0 && !hidden.length && (
+          <Press className="hm-cearlier" onPress={() => open(d.key)}>{d.past} earlier today</Press>
+        )}
+      </div>
+    )
+  }
+
+  const body = (
     <Panel className="hm-glance hm-cal" lit={isLive} i={8} dense>
-      <Press className="hm-g-head hm-g-press" onPress={() => open(day0)} aria-label="Calendar, open today's day view">
-        <span className="hm-g-label" data-lit={isLive || undefined}><HIcon name="calendar" lit={isLive} />Calendar</span>
-        <span className="hm-g-value">
-          {events && left > 0 ? <><b>{left}</b> left today</> : null}
-          <Old age={age} />
-        </span>
+      <Press className="hm-g-head hm-g-press" onPress={() => open(todayKey)} aria-label="Calendar, open today's day view. Times are New York time">
+        <span className="hm-g-label" data-lit={isLive || undefined}><HIcon name="calendar" lit={isLive} />Calendar<span className="hm-cal-tz">ET</span></span>
+        <span className="hm-g-value">{value}<Old age={age} /></span>
         <Chevron />
       </Press>
       <div className="hm-cal-body">
-        {!events ? (
+        {!view ? (
           <p className="hm-quiet">{cal.failed ? 'Calendar not answering' : 'Reading the calendar'}</p>
         ) : (
           <>
-            {allDay.length > 0 && (
-              <span className="hm-tags">
-                {allDay.map((e) => (
-                  <Press key={e.id} className="hm-tag vl-ellipsis" onPress={() => open(day0, e.id)} aria-label={`${e.title || 'Busy'}, all day, open its details`}>{e.title}</Press>
-                ))}
-              </span>
+            {today && dayGroup(today)}
+            {/* its own source: today's tasks right under today */}
+            {due && <TasksGlance due={due} rows={taskRows} now={now} />}
+            {view.days.slice(1).map(dayGroup)}
+            {hidden.length > 0 && (
+              <Press className="hm-cmore" onPress={() => open(hidden[0].day.key)} aria-label={`${hidden.length} more this week, open ${hidden[0].day.name}`}>
+                +{hidden.length} more this week
+              </Press>
             )}
-            {featured ? (
-              <NextEvent
-                e={featured}
-                live={isLive}
-                meta={<>{clock(featured.start)} to {clock(featured.end)}{featured.location ? ` · ${featured.location}` : ''}</>}
-                when={isLive ? <>Now<small>until {clock(featured.end)}</small></> : until(featured.start - now)}
-                onPress={() => open(day0, featured.id)}
-              />
-            ) : (
-              <Press className="hm-cal-note" onPress={() => open(day0)}>{past.length || allDay.length ? 'Nothing else today' : 'Nothing today'}</Press>
+            {!total && (
+              <Press className="hm-cempty" onPress={() => open(todayKey)}>Nothing in the next {DAYS} days</Press>
             )}
-            {rest.length > 0 && (
-              <span className="vl-rows hm-evrows">
-                {rest.slice(0, 4).map((e) => (
-                  <Press key={e.id} className="vl-row hm-evrow" onPress={() => open(day0, e.id)} aria-label={`${e.title || 'Busy'} at ${clock(e.start)}, open its details`}>
-                    <span className="hm-evtime">{clock(e.start)}</span>
-                    <span className="vl-ellipsis flex-1">{e.title || 'Busy'}</span>
-                    {e.start <= now && <span className="hm-live-tag">Now</span>}
-                  </Press>
-                ))}
-                {rest.length > 4 && <Press className="vl-row hm-evrow hm-faint" onPress={() => open(day0)}>+{rest.length - 4} more</Press>}
-              </span>
-            )}
-            {past.length > 0 && featured && <Press className="hm-earlier" onPress={() => open(day0)}>{past.length} earlier today</Press>}
           </>
         )}
-        {/* its own source: due tasks show while the calendar is still loading or not answering */}
-        <TasksGlance now={now} />
-        {events && <Ahead days={days} now={now} next={next} onOpen={open} />}
+        {!view && due && <TasksGlance due={due} rows={taskRows} now={now} />}
       </div>
     </Panel>
   )
+
+  if (!fit) return body
+  return (
+    <div className="hm-cal-slot" ref={slot}>
+      <div ref={box}>{body}</div>
+    </div>
+  )
+}
+
+type DueTasks = { open: number; due: Task[]; late: number }
+
+/** The open tasks (screens/Tasks.tsx) that are overdue or due today; null until the list has loaded once. */
+function useDueTasks(now: number): DueTasks | null {
+  const list = useOpenTasks().data?.tasks
+  if (!list) return null
+  const due = list.filter((t) => t.due && dueState(t.due, now) !== 'soon' && dueState(t.due, now) !== 'later')
+  return { open: list.length, due, late: due.filter((t) => dueState(t.due!, now) === 'overdue').length }
 }
 
 /**
- * The Calendar block's tasks (screens/Tasks.tsx): a line with what is overdue, what is due today
- * and how many are open, then up to three overdue or due-today tasks. All of it opens /m/tasks.
- * Nothing at all until the list has loaded once.
+ * The Calendar block's tasks: a line with what is overdue, what is due today and how many are
+ * open, then up to `rows` of the overdue or due-today tasks. All of it opens /m/tasks.
  */
-function TasksGlance({ now }: { now: number }) {
-  const tasks = useOpenTasks()
+function TasksGlance({ due: d, rows, now }: { due: DueTasks; rows: number; now: number }) {
   const navigate = useNavigate()
-  const list = tasks.data?.tasks
-  if (!list) return null
-  const due = list.filter((t) => t.due && dueState(t.due, now) !== 'soon' && dueState(t.due, now) !== 'later')
-  const late = due.filter((t) => dueState(t.due!, now) === 'overdue').length
+  const { due, late } = d
   const go = () => navigate('/m/tasks', { state: { v2Back: true } })
   const parts = [
     late ? { text: `${late} overdue`, late: true } : null,
     due.length - late ? { text: `${due.length - late} due today`, late: false } : null,
-    { text: `${list.length} open`, late: false },
+    { text: `${d.open} open`, late: false },
   ].filter((x): x is { text: string; late: boolean } => x !== null)
   return (
-    <div className="hm-ahead hm-tasks">
+    <div className="hm-tasks">
       <Press className="hm-ahead-head hm-tasks-head" onPress={go} aria-label={`Tasks: ${parts.map((x) => x.text).join(', ')}. Open the list`}>
         <span className="vl-caps">Tasks</span>
         <span>
           {parts.map((x, k) => <span key={x.text} data-late={x.late || undefined}>{k ? ' · ' : ''}{x.text}</span>)}
         </span>
       </Press>
-      {due.slice(0, 3).map((t) => {
+      {due.slice(0, rows).map((t) => {
         const isLate = dueState(t.due!, now) === 'overdue'
         return (
           <Press key={taskKey(t.ref)} className="hm-arow" onPress={go} aria-label={`${t.text}, due ${dueLabel(t.due!, now)}, open Tasks`}>
@@ -1167,44 +1363,6 @@ function TasksGlance({ now }: { now: number }) {
           </Press>
         )
       })}
-    </div>
-  )
-}
-
-/** The coming days as compact rows: a day tag on its first event, time, title; free runs fold into one row. Each row opens its day. */
-function Ahead({ days, now, next, onOpen }: { days: DayRow[]; now: number; next: EventVM | null; onOpen: (day: number, focus?: string) => void }) {
-  const total = new Set(days.flatMap((d) => d.list.map((e) => e.id))).size
-  return (
-    <div className="hm-ahead">
-      <div className="hm-ahead-head">
-        <span className="vl-caps">Next {AHEAD} days</span>
-        <span>{total ? plural(total, 'event') : 'Nothing planned'}</span>
-      </div>
-      {groupDays(days).map((g) => g.kind === 'free' ? (
-        <Press key={`f${g.a.i}`} className="hm-arow" data-free="" onPress={() => onOpen(g.a.from)} aria-label={`${dayTag(g.a.from)} free, open the day`}>
-          <span className="hm-aday">{dayTag(g.a.from)}</span>
-          <span className="hm-atitle">{g.a === g.b ? 'Free' : `Free through ${dayTag(g.b.from)}`}</span>
-        </Press>
-      ) : (
-        <div key={g.d.i} className="hm-aday-group">
-          {g.d.list.slice(0, PER_DAY).map((e, k) => (
-            <Press key={e.id} className="hm-arow" onPress={() => onOpen(g.d.from, e.id)} aria-label={`${dayTag(g.d.from)}, ${e.title || 'Busy'}, open its details`}>
-              <span className="hm-aday">{k === 0 ? dayTag(g.d.from) : ''}</span>
-              <span className="hm-atime" style={e.color ? { borderLeftColor: e.color } : undefined} title={e.source || undefined}>
-                {e.allDay ? 'All day' : e.start < g.d.from ? 'Cont.' : clock(e.start)}
-              </span>
-              <span className="hm-atitle">{e.title || 'Busy'}</span>
-              {e === next && <span className="hm-awhen">{until(e.start - now)}</span>}
-            </Press>
-          ))}
-          {g.d.list.length > PER_DAY && (
-            <Press className="hm-arow hm-faint" onPress={() => onOpen(g.d.from)}>
-              <span className="hm-aday" />
-              <span className="hm-atitle">+{g.d.list.length - PER_DAY} more</span>
-            </Press>
-          )}
-        </div>
-      ))}
     </div>
   )
 }

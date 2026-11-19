@@ -1,0 +1,239 @@
+/* Raven's shared pieces (kit/raven.tsx): the composer, attachment chips, a message's files, the
+   floating button, the quick sheet and the Messages tab's badge. Plain CSS on top of v2.css; colors
+   are the mode variables. No boxes: hairlines, text buttons, one row per thing. */
+
+/* ---------- Markdown in a reply ---------- */
+.rv-md { font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; color: var(--text); }
+.rv-md p { margin: 0 0 6px; }
+.rv-md p:last-child { margin-bottom: 0; }
+.rv-md ul, .rv-md ol { margin: 2px 0 6px; padding-left: 18px; }
+.rv-md li { margin: 1px 0; }
+.rv-md pre { max-width: 100%; overflow-x: auto; }
+/* quieter than the labels, still readable at 11 px (--faint is about 3.5:1 on black) */
+.rv-meta { margin: 3px 0 0; font-size: 11px; line-height: 15px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
+
+/* ---------- the composer ---------- */
+.rv-compose {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--line);
+}
+.rv-compose[data-over] { border-top-color: var(--fg); box-shadow: 0 -8px 16px -14px var(--fg); }
+.rv-compose-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.rv-compose textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 180px;
+  padding: 9px 2px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink-hi);
+  background: transparent;
+  border: 0;
+  resize: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.rv-compose textarea:focus { outline: none; }
+.rv-compose textarea::placeholder { color: var(--dim); }
+.rv-pick { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rv-attach {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+}
+.rv-attach[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+.rv-send.vl-btn-line { flex: none; min-height: 36px; margin-bottom: 1px; font-size: 12.5px; }
+
+.rv-chips { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 2px; }
+.rv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  font-size: 11.5px;
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+.rv-chip img { flex: none; width: 24px; height: 24px; object-fit: cover; border: 1px solid var(--line); }
+.rv-chip-name { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-chip-state { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
+.rv-chip[data-state='up'] .rv-chip-state { color: var(--fg); }
+.rv-chip[data-state='err'] { border-bottom-color: var(--hot); }
+.rv-chip[data-state='err'] .rv-chip-state { color: var(--hot); }
+.rv-chip-act { position: relative; font-size: 11.5px; font-weight: 600; color: var(--fg); padding: 0 2px; }
+.rv-chip-x { position: relative; display: grid; place-items: center; width: 22px; height: 26px; }
+.rv-chip-x::after, .rv-chip-act::after { content: ''; position: absolute; inset: -8px -4px; }
+
+/* ---------- a message's files ---------- */
+.rv-files { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; margin: 6px 0 2px; }
+.rv-thumb {
+  display: block;
+  width: 132px;
+  height: 99px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  overflow: hidden;
+}
+.rv-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.rv-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--fg);
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 35%, transparent);
+}
+.rv-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-file i { flex: none; font-style: normal; color: var(--dim); font-size: 11px; }
+
+/* ---------- the Messages tab's unread count ---------- */
+.rv-badge {
+  margin-left: 6px;
+  min-width: 15px;
+  padding: 0 4px;
+  font-size: 9.5px;
+  line-height: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: center;
+  color: #000;
+  background: var(--fg);
+  border-radius: 8px;
+  text-shadow: none;
+  box-shadow: var(--glow);
+}
+.rv-badge::before { content: attr(data-n); }
+@media (max-width: 639px) {
+  /* the phone's tabs are icons: the count sits on the icon's corner */
+  .vl-tab-prim .rv-badge { position: absolute; top: 5px; left: calc(50% + 5px); margin: 0; }
+}
+
+/* ---------- the floating button: bottom-right, the lights button's twin ---------- */
+/* button.: outranks v2.css's `.vl-shell > :not(.vl-shell-backdrop)`, whichever file loads first */
+.vl-shell > button.rv-fab {
+  position: absolute;
+  z-index: 4;
+  right: calc(10px + env(safe-area-inset-right));
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  transition: opacity .2s, visibility 0s;
+}
+.rv-fab {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--fg) 14%, transparent), transparent 72%),
+    #000;
+  border: 1px solid color-mix(in srgb, var(--fg) calc(var(--panel-a) + 6%), transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .85);
+  transition: transform .12s var(--ease), border-color .3s, box-shadow .3s;
+}
+.rv-fab::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
+.rv-fab .vl-icon { vertical-align: 0; transition: color .3s, filter .3s; }
+.rv-fab[data-unread], .rv-fab[data-on] {
+  border-color: color-mix(in srgb, var(--fg) 92%, transparent);
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent),
+    0 0 3px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent);
+}
+.rv-fab[data-pressed] { transform: scale(.92); }
+.rv-fab[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
+@media (hover: hover) and (pointer: fine) { .rv-fab:hover { border-color: color-mix(in srgb, var(--fg) 70%, transparent); } }
+/* the player bar keeps the corner free; a sheet or a page without the foot hides the button */
+.vl-shell:has(> .rv-fab) > .vl-foot[data-bar] { padding-right: calc(62px + env(safe-area-inset-right)); }
+.vl-shell:has([aria-modal='true']) > .rv-fab { opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s; }
+.vl-shell[data-nofoot] > .rv-fab { display: none; }
+/* the full pages outside the tabs (Calendar.tsx PageFrame) that scroll keep room for it */
+.vpg:has(> .rv-fab) .vpg-main[data-scroll] { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+
+/* ---------- the quick sheet ---------- */
+.rv-q { position: fixed; inset: 0; z-index: 70; font-family: var(--font); font-size: 13px; color: var(--text); }
+.rv-q[hidden] { display: none; }
+.rv-q-back { position: absolute; inset: 0; background: rgba(0, 0, 0, .5); animation: vl-fade .14s linear both; }
+.rv-q-sheet {
+  position: absolute;
+  right: calc(12px + env(safe-area-inset-right));
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  width: min(440px, calc(100% - 24px));
+  max-height: min(560px, calc(100% - 90px));
+  display: flex;
+  flex-direction: column;
+  padding: 4px 14px 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 40%), #000;
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .9), var(--glow);
+  animation: rv-pop .16s var(--ease) both;
+}
+@keyframes rv-pop { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
+.rv-q-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 40px; border-bottom: 1px solid var(--line); }
+.rv-q-head b { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); }
+.rv-q-status { flex: 1; min-width: 0; font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-q-status[data-busy] { color: var(--fg); }
+.rv-q-status[data-state='error'] { color: var(--hot); }
+.rv-q-open { position: relative; flex: none; font-size: 11.5px; font-weight: 600; color: var(--fg); }
+.rv-q-open::after { content: ''; position: absolute; inset: -12px -4px; }
+.rv-q-x { position: relative; flex: none; display: grid; place-items: center; width: 30px; height: 36px; margin-right: -6px; }
+.rv-q-thread {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+}
+.rv-q-me { margin: 0; font-size: 13.5px; line-height: 19px; color: var(--ink-hi); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rv-q-me::before { content: 'You  '; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); white-space: pre; }
+.rv-q-wait { margin: 0; font-size: 12px; color: var(--dim); }
+.rv-q-wait[data-busy] { color: var(--fg); }
+.rv-q-wait[data-busy]::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--fg); box-shadow: var(--glow); vertical-align: 1px; animation: rv-blink 1.4s ease-in-out infinite; }
+.rv-q-reply { padding-top: 6px; border-top: 1px solid var(--line); }
+.rv-q-compose { border-top: 0; padding-top: 4px; }
+.rv-q[data-sent] .rv-q-compose { border-top: 1px solid var(--line); }
+.rv-q-sheet .rv-chip-name { max-width: 10rem; }
+.rv-q-sheet, .rv-q-sheet :is(p, .rv-md) { -webkit-user-select: text; user-select: text; }
+@keyframes rv-blink { 50% { opacity: .3; } }
+html[data-motion='reduced'] .rv-q-sheet, html[data-motion='reduced'] .rv-q-back { animation: none; }
+
+/* phone: a sheet along the bottom, over the keyboard (its bottom follows the keyboard in raven.tsx) */
+@media (max-width: 639px) {
+  .rv-q-sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 70%;
+    padding: 2px calc(12px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(12px + env(safe-area-inset-left));
+    border-width: 1px 0 0;
+    animation-name: rv-rise;
+  }
+  @keyframes rv-rise { from { transform: translate3d(0, 24px, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+
+/* a finger: at least a 44 px target, drawn the same */
+@media (pointer: coarse) {
+  .rv-attach::after { content: ''; position: absolute; inset: -3px; }
+  .rv-file { position: relative; }
+  .rv-file::after { content: ''; position: absolute; inset: -8px 0; }
+  .rv-q-x::after { content: ''; position: absolute; inset: -4px -7px; }
+  .rv-q-open::after { inset: -14px -4px; }
+  .rv-chip-x::after { inset: -10px -11px; }
+  .rv-chip-act::after { inset: -10px -8px; }
+}

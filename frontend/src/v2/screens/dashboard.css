@@ -188,8 +188,11 @@
 .hm-trade-kv { display: flex; flex: 1 1 0; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; padding-bottom: 1px; }
 .hm-trade-k { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; font-size: 11.5px; line-height: 15px; color: var(--dim); white-space: nowrap; }
 .hm-trade-k[data-on] { color: var(--text); }
-.hm-trade-chart { position: relative; height: 190px; margin: 2px 1px 1px; }
-.hm-grow .hm-trade-chart { flex: 1 1 0; height: auto; min-height: 170px; }
+/* the chart keeps a short height of its own on every screen, never stretched to fill a column: 120 px in a
+   column up to 400 px wide (a 1600 px monitor, the iPads), growing with the width to 170 px (a 2560 px
+   monitor); the equity figure and the day's move above it carry the reading */
+.hm-trade { container: hm-trade / inline-size; }
+.hm-trade-chart { position: relative; height: clamp(120px, calc(120px + (100cqi - 400px) * .4), 170px); margin: 2px 1px 1px; }
 
 /* ---------- section head on the floor: icon + label .... value ---------- */
 
@@ -415,26 +418,66 @@ html[data-motion='reduced'] .hm-tick[data-busy]::before, html[data-motion='reduc
 html[data-motion='reduced'] .hm-tick-alt[data-busy] .hm-tick-box { animation: none; }
 @media (prefers-reduced-motion: reduce) { .hm-tick[data-busy]::before, .hm-plate[data-busy]::before, .hm-tick-alt[data-busy] .hm-tick-box { animation: none; } }
 
-/* ---------- calendar: today first; the head, each event and each day open the calendar sheet ---------- */
+/* ---------- calendar: the week under day headings (Dashboard.tsx Calendar); a heading, an event or a line opens the calendar on its day ---------- */
 
 .hm-quiet { display: block; margin: 0; font-size: 12.5px; line-height: 17px; color: var(--dim); }
-.hm-cal-body { padding: 0 10px 9px; }
-.hm-cal-note { display: block; width: 100%; min-height: 28px; margin: 0 0 3px; font-size: 11.5px; line-height: 15px; text-align: left; color: var(--dim); }
-.hm-cal-note[data-pressed] { color: var(--fg); }
-.hm-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
-.hm-tag {
-  max-width: 100%;
-  min-height: 24px;
-  padding: 2px 7px;
-  font-size: 11px;
-  line-height: 14px;
+.hm-cal-body { padding: 0 10px 8px; }
+/* every time in the block is New York time: said once, next to the label */
+.hm-cal-tz { margin-left: 8px; font-size: 9.5px; font-weight: 600; letter-spacing: .12em; color: var(--dim); text-shadow: none; }
+/* a fill layout (monitor, landscape iPad): the slot takes the height its column has left and ignores its
+   own content; the box inside keeps its natural height and lists as many lines as fit (useFitLines) */
+.hm-cal-slot { flex: 1 1 0; min-height: 0; contain: size; }
+
+/* a day: its heading, then its lines; a strong hairline between days */
+.hm-cday + .hm-cday, .hm-cday + .hm-tasks, .hm-tasks + .hm-cday, .hm-cday + .hm-cmore, .hm-tasks + .hm-cmore, .hm-tasks + .hm-cempty { border-top: 1px solid var(--line-strong); }
+.hm-cday-head { display: flex; align-items: baseline; gap: 9px; width: 100%; min-height: 28px; padding: 7px 0 3px; text-align: left; }
+.hm-cday-name { font-size: 11px; line-height: 15px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); }
+.hm-cday-date { font-size: 12px; line-height: 15px; color: var(--dim); }
+.hm-cday-head[data-pressed] .hm-cday-name { text-shadow: var(--text-glow); }
+
+/* one event (or a day's all-day events) per row: the time with the calendar's color as a 2 px edge, the
+   title bright, where it is dim; a meeting's Join sits at the end, outside the row's own press */
+.hm-crow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hm-crow + .hm-crow, .hm-crow + .hm-cnext, .hm-cnext + .hm-crow { border-top: 1px solid var(--line); }
+.hm-crow-main { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; min-height: 34px; padding: 3px 0; font-size: 14px; line-height: 18px; text-align: left; }
+.hm-crow-main[data-pressed] { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
+.hm-crow-main[data-pressed] .hm-ctitle { color: var(--fg); }
+.hm-ctime {
+  flex: none;
+  width: 70px;
+  padding-left: 7px;
+  border-left: 2px solid var(--line-strong);
+  font-size: 12.5px;
+  line-height: 16px;
   color: var(--text);
-  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-.hm-tag[data-pressed] { color: var(--fg); border-color: var(--fg); }
-.hm-next { display: flex; align-items: flex-start; gap: 12px; width: 100%; min-width: 0; min-height: 44px; padding: 2px 0; text-align: left; }
-.hm-next[data-pressed] .hm-next-title { color: var(--fg); text-shadow: var(--text-glow); }
-.hm-next-title {
+.hm-ctitle { flex: 0 1 auto; min-width: 0; font-weight: 500; color: var(--ink-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-cplace { flex: 1 1 0; min-width: 0; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-crow[data-allday] .hm-ctime { color: var(--dim); }
+.hm-crow[data-allday] .hm-ctitle { font-weight: 400; color: var(--text); }
+.hm-cnow, .hm-csoon { flex: none; margin-left: auto; white-space: nowrap; }
+.hm-cnow {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--hot);
+  border: 1px solid color-mix(in srgb, var(--hot) 70%, transparent);
+}
+.hm-csoon { font-size: 12.5px; font-weight: 700; color: var(--hot); }
+
+/* the event on now, or the next to start: its title large, "Now" or "in 25 min" in the hot color, then its
+   New York time and where it is; Join over the meta line's end */
+.hm-cnext { position: relative; min-width: 0; }
+.hm-cnext-main { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; min-height: 48px; padding: 4px 0 6px; text-align: left; }
+.hm-cnext-main[data-pressed] .hm-cnext-title { color: var(--fg); text-shadow: var(--text-glow); }
+.hm-cnext-top { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.hm-cnext-title {
+  flex: 1;
+  min-width: 0;
   font-size: 18px;
   line-height: 22px;
   font-weight: 600;
@@ -445,88 +488,72 @@ html[data-motion='reduced'] .hm-tick-alt[data-busy] .hm-tick-box { animation: no
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+.hm-cnext-when { flex: none; font-size: 18px; line-height: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--hot); text-shadow: var(--hot-glow); white-space: nowrap; }
+.hm-cnext-meta { display: block; min-width: 0; font-size: 12.5px; line-height: 17px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-cnext-meta .hm-cplace { font-size: inherit; }
+.hm-cnext[data-join] .hm-cnext-meta { padding-right: 58px; }
+.hm-cnext .hm-join { position: absolute; right: 0; bottom: 3px; min-height: 22px; }
 /* mono runs wide: one step smaller so a normal title fits on one line (long ones take two) */
-html:not([data-font='sans']) .hm-next-title { font-size: 16px; line-height: 20px; }
-html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px; }
-.hm-next-meta { display: block; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--dim); }
-.hm-next-when {
+html:not([data-font='sans']) .hm-cnext-title { font-size: 16px; line-height: 20px; }
+html:not([data-font='sans']) .hm-cnext-when { font-size: 17px; line-height: 20px; }
+
+/* a meeting's link: small accent caps in a hairline frame, a 26 px target that opens the meeting */
+.hm-join {
   flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  font-size: 22px;
-  line-height: 24px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  color: var(--hot);
-  text-shadow: var(--hot-glow);
-  white-space: nowrap;
-}
-.hm-next-when small { font-size: 11px; line-height: 14px; font-weight: 500; letter-spacing: 0; color: var(--dim); text-shadow: none; }
-.hm-evrows { display: block; margin-top: 8px; border-top: 1px solid var(--line); }
-.hm-evrow { width: 100%; min-height: 32px; font-size: 12.5px; text-align: left; }
-.hm-evrow[data-pressed] { color: var(--fg); background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
-.hm-evrow[data-past] { opacity: .42; }
-.hm-evtime { flex: none; width: 62px; font-size: 11.5px; color: var(--dim); }
-.hm-evloc { font-size: 11px; line-height: 13px; color: var(--dim); }
-.hm-live-tag {
-  flex: none;
-  padding: 1px 6px;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  line-height: 14px;
   font-weight: 700;
   letter-spacing: .14em;
   text-transform: uppercase;
-  color: var(--hot);
-  border: 1px solid color-mix(in srgb, var(--hot) 70%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--hot) 35%, transparent);
+  text-decoration: none;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent);
 }
-.hm-earlier { display: block; min-height: 24px; margin-top: 2px; font-size: 11px; text-align: left; color: var(--faint); }
-.hm-earlier[data-pressed] { color: var(--fg); }
+.hm-join:active { background: color-mix(in srgb, var(--fg) 14%, transparent); }
+/* a finger (phone, iPad): Join keeps its small frame but takes taps over the row's height and a little
+   to each side; the day headings grow to match the rows */
+@media (pointer: coarse) {
+  .hm-join { position: relative; }
+  .hm-join::after { content: ''; position: absolute; inset: -6px -5px; }
+  .hm-cday-head { min-height: 34px; }
+}
 
-/* the next six days: day tag on a day's first row, time with the calendar's color as a 2 px edge, title */
-.hm-ahead { margin-top: 10px; border-top: 1px solid var(--line-strong); }
+.hm-cearlier, .hm-cmore, .hm-cempty { display: block; width: 100%; min-height: 28px; font-size: 12px; line-height: 16px; text-align: left; color: var(--dim); }
+.hm-cearlier { min-height: 24px; color: var(--faint); border-top: 1px solid var(--line); }
+.hm-cearlier[data-pressed], .hm-cmore[data-pressed], .hm-cempty[data-pressed] { color: var(--fg); }
+
+/* the block's tasks (TasksGlance): the head in the day headings' look, then one row per due task */
 .hm-ahead-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
   padding: 7px 0 3px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 15px;
   color: var(--dim);
   white-space: nowrap;
 }
-.hm-ahead-head .vl-caps { color: var(--fg); font-size: 10.5px; }
-.hm-aday-group + .hm-aday-group, .hm-aday-group + .hm-arow, .hm-arow[data-free] + .hm-aday-group { border-top: 1px solid var(--line); }
+.hm-ahead-head .vl-caps { color: var(--fg); font-size: 11px; }
 .hm-arow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 30px;
-  font-size: 12.5px;
-  line-height: 16px;
+  min-height: 32px;
+  font-size: 13.5px;
+  line-height: 17px;
   text-align: left;
 }
 .hm-arow[data-pressed] { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
 .hm-arow[data-pressed] .hm-atitle { color: var(--fg); }
-.hm-aday { flex: none; width: 50px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
-.hm-atime {
-  flex: none;
-  width: 70px;
-  padding-left: 6px;
-  border-left: 2px solid var(--line-strong);
-  font-size: 11.5px;
-  line-height: 14px;
-  color: var(--dim);
-  white-space: nowrap;
-}
-.hm-atitle { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hm-awhen { flex: none; font-size: 12.5px; font-weight: 700; color: var(--hot); text-shadow: var(--hot-glow); white-space: nowrap; }
-.hm-arow[data-free] .hm-aday { font-weight: 500; color: var(--dim); }
-.hm-arow[data-free] .hm-atitle { color: var(--faint); }
-.hm-arow.hm-faint .hm-atitle { color: var(--faint); font-size: 11.5px; }
+.hm-aday { flex: none; width: 70px; padding-left: 9px; font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.hm-atitle { flex: 1; min-width: 0; color: var(--ink-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- quick start: outlined plates with the start icon ---------- */
 
@@ -1226,18 +1253,19 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
   .hm-tick-alt { font-size: 11px; line-height: 13px; padding-left: 11px; min-height: 28px; }
   .hm-tick { min-height: 50px; padding-left: 11px; }
   .hm-step-day { font-size: 12px; min-width: 88px; }
-  .hm-start, .hm-srow, .hm-evrow, .hm-quiet { font-size: 13.5px; }
-  .hm-srow-meta, .hm-evtime, .hm-meter-note, .hm-g-foot, .hm-cal-note, .hm-g-acct { font-size: 11.5px; }
-  .hm-next-meta, .hm-hrow-name, .hm-media-cap { font-size: 12.5px; }
-  .hm-arow, .hm-now-text, .hm-dl-title { font-size: 13.5px; }
-  .hm-aday, .hm-atime, .hm-ahead-head { font-size: 12px; }
-  .hm-aday { width: 56px; }
-  .hm-atime { width: 76px; }
-  .hm-arow { min-height: 31px; }
-  .hm-next-title { font-size: 21px; line-height: 25px; }
-  .hm-next-when { font-size: 24px; line-height: 27px; }
-  html:not([data-font='sans']) .hm-next-title { font-size: 19px; line-height: 23px; }
-  html:not([data-font='sans']) .hm-next-when { font-size: 22px; line-height: 25px; }
+  .hm-start, .hm-srow, .hm-quiet { font-size: 13.5px; }
+  .hm-srow-meta, .hm-meter-note, .hm-g-foot, .hm-g-acct { font-size: 11.5px; }
+  .hm-hrow-name, .hm-media-cap { font-size: 12.5px; }
+  .hm-now-text, .hm-dl-title { font-size: 13.5px; }
+  .hm-crow-main, .hm-arow { font-size: 15px; line-height: 19px; }
+  .hm-ctime, .hm-aday { width: 76px; font-size: 13px; }
+  .hm-cplace, .hm-ahead-head, .hm-cday-date { font-size: 12.5px; }
+  .hm-cday-name, .hm-ahead-head .vl-caps { font-size: 11.5px; }
+  .hm-cnext-meta { font-size: 13px; }
+  .hm-cnext-title { font-size: 21px; line-height: 25px; }
+  .hm-cnext-when { font-size: 21px; line-height: 25px; }
+  html:not([data-font='sans']) .hm-cnext-title { font-size: 19px; line-height: 23px; }
+  html:not([data-font='sans']) .hm-cnext-when { font-size: 19px; line-height: 23px; }
   .hm-meter-val { font-size: 24px; line-height: 27px; }
   .hm-chip-name { font-size: 13px; }
   .hm-allbar-name { font-size: 11.5px; }
@@ -1278,7 +1306,7 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 }
 
 /* Settings > Density: comfortable (the other rows are keyed in settings.css) */
-html[data-density='comfortable'] .hm-arow { min-height: 34px; }
+html[data-density='comfortable'] .hm-arow, html[data-density='comfortable'] .hm-crow-main { min-height: 38px; }
 html[data-density='comfortable'] .hm-now-main { min-height: 40px; }
 html[data-density='comfortable'] .hm-chips[data-wide] > .hm-chip { min-height: 44px; }
 html[data-density='comfortable'] .hm-allbar { min-height: 48px; }

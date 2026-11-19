@@ -1014,7 +1014,19 @@ export function useInboxCount(): Live<InboxCount> {
 
 // ---------- calendar ----------
 
-export type EventVM = { id: string; title: string; start: number; end: number; allDay: boolean; location: string; color: string; source: string }
+/** `join`: the meeting link (Teams, Zoom, Meet, Webex) from the event's link, location or notes, '' when it has none */
+export type EventVM = { id: string; title: string; start: number; end: number; allDay: boolean; location: string; color: string; source: string; join: string }
+
+const MEETING_URL = /https:\/\/(?:[\w-]+\.)*(?:teams\.(?:microsoft|live)\.com\/(?:l\/meetup-join|meet)\/|zoom\.us\/(?:j|my|w)\/|meet\.google\.com\/[a-z]|webex\.com\/(?:meet|join)\/)[^\s<>"')\]]*/i
+
+/** the first meeting link the event carries, '' when none */
+function meetingUrl(e: Pick<CalendarEvent, 'url' | 'location' | 'description'>): string {
+  for (const s of [e.url, e.location, e.description]) {
+    const m = s ? MEETING_URL.exec(s) : null
+    if (m) return m[0].replace(/[.,;:]+$/, '')
+  }
+  return ''
+}
 
 const toEvent = (e: CalendarEvent): EventVM => ({
   id: e.uid + e.start,
@@ -1025,6 +1037,7 @@ const toEvent = (e: CalendarEvent): EventVM => ({
   location: e.location,
   color: e.color,
   source: e.sourceLabel,
+  join: meetingUrl(e),
 })
 
 const calHidden = (): Set<string> => {
