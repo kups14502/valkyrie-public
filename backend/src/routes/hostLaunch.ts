@@ -286,6 +286,7 @@ router.get('/session-board', async (_req, res) => {
     const launcher = LAUNCHERS[name]
     if (!launcher.token) return { host: name, ok: false, status: 501, rows: [] as BoardRow[], detail: `${launcher.env} is not set on the api host` }
     try {
+      const askedAt = Date.now()
       const r = await callHostLauncher(launcher, '/sessions', { method: 'GET' }, 60_000)
       const body = (r.body ?? {}) as { sessions?: unknown }
       if (r.status !== 200 || !Array.isArray(body.sessions)) {
@@ -301,6 +302,7 @@ router.get('/session-board', async (_req, res) => {
           const at = row.lastActivityUtc ? Date.parse(String(row.lastActivityUtc)) : NaN
           return Number.isFinite(at) && at >= cutoff
         })
+      if (name === 'thor') keepBoard(rows, askedAt)
       return { host: name, ok: true, status: 200, rows, detail: null as string | null }
     } catch (err) {
       return { host: name, ok: false, status: 502, rows: [] as BoardRow[], detail: (err as Error).message }
@@ -412,13 +414,55 @@ export async function boardSessions(timeoutMs = 60_000): Promise<BoardRow[] | nu
   const launcher = LAUNCHERS.thor
   if (!launcher.token) return null
   try {
+    const askedAt = Date.now()
     const r = await callHostLauncher(launcher, '/sessions', { method: 'GET' }, timeoutMs)
     const body = (r.body ?? {}) as { sessions?: unknown }
     if (r.status !== 200 || !Array.isArray(body.sessions)) return null
-    return (body.sessions as BoardRow[]).map((row) => ({ ...row, host: 'thor', area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null) }))
+    const rows = (body.sessions as BoardRow[]).map((row) => ({ ...row, host: 'thor', area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null) }))
+    keepBoard(rows, askedAt)
+    return rows
   } catch {
     return null
   }
+}
+
+// One copy of thor's board rows for this whole box. Every read of thor's
+// /sessions here refreshes it: GET /session-board, which the Sessions screens
+// poll, and boardSessions (Raven's tools). boardNow answers from the copy at
+// once and never waits on thor. It asks thor itself, in the background and one
+// read at a time, only when nothing has refreshed the copy for 20 s, or once
+// when a pane's turn ended after the copy was read (a permission prompt shows
+// up as a turn end, and the old copy cannot know about it). So it adds no
+// poller of its own. A copy older than a minute is "unknown": a thor that
+// stopped answering has nobody waiting on it.
+const BOARD_FRESH_MS = 20_000
+const BOARD_KEEP_MS = 60_000
+export type BoardCopy = { at: number; rows: BoardRow[] }
+let boardCopy: BoardCopy | null = null
+let boardLoad: Promise<unknown> | null = null
+let boardAskedAt = 0
+
+// `at` is when the read started: what thor said can be no newer than that. Two
+// reads that land out of order keep the newer one.
+function keepBoard(rows: BoardRow[], at: number): void {
+  if (!boardCopy || at >= boardCopy.at) boardCopy = { at, rows }
+}
+
+/**
+ * thor's board rows as last read, with when that read started, or null when no
+ * read in the last minute worked. Never waits. `after`: a turn ended then; a
+ * copy read before it is stale, so one fresh read starts.
+ */
+export function boardNow(after = 0): BoardCopy | null {
+  const now = Date.now()
+  const at = boardCopy?.at ?? 0
+  const stale = now - at > BOARD_FRESH_MS && now - boardAskedAt > BOARD_FRESH_MS
+  const behind = after > at && after > boardAskedAt && now - after <= BOARD_KEEP_MS
+  if ((stale || behind) && !boardLoad) {
+    boardAskedAt = now
+    boardLoad = boardSessions(20_000).finally(() => { boardLoad = null })
+  }
+  return boardCopy && now - at <= BOARD_KEEP_MS ? boardCopy : null
 }
 
 router.get('/hosts/:host/launch-targets', async (req, res) => {

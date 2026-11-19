@@ -4,6 +4,7 @@ import { accessSync, constants as fsConstants, existsSync, readFileSync, statSyn
 import { homedir, userInfo } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
+import { cleanTitle } from './paneState.js'
 
 const exec = promisify(execFile)
 
@@ -343,6 +344,18 @@ const FORMAT = [
   // Last on purpose: every index above keeps its meaning, and a session made
   // before projects existed simply reads back an empty field here.
   '#{@vk_project}',
+  // When the pane last printed. session_activity above moves only on a key or
+  // an attach (measured on tmux 3.8: a detached pane printing every second
+  // left it where it was), window_activity on every byte of output.
+  '#{window_activity}',
+  // What a title equal to one of these means: nothing set it (tmux starts a
+  // pane titled with the host name) or a shell did.
+  '#{host}',
+  '#{host_short}',
+  '#{pane_current_command}',
+  // The title Claude sets (allow-set-title is on), last of all: the program
+  // inside the pane chose it, so whatever it holds stays in this field.
+  '#{pane_title}',
 ].join(SEP)
 
 export type TermSession = {
@@ -374,6 +387,13 @@ export type TermSession = {
   size: string
   // The Valkyrie project this pane was opened for, '' for none.
   projectId: string
+  // ms epoch when the pane last printed anything (tmux's window activity).
+  // activityAt is the session's: a key Brendon typed or an attach.
+  outputAt: number
+  // The pane's title as Claude sets it (its name after /rename, or the topic
+  // it picked), status glyph removed (paneState.ts cleanTitle). '' when
+  // nothing but tmux or a shell set one.
+  title: string
 }
 
 // The pane's last few printed lines, minus tmux's own dead-pane line. Only ever
@@ -427,6 +447,8 @@ export async function listSessions(): Promise<TermSession[]> {
         deadText: '',
         size: f[10] || '',
         projectId: f[12] || '',
+        outputAt: (Number(f[13]) || 0) * 1000,
+        title: cleanTitle(f.slice(17).join(SEP), [f[14] ?? '', f[15] ?? '', f[16] ?? '', f[0] ?? '']),
       }
     })
     .filter((s) => SESSION_NAME_RE.test(s.name))
@@ -534,10 +556,11 @@ export async function endScroll(name: string): Promise<void> {
 // into a pane, both by the minted name.
 
 // The visible screen, wrapped lines joined. null when the pane cannot be read.
-export async function capturePane(name: string): Promise<string | null> {
+// The session list's state check (paneState.ts) passes a shorter timeout.
+export async function capturePane(name: string, timeoutMs = 5_000): Promise<string | null> {
   if (!SESSION_NAME_RE.test(name)) return null
   try {
-    return await tmux(['capture-pane', '-p', '-J', '-t', name], 5_000)
+    return await tmux(['capture-pane', '-p', '-J', '-t', name], timeoutMs)
   } catch {
     return null
   }

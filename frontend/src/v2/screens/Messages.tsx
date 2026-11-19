@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
@@ -15,14 +15,15 @@ import {
 } from '../../lib/ravenApi'
 import './messages.css'
 
-// Messages (/m/messages): one conversation, Brendon and Raven (backend
-// lib/raven). Raven answers here, and what the agents, his sessions, the
-// features and Valkyrie itself say comes in as relays, labeled by their source;
-// the agents' proposals sit inline as cards he decides. Newest at the bottom,
-// older pages load on scroll-up, everything updates through the Messages
-// long-poll. A wide screen keeps a narrow "Connected" column on the right (main
-// terminals, watched sessions, agents, feeds); a narrow one opens it from
-// the header. Old links (?c=<channel>) land here; ?compose=1 focuses the box.
+// The Raven tab (/m/raven; the file keeps its old name, Messages): one
+// conversation, Brendon and Raven (backend lib/raven). Raven answers here, and
+// what the agents, his sessions, the features and Valkyrie itself say comes in
+// as relays, labeled by their source; the agents' proposals sit inline as cards
+// he decides. Newest at the bottom, older pages load on scroll-up, everything
+// updates through the Messages long-poll (/api/msg/changes). A wide screen
+// keeps a narrow "Connected" column on the right (main terminals, watched
+// sessions, agents, feeds); a narrow one opens it from the header. Old links
+// (/m/messages, ?c=<channel>) land here; ?compose=1 focuses the box.
 
 const NY_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
 const NY_KEY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
@@ -97,16 +98,18 @@ export default function Messages({ active }: ScreenProps) {
   // an agent's line with no relay label still shows the agent's name
   const names = useMemo(() => new Map((page?.agents ?? []).map((a) => [a.id, a.name])), [page])
 
-  // ?compose=1 focuses the box; ?c=<channel> (an old push) is dropped: there is one conversation
+  // ?compose=1 focuses the box; ?c=<channel> (an old push) is dropped: there is one conversation. An old
+  // /m/messages address waits for the shell to move it to /m/raven (with its query), so the two rewrites never race.
   const compose = params.get('compose') === '1'
+  const oldAddress = /^\/m\/messages(\/|$)/.test(useLocation().pathname)
   useEffect(() => {
-    if (!active || (!compose && !params.has('c'))) return
+    if (!active || oldAddress || (!compose && !params.has('c'))) return
     if (compose) ta.current?.focus({ preventScroll: true })
     const p = new URLSearchParams(params)
     p.delete('compose')
     p.delete('c')
     setParams(p, { replace: true })
-  }, [active, compose, params, setParams])
+  }, [active, oldAddress, compose, params, setParams])
 
   // Ctrl+Shift+Space and the palette's "Message Raven" here: the box below, not the quick sheet
   useIntent('raven:compose', () => ta.current?.focus(), active)

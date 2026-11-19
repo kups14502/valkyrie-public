@@ -1,7 +1,7 @@
 import { api } from './api'
 
 // Raven (backend/src/routes/raven.ts): Brendon's one assistant, the only
-// conversation in Messages. He writes, Raven answers, and what the agents,
+// conversation in the Raven tab. He writes, Raven answers, and what the agents,
 // his sessions and the features say comes into the same thread as relays.
 // Proposals the agents make are decided here too (routes/msg.ts), and the
 // thread updates through the Messages long-poll (/api/msg/changes).

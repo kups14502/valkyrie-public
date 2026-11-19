@@ -23,7 +23,7 @@ import MealsPage from './screens/Meals'
 import InboxPage from './screens/Inbox'
 import TasksPage from './screens/Tasks'
 import Messages from './screens/Messages'
-import Desk from './screens/Desk'
+import Desk, { DeskBadge } from './screens/Desk'
 import './v2.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
@@ -69,7 +69,10 @@ const BASE_SCREENS: ScreenDef[] = [
     floor: (sub) => (sub === 'today' || sub === 'hotkeys' ? 'faint' : false),
   },
   // the one conversation with Raven, his assistant (lib/raven on the backend); the badge counts Raven's unread
-  { id: 'messages', label: 'Messages', Component: Messages, floor: 'faint', badge: RavenBadge },
+  { id: 'raven', label: 'Raven', Component: Messages, floor: 'faint', badge: RavenBadge },
+  // his Claude sessions in tabs, like Windows Terminal: one to three columns, each a strip of tabs over the active
+  // session's terminal, filling the screen (no lights button under it); the badge counts tabs done and not opened
+  { id: 'desk', label: 'Desk', Component: Desk, floor: 'faint', foot: false, badge: DeskBadge },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },
   // Lights draws its own full-page 3D floor under the room
@@ -92,11 +95,13 @@ const BASE_SCREENS: ScreenDef[] = [
 const SCREENS = withFeatures(BASE_SCREENS)
 
 // Old URLs (bookmarks, the home screen icon, screens still saying go('claude')) land on the new tabs.
-// The Car tab is gone (the Tesla app has the controls): the car stays on System > Hosts.
+// The Car tab is gone (the Tesla app has the controls): the car stays on System > Hosts. Messages is
+// the Raven tab now; its old links (/m/messages?compose=1, older pushes) keep their query.
 const LEGACY: LegacyMap = (screen, sub) => {
   if (screen === 'home') return sub === 'settings' ? 'settings' : sub === 'today' ? 'dashboard/today' : 'dashboard'
   if (screen === 'claude') return sub ? `ai/${sub}` : 'ai'
   if (screen === 'car') return 'system/hosts'
+  if (screen === 'messages') return 'raven'
   return null
 }
 
@@ -141,13 +146,10 @@ function useV2Document() {
 
 const SCREENS_IPAD: ScreenDef[] = SCREENS.map((s) => (s.id === 'dashboard' ? { ...s, subs: DASH_SUBS_IPAD } : s))
 
-// The headset has the room for several sessions at once: Desk (screens/Desk.tsx) sits after Dashboard
-const SCREENS_VR: ScreenDef[] = [SCREENS[0], { id: 'desk', label: 'Desk', Component: Desk, floor: 'faint' }, ...SCREENS.slice(1)]
-
-/** The tabs for this device: the iPad's Dashboard also has Hotkeys, the headset has Desk, and features drop tabs outside their profiles. */
+/** The tabs for this device: the iPad's Dashboard also has Hotkeys, and features drop tabs outside their profiles. */
 function useScreens(): ScreenDef[] {
   const device = useProfile().resolved
-  return useFeatureScreens(device === 'ipad' ? SCREENS_IPAD : device === 'vr' ? SCREENS_VR : SCREENS, device)
+  return useFeatureScreens(device === 'ipad' ? SCREENS_IPAD : SCREENS, device)
 }
 
 const FEATURE_ROUTES = featureRoutes()

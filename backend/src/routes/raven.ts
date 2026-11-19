@@ -11,7 +11,7 @@ import { ravenSessionsState } from '../lib/raven/tools/index.js'
 import { RAVEN_CHANNEL, type RavenNotice } from '../lib/raven/types.js'
 
 // Raven's thread (lib/raven/run.ts) for the app: the one conversation in the
-// Messages tab, its live state, Brendon's attachments, Stop, and the doors in
+// Raven tab, its live state, Brendon's attachments, Stop, and the doors in
 // from outside the app: /raven/say for the Siri Shortcut and the office
 // hotkey, /raven/notify for processes on this host. All of it is
 // tailnet only: through Cloudflare every route here answers like it does not

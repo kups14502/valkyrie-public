@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ChevronDown, PanelRightOpen, SquareArrowOutUpRight, type LucideIcon } from 'lucide-react'
 import { useIntent, useShell, type ScreenProps } from '../kit/shell'
 import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
-import { Icon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
+import { Icon, StateIcon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
 import { canDetach, openDetached } from '../kit/windows'
 import {
   ago, onAccount, resetWhen, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
@@ -177,13 +177,6 @@ const until = (ms: number, now: number) => {
 
 const ACTIVITY_RANK: Record<SessionVM['activity'], number> = { asking: 0, working: 1, idle: 2, closed: 3 }
 const STATE_WORD: Record<SessionVM['activity'], string> = { working: 'working', asking: 'asking', idle: 'idle', closed: 'open' }
-// working and asking are lit (glow); idle is dim and closed faint, no glow
-const STATE_ICON: Record<SessionVM['activity'], { name: IconName; tone: IconTone; glow: boolean }> = {
-  working: { name: 'working', tone: 'fg', glow: true },
-  asking: { name: 'asking', tone: 'acc2', glow: true },
-  idle: { name: 'idle', tone: 'dim', glow: false },
-  closed: { name: 'claude', tone: 'faint', glow: false },
-}
 const isLive = (s: Pick<SessionVM, 'live' | 'activity'>) => s.live || s.activity !== 'closed'
 
 /** A board row: the view model and whether it is marked done. A running session marked done stays under Live until it closes (the classic board's rule). */
@@ -1899,16 +1892,6 @@ function AreaFilter({ items, value, onChange, vertical }: {
 
 // ---------- sessions ----------
 
-/** The session's state as its icon: working pulses gently, asking breathes in acc2. */
-function StateIcon({ a, size = 17 }: { a: SessionVM['activity']; size?: number }) {
-  const s = STATE_ICON[a]
-  return (
-    <span className="vc-sicon" data-a={a} aria-hidden>
-      <Icon name={s.name} size={size} tone={s.tone} glow={s.glow} />
-    </span>
-  )
-}
-
 /**
  * A section header: icon, label and count on a hairline; an optional action
  * on the right. With `fold`, the label side is a button that folds the group
@@ -2290,7 +2273,7 @@ function OpenTerminals({ list, titles, now, hostLabel, k0, stopAll, open, onFold
                 title={`Reattach to ${label} on ${hostLabel(t.host)}`}
                 onPress={() => onReattach(t.name)}
               >
-                <span className="vc-sicon" aria-hidden>
+                <span className="vl-sicon" aria-hidden>
                   <Icon name={t.dead ? 'alert' : 'claude'} size={16} tone={t.dead ? 'acc2' : claude ? 'fg' : 'dim'} />
                 </span>
                 <span className="vc-row-main">

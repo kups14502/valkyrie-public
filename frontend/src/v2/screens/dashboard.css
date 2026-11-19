@@ -605,6 +605,71 @@ html:not([data-font='sans']) .hm-cnext-when { font-size: 17px; line-height: 20px
 .hm-up[data-drop] .hm-start .vl-icon { color: var(--plate-ink); }
 .hm-up .hm-start[data-pressed] .vl-icon { color: var(--plate-ink); filter: var(--icon-glow); }
 
+/* ---------- Raven (Dashboard.tsx RavenBlock): the heading with Raven's status, the last exchange, a one-line box ---------- */
+
+/* two columns (the upright iPad): across both, right under the stage */
+.hm-layout > .hm-rv { grid-column: 1 / -1; }
+.hm-rv-head { width: 100%; text-align: left; }
+.hm-rv-head[data-pressed] .hm-head-label { text-shadow: var(--text-glow); }
+.hm-rv-status { display: inline-flex; align-items: center; gap: 7px; }
+.hm-rv-status[data-busy] { color: var(--fg); }
+.hm-rv-status[data-state='error'] { color: var(--hot); }
+.hm-rv-x {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 0 1px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.hm-rv-who { font-size: 10px; line-height: 19px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+.hm-rv-text {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.hm-rv-text[data-who='me'] { color: var(--ink-hi); }
+.hm-rv-text.hm-dim { color: var(--dim); }
+.hm-rv-text[data-error] { color: var(--hot); }
+.hm-rv-wait { display: flex; align-items: center; gap: 8px; color: var(--fg); }
+.hm-rv-pulse { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); box-shadow: var(--glow); animation: vl-blink 1.1s steps(1, end) infinite; }
+html[data-motion='reduced'] .hm-rv-pulse { animation: none; }
+.hm-rv-form { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); transition: border-color .15s; }
+.hm-rv-form:focus-within { border-bottom-color: color-mix(in srgb, var(--fg) 70%, transparent); }
+.hm-rv-form input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 2px;
+  font-size: 13.5px;
+  color: var(--ink-hi);
+  background: transparent;
+  border: 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.hm-rv-form input:focus { outline: none; }
+.hm-rv-form input::placeholder { color: var(--dim); }
+/* unlayered, so it beats index.css's `button { font: inherit }`; 36 px plus the kit's 4 px reach above and below is a 44 px target */
+.hm-rv-send.vl-btn-line { flex: none; min-height: 36px; margin-bottom: 1px; font-size: 12.5px; }
+/* a finger: the heading (the way into the conversation) and the box take 44 px taps, the heading's reach
+   drawn past its 20 px line so the landscape iPad still fits one screen; iOS zooms the page into any input under 16 px */
+@media (pointer: coarse) {
+  .hm-rv-head { position: relative; }
+  .hm-rv-head::after { content: ''; position: absolute; inset: -12px 0; }
+  .hm-rv-form input { height: 44px; font-size: 16px; }
+}
+
 /* ---------- glance blocks (lights, AI, media, systems): dense panels, their rows carry the padding ---------- */
 
 .hm-glance { padding: 0 !important; }

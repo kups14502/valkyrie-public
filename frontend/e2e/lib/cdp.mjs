@@ -250,7 +250,13 @@ export class Page {
     return p
   }
 
-  constructor(browser, { base, device = 'phone', storage = {}, name = '', term = '', scripts = [], apiHosts = [], patch = [] }) {
+  constructor(browser, { base, device = 'phone', storage = {}, name = '', term = '', scripts = [], apiHosts = [], patch = [], stubFrames = false }) {
+    /**
+     * The Desk's tabs (screens/Desk.tsx) each load the pop-out terminal page (/m/w/term/<name>) in an
+     * iframe, a whole copy of the app. A test about the tabs alone answers those documents with an
+     * empty black page, which keeps a loaded odin quick.
+     */
+    this.stubFrames = stubFrames
     this.b = browser
     /**
      * Source edits to a dev-server module as it loads: [{ path, from, to }]
@@ -330,6 +336,7 @@ export class Page {
         { urlPattern: '*/api/*', requestStage: 'Request' },
         { urlPattern: '*/sessions/terminal*', resourceType: 'Document', requestStage: 'Request' },
         { urlPattern: '*/terminal', resourceType: 'Document', requestStage: 'Request' },
+        ...(this.stubFrames ? [{ urlPattern: '*/m/w/term/*', resourceType: 'Document', requestStage: 'Request' }] : []),
         // odin's API straight over the tailnet (the desktop app's healthz probe): answered here, never sent
         { urlPattern: '*:8420/*', requestStage: 'Request' },
         { urlPattern: 'http://odin/*', requestStage: 'Request' },
@@ -480,6 +487,10 @@ export class Page {
         this.notes.push(`refused a direct request to odin: ${request.method} ${url.origin}${path}`)
         this.direct = (this.direct ?? 0) + 1
         await this.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }).catch(() => {})
+        return
+      }
+      if (this.stubFrames && resourceType === 'Document' && path.startsWith('/m/w/term/')) {
+        await fulfill(200, '<!doctype html><title>e2e tab</title><body style="margin:0;background:#000"></body>', 'text/html')
         return
       }
       if (resourceType === 'Document' && !path.startsWith('/api/')) {

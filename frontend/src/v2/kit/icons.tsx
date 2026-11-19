@@ -1,13 +1,15 @@
 import { isValidElement, type CSSProperties, type ReactElement } from 'react'
 import {
-  Activity, ArrowRight, Battery, BatteryCharging, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
+  Activity, ArrowRight, Battery, BatteryCharging, Bird, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, CircleAlert, CirclePause, CirclePlay,
   Clapperboard, Clock, Container, Copy, Cpu, Download, Dumbbell, Film, FolderKanban, Gauge, Glasses, Hand, HardDrive,
   House, Inbox, LayoutDashboard, MessagesSquare, Laptop, Lightbulb, LightbulbOff, ListChecks, ListMusic, Lock, LockOpen, MapPin, MemoryStick, MessageCircleQuestion, MessageSquarePlus, Monitor,
   Moon, Music, Palette, Pill, Plug, PlugZap, Plus, Power, RefreshCw, Rocket, Route, Search, Server, Settings, ShieldCheck,
   Smartphone, Sparkles, SquareTerminal, SquareArrowOutUpRight, Sun, Tablet, Thermometer, Timer, TrendingDown, TrendingUp, Tv, Undo2, Wifi, WifiOff, X, Zap,
   UtensilsCrossed, MapPinned, CloudDownload, KeyRound,
-  createLucideIcon, type LucideIcon,
+  AppWindow, createLucideIcon, type LucideIcon,
 } from 'lucide-react'
+import { STATE_ICON, type SessionState } from './sessionState'
+import './sicon.css'
 
 // Thor RGB: three overlapping light circles (the additive RGB mark), drawn in lucide's 24 px line style.
 const RgbCircles = createLucideIcon('rgb-circles', [
@@ -24,12 +26,18 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 // every screen draws the same thing for the same idea. Color comes from the
 // tone (palette variables), so icons morph with the mode like everything else.
 
+// The names and their helpers live beside the Icon component on purpose (every screen takes both
+// from here); an edit to this file reloads the page instead of hot-swapping it.
+/* eslint-disable react-refresh/only-export-components */
+
 export const ICONS = {
   // tabs and sections
   dashboard: LayoutDashboard,
   home: House,
   ai: SquareTerminal,
   claude: SquareTerminal,
+  // the Desk: sessions in tabs, like a terminal window
+  desk: AppWindow,
   lights: Lightbulb,
   media: Clapperboard,
   system: Activity,
@@ -38,6 +46,8 @@ export const ICONS = {
   meals: UtensilsCrossed,
   inbox: Inbox,
   messages: MessagesSquare,
+  // Raven, his assistant (the Raven tab, its corner button and the Dashboard's Raven block)
+  raven: Bird,
   tasks: ListChecks,
   projects: FolderKanban,
   // opening something in a window of its own
@@ -153,6 +163,18 @@ export function Icon({ name, size = 16, tone = 'fg', glow = false, className, st
       aria-label={title}
       role={title ? 'img' : undefined}
     />
+  )
+}
+
+// ---------- a Claude session's state (the table is sessionState.ts) ----------
+
+/** The state icon in its column: a soft halo breathes behind it, gently while working, quicker while asking (sicon.css). */
+export function StateIcon({ a, size = 17, className }: { a: SessionState; size?: number; className?: string }) {
+  const s = STATE_ICON[a]
+  return (
+    <span className={cx('vl-sicon', className)} data-a={a} aria-hidden>
+      <Icon name={s.name} size={size} tone={s.tone} glow={s.glow} />
+    </span>
   )
 }
 

@@ -71,12 +71,19 @@
 //            tablet, a car's battery and range and no CPU or memory, a car
 //            asleep still a live row, and a press opening System > Hosts with
 //            that car picked; the monitor still fits without a scroll.
+//   raven    the Raven block (`dash:raven`) over a fake /api/raven: its status and the last
+//            exchange (his last line, Raven's own reply after it, one or two lines each), right
+//            under the stage on the phone and the iPads and under Quick start on a monitor, no
+//            corner button beside it, a send carrying the Raven screen's body (source app), Raven
+//            working then the reply in the block (and read there), the heading opening /m/raven,
+//            no scroll on a monitor or the landscape iPad, nothing wider than the screen.
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
 import { applyLight, quietThor, tradePage, tradeStatus } from '../lib/fixtures.mjs'
 import { tauriStub } from '../lib/tauri.mjs'
 import { carHost } from './hosts.mjs'
+import { ravenBackend } from './raven.mjs'
 
 const ok = (body) => ({ status: 200, body })
 const iso = (ms) => new Date(ms).toISOString()
@@ -1237,7 +1244,7 @@ function deviceReport() {
   const col = inner.closest('.hm-col')
   const stage = inner.closest('.hm-stage')
   // where the stage sits: its column's blocks in order (a monitor), or the layout's own children (phone, upright iPad)
-  const kind = (c) => (c.contains(inner) ? 'stage' : c.classList.contains('hm-pair') ? 'ai+sys' : c.classList.contains('hm-tk') ? 'ticker' : c.classList.contains('hm-col') ? 'col' : 'other')
+  const kind = (c) => (c.contains(inner) ? 'stage' : c.classList.contains('hm-pair') ? 'ai+sys' : c.classList.contains('hm-tk') ? 'ticker' : c.classList.contains('hm-rv') ? 'raven' : c.classList.contains('hm-col') ? 'col' : 'other')
   const order = [...(col ?? stage?.parentElement)?.children ?? []].map(kind)
   let outline = null
   let spots = {}
@@ -1412,7 +1419,7 @@ function deviceTests() {
       const desk = c.device.startsWith('desk') || !!c.pad
       if (c.pad) t.check(r.inCol === 'hm-b' && r.order[0] === 'stage', `the landscape iPad's stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want it at the head of the middle column`)
       else if (desk) t.check(r.inCol === 'hm-b' && r.order.join('>') === 'stage>ai+sys', `the stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want the middle column as stage > AI and the hosts`)
-      else t.check(r.inCol === null && /^(ticker>)?stage>col>col$/.test(r.order.join('>')), `the layout reads ${r.order.join(' > ')}, want the stage across the top (under the ticker on the phone), then the columns`)
+      else t.check(r.inCol === null && /^(ticker>)?stage>raven>col>col$/.test(r.order.join('>')), `the layout reads ${r.order.join(' > ')}, want the stage across the top (under the ticker on the phone), Raven under it, then the columns`)
       checkNoRoom(t, await page.eval(dashboardScenes))
       // a monitor (and the app's window) shows the whole Dashboard: no scroll, the three columns ending together
       // (the left one ends with the calendar's slot: the room the block lists its days in)
@@ -1536,6 +1543,128 @@ function carTests() {
   }))
 }
 
+// ---------- Raven: the block on Dashboard > Overview (Dashboard.tsx RavenBlock) ----------
+
+/** The Raven block in one read. */
+function ravenBlockSnap() {
+  const root = document.querySelector('.vl-page[data-active]')
+  const rv = root?.querySelector('.hm-rv')
+  const lay = root?.querySelector('.hm-layout')
+  const text = (who) => rv?.querySelector(`.hm-rv-text[data-who="${who}"]`)
+  const lines = (el) => (el ? Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) : 0)
+  const prev = rv?.previousElementSibling
+  const W = document.documentElement.clientWidth
+  const b = rv?.getBoundingClientRect()
+  return {
+    found: !!rv,
+    status: rv?.querySelector('.hm-rv-status')?.textContent?.trim() ?? null,
+    me: text('me')?.textContent ?? null,
+    raven: text('raven')?.textContent ?? null,
+    wait: !!rv?.querySelector('.hm-rv-wait'),
+    meLines: lines(text('me')),
+    ravenLines: lines(text('raven')),
+    box: rv?.querySelector('.hm-rv-form input')?.value ?? null,
+    focused: document.activeElement === rv?.querySelector('.hm-rv-form input'),
+    // where it sits: right after the stage (phone, iPads) or right under Quick start (monitors)
+    after: prev ? (prev.classList.contains('hm-stage') ? 'stage' : prev.querySelector('.hm-starts, .hm-starts-empty') ? 'quick start' : String(prev.className).slice(0, 40)) : null,
+    col: rv?.closest('.hm-col') ? ['hm-a', 'hm-b', 'hm-c'].find((k) => rv.closest('.hm-col').classList.contains(k)) : null,
+    cols: lay?.getAttribute('data-cols') ?? null,
+    pad: !!lay?.hasAttribute('data-pad'),
+    inside: b ? b.left >= -0.5 && b.right <= W + 0.5 : false,
+    fab: !!document.querySelector('.vl-shell > .rv-fab'),
+    scrollH: root?.scrollHeight ?? 0,
+    clientH: root?.clientHeight ?? 0,
+    dash: /—/.test(rv?.innerText ?? ''),
+  }
+}
+
+function ravenBlockTests() {
+  const out = []
+  for (const device of ['phone', 'ipad', 'ipadland', 'desktop', 'desk1440']) {
+    out.push({
+      name: `dash:raven:${device}`,
+      group: 'dashboard',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { replyMs: 10_000 })
+        await page.goto('/m/dashboard')
+        await shellUp(page)
+        await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-rv .hm-rv-x'), { timeout: 90_000, message: 'the Raven block did not show the last exchange' })
+        await sleep(2500)
+        const s = await page.eval(ravenBlockSnap)
+        // the fake's newest line from him (106, two files) and Raven's own reply after it (107); the agent relay after that is not part of it
+        t.check(s.status === 'idle', `the block's status reads ${JSON.stringify(s.status)}, want idle`)
+        t.check(s.me === 'Here are the photo and the notes', `his last line reads ${JSON.stringify(s.me)}`)
+        t.check(s.raven === 'Got both. The photo shows the jammed tray.', `Raven's line reads ${JSON.stringify(s.raven)}`)
+        t.check(s.meLines >= 1 && s.meLines <= 2 && s.ravenLines >= 1 && s.ravenLines <= 2, `the exchange takes ${s.meLines} and ${s.ravenLines} lines, want one or two each`)
+        t.check(!s.fab, 'the corner button shows on the Dashboard beside the Raven block')
+        t.check(!s.dash, 'an em dash in the Raven block')
+        t.check(s.inside, 'the Raven block runs past the screen')
+        const desk = device.startsWith('desk')
+        if (device === 'desktop' || desk) {
+          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === 'quick start', `on a monitor the block sits in ${s.col} after ${s.after}, want the left column right under Quick start`)
+        } else if (device === 'ipadland') {
+          t.check(s.pad && s.col === 'hm-b' && s.after === 'stage', `on the landscape iPad the block sits in ${s.col} after ${s.after}, want right under the stage`)
+        } else {
+          t.check(!s.col && s.after === 'stage', `on the ${device} the block sits after ${s.after} (column ${s.col}), want right under the stage`)
+        }
+        if (device !== 'phone' && device !== 'ipad') t.check(s.scrollH <= s.clientH + 2, `the Dashboard scrolls with the Raven block (${s.scrollH} > ${s.clientH})`)
+        const lr = await page.eval(layoutReport)
+        t.check(lr.docSW <= lr.W + 1, `the Dashboard is wider than the screen (${lr.docSW} > ${lr.W})${lr.wide?.length ? `: ${lr.wide.join(', ')}` : ''}`)
+        await t.shot(page, 'idle')
+
+        // a send: the button on a touch screen, Enter on a keyboard; the Raven screen's body (source app)
+        const want = `Check the printer from ${device}`
+        if (device === 'desktop' || desk) {
+          await page.eval(() => document.querySelector('.vl-page[data-active] .hm-rv-form input')?.focus())
+          await page.type(want)
+          await page.key('Enter')
+        } else {
+          await page.tap({ sel: '.vl-page[data-active] .hm-rv-form input' }, { wait: 40_000 })
+          await page.type(want)
+          await page.tap({ sel: '.vl-page[data-active] .hm-rv-send' }, { wait: 40_000 })
+        }
+        const t0 = Date.now()
+        while (!st.sent.length && Date.now() - t0 < 60_000) await sleep(100)
+        t.check(st.sent.length === 1 && st.sent[0].text === want && st.sent[0].source === 'app' && !st.sent[0].files, `the send carried ${JSON.stringify(st.sent)}`)
+        await page.waitFor((w) => {
+          const rv = document.querySelector('.vl-page[data-active] .hm-rv')
+          return rv?.querySelector('.hm-rv-text[data-who="me"]')?.textContent === w && rv.querySelector('.hm-rv-form input')?.value === ''
+        }, { args: [want], timeout: 60_000, interval: 250, message: 'the sent line did not show in the block, or the box kept the text' })
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await page.eval(ravenBlockSnap))}`))
+        await page.waitFor(() => {
+          const rv = document.querySelector('.vl-page[data-active] .hm-rv')
+          return rv?.querySelector('.hm-rv-status')?.textContent?.trim() === 'thinking · Sonnet 5.5 · high' && /thinking · Sonnet 5\.5 · high/.test(rv.querySelector('.hm-rv-wait')?.textContent ?? '')
+        }, { timeout: 60_000, interval: 250, message: 'the block did not show Raven working (status and the waiting line)' })
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await page.eval(ravenBlockSnap))}`))
+        await t.shot(page, 'working')
+        await page.waitFor((w) => {
+          const rv = document.querySelector('.vl-page[data-active] .hm-rv')
+          return rv?.querySelector('.hm-rv-text[data-who="raven"]')?.textContent === `Done: ${w}` && rv.querySelector('.hm-rv-status')?.textContent?.trim() === 'idle'
+        }, { args: [want], timeout: 90_000, interval: 250, message: 'the reply did not show in the block' })
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await page.eval(ravenBlockSnap))}`))
+        // the reply to his line is read where he saw it
+        const replyId = st.messages.find((m) => m.author === 'raven' && m.meta.replyTo !== undefined && m.text === `Done: ${want}`)?.id
+        const t1 = Date.now()
+        while (!st.reads.includes(replyId) && Date.now() - t1 < 30_000) await sleep(100)
+        t.check(replyId && st.reads.includes(replyId), `the reply (${replyId}) was not marked read: reads ${JSON.stringify(st.reads)}`)
+        const lr2 = await page.eval(layoutReport)
+        t.check(lr2.docSW <= lr2.W + 1, `after the reply the Dashboard is wider than the screen (${lr2.docSW} > ${lr2.W})`)
+        await t.shot(page, 'reply')
+
+        // the heading opens the conversation
+        await page.tap({ sel: '.vl-page[data-active] .hm-rv-head' }, { wait: 40_000 })
+        await page.waitPath('/m/raven', 60_000).catch((e) => t.check(false, `the heading: ${e.message}`))
+        await page.waitFor(() => document.querySelector('.vl-page[data-active][data-screen="raven"] .rv-msg'), { timeout: 90_000, message: 'the Raven screen did not come up from the heading' })
+          .catch((e) => t.check(false, e.message))
+      },
+    })
+  }
+  return out
+}
+
 export function dashboardTests() {
-  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...calendarTests(), ...calendarEdgeTests(), ...deviceTests(), ...carTests()]
+  return [...lightsTests(), ...lightsTabTests(), ...tradeTests(), ...mediaTests(), ...layoutTests(), ...calendarTests(), ...calendarEdgeTests(), ...deviceTests(), ...carTests(), ...ravenBlockTests()]
 }

@@ -1,4 +1,5 @@
 import { workConf } from '../workConfig.js'
+import { getAgent } from '../agentsStore.js'
 
 // Raven's standing brief: the system prompt every run appends. What Raven is,
 // how it writes for Brendon, what it is connected to and what it must never do
@@ -6,11 +7,13 @@ import { workConf } from '../workConfig.js'
 // never from this file (the repo is public).
 
 export function ravenBrief(opts: { features?: string[] } = {}): string {
-  const areas = workConf().franchises.map((f) => `${f.label} (key ${f.key}, triage agent @${f.agent.id})`)
+  const areas = workConf().franchises.map((f) => (getAgent(f.agent.id)?.enabled === false
+    ? `${f.label} (key ${f.key}, no triage agent: Brendon switched it off, leave this area's tickets alone)`
+    : `${f.label} (key ${f.key}, triage agent @${f.agent.id})`))
   const features = (opts.features ?? []).filter(Boolean)
   return [
     "You are Raven, Brendon's assistant inside Valkyrie, his own dashboard for home and work. "
-      + 'You and he talk in one direct-message thread (Valkyrie Messages) on his phone, iPad and desktop, and by voice through Siri. '
+      + 'You and he talk in one direct-message thread (the Raven tab in Valkyrie) on his phone, iPad and desktop, and by voice through Siri. '
       + 'You run headless on odin, his home server, woken by his messages and by what his agents and Claude sessions say.',
     '',
     '## How you write',

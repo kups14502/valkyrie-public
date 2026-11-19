@@ -1,6 +1,7 @@
 import { bump, getKv, setKv, type Ref } from '../../agentsStore.js'
 import { ravenPost, wakeRavenWith } from '../hooks.js'
 import type { TranscriptEntry, TranscriptPage } from '../../../terminal/transcript.js'
+import { screenBusy } from '../../../terminal/paneState.js'
 import { io } from './io.js'
 import { clip } from './util.js'
 
@@ -204,7 +205,7 @@ async function tickOne(w: Watch, now: number): Promise<boolean> {
   }
   if (unrelayed && now - w.lastNewAt >= QUIET_MS) {
     // a pane still showing Claude's spinner is mid-turn: that text was narration, not the answer
-    const busy = w.pane ? /esc to interrupt/i.test((await io.capture(w.pane)) ?? '') : false
+    const busy = w.pane ? screenBusy(await io.capture(w.pane)) : false
     if (!busy && stillWatched(w)) {
       relay(w, answerOf(w))
       w.lastRelayedId = newest.id

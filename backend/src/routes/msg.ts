@@ -81,7 +81,7 @@ router.get('/msg/overview', h((req, res) => {
   })
 }))
 
-// The Messages tab is Raven's thread now, and every post that wants Brendon is
+// The Raven tab (once Messages) is Raven's thread, and every post that wants Brendon is
 // mirrored into it, so its badge counts that thread alone (the agent channels
 // would count each mirrored post twice). Through Cloudflare the thread is hidden.
 router.get('/msg/count', h((req, res) => {

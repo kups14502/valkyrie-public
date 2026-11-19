@@ -3,7 +3,8 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useNavigate, useParams } from 'react-router-dom'
 import { StatusStrip, desktopWindow } from '../kit/shell'
 import { DotFloor, Press, ToastHost, cx, toast } from '../kit/ui'
-import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
+import { Icon, hostIcon } from '../kit/icons'
+import { STATE_ICON } from '../kit/sessionState'
 import { ago, useHosts, useLaunchTargets, useSessionIndex, useSessions, useTick, type SessionVM } from '../kit/data'
 import { applyPalette, useFont, useStoredMode } from '../kit/theme'
 import { PROJECT_ID_RE, closeDetached, openDetached, setDetachedTitle } from '../kit/windows'
@@ -55,13 +56,6 @@ const shortDate = (ms: number) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).
 type Activity = SessionVM['activity']
 const ACTIVITY_RANK: Record<Activity, number> = { asking: 0, working: 1, idle: 2, closed: 3 }
 const STATE_WORD: Record<Activity, string> = { working: 'working', asking: 'asking', idle: 'idle', closed: 'open' }
-// working and asking are lit (glow); idle is dim and closed faint, no glow
-const STATE_ICON: Record<Activity, { name: IconName; tone: IconTone; glow: boolean }> = {
-  working: { name: 'working', tone: 'fg', glow: true },
-  asking: { name: 'asking', tone: 'acc2', glow: true },
-  idle: { name: 'idle', tone: 'dim', glow: false },
-  closed: { name: 'claude', tone: 'faint', glow: false },
-}
 const isLive = (s: Pick<SessionVM, 'live' | 'activity'>) => s.live || s.activity !== 'closed'
 
 /** A board row with whether it is marked done (the board's index carries it; the persisted open rows are never done). */

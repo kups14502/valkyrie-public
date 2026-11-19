@@ -223,7 +223,7 @@ const say = (key: string, sessionId: string, ...es: TranscriptEntry[]) => {
   transcripts.set(key, t)
 }
 const pane = (name: string, label: string, target: string, sessionId: string): TermSession => {
-  const p: TermSession = { name, label, mode: 'new', host: 'thor', target, sessionId, createdAt: clock, activityAt: clock, clients: 0, dead: false, deadStatus: null, deadText: '', size: '120x40', projectId: '' }
+  const p: TermSession = { name, label, mode: 'new', host: 'thor', target, sessionId, createdAt: clock, activityAt: clock, clients: 0, dead: false, deadStatus: null, deadText: '', size: '120x40', projectId: '', outputAt: clock, title: '' }
   panes.push(p)
   states.set(name, 'live')
   return p

@@ -6,11 +6,14 @@ import { sleep } from '../lib/cdp.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
 import { extraPrims } from './extra.mjs'
 import { placeAfter } from './tabs.mjs'
+import { ravenBackend } from './raven.mjs'
 
 // the tap tour, Dashboard last so it ends at home; a feature tab (extra.mjs:
 // { label, id, after?, devices? }) with no anchor goes just before it
 const primsFor = (device) => [
   ...placeAfter([
+    { label: 'Raven', id: 'raven' },
+    { label: 'Desk', id: 'desk' },
     { label: 'AI', id: 'ai' },
     { label: 'Lights', id: 'lights' },
     { label: 'Media', id: 'media' },
@@ -76,15 +79,21 @@ export function navigationTests() {
       name: `nav:tabs:${device}`,
       group: 'navigation',
       device,
-      // six tabs, each waiting for its live data: 58 s of 60 on a day thor's reads took 6 s each
-      timeout: 90_000,
+      // eight tabs, each waiting for its live data: six took 58 s on a day thor's reads took 6 s each
+      timeout: 130_000,
       async run(t) {
         const page = await t.page()
+        // Raven's fake (nothing unread, so the tab never reads anything back); thor's reads stay live as before
+        ravenBackend(page, { replyMs: -1, unread: 0, quiet: false })
+        // the tour opens the Desk: over an empty pane list, so it never mounts a real pane's terminal
+        page.mock('/api/terminal/sessions', () => ({ status: 200, body: [] }))
         await page.goto('/m/dashboard')
         await shellUp(page)
         for (const p of primsFor(device)) {
           await t.step(`tap ${p.label}`, async () => {
-            await page.tap(tabSel(p.label))
+            // the first tap lands while the Dashboard still builds its 3D stage: on odin's GPU-less browser one
+            // read of the tab can take over 4 s then, which the default wait reports as "still moving"
+            await page.tap(tabSel(p.label), { wait: 20_000 })
             await page.waitPath(new RegExp(`^/m/${p.id}(/[a-z]+)?$`))
             await onScreen(page, { screen: p.id, tab: p.label })
           })
@@ -268,7 +277,7 @@ export function navigationTests() {
     timeout: 60_000,
     async run(t) {
       const page = await t.page()
-      for (const [from, to] of [['/m/home/today', '/m/dashboard/today'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions'], ['/m/car', '/m/system/hosts']]) {
+      for (const [from, to] of [['/m/home/today', '/m/dashboard/today'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions'], ['/m/car', '/m/system/hosts'], ['/m/messages', '/m/raven']]) {
         await t.step(`${from} -> ${to}`, async () => {
           await page.goto(from)
           await page.waitPath(to, 8000)

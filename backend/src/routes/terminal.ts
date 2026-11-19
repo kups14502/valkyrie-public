@@ -9,7 +9,7 @@ import { requireStrongAuth, authorizeStrongUpgrade, viaCloudflare } from '../mid
 import { isAllowedHost, isAllowedOrigin } from '../middleware/origin.js'
 import {
   MAX_SESSIONS, MODES, SESSION_NAME_RE, TARGET_RE, TERM_HOSTS, TMUX_BIN, UUID_RE,
-  APP_SCROLL_END, attachArgs, createSession, endScroll, ensureServer, findOdinTarget, hasSession, killSession, listSessions,
+  APP_SCROLL_END, attachArgs, capturePane, createSession, endScroll, ensureServer, findOdinTarget, hasSession, killSession, listSessions,
   odinClaudeReady, odinTargets, paneTakesWheel, remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion, wheelInput,
   type TermHost, type TermMode, type TermSession,
 } from '../terminal/tmux.js'
@@ -17,6 +17,8 @@ import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
 import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
 import { paneTranscript } from '../terminal/transcriptFeed.js'
+import { paneStateTracker } from '../terminal/paneState.js'
+import { boardNow } from './hostLaunch.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
@@ -27,8 +29,9 @@ import { paneTranscript } from '../terminal/transcriptFeed.js'
 // What to open comes from elsewhere: the launch targets from thor's launcher
 // agent (GET /hosts/thor/launch-targets, filtered to the ones flagged for the
 // phone) and the conversations to resume from the session board
-// (GET /hosts/thor/sessions). Transcripts are read only for the session view,
-// through terminal/transcriptFeed.ts.
+// (GET /hosts/thor/sessions). Transcripts are read for the session view,
+// through terminal/transcriptFeed.ts, and once per turn end for the list's
+// state (terminal/paneState.ts).
 //
 // Every route in here is behind requireStrongAuth, NOT the app-wide requireAuth,
 // so the media-scoped query token that opens a poster can never open a shell.
@@ -94,8 +97,21 @@ const hiddenFrom = (req: Request) => {
   }
 }
 
-const maskRow = (hidden: (projectId: string) => boolean) => (s: TermSession): TermSession =>
-  (hidden(s.projectId) ? { ...s, projectId: '', label: s.target || s.name } : s)
+// The title Claude gave the session and its follow-up line can name the
+// project as plainly as the label, so they go with it.
+const maskRow = (hidden: (projectId: string) => boolean) => <T extends TermSession & { ask?: string }>(s: T): T =>
+  (hidden(s.projectId) ? { ...s, projectId: '', label: s.target || s.name, title: '', ...(s.ask === undefined ? {} : { ask: '' }) } : s)
+
+// Each pane's state (working, asking, idle, shell, dead), its follow-up line
+// and since when, for the Desk's tabs (terminal/paneState.ts). Its screen is
+// read with a short timeout, its transcript once per turn end, and thor's
+// board from the copy this box already keeps.
+const paneStates = paneStateTracker({
+  capture: (name) => capturePane(name, 2_000),
+  transcript: (name) => paneTranscript(name, ''),
+  board: boardNow,
+  now: () => Date.now(),
+})
 
 router.get('/terminal/sessions', async (req, res) => {
   const project = req.query.project
@@ -105,8 +121,11 @@ router.get('/terminal/sessions', async (req, res) => {
   const hidden = hiddenFrom(req)
   if (project !== undefined && hidden(project)) return res.json([])
   try {
-    const rows = (await listSessions()).map(maskRow(hidden))
-    res.json(project === undefined ? rows : rows.filter((s) => s.projectId === project))
+    // A project the caller may not see was answered [] above, so filtering on
+    // the unmasked id picks the same rows masking first did.
+    const all = await listSessions()
+    const rows = project === undefined ? all : all.filter((s) => s.projectId === project)
+    res.json((await paneStates.annotate(rows)).map(maskRow(hidden)))
   } catch (err) {
     console.error('[terminal] list failed', err)
     res.status(500).json({ error: 'could not list sessions' })

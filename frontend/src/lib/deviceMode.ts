@@ -9,9 +9,9 @@ import { TERM_NAME_RE, v2TermPath } from './term'
 // header's home button goes), and whether touch controls on the classic pages
 // render at the large "pad" size. Nothing here is cosmetic-only.
 
-// 'vr' is the Steam Frame (or any headset browser): it opens v2 with the Desk
-// tab added and gets the pad-sized controls, because a laser pointer wants
-// targets as big as a finger does. Never auto-detected; a headset browser looks
+// 'vr' is the Steam Frame (or any headset browser): it opens v2, whose Desk
+// shows three columns of sessions there, and gets the pad-sized controls,
+// because a laser pointer wants targets as big as a finger does. Never auto-detected; a headset browser looks
 // like a desktop to every media query.
 export type DeviceMode = 'auto' | 'desktop' | 'iphone' | 'ipad' | 'vr'
 
@@ -66,9 +66,9 @@ const CLASSIC_HOME: Record<Exclude<DeviceMode, 'auto'>, string> = {
 
 export function resolveProfile(mode: DeviceMode = getDeviceMode()): Profile {
   const resolved = mode === 'auto' ? detect() : mode
-  // v2 (src/v2, /m/*) is the UI on every device. The headset also gets v2's
-  // Desk tab, several sessions side by side; the classic VR workspace it
-  // replaced is its classic home. The classic homes stay reachable from v2
+  // v2 (src/v2, /m/*) is the UI on every device. v2's Desk tab (several
+  // sessions side by side, three columns on the headset) replaced the classic
+  // VR workspace, which stays the headset's classic home. The classic homes stay reachable from v2
   // Settings > Classic, the classic menu and ?classic=1.
   const ui: TabUi = 'v2'
   return {

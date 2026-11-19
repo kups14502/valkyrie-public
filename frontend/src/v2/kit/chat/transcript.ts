@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchTermTranscript, type TranscriptEntry, type TranscriptPage, type TranscriptTodo } from '../../../lib/api'
 import { errText } from '../../../lib/term'
+import { DESK_SHOWN_EVENT, deskTabShown } from '../../../lib/embed'
 import { userPart } from './user'
 
 // The Chat view's data: the pane's transcript, read from the server about once
@@ -173,7 +174,8 @@ export function useTranscript(name: string, on: boolean): Transcript {
         cursor = page.cursor || null
         fails = 0
         setState((cur) => applyPage(cur, page, first))
-        schedule(page.more ? 0 : document.visibilityState === 'visible' ? VISIBLE_MS : HIDDEN_MS)
+        // a Desk tab kept mounted behind another reads as visible: it waits like a hidden page
+        schedule(page.more ? 0 : document.visibilityState === 'visible' && deskTabShown() ? VISIBLE_MS : HIDDEN_MS)
       } catch (e) {
         if (!alive || ctrl?.signal.aborted) return
         const status = (e as { response?: { status?: number } } | null)?.response?.status
@@ -186,15 +188,17 @@ export function useTranscript(name: string, on: boolean): Transcript {
     }
     // back on screen: read now instead of waiting out the hidden interval
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && fails === 0) schedule(0)
+      if (document.visibilityState === 'visible' && deskTabShown() && fails === 0) schedule(0)
     }
     document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener(DESK_SHOWN_EVENT, onVisible)
     schedule(0)
     return () => {
       alive = false
       window.clearTimeout(timer)
       ctrl?.abort()
       document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener(DESK_SHOWN_EVENT, onVisible)
     }
   }, [name, on])
 

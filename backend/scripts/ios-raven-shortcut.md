@@ -1,11 +1,11 @@
 # "Hey Siri, Raven" (iOS Shortcut)
 
-Raven is the assistant in Valkyrie's Messages tab. This Shortcut lets you talk to it from the phone without opening
+Raven is the assistant in Valkyrie's Raven tab. This Shortcut lets you talk to it from the phone without opening
 the app: Siri takes your words, the Shortcut posts them to Raven, waits for the answer and reads it out. The message
-and the answer also land in the Messages thread, so you can read them there later.
+and the answer also land in the Raven tab, so you can read them there later.
 
 The endpoint is `POST /api/raven/say`. It waits up to 55 seconds for Raven's answer. When a job takes longer, the
-Shortcut says "Still working on it. I will message you when it is done." and the answer arrives in Messages as a
+Shortcut says "Still working on it. I will message you when it is done." and the answer arrives in the Raven tab as a
 notification.
 
 ## What you need
@@ -54,7 +54,7 @@ keeps the answer to one or two sentences.
 
 - **Type instead of talk**: replace action 1 with **Ask for Input** (Text). Everything else stays.
 - **Fire and forget**: set `wait` to **False** and drop actions 3 and 4. The Shortcut returns at once with
-  `{"ok":true,"id":123}`, and the answer arrives in Messages as a notification.
+  `{"ok":true,"id":123}`, and the answer arrives in the Raven tab as a notification.
 - **Office hotkey**: the desktop app opens Raven's quick sheet on Ctrl+Shift+Space. A script can also post straight to
   the same endpoint with `"source": "hotkey"`.
 

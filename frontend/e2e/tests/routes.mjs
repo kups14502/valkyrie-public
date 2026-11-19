@@ -18,6 +18,8 @@ import { tabsFor } from './tabs.mjs'
  */
 export const ROUTES = [
   { path: '/m/dashboard', tab: 'Dashboard', ready: { sel: '.hm-hrow', text: /\$/ } },
+  // the Desk over an EMPTY pane list: a tab there would mount the terminal page of a real pane (desk.mjs has the fake ones)
+  { path: '/m/desk', tab: 'Desk', foot: false, ready: { text: /No session is open/ }, mock: (page) => page.mock('/api/terminal/sessions', () => ({ status: 200, body: [] })) },
   { path: '/m/ai/sessions', tab: 'AI', sub: 'Sessions', ready: { text: /\d+\s*live/i } },
   { path: '/m/ai/projects', tab: 'AI', sub: 'Projects', ready: { text: /\d+\s*projects?/i } },
   { path: '/m/ai/usage', tab: 'AI', sub: 'Usage', ready: { text: /\d+\s*%/ } },

@@ -244,7 +244,7 @@ server.listen(PORT, BIND, () => {
     startWorkFeeds()
   }
   for (const f of FEATURES) f.start?.()
-  // Raven, Brendon's assistant in the Messages tab, with what each feature gives it; RAVEN_OFF=1 keeps it idle
+  // Raven, Brendon's assistant in the Raven tab, with what each feature gives it; RAVEN_OFF=1 keeps it idle
   if (process.env.RAVEN_OFF !== '1') {
     startRaven(FEATURES.flatMap((f) => (f.raven ? [{ id: f.id, tools: f.raven.tools, status: f.raven.status }] : [])))
   }

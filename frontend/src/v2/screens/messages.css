@@ -40,6 +40,10 @@
   color: var(--fg);
   text-shadow: var(--text-glow);
 }
+/* the phone's sub-tab row already leads with the tab's name, Raven, right above: the status leads here (the name stays for screen readers) */
+@media (max-width: 639px) {
+  .rv-head h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 .rv-status { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rv-status[data-busy] { color: var(--fg); }
 .rv-status[data-state='error'] { color: var(--hot); }

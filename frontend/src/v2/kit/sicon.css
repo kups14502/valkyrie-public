@@ -1,0 +1,29 @@
+/* A Claude session's state icon (icons.tsx StateIcon), the look of AI > Sessions that the Desk's
+   tabs share: the icon stays at full strength; a soft halo behind it breathes (gently while
+   working, quicker while asking). A lit icon also gets a faint fill, so lit reads at a glance
+   next to the dim outline icons. */
+
+.vl-sicon { position: relative; flex: none; display: grid; place-items: center; width: 22px; height: 22px; }
+.vl-sicon > svg { position: relative; }
+.vl-sicon .vl-icon-glow > :first-child { fill: color-mix(in srgb, currentColor 22%, transparent); }
+.vl-sicon[data-a='working']::before,
+.vl-sicon[data-a='asking']::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--fg) 40%, transparent), transparent 68%);
+  animation: vl-sicon-halo 2.4s ease-in-out infinite;
+}
+.vl-sicon[data-a='asking']::before {
+  background: radial-gradient(circle, color-mix(in srgb, var(--acc2) 46%, transparent), transparent 68%);
+  animation-duration: 1.2s;
+}
+@keyframes vl-sicon-halo {
+  0%, 100% { opacity: .2; transform: scale(.75); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+html[data-motion='reduced'] .vl-sicon::before { animation: none; opacity: .7; }
+@media (prefers-reduced-motion: reduce) {
+  .vl-sicon::before { animation: none; opacity: .7; }
+}

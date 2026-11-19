@@ -56,6 +56,7 @@ const SUB_META: Record<string, { icon: IconName; keys: string }> = {
 const SCREEN_KEYS: Record<string, string> = {
   dashboard: 'home today tracker calendar',
   lights: 'bulbs rgb home assistant',
+  raven: 'messages assistant chat conversation dm',
 }
 
 // classic pages with no v2 screen; following one marks the tab classic until "new ui"
@@ -191,8 +192,8 @@ function PaletteBox({ screens, onClose }: { screens: ScreenDef[]; onClose: () =>
     }
 
     // ---- quick actions ----
-    // Raven's quick sheet (kit/raven.tsx); on Messages it focuses the conversation's box instead
-    out.push({ id: 'act:raven', label: 'Message Raven', group: 'Actions', icon: 'messages', hint: 'Ctrl+Shift+Space', keys: 'raven assistant ask send note quick', run: openRavenQuick })
+    // Raven's quick sheet (kit/raven.tsx); on the Raven tab it focuses the conversation's box instead
+    out.push({ id: 'act:raven', label: 'Message Raven', group: 'Actions', icon: 'raven', hint: 'Ctrl+Shift+Space', keys: 'raven assistant ask send note quick', run: openRavenQuick })
     out.push({ id: 'act:new', label: 'New AI session', group: 'Actions', icon: 'newSession', keys: 'start claude launch', run: () => navigate(`${BASE}/ai/sessions?new=1`, { replace: onTab }) })
     // the shell's round lights button does the switching (and its Undo); no button, no row
     if (document.querySelector('.vl-lamp')) {

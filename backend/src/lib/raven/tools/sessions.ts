@@ -6,6 +6,7 @@ import { failRunsForTmux } from '../../projectsStore.js'
 import { paneLimitState } from '../../accountSwitchCore.js'
 import type { LaunchTargetInfo } from '../../../routes/hostLaunch.js'
 import { SESSION_NAME_RE, TARGET_RE, UUID_RE, type CreateOpts, type TermSession } from '../../../terminal/tmux.js'
+import { paneBusy } from '../../../terminal/paneState.js'
 import type { TranscriptEntry } from '../../../terminal/transcript.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
@@ -33,7 +34,6 @@ const MAINS_KEY = 'raven:mains'
 const PROMPT_WAIT_MS = 45_000
 const TEXT_MAX = 8_000
 const TARGETS_TTL_MS = 10 * 60_000
-const BUSY_RE = /esc to interrupt/i
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
 export type RavenWatch = { pane: string; label: string; sessionId: string; since: string }
@@ -114,11 +114,8 @@ export async function mainTargets(waitMs?: number): Promise<{ key: string; label
 
 // -------------------------------------------------------------- panes ----
 
-async function paneBusy(p: TermSession): Promise<boolean> {
-  // the spinner repaints every second; a pane quiet for half a minute is not working
-  if (p.dead || io.now() - p.activityAt > 30_000) return false
-  return BUSY_RE.test((await io.capture(p.name)) ?? '')
-}
+// Working or not is the Desk's busy rule (terminal/paneState.ts), read through io.
+const busy = (p: TermSession): Promise<boolean> => paneBusy(p, io.capture, io.now())
 
 function mainOf(pane: string): string | null {
   for (const [target, r] of Object.entries(mainsMap())) if (r.pane === pane) return target
@@ -277,7 +274,7 @@ async function mainsNow(waitMs: number): Promise<{ known: boolean; mains: RavenM
     const p = rec ? panes.find((x) => x.name === rec.pane) : undefined
     if (!p) return { target: t.key, label: t.label, pane: null, state: 'closed' }
     if (p.dead) return { target: t.key, label: t.label, pane: p.name, state: 'dead' }
-    return { target: t.key, label: t.label, pane: p.name, state: (await paneBusy(p)) ? 'working' : 'idle' }
+    return { target: t.key, label: t.label, pane: p.name, state: (await busy(p)) ? 'working' : 'idle' }
   }))
   return { known: targets !== null, mains, panes }
 }

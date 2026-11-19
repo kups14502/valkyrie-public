@@ -1,5 +1,5 @@
 /* Raven's shared pieces (kit/raven.tsx): the composer, attachment chips, a message's files, the
-   floating button, the quick sheet and the Messages tab's badge. Plain CSS on top of v2.css; colors
+   floating button, the quick sheet and the Raven tab's badge. Plain CSS on top of v2.css; colors
    are the mode variables. No boxes: hairlines, text buttons, one row per thing. */
 
 /* ---------- Markdown in a reply ---------- */
@@ -99,7 +99,7 @@
 .rv-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-file i { flex: none; font-style: normal; color: var(--dim); font-size: 11px; }
 
-/* ---------- the Messages tab's unread count ---------- */
+/* ---------- the Raven tab's unread count ---------- */
 .rv-badge {
   margin-left: 6px;
   min-width: 15px;

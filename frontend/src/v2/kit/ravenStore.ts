@@ -6,18 +6,22 @@ import {
 } from '../../lib/ravenApi'
 import { useLive, type Live } from './data'
 
-// Raven's state for the Messages screen and the quick sheet (kit/raven.tsx):
+// Raven's state for the Raven screen, the Dashboard's Raven block and the quick sheet (kit/raven.tsx):
 // the thread and its long-poll, the unread badge, the draft with its
 // attachments, the file URLs, and the quick sheet's open switch. No
 // components here (the react-refresh lint keeps hooks out of component files).
 
 export const RAVEN_KEY = ['raven'] as const
 
-/** GET /api/raven while `on`, kept current by the Messages long-poll. */
-export function useRaven(on: boolean) {
+/**
+ * GET /api/raven while `on`, kept current by the Messages long-poll while `live` too. The
+ * Dashboard's block holds the long-poll only while a reply is due: it holds one of the
+ * browser's few connections to odin for as long as it runs.
+ */
+export function useRaven(on: boolean, live = true) {
   // the long-poll carries the changes; the slow poll only covers a dropped one
   const q = useQuery({ queryKey: RAVEN_KEY, queryFn: fetchRaven, enabled: on, refetchOnWindowFocus: true, refetchInterval: 60_000, retry: 1 })
-  useRavenLive(on, q.data?.seq)
+  useRavenLive(on && live, q.data?.seq)
   return q
 }
 
@@ -60,7 +64,7 @@ function useRavenLive(on: boolean, seq: number | undefined) {
 
 const UNREAD_KEY = 'raven-unread'
 
-/** Raven's unread count for the Messages tab's badge (GET /api/msg/count). */
+/** Raven's unread count for the Raven tab's badge (GET /api/msg/count). */
 export function useRavenUnread(): Live<{ unread: number }> {
   return useLive(UNREAD_KEY, fetchMsgCount, 30_000)
 }

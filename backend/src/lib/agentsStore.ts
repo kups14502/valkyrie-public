@@ -550,7 +550,8 @@ export function moveProposal(id: number, from: ProposalStatus[], to: ProposalSta
 export function pendingProposals(agentId?: string): Proposal[] {
   const rows = agentId
     ? db.prepare("SELECT * FROM proposals WHERE status = 'pending' AND agentId = ? ORDER BY id").all(agentId)
-    : db.prepare("SELECT * FROM proposals WHERE status = 'pending' ORDER BY id").all()
+    // an agent Brendon switched off is out of the counts and lists: its old cards wait on nothing
+    : db.prepare("SELECT p.* FROM proposals p JOIN agents a ON a.id = p.agentId WHERE p.status = 'pending' AND a.enabled = 1 ORDER BY p.id").all()
   return (rows as ProposalRow[]).map(toProposal)
 }
 

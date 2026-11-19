@@ -19,6 +19,6 @@ export function ravenPush(title: string, text: string, opts: { force?: boolean }
   if (!opts.force && now - last < THROTTLE_MS) return false
   last = now
   const body = pushLine(text) || 'New message'
-  void pushToAll({ title, body, tag: 'raven', url: '/m/messages' }).catch(() => {})
+  void pushToAll({ title, body, tag: 'raven', url: '/m/raven' }).catch(() => {})
   return true
 }

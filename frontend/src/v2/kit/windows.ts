@@ -178,14 +178,14 @@ export function openDetached(target: DetachTarget): void {
     toast(target.kind === 'project' ? 'That is not a project id' : target.kind === 'session' ? 'That is not a session name' : 'That window is not in this build')
     return
   }
-  if (desktopApp()) {
-    void openAppWindow(target, path)
-    return
-  }
-  // a screen of the headset's Desk: the session gets a screen beside this one
+  // a tab of the Desk (screens/Desk.tsx): the session gets a tab beside this one, in the desktop app too
   const desk = deskHost()
   if (desk && target.kind === 'session') {
     desk.open(target.name, window)
+    return
+  }
+  if (desktopApp()) {
+    void openAppWindow(target, path)
     return
   }
   if (!canDetach()) {
@@ -200,7 +200,7 @@ export function openDetached(target: DetachTarget): void {
  * window.close(), so after a moment it goes to `fallback` instead.
  */
 export function closeDetached(fallback = '/m/ai/sessions'): void {
-  // a Desk screen leaves the desk; a Steam Frame panel asks the app to drop it
+  // a Desk tab leaves the Desk; a Steam Frame panel asks the app to drop it
   const desk = deskHost()
   if (desk) {
     desk.close(window)

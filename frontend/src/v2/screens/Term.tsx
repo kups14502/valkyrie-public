@@ -18,7 +18,7 @@ import { readText as readClipboard } from '../../lib/clipboard'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { uploadLine, useThorUpload } from '../../lib/useThorUpload'
 import { BASE, StatusStrip, desktopWindow } from '../kit/shell'
-import { isFramed } from '../../lib/embed'
+import { DESK_FOCUS_EVENT, DESK_SHOWN_EVENT, deskChord, deskHost, deskTabShown, isFramed } from '../../lib/embed'
 import { Button, Glyph, IconButton, Press, ToastHost, cx, toast } from '../kit/ui'
 import { closeDetached, openDetached, setDetachedTitle } from '../kit/windows'
 import { Icon, hostIcon } from '../kit/icons'
@@ -171,10 +171,19 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   // ended, and that call must not be made off a cached list from before this
   // session was opened.
   const sessions = useQuery({ queryKey: ['term', 'sessions'], queryFn: fetchTermSessions, refetchOnMount: 'always' })
-  const status = useQuery({ queryKey: ['term', 'status'], queryFn: fetchTermStatus, refetchInterval: 60_000 })
+  // a Desk tab kept mounted behind another one (or with the Desk off screen) stops its own polls
+  const [tabShown, setTabShown] = useState(deskTabShown)
+  useEffect(() => {
+    if (!isFramed) return
+    const f = () => setTabShown(deskTabShown())
+    f()
+    window.addEventListener(DESK_SHOWN_EVENT, f)
+    return () => window.removeEventListener(DESK_SHOWN_EVENT, f)
+  }, [])
+  const status = useQuery({ queryKey: ['term', 'status'], queryFn: fetchTermStatus, refetchInterval: tabShown ? 60_000 : false })
   const targets = useQuery({ queryKey: ['launchTargets', 'thor'], queryFn: () => fetchLaunchTargets('thor'), staleTime: 60_000 })
   const phoneTargets = (targets.data ?? []).filter((t) => t.phone && t.exists)
-  const recent = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, staleTime: 10_000, refetchInterval: 30_000 })
+  const recent = useQuery({ queryKey: ['sessionList'], queryFn: fetchSessionList, staleTime: 10_000, refetchInterval: tabShown ? 30_000 : false })
   const boardRows = useMemo(() => (recent.data?.installed ? recent.data.sessions : []), [recent.data])
   const resumable = boardRows.filter((s) => !s.live && !s.done).slice(0, 40)
   const titles = useMemo(() => {
@@ -526,6 +535,32 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     return () => window.removeEventListener('keydown', f)
   }, [])
 
+  // A tab of the Desk: its keys (lib/embed.ts deskChord) go to the Desk, never
+  // into the session. Caught on the way down, before the grid or the composer
+  // sees them. The Desk opening this tab asks for the keyboard (DESK_FOCUS_EVENT).
+  useEffect(() => {
+    if (!isFramed) return
+    const onKey = (e: KeyboardEvent) => {
+      const chord = deskChord(e)
+      const desk = chord ? deskHost() : null
+      if (!chord || !desk) return
+      e.preventDefault()
+      e.stopPropagation()
+      desk.key(chord, window)
+    }
+    const onFocus = () => {
+      if (coarseRef.current) return
+      if (chatRef.current) taRef.current?.focus({ preventScroll: true })
+      else termRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener(DESK_FOCUS_EVENT, onFocus)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener(DESK_FOCUS_EVENT, onFocus)
+    }
+  }, [termRef])
+
   // ---------- uploads into the prompt ----------
 
   // Photos and videos to C:\Thor\uploads, each saved path typed into the prompt
@@ -661,7 +696,8 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     })
   }
 
-  const title = shown ? termLabel(shown, titles) : sessions.isLoading ? 'Opening' : 'Not open'
+  // Claude's own name for the session (its pane title, what /rename sets) leads, as on the Desk's tabs
+  const title = shown ? shown.title || termLabel(shown, titles) : sessions.isLoading ? 'Opening' : 'Not open'
   const pos = session ? ordered.findIndex((s) => s.name === name) + 1 : 0
   const host = shown?.host ?? 'thor'
   const modeLabel = MODE_LABEL[screen.mode]
@@ -685,7 +721,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     <div ref={rootRef} className="vsk vtm" data-term-root data-phase={phase} data-view={chat ? 'chat' : 'term'} data-direct={direct || undefined} data-standalone={standalone || undefined}>
       {up.inputs}
       <header className="vsk-head">
-        {/* a screen of the Desk sits under the desk's own strip */}
+        {/* a tab of the Desk sits under the Desk's own tab strip */}
         {!isFramed && <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />}
         {/* in a pop-out the bar is title bar too: its empty parts drag the window as the strip's do */}
         <div className="vsk-bar" data-tauri-drag-region={standalone && desktopWindow() ? 'deep' : undefined}>

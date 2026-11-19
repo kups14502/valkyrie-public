@@ -1,4 +1,4 @@
-// RAVEN: Messages as the one conversation with Raven (src/v2/screens/Messages.tsx, /m/messages),
+// RAVEN: the Raven tab, the one conversation with Raven (src/v2/screens/Messages.tsx, /m/raven),
 // the quick sheet and the corner button (src/v2/kit/raven.tsx), over a fake /api/raven in the
 // contract's shapes (backend routes/raven.ts). Every write (send, read, upload, stop, a proposal's
 // approve or decline) is answered in the browser and changes the fake the way the backend would.
@@ -17,12 +17,13 @@
 //   proposal   the draft edited then Send; Save to drafts; Decline with a reason; Approve on a
 //              ticket note (desktop)
 //   older      scrolling to the top reads the page before the oldest line and keeps the view
-//   links      ?compose=1 focuses the box; an old ?c=<channel> push lands on the conversation
+//   links      ?compose=1 focuses the box; an old ?c=<channel> push lands on the conversation; the old
+//              /m/messages address (and its ?compose=1) lands on /m/raven with the box focused
 //   quick      the corner button opens the sheet with its box focused, a send shows the line,
 //              the status and the reply with Open conversation, Escape or a tap outside closes
 //              (phone, ipad, desktop); Ctrl+Shift+Space and the palette open it on the desktop
-//   corner     the corner button on every tab and page, never over content at the bottom of a
-//              scrolled page (phone)
+//   corner     the corner button on every tab and page (but Raven and Dashboard > Overview, whose Raven
+//              block takes its place), never over content at the bottom of a scrolled page (phone)
 //   down       /api/raven not answering: one plain line, no crash
 
 import { sleep } from '../lib/cdp.mjs'
@@ -31,7 +32,7 @@ import { fixtures } from './upload.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
-const ROUTE = '/m/messages'
+const ROUTE = '/m/raven'
 const MIN = 60_000
 const iso = (ms) => new Date(ms).toISOString()
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#0a3"/><circle cx="80" cy="60" r="30" fill="#fd0"/></svg>'
@@ -343,8 +344,8 @@ export function ravenTests() {
         t.check(JSON.stringify(s.props) === JSON.stringify(['Reply to Pat Example|Send,Save to Outlook drafts,Decline', 'Note on T20261119.0002|Approve,Decline']), `the proposal cards read ${JSON.stringify(s.props)}`)
         t.check(s.gap >= 0 && s.gap < 4, `the thread did not open at its end (${s.gap} px left below)`)
         t.check(s.select === 'text', `the thread's text cannot be selected (user-select ${s.select})`)
-        t.check(!s.fab, 'the corner button shows on Messages')
-        t.check(!s.dash, 'an em dash on Messages')
+        t.check(!s.fab, 'the corner button shows on Raven')
+        t.check(!s.dash, 'an em dash on Raven')
         // Connected: a column on a wide screen, a toggle on a narrow one
         const wantWide = ['ipadland', 'desktop', 'desk1440'].includes(device)
         t.check(s.wide === wantWide, `wide is ${s.wide} on ${device}`)
@@ -378,12 +379,12 @@ export function ravenTests() {
       ravenBackend(page, { unread: 4 })
       // Settings swaps the tabs for its own bar, so a tab screen
       await page.goto('/m/system/services')
-      await until(page, () => document.querySelector('.vl-nav .vl-tab-prim .rv-badge')?.getAttribute('data-n') === '4', 'the Messages tab shows no badge of 4', [], UP_MS)
+      await until(page, () => document.querySelector('.vl-nav .vl-tab-prim .rv-badge')?.getAttribute('data-n') === '4', 'the Raven tab shows no badge of 4', [], UP_MS)
       const r = await page.eval(() => {
         const b = [...document.querySelectorAll('.vl-nav .vl-tab-prim')].find((x) => x.querySelector('.rv-badge'))
         return { text: b?.textContent.trim(), label: b?.querySelector('.vl-tab-label')?.textContent, fab: document.querySelector('.vl-shell > .rv-fab')?.getAttribute('aria-label') }
       })
-      t.check(r.text === 'Messages' && r.label === 'Messages', `the badge sits on ${JSON.stringify(r)} (the tab's text must stay its name)`)
+      t.check(r.text === 'Raven' && r.label === 'Raven', `the badge sits on ${JSON.stringify(r)} (the tab's text must stay its name)`)
       t.check(r.fab === 'Message Raven (4 unread)', `the corner button reads ${r.fab}`)
       await t.shot(page, 'badge')
     },
@@ -616,6 +617,15 @@ export function ravenTests() {
       await threadUp(page)
       await until(page, () => document.activeElement === document.querySelector('.rv .rv-compose textarea'), '?compose=1 did not focus the box')
       await page.waitPath(new RegExp(`^${ROUTE}$`), 60_000).catch((e) => t.check(false, `?compose=1: ${e.message}`))
+      // the tab's old address (old pushes, the old Siri and hotkey links): Raven, with the box focused
+      await page.goto('/m/messages?compose=1')
+      await threadUp(page)
+      await until(page, () => document.activeElement === document.querySelector('.rv .rv-compose textarea'), '/m/messages?compose=1 did not focus the box')
+      await page.waitPath(new RegExp(`^${ROUTE}$`), 60_000).catch((e) => t.check(false, `/m/messages?compose=1: ${e.message}`))
+      // and it stays there: the old address's rewrite and the box's own clean-up never race each other back to ?compose=1
+      await sleep(2500)
+      const end = await page.eval(() => ({ path: location.pathname + location.search, tab: document.querySelector('.vl-nav .vl-tab-prim[aria-current="page"]')?.textContent?.trim() }))
+      t.check(end.path === ROUTE && end.tab === 'Raven', `/m/messages?compose=1 ended at ${JSON.stringify(end)}, want ${ROUTE} with the Raven tab lit`)
     },
   })
 
@@ -665,13 +675,13 @@ export function ravenTests() {
         if (device === 'desktop') await page.key('Escape')
         else await page.tap({ x: 40, y: 14 })
         await until(page, () => document.querySelector('.rv-q')?.hidden, 'the sheet did not close')
-        // Open conversation goes to Messages and closes the sheet
+        // Open conversation goes to the Raven tab and closes the sheet
         await page.tap({ sel: '.vl-shell > .rv-fab' }, { wait: 40_000 })
         await until(page, () => !document.querySelector('.rv-q')?.hidden, 'the sheet did not open again')
         t.check(await page.eval(() => !document.querySelector('.rv-q-me') && !document.querySelector('.rv-q-reply')), 'the sheet opened again still showing the answered line')
         await page.tap({ sel: '.rv-q-open' }, { wait: 40_000 })
         await page.waitPath(ROUTE, 60_000).catch((e) => t.check(false, e.message))
-        await until(page, () => document.querySelector('.rv-q')?.hidden, 'the sheet stayed open on Messages')
+        await until(page, () => document.querySelector('.rv-q')?.hidden, 'the sheet stayed open on Raven')
       },
     })
   }
@@ -699,13 +709,13 @@ export function ravenTests() {
       await until(page, () => !document.querySelector('.rv-q')?.hidden && document.activeElement === document.querySelector('.rv-q textarea'), 'the palette did not open the sheet with its box focused')
       await page.key('Escape')
       await until(page, () => document.querySelector('.rv-q')?.hidden, 'Escape did not close the sheet the palette opened')
-      // on Messages the chord focuses the conversation's own box
+      // on the Raven tab the chord focuses the conversation's own box
       await page.goto(ROUTE)
       await threadUp(page)
       await page.eval(() => document.activeElement?.blur())
       await ctrlShiftSpace(page)
-      await until(page, () => document.activeElement === document.querySelector('.rv .rv-compose textarea'), 'on Messages the chord did not focus the box')
-      t.check(await page.eval(() => document.querySelector('.rv-q')?.hidden), 'on Messages the chord opened the sheet')
+      await until(page, () => document.activeElement === document.querySelector('.rv .rv-compose textarea'), 'on Raven the chord did not focus the box')
+      t.check(await page.eval(() => document.querySelector('.rv-q')?.hidden), 'on Raven the chord opened the sheet')
     },
   })
 
@@ -720,7 +730,7 @@ export function ravenTests() {
       async run(t) {
         const page = await t.page()
         ravenBackend(page, { replyMs: -1, quiet: false })
-        const routes = ['/m/dashboard/overview', '/m/dashboard/today', '/m/ai/sessions', '/m/ai/projects', '/m/ai/usage', '/m/lights', '/m/media/dashboard', '/m/media/movies', '/m/media/requests', '/m/system/hosts', '/m/system/services', '/m/system/trades', '/m/settings', '/m/inbox', '/m/tasks', '/m/meals']
+        const routes = ['/m/dashboard/today', '/m/ai/sessions', '/m/ai/projects', '/m/ai/usage', '/m/lights', '/m/media/dashboard', '/m/media/movies', '/m/media/requests', '/m/system/hosts', '/m/system/services', '/m/system/trades', '/m/settings', '/m/inbox', '/m/tasks', '/m/meals']
         // RAVEN_CORNER=/m/media/movies,... runs only those (a recheck after a fix)
         const only = (process.env.RAVEN_CORNER ?? '').split(',').filter(Boolean)
         for (const path of only.length ? routes.filter((r) => only.includes(r)) : routes) {

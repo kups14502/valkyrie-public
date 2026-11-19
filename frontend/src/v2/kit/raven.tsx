@@ -18,11 +18,13 @@ import { Icon } from './icons'
 import { Button, Press, cx, toast } from './ui'
 import './raven.css'
 
-// Raven everywhere in v2: the composer the Messages screen and the quick sheet
+// Raven everywhere in v2: the composer the Raven screen and the quick sheet
 // share, a message's attachments, the floating button in the bottom-right
 // corner (the lights button has the left), the quick sheet it opens (also
 // Ctrl+Shift+Space and the palette's "Message Raven"), and the unread badge on
-// the Messages tab. The state behind them is kit/ravenStore.ts.
+// the Raven tab. The state behind them is kit/ravenStore.ts. The Dashboard has
+// its own Raven block (screens/Dashboard.tsx RavenBlock), so the corner button
+// stays off there.
 
 /** a fine pointer: Enter sends there; a touch keyboard's return is a new line */
 const finePointer = () => typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -173,7 +175,7 @@ export function RavenFiles({ files }: { files: RavenFile[] }) {
 // ------------------------------------------------------------- the badge ---
 
 /**
- * Raven's unread count on the Messages tab. The number is drawn by CSS from
+ * Raven's unread count on the Raven tab. The number is drawn by CSS from
  * data-n, so the tab's text stays its name (the tests and the palette find
  * tabs by it).
  */
@@ -185,16 +187,20 @@ export function RavenBadge() {
 
 // ------------------------------------------------------ the floating button ---
 
+/** Raven's own tab, and the Dashboard's Overview, which has the Raven block: no corner button there (one Raven entry per screen). */
+const NO_FAB = /^\/m\/(raven|messages)(\/|$)|^\/m\/dashboard(\/overview)?\/?$/
+
 /**
- * Bottom-right on every tab but Messages, the lights button's twin: one tap
- * opens the quick sheet with its box focused. Not in the headset.
+ * Bottom-right on every tab but Raven and the Dashboard's Overview, the lights
+ * button's twin: one tap opens the quick sheet with its box focused. Not in
+ * the headset.
  */
 export function RavenFab() {
   const { pathname } = useLocation()
   const vr = useProfile().resolved === 'vr'
   const open = useQuickOpen()
   const unread = useRavenUnread().data?.unread ?? 0
-  if (vr || pathname.startsWith('/m/messages')) return null
+  if (vr || NO_FAB.test(pathname)) return null
   const label = unread ? `Message Raven (${unread} unread)` : 'Message Raven'
   return (
     <Press
@@ -312,7 +318,7 @@ export function RavenQuick() {
   const close = () => setQuickOpen(false)
   const toThread = () => {
     close()
-    navigate('/m/messages', { state: { v2Back: true } })
+    navigate('/m/raven', { state: { v2Back: true } })
   }
   const busy = ravenBusy(page)
   const status = page ? ravenStatusText(page) : ''
@@ -357,7 +363,7 @@ export function RavenQuick() {
                   <p className="rv-meta">{[modelLabel(reply.meta.model, reply.meta.tier), reply.meta.effort, etTime(reply.createdAt)].filter(Boolean).join(' · ')}</p>
                 </div>
               )
-              : <p className="rv-q-wait" data-busy={busy || undefined}>{busy ? status : 'Sent. Raven answers here and in Messages.'}</p>}
+              : <p className="rv-q-wait" data-busy={busy || undefined}>{busy ? status : 'Sent. Raven answers here and in the Raven tab.'}</p>}
           </div>
         )}
         <RavenComposer

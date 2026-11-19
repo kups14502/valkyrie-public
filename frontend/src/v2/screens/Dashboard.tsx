@@ -2,10 +2,10 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
-import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
+import { useIsFetching, useMutation, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { playerActions, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
-import { Bar, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
+import { playerActions, useIntent, usePlayerNow, useShell, type ScreenProps } from '../kit/shell'
+import { Bar, Button, Glyph, Panel, Press, cx, dismissToast, toast } from '../kit/ui'
 import {
   ago, equityAge, fullest, nyDayKey, onAccount, resetWhen, tradeSession, useCalendar, useHosts, useLaunchTargets, useLights, useLive, useMediaQueue, useOpenTasks, usePlexRecentRich, useSessions, useSwitchStatus, useTick,
   useTrade, useTracker, useUsage,
@@ -30,6 +30,8 @@ import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } fro
 import { clockOf, dueLabel, dueState } from '../../lib/taskDue'
 import { taskKey, type Task } from '../../lib/tasksApi'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
+import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven } from '../kit/ravenStore'
+import { markRavenRead, ravenBusy, ravenStatusText, sendRaven, type RavenMsg } from '../../lib/ravenApi'
 import './dashboard.css'
 
 // Dashboard: one page with everything Valkyrie does, around the device it is
@@ -37,25 +39,26 @@ import './dashboard.css'
 // mimir's laptop, the phone, the iPad, the headset), the largest thing on the
 // page on every screen, its live numbers tied to its parts by leader lines.
 // Phone (one column, in this order): the trade ticker line (the newest session,
-// bot online, 7 days), the stage, quick start, upload (pictures to thor, for
+// bot online, 7 days), the stage, Raven (its status, the last exchange, a box
+// to write it), quick start, upload (pictures to thor, for
 // the session just started), lights (one bar for all of them, every bulb, a tap
 // switches one, the presets, a plate that switches them all), the daily tracker
 // (day stepping, the other day's line, hold Exercise to skip), the calendar
 // (the week by day, the next event first; a tap opens the calendar sheet), AI
 // (live and asking sessions, usage meters), media (playing or newest added,
 // downloads) and every host (CPU / Mem / Disk, battery where the host has one).
-// From 600 px: the stage across the top, two columns under it, the ticker
+// From 600 px: the stage across the top, Raven across under it, two columns under that, the ticker
 // becomes the head of a Trade box (equity, the 3D equity chart) and the presets
 // get their names.
 // Desktop: three columns that reach the bottom of the page, the middle one
-// wider: [quick start, upload, tracker, calendar] [the stage, then AI and the
+// wider: [quick start, Raven, upload, tracker, calendar] [the stage, then AI and the
 // hosts side by side] [lights, trade, media]. The trade box keeps its own
 // short height; the stage and the poster grid take the height that is left,
 // and the calendar lists as many days as its column has room for, so no box
 // stretches empty. A 2560 px monitor has the newest addition as a banner over
 // the posters.
 // iPad in landscape (the iPad profile only): one screen, no scrolling: [lights,
-// tracker, calendar] [the stage, AI] [trade, hosts].
+// tracker, calendar] [the stage, Raven, AI] [trade, hosts].
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -202,9 +205,11 @@ export default function Dashboard({ active }: ScreenProps) {
   // the calendar sheet (src/v2/screens/Calendar.tsx): opened from the Calendar block, closed when the tab is left
   const [cal, setCal] = useState<CalendarOpen | null>(null)
   const calSeed = useCalendar(7).data
-  useEffect(() => {
+  const [wasActive, setWasActive] = useState(active)
+  if (wasActive !== active) {
+    setWasActive(active)
     if (!active) setCal(null)
-  }, [active])
+  }
   const device = useThisDevice()
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
@@ -233,6 +238,7 @@ export default function Dashboard({ active }: ScreenProps) {
             </div>
             <div className="hm-col hm-b">
               <DeviceStage id={device} active={active} i={0} fill={fill} />
+              <RavenBlock active={active} i={1} />
               <AiBlock wide i={4} max={3} />
             </div>
             <div className="hm-col hm-c">
@@ -244,6 +250,7 @@ export default function Dashboard({ active }: ScreenProps) {
           <>
             <TradeTicker active={active} i={0} />
             <DeviceStage id={device} active={active} i={1} compact />
+            <RavenBlock active={active} i={2} />
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
@@ -260,6 +267,7 @@ export default function Dashboard({ active }: ScreenProps) {
         ) : cols === 2 ? (
           <>
             <DeviceStage id={device} active={active} i={0} compact />
+            <RavenBlock active={active} i={1} />
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
@@ -278,6 +286,7 @@ export default function Dashboard({ active }: ScreenProps) {
           <>
             <div className="hm-col hm-a">
               <QuickStart />
+              <RavenBlock active={active} i={2} />
               <UploadBlock wide />
               <Tracker />
               <Calendar onOpen={setCal} fit={fill} />
@@ -656,7 +665,7 @@ function tickState(taken: boolean, takenAt: string | null): TickState {
  */
 function useHold(onHold: () => void, enabled: boolean) {
   const fire = useRef(onHold)
-  fire.current = onHold
+  useLayoutEffect(() => { fire.current = onHold })
   const held = useRef(false)
   const [holding, setHolding] = useState(false)
   const lastPointer = useRef<string>('')
@@ -1436,6 +1445,136 @@ function QuickStart() {
       ) : (
         <p className="hm-quiet hm-starts-empty vl-build" style={bi(2)}>No phone targets on thor</p>
       )}
+    </section>
+  )
+}
+
+// ---------- Raven: his assistant's status, the last exchange, a box to write it ----------
+
+const RAVEN = 'raven'
+const LIST_MARK = /^([-*+]|\d+[.)])\s+/
+
+/**
+ * A message as one plain run of text for the block: Markdown marks out. A list item, or a new paragraph,
+ * after text that ends without a stop joins with " · ", so two thoughts never run together as one sentence.
+ */
+function ravenPlain(m: RavenMsg): string {
+  let out = ''
+  let gap = false
+  for (const raw of m.text.replace(/```[\s\S]*?```/g, ' ').split('\n')) {
+    const item = LIST_MARK.test(raw.trim())
+    const line = raw.trim().replace(LIST_MARK, '').replace(/^(#+|>)\s*/, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*+|`+|~~|__/g, '').trim()
+    if (!line) {
+      gap = true
+      continue
+    }
+    out = out ? `${out}${(item || gap) && !/[.!?:]$/.test(out) ? ' · ' : ' '}${line}` : line
+    gap = false
+  }
+  const n = m.meta.files?.length ?? 0
+  return out || (n ? `${n} ${n === 1 ? 'file' : 'files'}` : '')
+}
+
+/** His newest line, and Raven's newest own reply after it (relays are not part of the exchange). */
+function lastExchange(messages: RavenMsg[]): { me: RavenMsg | null; reply: RavenMsg | null } {
+  const me = messages.findLast((m) => m.author === 'brendon') ?? null
+  const reply = messages.findLast((m) => m.author === 'raven' && !m.meta.relay && (!me || m.id > me.id)) ?? null
+  return { me, reply }
+}
+
+/**
+ * Raven on the Dashboard, where the corner button would be (kit/raven.tsx
+ * hides it here): the heading with Raven's live status (the Raven screen's
+ * words), his last line and Raven's latest reply, each clipped, and a one-line
+ * box. A send goes the Raven screen's way (source app) and the reply shows
+ * here when it lands. The heading opens the conversation; Ctrl+Shift+Space and
+ * the palette's "Message Raven" focus the box.
+ */
+function RavenBlock({ active, i }: { active: boolean; i: number }) {
+  const { go } = useShell()
+  const qc = useQueryClient()
+  // the long-poll only while a reply is due (below); otherwise the slow re-read and the app coming back to the front
+  const [live, setLive] = useState(false)
+  const q = useRaven(active, live)
+  const page = q.data
+  const [text, setText] = useState('')
+  const [sentId, setSentId] = useState(0)
+  const box = useRef<HTMLInputElement>(null)
+  useIntent('raven:compose', () => box.current?.focus(), active)
+
+  const send = useMutation({
+    mutationFn: (line: string) => sendRaven({ text: line, source: 'app' }),
+    onSuccess: (m) => {
+      setText('')
+      setSentId(m.id)
+      addToThread(qc, { messages: [m] })
+      void qc.invalidateQueries({ queryKey: RAVEN_KEY })
+    },
+    onError: (e) => toast(apiErrorText(e, 'Raven did not answer'), { ms: 4000 }),
+  })
+  const line = text.trim()
+  const submit = () => {
+    if (line && !send.isPending) send.mutate(line)
+  }
+
+  const busy = ravenBusy(page)
+  const failed = q.isError && !page
+  const status = failed ? 'not answering' : page ? ravenStatusText(page) : '--'
+  const { me, reply } = lastExchange(page?.messages ?? [])
+  // a reply is due: a line sent from here has none yet, or Raven is at work
+  const due = busy || (!!sentId && me?.id === sentId && !reply)
+  if (due !== live) setLive(due)
+
+  // a reply to a line sent from here is read once it shows (the quick sheet's rule), so the tab's badge does not count it
+  const replyId = sentId && me?.id === sentId ? reply?.id ?? 0 : 0
+  const unread = page?.unread ?? 0
+  useEffect(() => {
+    if (!active || !replyId || !unread) return
+    void markRavenRead(replyId).then(() => refreshRavenUnread(qc), () => { /* the badge stays until the next read */ })
+  }, [active, replyId, unread, qc])
+
+  return (
+    <section className="hm-sec hm-rv" aria-label="Raven">
+      <Press className="hm-head hm-rv-head vl-build" style={bi(i)} onPress={() => go(RAVEN)} aria-label={`Raven${page || failed ? `, ${status}` : ''}, open the conversation`}>
+        <span className="hm-head-label" data-lit={busy || undefined}><HIcon name="raven" lit={busy} />Raven</span>
+        <span className="hm-head-value hm-rv-status" data-busy={busy || undefined} data-state={failed ? 'error' : page?.status} title={status}>
+          <span className="vl-ellipsis">{status}</span>
+          <Chevron />
+        </span>
+      </Press>
+      {page && (me || reply) ? (
+        <div className="hm-rv-x vl-build" style={bi(i + 1)}>
+          {me && (
+            <>
+              <span className="hm-rv-who">You</span>
+              <p className="hm-rv-text" data-who="me">{ravenPlain(me)}</p>
+            </>
+          )}
+          <span className="hm-rv-who">Raven</span>
+          {reply ? <p className="hm-rv-text" data-who="raven" data-error={reply.meta.error ? '' : undefined}>{ravenPlain(reply)}</p>
+            : busy ? <p className="hm-rv-text hm-rv-wait" data-who="raven"><span className="hm-rv-pulse" aria-hidden />{status}</p>
+            : <p className="hm-rv-text hm-dim" data-who="raven">No reply yet</p>}
+        </div>
+      ) : (
+        <p className="hm-quiet vl-build" style={bi(i + 1)}>{failed ? `Raven is not answering: ${apiErrorText(q.error, 'no reply from Valkyrie')}` : page ? 'Nothing yet. Ask Raven anything.' : 'Reading Raven'}</p>
+      )}
+      <form className="hm-rv-form vl-build" style={bi(i + 1)} onSubmit={(e) => { e.preventDefault(); submit() }}>
+        <input
+          ref={box}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+            e.preventDefault()
+            submit()
+          }}
+          placeholder="Message Raven"
+          aria-label="Message Raven"
+          enterKeyHint="send"
+          autoComplete="off"
+        />
+        <Button kind="line" lit={!!line} type="button" className="hm-rv-send" disabled={!line || send.isPending} onPress={submit}>Send</Button>
+      </form>
     </section>
   )
 }

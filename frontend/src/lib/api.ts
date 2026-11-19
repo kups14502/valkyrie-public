@@ -821,7 +821,26 @@ export type TermSession = {
   // The project the pane was opened for, from tmux's @vk_project option. Empty
   // for a pane opened outside a project, and for any API older than projects.
   projectId: string
+  // What Claude in the pane is doing (the words AI > Sessions uses): working,
+  // asking (done, with a question or a Next: line for him, or a prompt blocking
+  // on him), idle, shell (no Claude) or dead. Undefined on an API older than the
+  // Desk; read a missing state as idle.
+  state?: PaneState
+  // Claude's own name for the session (the pane title it sets, its status glyph
+  // removed): the name /rename gives it. Empty when the pane has none.
+  title?: string
+  // ms epoch when `state` last changed, as the API saw it.
+  stateSince?: number
+  // ms epoch when the pane last printed (tmux's window activity). activityAt
+  // is the session's own, which moves on a key or an attach, never on output.
+  // Undefined on an API older than the Desk.
+  outputAt?: number
+  // While asking: the question or the Next: line itself, one line. Empty otherwise.
+  ask?: string
 }
+
+export type PaneState = 'working' | 'asking' | 'idle' | 'shell' | 'dead'
+const PANE_STATES: PaneState[] = ['working', 'asking', 'idle', 'shell', 'dead']
 
 export type TermStatus = {
   ok: boolean
@@ -855,6 +874,7 @@ const parseTermSession = (raw: unknown): TermSession | null => {
   const name = wsStr(r.name)
   if (!name) return null
   const mode = wsStr(r.mode)
+  const state = wsStr(r.state)
   return {
     name,
     label: wsStr(r.label) ?? name,
@@ -870,6 +890,11 @@ const parseTermSession = (raw: unknown): TermSession | null => {
     deadText: wsStr(r.deadText) ?? '',
     size: wsStr(r.size) ?? '',
     projectId: wsStr(r.projectId) ?? '',
+    state: (PANE_STATES as string[]).includes(state ?? '') ? (state as PaneState) : undefined,
+    title: wsStr(r.title) ?? '',
+    stateSince: wsNum(r.stateSince) ?? undefined,
+    outputAt: wsNum(r.outputAt) ?? undefined,
+    ask: wsStr(r.ask) ?? '',
   }
 }
 
