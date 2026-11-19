@@ -46,15 +46,24 @@ router.use('/raven', (req: Request, res: Response, next: NextFunction) => {
 export type RavenMsgView = {
   id: number; author: string; text: string; createdAt: string; refs: Message['refs']; meta: Message['meta']
   proposal: { id: number; kind: string; title: string; payload: unknown; status: string; result: string | null; decidedAt: string | null } | null
+  /** every proposal when a relay folded in more than one (proposal is the first) */
+  proposals?: NonNullable<RavenMsgView['proposal']>[]
 }
 
+type ProposalView = NonNullable<RavenMsgView['proposal']>
+const proposalIdsOf = (m: Message): number[] => [...(m.proposalId ? [m.proposalId] : []), ...(m.meta.relay?.proposalIds ?? [])]
+
 function messagesView(msgs: Message[]): RavenMsgView[] {
-  const props = proposalsFor(msgs.map((m) => m.proposalId).filter((x): x is number => x !== null))
+  const props = proposalsFor(msgs.flatMap(proposalIdsOf))
   return msgs.map((m) => {
-    const p = m.proposalId ? props.get(m.proposalId) : undefined
+    const list: ProposalView[] = proposalIdsOf(m).flatMap((id) => {
+      const p = props.get(id)
+      return p ? [{ id: p.id, kind: p.kind, title: p.title, payload: p.payload, status: p.status, result: p.result || null, decidedAt: p.decidedAt }] : []
+    })
     return {
       id: m.id, author: m.author, text: m.text, createdAt: m.createdAt, refs: m.refs, meta: m.meta,
-      proposal: p ? { id: p.id, kind: p.kind, title: p.title, payload: p.payload, status: p.status, result: p.result || null, decidedAt: p.decidedAt } : null,
+      proposal: list[0] ?? null,
+      ...(list.length > 1 ? { proposals: list } : {}),
     }
   })
 }

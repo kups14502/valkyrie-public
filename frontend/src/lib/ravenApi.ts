@@ -59,6 +59,8 @@ export type RavenMsg = {
   refs: Ref[]
   meta: RavenMeta
   proposal: Proposal | null
+  /** every proposal when one relay holds several (proposal is the first) */
+  proposals?: Proposal[]
 }
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
@@ -153,6 +155,7 @@ function normMsg(m: RavenMsg): RavenMsg {
     refs: Array.isArray(m.refs) ? m.refs : [],
     meta: m.meta && typeof m.meta === 'object' ? m.meta : {},
     proposal: m.proposal ?? null,
+    ...(Array.isArray(m.proposals) && m.proposals.length > 1 ? { proposals: m.proposals } : {}),
   }
 }
 

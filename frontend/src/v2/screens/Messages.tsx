@@ -316,7 +316,7 @@ function Row({ m, grouped, names }: { m: RavenMsg; grouped: boolean; names: Map<
       {m.text && <Markdown className="rv-md">{m.text}</Markdown>}
       {m.meta.files && m.meta.files.length > 0 && <RavenFiles files={m.meta.files} />}
       {refs.length > 0 && <Refs refs={refs} />}
-      {m.proposal && <ProposalCard p={m.proposal} />}
+      {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
       {meta && <p className="rv-meta" title={m.meta.why || undefined}>{meta}</p>}
     </article>
   )

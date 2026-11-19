@@ -203,6 +203,8 @@ function settle(ids: number[], r: SayResult): void {
 
 type RavenRun = {
   runId: string; fromBrendon: boolean; acted: number; ctx: RavenToolCtx; ac: AbortController; stopped: boolean; hop: number
+  /** the second try after a run Brendon started ended with no reply */
+  mustAnswer?: boolean
 }
 const RUN_TOKENS = new Map<string, RavenRun>()
 /** The run a raven-mcp request belongs to, by its token. */
@@ -312,6 +314,7 @@ export function errorLine(e: unknown): string {
 
 // exactly "(no reply)", maybe in backticks or bold; a bare "No reply." is an answer ("did she write back?")
 const NO_REPLY_RE = /^[`*_]*\(\s*no reply\s*\)[`*_]*\.?$/i
+const isSilent = (text: string) => !text.trim() || NO_REPLY_RE.test(text.trim())
 
 /** One run over every open event. Returns true when more arrived meanwhile. */
 async function runOnce(): Promise<boolean> {
@@ -363,9 +366,19 @@ async function runOnce(): Promise<boolean> {
       route = await routeMessage(text, { files: nFiles, signal: run.ac.signal })
       if (run.ac.signal.aborted) throw new ClaudeCliError('stopped')
     }
-    const result = await runModel(run, route, events, (u) => { used = u })
+    let result = await runModel(run, route, events, (u) => { used = u })
+    // he wrote: he always gets an answer. A run that ends with none goes again once, on a stronger model.
+    if (fromBrendon && isSilent(result.text) && !run.ac.signal.aborted) {
+      console.warn(`[raven] ${modelLabel(used.model ?? '')} gave Brendon no reply; trying again`)
+      run.mustAnswer = true
+      // what the first try did stays done: the second only looks and answers
+      if (run.acted > 0) run.ctx.fromBrendon = false
+      if (route.tier === 'haiku') route = { ...route, tier: 'sonnet', effort: 'medium', why: `${route.why} (again: no reply)` }
+      result = await runModel(run, route, events, (u) => { used = u })
+    }
     endRun(runId, { status: 'done', summary: result.text.trim(), cred: result.cred, costUsd: result.costUsd, turns: result.turns, durationMs: Date.now() - t0 })
-    const reply = result.text.trim()
+    let reply = result.text.trim()
+    if (fromBrendon && isSilent(reply)) reply = 'I have no answer for that. Ask me again in other words.'
     if (reply && !NO_REPLY_RE.test(reply)) {
       const meta: RavenMeta = { tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, why: route.why }
       if (replyTo) meta.replyTo = replyTo
@@ -406,7 +419,7 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
     await mkdir(work)
     const mcpFile = path.join(dir, 'mcp.json')
     await writeFile(mcpFile, JSON.stringify({ mcpServers: { raven: { type: 'http', url: MCP_URL, headers: { 'X-Raven-Token': token } } } }), { mode: 0o600 })
-    const { system, prompt } = await buildPrompt(events, run.fromBrendon)
+    const { system, prompt } = await buildPrompt(events, run.fromBrendon, run.mustAnswer)
     let model = modelFor(route.tier)
     let effort = effortFor(route.effort)
     for (let attempt = 0; ; attempt++) {
@@ -566,7 +579,7 @@ export async function ravenLiveSnapshot(): Promise<string> {
   return out.join('\n')
 }
 
-async function buildPrompt(events: AgentEvent[], fromBrendon: boolean): Promise<{ system: string; prompt: string }> {
+async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswer = false): Promise<{ system: string; prompt: string }> {
   const system = ravenBrief({ features: features.filter((f) => f.tools).map((f) => f.id) })
   const prompt = [
     `Now: ${nyNowLine()}.`,
@@ -580,7 +593,11 @@ async function buildPrompt(events: AgentEvent[], fromBrendon: boolean): Promise<
     await ravenLiveSnapshot(),
     '## Now',
     fromBrendon
-      ? 'Do what he asked with your tools, then give your reply to him as your final answer.'
+      ? 'Do what he asked with your tools, then give your reply to him as your final answer. He wrote to you: you always answer him, '
+        + 'at least one line, never (no reply). A question about a job you handed on (how long, is it done) gets where it stands now: '
+        + 'look at the agent or session first (working since when, what it last said, what it waits on).'
+        + (mustAnswer ? ' Your first try this run ended with no reply at all, which left him waiting with nothing: answer him now. '
+          + 'Whatever that try already did with your tools stays done: never repeat it, look and answer.' : '')
       // an agent's post, a session's answer and a notice are already in the thread: repeating them is a second row and a second buzz
       : 'Brendon did not write this time. What woke you is already in the thread where he reads it: never repeat it. '
         + 'Do a follow-up you were given, or answer when it needs a decision or a fact from you that the post does not give him, in one or two lines. '

@@ -5,7 +5,7 @@ import path from 'node:path'
 import {
   addEvent, addMessage, agentsWithOpenEvents, archiveChannel, bump, claimEvents, dmChannel, endRun, failStaleRuns, getAgent, getChannel,
   getKv, listAgents, listChannels, listMessages, listRuns, nowIso, openEvents, patchAgent, pruneEvents, pruneMail, pruneMessages,
-  pruneTracked, releaseEvents, runsSince, setKv, startRun, trackerCounts, upsertAgent, upsertChannel,
+  pruneTracked, releaseEvents, runsSince, setKv, startRun, trackerCounts, updateMessage, upsertAgent, upsertChannel,
   type Agent, type AgentEvent, type Channel, type Message, type Ref, AgentError,
 } from './agentsStore.js'
 import { runClaude, nyNowLine } from './claudeCli.js'
@@ -147,11 +147,44 @@ export function canPost(agent: Agent, ch: Channel): boolean {
  */
 function mirrorToRaven(agent: Agent, msg: Message): void {
   ensureRavenChannel()
+  if (foldIntoRelay(agent, msg)) return
   addMessage({
     channelId: RAVEN_CHANNEL, author: agent.id, text: msg.text, refs: msg.refs, notify: true, hop: msg.hop, proposalId: msg.proposalId,
     meta: { relay: { kind: 'agent', from: agent.id, label: agent.name, sourceMessageId: msg.id } },
   })
   ravenPush(agent.name, msg.text)
+}
+
+const FOLD_MS = 15 * 60_000
+// the default line a proposal posts when the agent gave no why: the card under it says it all
+const BARE_PROPOSAL_RE = /^(?:An internal note|Draft reply to .{1,120}) for your approval\.?$/i
+const ticketKeys = (refs: Ref[]) => refs.flatMap((r) => (r.type === 'ticket' ? [`${r.franchise}:${r.number}`] : []))
+
+/**
+ * One relay per ticket: an agent's next post about a ticket it posted about minutes ago
+ * (the assignment, then the internal note) joins that relay instead of opening a new one.
+ * Only while that relay is still the newest line in the thread, and no second buzz.
+ */
+function foldIntoRelay(agent: Agent, msg: Message): boolean {
+  const keys = ticketKeys(msg.refs)
+  if (!keys.length) return false
+  const last = listMessages(RAVEN_CHANNEL, { limit: 1 })[0]
+  const relay = last?.meta.relay
+  if (!last || relay?.kind !== 'agent' || relay.from !== agent.id) return false
+  if (Date.now() - Date.parse(last.createdAt) > FOLD_MS) return false
+  const had = new Set(ticketKeys(last.refs))
+  if (!keys.some((k) => had.has(k))) return false
+  const text = BARE_PROPOSAL_RE.test(msg.text.trim()) || last.text.includes(msg.text.trim()) ? last.text : `${last.text}\n\n${msg.text}`
+  const seen = new Set(last.refs.map((r) => JSON.stringify(r)))
+  const refs = [...last.refs, ...msg.refs.filter((r) => !seen.has(JSON.stringify(r)))]
+  let proposalId = last.proposalId
+  const more = [...(relay.proposalIds ?? [])]
+  if (msg.proposalId) {
+    if (proposalId === null) proposalId = msg.proposalId
+    else if (proposalId !== msg.proposalId && !more.includes(msg.proposalId)) more.push(msg.proposalId)
+  }
+  updateMessage(last.id, { text, refs, proposalId, meta: { ...last.meta, relay: { ...relay, ...(more.length ? { proposalIds: more } : {}) } } })
+  return true
 }
 
 /** A message from an agent. Mentions and DMs wake the agents they name, one hop deeper. */

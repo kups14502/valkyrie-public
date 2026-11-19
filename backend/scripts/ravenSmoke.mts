@@ -381,11 +381,19 @@ queue({ result: 'No reply.' })
 await j('POST', '/raven/messages', { text: 'did the landlord answer my mail?' })
 await ravenIdle()
 check('"No reply." as an answer is posted', lastRavenMsg()?.text === 'No reply.', lastRavenMsg()?.text)
-queue({ result: '`(no reply)`' })
+// he wrote: a run that ends in (no reply) goes again once, and he always gets an answer
+queue({ result: '`(no reply)`' }, { result: 'Noted.' })
 let msgsNow = thread().length
+before = calls().length
 await j('POST', '/raven/messages', { text: 'fyi only' })
 await ravenIdle()
-check('(no reply) in backticks still posts nothing', thread().length === msgsNow + 1, thread().slice(msgsNow).map((m) => m.text))
+check('(no reply) to his own message runs again and answers', calls().slice(before).filter((c) => c.kind === 'raven').length === 2 && lastRavenMsg()?.text === 'Noted.',
+  thread().slice(msgsNow).map((m) => m.text))
+queue({ result: '(no reply)' }, { result: '' })
+msgsNow = thread().length
+await j('POST', '/raven/messages', { text: 'fyi again' })
+await ravenIdle()
+check('two silent tries still answer him', thread().length === msgsNow + 2 && /no answer/i.test(lastRavenMsg()?.text ?? ''), thread().slice(msgsNow).map((m) => m.text))
 router({})
 
 // ------------------------------------------------------------ queueing ---

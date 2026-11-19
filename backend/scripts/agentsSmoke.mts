@@ -206,6 +206,22 @@ await j('POST', '/msg/channels/raven/read', {})
 ;[, cnt] = await j('GET', '/msg/count')
 check('read clears the count', cnt.unread === 0, cnt)
 
+// one relay per ticket: the assignment and then the note on the same ticket fold into one line in Raven's thread
+{
+  const g = store.getAgent('groceries')!
+  const t1 = { type: 'ticket' as const, franchise: 'east' as any, id: 9001, number: 'T20991231.0001' }
+  const t2 = { ...t1, id: 9002, number: 'T20991231.0002' }
+  const n0 = store.listMessages('raven', { limit: 200 }).length
+  agents.agentPost(g, 'groceries', 'Assigned it to you.', { refs: [t1], notify: true, proposalId: 7001 })
+  agents.agentPost(g, 'groceries', 'An internal note for your approval.', { refs: [t1], notify: true, proposalId: 7002 })
+  agents.agentPost(g, 'groceries', 'Same ticket, one more line.', { refs: [t1], notify: true })
+  agents.agentPost(g, 'groceries', 'A different ticket.', { refs: [t2], notify: true, proposalId: 7003 })
+  const got = store.listMessages('raven', { limit: 200 }).slice(n0)
+  check('same-ticket posts fold into one relay', got.length === 2 && got[0].text === 'Assigned it to you.\n\nSame ticket, one more line.', got.map((m) => m.text))
+  check('the folded relay holds both proposals', got[0]?.proposalId === 7001 && JSON.stringify(got[0]?.meta.relay?.proposalIds) === '[7002]', got[0])
+  check('another ticket gets its own relay', got[1]?.proposalId === 7003 && got[1]?.refs[0]?.type === 'ticket', got[1])
+}
+
 // a channel the agent may not post in
 script('groceries', [{ tool: 'post', args: { text: 'hi', channel: 'east-triage' } }, { tool: 'ticket', args: { ticket: '101' } }])
 await j('POST', '/msg/channels/groceries/messages', { text: 'try east' })

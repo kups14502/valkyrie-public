@@ -380,6 +380,17 @@ export function addMessage(m: { channelId: string; author: string; text: string;
   return getMessage(Number(r.lastInsertRowid))!
 }
 
+/** Rewrites a message in place (a relay that folds in a later post about the same ticket). */
+export function updateMessage(id: number, m: { text?: string; refs?: Ref[]; meta?: RavenMeta; proposalId?: number | null }): Message | null {
+  const cur = getMessage(id)
+  if (!cur) return null
+  db.prepare('UPDATE messages SET text = ?, refs = ?, meta = ?, proposalId = ? WHERE id = ?').run(
+    (m.text ?? cur.text).slice(0, MAX_TEXT), JSON.stringify(m.refs ?? cur.refs), JSON.stringify(m.meta ?? cur.meta),
+    m.proposalId === undefined ? cur.proposalId : m.proposalId, id)
+  bump()
+  return getMessage(id)
+}
+
 export function getMessage(id: number): Message | null {
   const r = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined
   return r ? toMessage(r) : null

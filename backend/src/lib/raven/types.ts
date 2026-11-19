@@ -37,6 +37,8 @@ export type RavenMeta = {
     label: string
     /** the original message id in its own channel, for an agent relay */
     sourceMessageId?: number
+    /** more proposals folded into this relay (the same agent, the same ticket, minutes apart), oldest first */
+    proposalIds?: number[]
     /** a pane's conversation id, for a session relay */
     sessionId?: string
   }
