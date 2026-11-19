@@ -77,12 +77,36 @@ function creds(scratch: string): Cred[] {
   return [...pool, ...profiles].slice(0, 3)
 }
 
-/** detail: what the CLI itself printed on each failure (stdout or stderr), for a caller that must tell one failure from another. */
+/**
+ * detail: what the CLI itself printed on each failure (stdout or stderr), for a caller that must tell one failure from another.
+ * costUsd: what the failed runs cost by the CLI's own count (a run stopped by --max-budget-usd spent its budget), or null.
+ */
 export class ClaudeCliError extends Error {
   detail = ''
+  costUsd: number | null = null
 }
 
-const cliError = (message: string, detail: string[] = []) => Object.assign(new ClaudeCliError(message), { detail: detail.join('\n').slice(0, 4000) })
+const cliError = (message: string, detail: string[] = [], costUsd: number | null = null) =>
+  Object.assign(new ClaudeCliError(message), { detail: detail.join('\n').slice(0, 4000), costUsd })
+
+/**
+ * The environment a run reads 'minimal': what the CLI needs to start and reach the network, nothing of this
+ * process's own settings (a run whose prompt holds outside text must not find the backend's keys in its env).
+ */
+const MINIMAL_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TMPDIR', 'TERM',
+  'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy']
+
+const baseEnv = (env: 'inherit' | 'minimal' | undefined): NodeJS.ProcessEnv =>
+  (env === 'minimal' ? Object.fromEntries(MINIMAL_ENV.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])) : process.env)
+
+/** The CLI's cost figure in its JSON envelope, or null. */
+const costOf = (out: string | undefined): number | null => {
+  if (!out) return null
+  const env = extractJson(out) as { total_cost_usd?: unknown } | null
+  return typeof env?.total_cost_usd === 'number' && Number.isFinite(env.total_cost_usd) ? env.total_cost_usd : null
+}
+
 // a failed execFile: what it printed, never its message (the whole command line, prompt included);
 // anything else (an is_error answer, an empty one): the message
 const said = (e: { stdout?: string; stderr?: string; code?: unknown; signal?: unknown; message: string }) =>
@@ -153,24 +177,32 @@ export type CliRun = { text: string; cred: string; costUsd: number | null; turns
  * words, so a caller can stop on an error no other account would fix.
  *
  * signal (optional) stops the run: the child is killed and the call throws
- * ClaudeCliError('stopped'), with no further credential tried.
+ * ClaudeCliError('stopped'), with no further credential tried. env 'minimal':
+ * the run gets only MINIMAL_ENV and the credential, not this process's
+ * environment. A run that fails after it spent (a budget stop) throws with
+ * that cost on the error.
  */
-export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: (why: string) => boolean; signal?: AbortSignal }): Promise<CliRun> {
+export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: (why: string) => boolean; signal?: AbortSignal; env?: 'inherit' | 'minimal' }): Promise<CliRun> {
   const cli = CLI_CANDIDATES.find((c) => existsSync(c))
   if (!cli) throw new ClaudeCliError('the claude CLI is not installed on this host')
   const errors: string[] = []
   const details: string[] = []
+  let spent: number | null = null
   for (const p of creds(opts.scratch)) {
     if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
     try {
       const { stdout } = await run(cli, args, {
         cwd: opts.cwd,
         timeout: opts.timeoutMs,
-        env: { ...process.env, ...p.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' },
+        env: { ...baseEnv(opts.env), ...p.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' },
         signal: opts.signal,
       })
       const env = extractJson(stdout) as { result?: unknown; is_error?: unknown; total_cost_usd?: unknown; num_turns?: unknown; duration_ms?: unknown } | null
-      if (env && env.is_error === true) throw new Error(String(env.result ?? 'the CLI reported an error').slice(0, 300))
+      if (env && env.is_error === true) {
+        const cost = costOf(stdout)
+        if (cost !== null) spent = (spent ?? 0) + cost
+        throw new Error(String(env.result ?? 'the CLI reported an error').slice(0, 300))
+      }
       const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
       return {
         text: env && typeof env.result === 'string' ? env.result : stdout.slice(0, 4000),
@@ -182,6 +214,8 @@ export async function runClaude(args: string[], opts: { cwd: string; scratch: st
     } catch (err) {
       if (opts.signal?.aborted) throw new ClaudeCliError('stopped')
       const e = err as Error & { killed?: boolean; code?: string; stdout?: string; stderr?: string }
+      const cost = costOf(e.stdout)
+      if (cost !== null) spent = (spent ?? 0) + cost
       // never e.message for a failed execFile: it is the whole command line, the prompt included
       const why = e.killed || e.code === 'ETIMEDOUT' ? 'timed out' : said(e).slice(0, 300)
       errors.push(`${p.id}: ${why}`)
@@ -189,7 +223,7 @@ export async function runClaude(args: string[], opts: { cwd: string; scratch: st
       if (!opts.retryable(`${why}\n${said(e)}`) || why === 'timed out') break
     }
   }
-  throw cliError(errors.join('; ') || 'no Claude profile answered', details)
+  throw cliError(errors.join('; ') || 'no Claude profile answered', details, spent)
 }
 
 // ---------------------------------------------------------- New York time ----
