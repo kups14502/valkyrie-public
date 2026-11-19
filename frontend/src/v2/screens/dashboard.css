@@ -18,7 +18,7 @@
 /* ---------- layout ---------- */
 
 /* phone: one column; the column wrappers dissolve, so the blocks read in source order
-   (ticker, quick start, upload, lights, tracker, calendar, AI, media, systems) */
+   (ticker, the stage, quick start, upload, lights, tracker, calendar, AI, media, systems) */
 .hm-layout {
   display: flex;
   flex-direction: column;
@@ -37,22 +37,25 @@
 }
 .hm-layout > .hm-tk { grid-column: 1 / -1; }
 .hm-layout[data-cols='2'] > .hm-col, .hm-layout[data-cols='3'] > .hm-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-/* desktop: three equal columns, centered in the page; a 2560 px monitor gets wider ones, never edge to edge */
+/* desktop: three columns, centered in the page, the middle one (the stage) wider; a 2560 px monitor
+   gets wider ones, never edge to edge */
 .hm-layout[data-cols='3'] {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1fr);
   column-gap: 22px;
   max-width: 1560px;
   margin-inline: auto;
 }
 .hm-layout[data-cols='3'][data-xl] { max-width: 2000px; column-gap: 26px; }
-/* iPad landscape (Dashboard.tsx pad): the same three columns on a ~1180 px screen, a tighter gap */
-.hm-layout[data-pad] { column-gap: 14px; }
+/* iPad landscape (Dashboard.tsx pad): three columns on a ~1180 px screen, a tighter gap, the stage's a little wider */
+.hm-layout[data-pad] { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); column-gap: 14px; }
 /* desktop fill: the three columns reach the bottom of the page together. Each column has one
-   elastic part (media's poster grid, the equity chart, this device's model) that takes the height left, so
+   elastic part (the equity chart, the stage, media's poster grid) that takes the height left, so
    no box stretches empty; a page shorter than the content scrolls with each at its minimum. */
 .hm-layout[data-cols='3'][data-fill] { min-height: var(--hm-h); align-items: stretch; }
 .hm-grow { flex: 1 1 auto; display: flex; flex-direction: column; }
 .hm-grow > .vl-panel-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* desktop, under the stage: AI and the hosts side by side, each at its own height (a box never stretches empty) */
+.hm-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
 /* landscape phone: tighter rhythm, the page is ~300 px tall */
 @media (min-width: 640px) and (max-height: 480px) {
   .hm-layout[data-cols] { row-gap: 9px; }
@@ -840,92 +843,174 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-chip[data-pressed] { transform: scale(.97); }
 .hm-chip:disabled { opacity: .5; }
 
-/* this device: its x-ray model on the right (the anchor the hero fits it to), its name, state, numbers
-   and last hour on the left over the dimmed floor, one press over all of it. Desktop: its own box between
-   Lights and Systems and the right column's elastic part: the model takes the right side at the box's
-   full height, the last hour grows with the box, and a tall box (data-tall, Dashboard.tsx DEV_TALL) sets
-   the numbers larger. Compact (phone, iPad): a short block leading Systems, as tall as its text. */
+/* this device: the stage (Dashboard.tsx DeviceStage). The x-ray model of the device the page is open on,
+   the largest thing on the Dashboard: no box, its dot floor fading out at the edges, four corner marks.
+   A three-column grid: the numbers left and right (--hm-rd wide), the model's anchor between them at the
+   stage's full height; the name and state in the top left corner; the last hour along the foot. Each
+   number's bar runs on into a leader line to its part (the SVG inside the scene). `foot`: two numbers
+   beside a wide slab stand in the lower corners and the anchor takes the whole width. */
+.hm-stage { position: relative; min-width: 0; container: hm-dev / inline-size; }
+/* phone and upright iPad: a band across the top, over both columns */
+.hm-layout > .hm-stage { grid-column: 1 / -1; }
 .hm-dev-in {
-  /* the text column; the model's anchor takes the rest */
-  --hm-dev-text: clamp(210px, 47%, 310px);
+  --hm-rd: 104px;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 200px;
-}
-.hm-grow .hm-dev-in { flex: 1 1 0; min-height: auto; }
-.hm-dev-in[data-compact] { --hm-dev-text: 58%; min-height: 112px; margin: 0 10px; border-top: 1px solid var(--line); }
-/* nothing under the name (offline, not listed): no empty band under the state */
-.hm-dev-in[data-compact][data-bare] { min-height: 74px; }
-/* desktop: under the head row; compact: the full height beside the text */
-.hm-dev-anchor { position: absolute; top: 26px; right: 2px; bottom: 2px; left: var(--hm-dev-text); pointer-events: none; }
-.hm-dev-in[data-compact] .hm-dev-anchor { top: 8px; right: 0; bottom: 8px; }
-.hm-dev-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-/* the press lies over the model: no orbit and no diamonds here (System > Hosts has both) */
-.hm-dev-scene .vl-hero { pointer-events: none; }
-.hm-dev-scene [data-hotspot], .hm-dev-scene [data-orbit-zone] { display: none !important; }
-.hm-dev-press {
-  position: relative;
-  z-index: 1;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
+  display: grid;
+  grid-template-columns: var(--hm-rd) minmax(0, 1fr) var(--hm-rd);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 8px;
+  height: clamp(230px, 34vh, 400px);
   padding: 8px 10px 10px;
-  text-align: left;
-  transition: background-color .12s;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
-.hm-dev-in[data-compact] .hm-dev-press { padding: 8px 0 9px; }
-.hm-dev-press[data-pressed] { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
+.hm-stage.hm-grow > .hm-dev-in { flex: 1 1 0; height: auto; min-height: 300px; }
+/* the corner marks */
+.hm-dev-in::after {
+  --b: color-mix(in srgb, var(--fg) 60%, transparent);
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    linear-gradient(var(--b), var(--b)) 0 0 / 14px 1px,
+    linear-gradient(var(--b), var(--b)) 0 0 / 1px 14px,
+    linear-gradient(var(--b), var(--b)) 100% 0 / 14px 1px,
+    linear-gradient(var(--b), var(--b)) 100% 0 / 1px 14px,
+    linear-gradient(var(--b), var(--b)) 0 100% / 14px 1px,
+    linear-gradient(var(--b), var(--b)) 0 100% / 1px 14px,
+    linear-gradient(var(--b), var(--b)) 100% 100% / 14px 1px,
+    linear-gradient(var(--b), var(--b)) 100% 100% / 1px 14px;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+/* The floor fades out into the page at the stage's edges, and dims toward both sides so the numbers
+   never sit on bright dots. Black over the scene, not a mask: the page is black, and a mask on a
+   canvas that redraws every frame costs a composite pass each time (it slowed taps on a phone). */
+.hm-dev-in::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, #000, rgba(0, 0, 0, .6) 9%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, .6) 91%, #000),
+    linear-gradient(180deg, #000, rgba(0, 0, 0, 0) 14px, rgba(0, 0, 0, 0) 90%, #000);
+  pointer-events: none;
+}
+.hm-dev-in[data-bare]::before {
+  background:
+    linear-gradient(90deg, #000, rgba(0, 0, 0, .6) 9%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0) 91%, #000),
+    linear-gradient(180deg, #000, rgba(0, 0, 0, 0) 14px, rgba(0, 0, 0, 0) 90%, #000);
+}
+/* the scene fills the stage; only the disc around the model takes a drag */
+.hm-dev-scene { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.hm-dev-scene [data-orbit-zone] { cursor: grab; }
+.hm-dev-scene [data-orbit-zone]:active { cursor: grabbing; }
+/* the model's place: between the numbers, the stage's full height above the last hour */
+.hm-dev-anchor { grid-column: 2; grid-row: 1 / 3; margin: 10px 0 4px; min-height: 0; pointer-events: none; }
+.hm-dev-in[data-bare] .hm-dev-anchor { grid-column: 1 / -1; margin-inline: 12%; }
+/* the tablet's wide slab on a narrow stage (the iPad's own column): under the head, not behind it */
+@container hm-dev (max-width: 519px) {
+  .hm-dev-in[data-bare][data-model='tablet'] .hm-dev-anchor { grid-row: 2; margin-inline: 4%; }
+}
+.hm-dev-in[data-reads='foot'] .hm-dev-anchor { grid-column: 1 / -1; grid-row: 2; margin-inline: 4%; }
+/* a wide stage (the upright iPad's): the head is clear of the model, which takes its height too */
+@container hm-dev (min-width: 520px) {
+  .hm-dev-in[data-reads='foot'] .hm-dev-anchor { grid-row: 1 / 3; margin-inline: 12%; }
+}
+/* the leader lines: each number's bar runs on to its part, ending in a diamond on it */
+.hm-dev-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.hm-dev-lines g { opacity: 0; transition: opacity .3s var(--ease); }
+.hm-dev-lines path { fill: none; stroke: var(--fg); stroke-opacity: .5; stroke-width: 1; stroke-linejoin: round; }
+.hm-dev-lines rect { fill: rgba(0, 0, 0, .7); stroke: var(--fg); stroke-width: 1.3; filter: drop-shadow(0 0 3px var(--fg)); }
+.hm-dev-lines g[data-hot] path { stroke-opacity: 1; stroke-width: 1.4; filter: drop-shadow(0 0 3px var(--fg)); }
+.hm-dev-lines g[data-hot] rect { fill: var(--fg); }
+.hm-dev-lines g[data-alert] path, .hm-dev-lines g[data-alert] rect { stroke: var(--acc2); }
+.hm-dev-lines g[data-alert] rect { filter: drop-shadow(0 0 3px var(--acc2)); }
+/* the head: caption, name, state; its own press (the keyboard's way in) */
+.hm-dev-press {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  justify-self: start;
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 8px 6px 0;
+  text-align: left;
+}
+.hm-dev-press[data-pressed] .hm-dev-name { color: var(--fg); }
 .hm-dev-press[data-pressed] .hm-chev { color: var(--fg); }
 .hm-dev-press:disabled { cursor: default; }
-.hm-dev-top { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
-.hm-dev-top > .hm-chev { margin-left: auto; }
-.hm-dev-in[data-compact] .hm-dev-top { min-height: 14px; }
-/* inside Systems the block's label is a quiet cap, not a second section title */
+.hm-dev-top { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 18px; }
 .hm-dev-cap {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  line-height: 12px;
+  gap: 7px;
+  font-size: 10.5px;
+  line-height: 14px;
   font-weight: 700;
   letter-spacing: .16em;
   text-transform: uppercase;
   color: var(--dim);
+  white-space: nowrap;
 }
-.hm-dev-cap[data-lit] { color: var(--fg); }
-.hm-dev-id, .hm-dev-rows, .hm-dev-hist, .hm-dev-off { width: calc(var(--hm-dev-text) - 12px); min-width: 0; }
-.hm-dev-in[data-compact] :is(.hm-dev-id, .hm-dev-rows) { width: calc(var(--hm-dev-text) - 8px); }
-.hm-dev-id { display: flex; flex-direction: column; margin-top: 1px; }
-.hm-dev-name { font-size: 18px; line-height: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--ink-hi); }
-.hm-dev-in[data-compact] .hm-dev-name { font-size: 14px; line-height: 18px; }
-.hm-dev-state { font-size: 11.5px; line-height: 15px; color: var(--text); }
+.hm-dev-cap[data-lit] { color: var(--fg); text-shadow: var(--text-glow); }
+.hm-dev-name { max-width: 100%; margin-top: 2px; font-size: 22px; line-height: 26px; font-weight: 700; letter-spacing: -.01em; color: var(--ink-hi); text-shadow: var(--num-glow); }
+.hm-dev-in:not([data-state='on']) .hm-dev-name { color: var(--text); text-shadow: none; }
+/* the state and what follows it break between them, never inside either */
+.hm-dev-state { display: flex; flex-wrap: wrap; column-gap: .5ch; max-width: calc(var(--hm-rd) + 40px); font-size: 11.5px; line-height: 15px; color: var(--text); }
+.hm-dev-state > span { white-space: nowrap; }
 .hm-dev-state[data-state='off'] { color: var(--faint); }
 .hm-dev-state[data-state='stale'] { color: var(--acc2); }
-/* the numbers: label, what it is out of, the figure, and the bar under them. The padding is the least
-   gap; height the last hour cannot take is shared out above and below them (auto margins) */
-.hm-dev-rows { display: flex; flex-direction: column; gap: 6px; margin-block: auto; padding-top: 9px; }
-.hm-dev-in[data-compact] .hm-dev-rows { gap: 6px; padding-top: 7px; }
-.hm-dev-row { display: grid; grid-template-columns: 12px auto minmax(0, 1fr) auto; align-items: center; column-gap: 6px; row-gap: 3px; }
-.hm-dev-row > .hm-mini-bar { grid-column: 2 / -1; }
-.hm-dev-k { font-size: 11.5px; line-height: 15px; color: var(--dim); white-space: nowrap; }
-.hm-dev-sz { min-width: 0; font-size: 10.5px; line-height: 14px; text-align: right; color: var(--dim); }
-.hm-dev-row .hm-mini-v { min-width: 0; }
+/* the numbers: key and figure on one line, the bar under them (the leader line starts at its inner
+   end), what the figure is out of under that */
+.hm-dev-rows { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 14px; min-width: 0; align-self: center; }
+.hm-dev-rows[data-side='l'] { grid-column: 1; grid-row: 2; }
+.hm-dev-rows[data-side='r'] { grid-column: 3; grid-row: 1 / 3; }
+.hm-dev-in[data-reads='foot'] .hm-dev-rows { grid-row: 3; align-self: end; }
+.hm-dev-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 6px; row-gap: 3px; min-width: 0; }
+.hm-dev-k {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+  transition: color .15s;
+}
+.hm-dev-row .hm-mini-v { min-width: 0; font-size: 17px; line-height: 20px; text-shadow: var(--num-glow); }
+.hm-dev-row .hm-mini-v small { font-size: 10px; }
+.hm-dev-row > .hm-mini-bar { grid-column: 1 / -1; flex: none; height: 3px; }
+.hm-dev-sz { grid-column: 1 / -1; min-height: 13px; font-size: 10px; line-height: 13px; color: var(--dim); }
+.hm-dev-row[data-hot] .hm-dev-k { color: var(--fg); }
 .hm-dev-row[data-alert] .hm-mini-bar i { background: var(--acc2); }
-.hm-dev-row[data-alert] .hm-mini-v { color: var(--acc2); }
-.hm-dev-rows[data-old] .hm-mini-v { color: var(--dim); }
+.hm-dev-row[data-alert] .hm-mini-v { color: var(--acc2); text-shadow: none; }
+.hm-dev-rows[data-old] .hm-mini-v { color: var(--dim); text-shadow: none; }
 .hm-dev-rows[data-old] .hm-mini-bar i { opacity: .5; }
-.hm-dev-hint { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
-.hm-dev-off { padding-top: 10px; font-size: 11.5px; line-height: 15px; color: var(--faint); }
-/* the last hour of CPU and memory: the elastic part of the text column, up to a cap */
-.hm-dev-hist { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 44px; max-height: 128px; padding-top: 10px; }
+.hm-dev-hint { display: flex; align-items: flex-start; gap: 6px; max-width: calc(var(--hm-rd) + 40px); margin-top: 6px; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+.hm-dev-hint .hm-ic { margin-top: 2px; }
+.hm-dev-in[data-bare] .hm-dev-hint { max-width: none; white-space: nowrap; }
+.hm-dev-off { margin-top: 6px; font-size: 11.5px; line-height: 15px; color: var(--faint); white-space: nowrap; }
+/* the last hour of CPU and memory, along the stage's foot */
+.hm-dev-hist { grid-column: 1 / -1; grid-row: 3; position: relative; z-index: 3; display: flex; flex-direction: column; min-width: 0; height: 56px; padding-top: 4px; }
 .hm-dev-hist-cap { display: flex; align-items: center; min-width: 0; font-size: 10.5px; line-height: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; }
 .hm-dev-hist-k { margin-right: 4px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text); }
 .hm-dev-peak { margin-left: auto; padding-left: 8px; }
 .hm-key { flex: none; display: inline-block; width: 10px; height: 2px; margin: 0 4px 0 8px; background: var(--fg); opacity: .7; }
 .hm-key[data-c='cpu'] { background: var(--hot); opacity: 1; box-shadow: 0 0 4px var(--hot); }
-.hm-dev-spark { position: relative; flex: 1 1 0; min-height: 26px; margin-top: 5px; }
+.hm-dev-spark { position: relative; flex: 1 1 0; min-height: 26px; margin-top: 4px; }
 .hm-spark { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
 .hm-spark path, .hm-spark line { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .hm-spark-base { stroke: var(--line-strong); stroke-width: 1; }
@@ -933,17 +1018,28 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-spark-cpu { stroke: var(--hot); stroke-width: 1.5; filter: drop-shadow(0 0 2px color-mix(in srgb, var(--hot) 60%, transparent)); }
 .hm-spark-mem { stroke: var(--fg); stroke-opacity: .8; stroke-width: 1.2; }
 .hm-dev-hist[data-old] .hm-spark path { opacity: .5; }
-/* a tall box: the numbers a step up, more air, a taller last hour */
-.hm-dev-in[data-tall] .hm-dev-name { font-size: 26px; line-height: 31px; }
-.hm-dev-in[data-tall] .hm-dev-state { font-size: 12.5px; line-height: 17px; }
-.hm-dev-in[data-tall] .hm-dev-rows { gap: 14px; padding-top: 20px; }
-.hm-dev-in[data-tall] .hm-dev-row { row-gap: 6px; }
-.hm-dev-in[data-tall] .hm-dev-k { font-size: 12.5px; line-height: 16px; }
-.hm-dev-in[data-tall] .hm-dev-sz { font-size: 11.5px; line-height: 15px; }
-.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v { font-size: 19px; line-height: 22px; }
-.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v small { font-size: 11px; }
-.hm-dev-in[data-tall] .hm-dev-row .hm-mini-bar { height: 5px; }
-.hm-dev-in[data-tall] .hm-dev-hist { max-height: 260px; padding-top: 20px; }
+/* a roomy stage (a monitor's middle column): wider number columns, one type step up */
+@container hm-dev (min-width: 520px) {
+  .hm-dev-in { --hm-rd: 132px; column-gap: 12px; padding: 10px 14px 12px; }
+  .hm-dev-name { font-size: 26px; line-height: 30px; }
+  .hm-dev-cap { font-size: 12px; line-height: 17px; }
+  .hm-dev-state { font-size: 12px; line-height: 16px; }
+  .hm-dev-rows { gap: 18px; }
+  .hm-dev-k { font-size: 10.5px; }
+  .hm-dev-row .hm-mini-v { font-size: 20px; line-height: 23px; }
+  .hm-dev-sz { font-size: 10.5px; line-height: 14px; min-height: 14px; }
+}
+@container hm-dev (min-width: 760px) {
+  .hm-dev-in { --hm-rd: 164px; }
+}
+/* a tall stage: the name and numbers a step up, more air, a taller last hour */
+.hm-dev-in[data-tall] .hm-dev-name { font-size: 32px; line-height: 37px; }
+.hm-dev-in[data-tall] .hm-dev-rows { gap: 26px; }
+.hm-dev-in[data-tall] .hm-dev-row { row-gap: 5px; }
+.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v { font-size: 24px; line-height: 27px; }
+.hm-dev-in[data-tall] .hm-dev-row .hm-mini-v small { font-size: 12px; }
+.hm-dev-in[data-tall] .hm-dev-row > .hm-mini-bar { height: 4px; }
+.hm-dev-in[data-tall] .hm-dev-hist { height: 92px; }
 .hm-dev-in[data-tall] .hm-dev-hist-cap { font-size: 11.5px; line-height: 15px; }
 
 /* media: the head opens Media; a playing track with its play / pause plate; newest posters; downloads */
@@ -1117,8 +1213,8 @@ html:not([data-font='sans']) .hm-next-when { font-size: 20px; line-height: 22px;
 .hm-mini[data-k='range'] { justify-content: flex-end; }
 /* a monitor shows the whole Dashboard with no scroll: a longer Systems list (a car or two after the
    machines, the phone and the tablet) packs its rows tighter instead of pushing the column past the window */
-.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(7)) .hm-hrow { min-height: 31px; }
-.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(8)) .hm-hrow { min-height: 28px; }
+.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(9)) .hm-hrow { min-height: 31px; }
+.hm-layout[data-fill] .hm-hrows:has(> .hm-hrow:nth-child(10)) .hm-hrow { min-height: 28px; }
 
 /* ---------- desktop: one type step up (DPR 1 screens read small) ---------- */
 

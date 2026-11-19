@@ -49,7 +49,29 @@ export type WireSceneProps = {
    * full-screen scene leaves the empty floor alone.
    */
   orbitArea?: 'box' | 'model'
+  /**
+   * Touch on the orbit disc (orbitArea 'model'). 'none' (default): the disc
+   * takes every drag. 'pan-y': a sideways drag turns the model and an
+   * up-down one scrolls the page, for a scene inside a scrolling column.
+   */
+  orbitTouch?: 'none' | 'pan-y'
+  /**
+   * Called after each drawn frame with every hotspot's point in the box's own
+   * CSS px (model.hotspots order; ok: in view, o: 1, or 0.5 on the far side)
+   * and the box's size. For overlays that follow the model without a render.
+   */
+  onPlace?: (pts: readonly HotspotPoint[], w: number, h: number) => void
+  /**
+   * Frames a second while nothing moves but the ambient motion (blades, the
+   * pulse): no camera flight, no drag or its ease back, no prop change. A
+   * model with no blades turning takes 12 at most. Unset: every frame. For a
+   * scene that is always on screen (the Dashboard's stage), so a still model
+   * does not cost a full redraw 60 times a second.
+   */
+  idleFps?: number
 }
+
+export type HotspotPoint = { x: number; y: number; ok: boolean; o: number }
 
 const NONE: never[] = []
 
@@ -62,6 +84,10 @@ type Engine = {
   visible: boolean
   onscreen: boolean
   dirty: boolean
+  /** the orbit still moved on the last drawn frame (inertia, the ease back) */
+  moving: boolean
+  /** when the last frame was drawn (idleFps) */
+  drawnAt: number
   reducedMQ: boolean
   hs: { x: number; y: number; ok: boolean; o: number }[]
   sumMs: number
@@ -148,6 +174,7 @@ export function WireScene(props: WireSceneProps) {
         z.style.transform = `translate3d(${(out[0] - r).toFixed(1)}px, ${(out[1] - r).toFixed(1)}px, 0)`
       }
     }
+    propsRef.current.onPlace?.(e.hs, e.r.w, e.r.h)
   }
 
   /**
@@ -195,6 +222,16 @@ export function WireScene(props: WireSceneProps) {
     if (!e.visible || !e.onscreen) return
     const p = propsRef.current
     const running = !p.paused
+    // idle (see idleFps): wait for the next frame that is due
+    if (running && p.idleFps && !e.dirty && !e.moving && !e.cam.tweening && !e.orbit.dragging && !p.autoSpin) {
+      // no blades turning (a phone, a tablet, a host that is off): only the slow glow pulse is left, 12 a second carries it
+      const blades = (p.spin ?? 1) > 0 && !!e.r.model?.spins.length && !reduced()
+      if (now - e.drawnAt < 1000 / (blades ? p.idleFps : Math.min(p.idleFps, 12)) - 3) {
+        e.raf = requestAnimationFrame(tick)
+        return
+      }
+    }
+    e.drawnAt = now
     const dt = e.last ? Math.min(0.05, (now - e.last) / 1000) : 1 / 60
     e.last = running ? now : 0
     const red = reduced()
@@ -203,7 +240,7 @@ export function WireScene(props: WireSceneProps) {
       e.cam.cur = { ...e.cam.to }
     }
     e.cam.step(now)
-    e.orbit.update(e.cam, now, dt)
+    e.moving = e.orbit.update(e.cam, now, dt)
     if (running && !red && p.autoSpin && !e.orbit.dragging) e.cam.spinYaw = (e.cam.spinYaw + p.autoSpin * dt) % 360
     const t0 = performance.now()
     e.r.frame(now, running ? dt : 0, e.cam, fxOf())
@@ -242,7 +279,7 @@ export function WireScene(props: WireSceneProps) {
     const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
     const e: Engine = {
       r, cam: new Camera(p.pose, c.center), orbit: new Orbit(), raf: 0, last: 0,
-      visible: !document.hidden, onscreen: true, dirty: true, reducedMQ: !!mq?.matches,
+      visible: !document.hidden, onscreen: true, dirty: true, moving: false, drawnAt: 0, reducedMQ: !!mq?.matches,
       hs: [], sumMs: 0, frames: 0, statT: performance.now(),
     }
     eng.current = e
@@ -381,7 +418,7 @@ export function WireScene(props: WireSceneProps) {
           aria-hidden
           style={{
             position: 'absolute', left: 0, top: 0, width: 0, height: 0, borderRadius: '50%', pointerEvents: 'auto',
-            touchAction: 'none', cursor: 'grab', willChange: 'transform',
+            touchAction: props.orbitTouch === 'pan-y' ? 'pan-y' : 'none', cursor: 'grab', willChange: 'transform',
           }}
         />
       )}

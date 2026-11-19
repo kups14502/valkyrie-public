@@ -1,5 +1,5 @@
 import {
-  useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { useIsFetching, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
@@ -14,7 +14,8 @@ import {
 import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
-import { HOST_POSE, Hero, MODEL_ONLY_IDS, MODEL_ONLY_LABEL, hostModel, useHeat, type HostModelId } from '../kit/hero'
+import { HOST_POSE, Hero, MODEL_ONLY_IDS, MODEL_ONLY_LABEL, heroModel, hostModel, hotspotSides, useHeat, type HostModelId } from '../kit/hero'
+import type { HotspotPoint } from '../kit/three'
 import { thisDeviceId } from '../kit/thisDevice'
 import { EquityChart } from '../kit/three/EquityChart'
 import { apiErrorText, localHostname, type LightState, type LightUpdate } from '../../lib/api'
@@ -31,24 +32,29 @@ import { taskKey } from '../../lib/tasksApi'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
 import './dashboard.css'
 
-// Dashboard: one page with everything Valkyrie does, in the order Brendon
-// uses it. Phone (one column, in this order): the trade ticker line (the
-// newest session, bot online, 7 days), quick start, upload (pictures to thor,
-// for the session just started), lights (one bar for all of them, every bulb,
-// a tap switches one, the presets, a plate that switches them all), the daily tracker (day stepping,
-// the other day's line, hold Exercise to skip), the calendar (today first,
-// then the next six days; a tap opens the calendar sheet), AI (live and asking
-// sessions, usage meters), media (playing or newest added, downloads) and
-// every host (CPU / Mem / Disk, battery where the host has one), led by this
-// device: the 3D model of the phone or iPad in hand with its battery and storage.
-// From 600 px: two columns, the ticker becomes the head of a Trade box (equity,
-// the 3D equity chart) and the presets get their names.
-// Desktop: three columns that reach the bottom of the page: [quick start,
-// upload, tracker, media with the newest backdrop and a poster grid] [trade,
-// AI, calendar] [lights, this device, hosts]. The equity chart, this device's
-// model and the poster grid take the height that is left, so no box stretches empty.
+// Dashboard: one page with everything Valkyrie does, around the device it is
+// open on. The stage (DeviceStage) is the 3D model of that device (thor's tower,
+// mimir's laptop, the phone, the iPad, the headset), the largest thing on the
+// page on every screen, its live numbers tied to its parts by leader lines.
+// Phone (one column, in this order): the trade ticker line (the newest session,
+// bot online, 7 days), the stage, quick start, upload (pictures to thor, for
+// the session just started), lights (one bar for all of them, every bulb, a tap
+// switches one, the presets, a plate that switches them all), the daily tracker
+// (day stepping, the other day's line, hold Exercise to skip), the calendar
+// (today first, then the next six days; a tap opens the calendar sheet), AI
+// (live and asking sessions, usage meters), media (playing or newest added,
+// downloads) and every host (CPU / Mem / Disk, battery where the host has one).
+// From 600 px: the stage across the top, two columns under it, the ticker
+// becomes the head of a Trade box (equity, the 3D equity chart) and the presets
+// get their names.
+// Desktop: three columns that reach the bottom of the page, the middle one
+// wider: [quick start, upload, tracker, trade] [the stage, then AI and the
+// hosts side by side] [lights, calendar, media]. The stage, the equity chart
+// and the poster grid take the height that is left, so no box stretches empty.
+// A 2560 px monitor has the calendar under the trade box and the newest
+// addition as a banner over the posters.
 // iPad in landscape (the iPad profile only): one screen, no scrolling: [lights,
-// tracker] [AI, calendar] [trade, hosts], the equity chart taking what is left.
+// tracker, calendar] [the stage, AI] [trade, hosts].
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -201,10 +207,10 @@ export default function Dashboard({ active }: ScreenProps) {
   const device = useThisDevice()
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
-  // the order above (Upload right under Quick Start, Lights right under it).
-  // Two columns: the doing column left; trade, AI, media and the hosts right.
-  // Three: see the header; each column has one elastic part, so the three end
-  // at the bottom of the page together.
+  // the order above (the stage, Quick Start, Upload right under it, then Lights).
+  // Two columns: the stage across both; the doing column left; trade, AI, media
+  // and the hosts right. Three: see the header; each column has one elastic
+  // part, so the three end at the bottom of the page together.
   return (
     <div className="hm" ref={box}>
       <div
@@ -217,24 +223,26 @@ export default function Dashboard({ active }: ScreenProps) {
       >
         {pad ? (
           // iPad landscape: what he glances at, one screen. Quick start lives on the Hotkeys
-          // tab; upload, media and this device's model are a tab away.
+          // tab; upload and media are a tab away.
           <>
             <div className="hm-col hm-a">
-              <LightsBox i={1} variant="rows" />
+              <LightsBox i={2} variant="rows" />
               <Tracker />
-            </div>
-            <div className="hm-col hm-b">
-              <AiBlock wide i={4} max={4} />
               <Calendar onOpen={setCal} />
             </div>
+            <div className="hm-col hm-b">
+              <DeviceStage id={device} active={active} i={0} fill={fill} />
+              <AiBlock wide i={4} max={3} />
+            </div>
             <div className="hm-col hm-c">
-              <TradeBox active={active} i={2} fill={fill} />
+              <TradeBox active={active} i={3} fill={fill} />
               <Systems i={11} />
             </div>
           </>
         ) : cols === 1 ? (
           <>
             <TradeTicker active={active} i={0} />
+            <DeviceStage id={device} active={active} i={1} compact />
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
@@ -245,11 +253,12 @@ export default function Dashboard({ active }: ScreenProps) {
             <div className="hm-col hm-b">
               <AiBlock wide={false} i={9} />
               <MediaBox i={10} />
-              <Systems i={11} device={device} active={active} />
+              <Systems i={11} />
             </div>
           </>
         ) : cols === 2 ? (
           <>
+            <DeviceStage id={device} active={active} i={0} compact />
             <div className="hm-col hm-a">
               <QuickStart />
               <UploadBlock wide={false} />
@@ -261,7 +270,7 @@ export default function Dashboard({ active }: ScreenProps) {
               <TradeBox active={active} i={1} />
               <AiBlock wide={false} i={9} />
               <MediaBox i={10} />
-              <Systems i={11} device={device} active={active} />
+              <Systems i={11} />
             </div>
           </>
         ) : (
@@ -270,17 +279,21 @@ export default function Dashboard({ active }: ScreenProps) {
               <QuickStart />
               <UploadBlock wide />
               <Tracker />
-              <MediaBox i={10} banner fill={fill} />
+              <TradeBox active={active} i={5} fill={fill} />
+              {xl && <Calendar onOpen={setCal} />}
             </div>
             <div className="hm-col hm-b">
-              <TradeBox active={active} i={1} fill={fill} />
-              <AiBlock wide i={8} />
-              <Calendar onOpen={setCal} />
+              <DeviceStage id={device} active={active} i={0} fill={fill} />
+              {/* under the stage, side by side: what runs (AI) and every other machine */}
+              <div className="hm-pair">
+                <AiBlock wide i={6} max={xl ? 6 : 4} />
+                <Systems i={7} />
+              </div>
             </div>
             <div className="hm-col hm-c">
               <LightsBox i={3} variant="rows" />
-              <ThisDevice id={device} active={active} i={4} fill={fill} />
-              <Systems i={11} />
+              {!xl && <Calendar onOpen={setCal} />}
+              <MediaBox i={10} banner={xl} fill={fill} />
             </div>
           </>
         )}
@@ -1567,10 +1580,9 @@ function useOpenHost(): (id?: string) => void {
 
 /**
  * Every host from /api/hosts: icon, name, its load as mini bars. A row opens
- * System > Hosts with that host picked. `device` (phone, iPad): this device's
- * compact block leads the list.
+ * System > Hosts with that host picked.
  */
-function Systems({ i, device, active = false }: { i: number; device?: HostModelId | null; active?: boolean }) {
+function Systems({ i }: { i: number }) {
   const hosts = useHosts()
   const open = useOpenHost()
   const now = useTick(30_000)
@@ -1587,7 +1599,6 @@ function Systems({ i, device, active = false }: { i: number; device?: HostModelI
         </span>
         <Chevron />
       </Press>
-      {device && <ThisDevice id={device} active={active} compact />}
       {list.length ? (
         <div className="hm-hrows" data-old={age ? '' : undefined}>
           {list.map((h) => <HostLine key={h.id} h={h} onPress={() => open(h.id)} />)}
@@ -1711,35 +1722,84 @@ function DevSpark({ h, t1 }: { h: HostVM; t1: number }) {
   )
 }
 
-/** a This device box from this height (layout px) sets its numbers larger and gives the last hour more room */
-const DEV_TALL = 400
+/** a stage from this height (layout px) sets its name and numbers larger and gives the last hour more room */
+const DEV_TALL = 520
+
+/** the hotspot of the model (kit/three/models) each number sits on */
+const SPOT_OF: Record<string, string> = { cpu: 'cpu', mem: 'mem', disk: 'disk', bat: 'battery' }
+
+type ReadSlots = { order: string[]; slot: Record<string, { side: 'l' | 'r'; spot: number }> }
+/** one layout per set of numbers, model and pose, so the same set always gets the same object */
+const slotCache = new Map<string, ReadSlots>()
 
 /**
- * This device: the x-ray model of the machine the page runs on, its heat and
- * glow from the live load (Hero, as on System > Hosts), its name, online state
- * and uptime, and its live numbers with what each is out of (cores, used /
- * total). The whole block is one press that opens System > Hosts with it
- * picked; the model sits under it, so it neither turns nor takes a swipe here.
- * Desktop: its own box in the right column and the column's elastic part: the
- * model takes the right side at the box's full height, the facts and the last
- * hour (CPU and memory, as System > Hosts draws it) the left. `compact` (phone,
- * iPad): a short block that leads the Systems box, as tall as its text.
+ * Where each number goes around the model. The numbers stand left and right
+ * of it, each tied to its part by a leader line, so a number goes to the side
+ * its part is on (as the model stands in `pose`) and each side reads top to
+ * bottom in the parts' order: the lines never cross. `order` is the left side
+ * top to bottom, then the right. spot: the part's index in the model's
+ * hotspots, -1 for a number with no part. `keyList`: the numbers' keys, comma
+ * separated.
  */
-function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; active: boolean; i?: number; compact?: boolean; fill?: boolean }) {
+function readSlots(keyList: string, model: HostModelId | null, pose: string): ReadSlots {
+  const id = `${keyList}|${model ?? ''}|${pose}`
+  const hit = slotCache.get(id)
+  if (hit) return hit
+  const keys = keyList ? keyList.split(',') : []
+  const at = model ? hotspotSides(model, pose) : {}
+  const spots = model ? heroModel(model).hotspots : []
+  const all = keys.map((key, k) => {
+    const id = SPOT_OF[key] ?? key
+    return { key, spot: spots.findIndex((s) => s.id === id), x: at[id]?.x ?? (k + 0.5) / keys.length, y: at[id]?.y ?? k }
+  })
+  const byX = [...all].sort((a, b) => a.x - b.x)
+  const nl = Math.ceil(all.length / 2)
+  const out: ReadSlots = { order: [], slot: {} }
+  for (const [side, list] of [['l', byX.slice(0, nl)], ['r', byX.slice(nl)]] as const) {
+    for (const c of [...list].sort((a, b) => a.y - b.y)) {
+      out.order.push(c.key)
+      out.slot[c.key] = { side, spot: c.spot }
+    }
+  }
+  slotCache.set(id, out)
+  return out
+}
+
+/**
+ * This device: the Dashboard's stage. The x-ray model of the machine the page
+ * runs on, as large as its place allows, glowing by the live load (Hero, as on
+ * System > Hosts), with its name, state and uptime in the corner and its live
+ * numbers standing around it, each tied by a leader line to the part it reads
+ * (CPU, memory, disk, battery) and following that part as the model turns.
+ * A drag on the model turns it (on a touch screen sideways only: up and down
+ * scroll the page), and it eases back. A tap anywhere on the stage opens System >
+ * Hosts with this device picked.
+ * Monitor (`fill`): the middle column's elastic part, the last hour of CPU and
+ * memory along its foot. iPad in landscape: the same, in its middle column.
+ * Phone and upright iPad (`compact`): a band across the top of the page.
+ * The phone and tablet report two numbers at most: the tablet's stand in the
+ * stage's lower corners (`foot`), so the wide slab keeps the whole width.
+ */
+function DeviceStage({ id, active, i, compact, fill }: { id: HostModelId | null; active: boolean; i: number; compact?: boolean; fill?: boolean }) {
   const hosts = useHosts()
   const open = useOpenHost()
   const now = useTick(30_000)
   const anchor = useRef<HTMLDivElement>(null)
   const inRef = useRef<HTMLDivElement>(null)
-  // The hero fits the model from client rects, which the panel's build-in tilt
-  // skews while it plays; each time the build-in ends, it measures again.
+  // The hero fits the model from client rects, which the build-in tilt skews
+  // while it plays; each time the build-in ends (or is cut short: the page
+  // drops data-building), it measures again.
   const [built, setBuilt] = useState(0)
   useEffect(() => {
     const el = inRef.current?.closest('.vl-build')
     if (!el) return
     const done = (e: Event) => { if (e.target === el) setBuilt((n) => n + 1) }
     el.addEventListener('animationend', done)
-    return () => el.removeEventListener('animationend', done)
+    el.addEventListener('animationcancel', done)
+    return () => {
+      el.removeEventListener('animationend', done)
+      el.removeEventListener('animationcancel', done)
+    }
   }, [])
   // the same online test the model glows by
   const { online } = useHeat(id ?? '')
@@ -1763,71 +1823,181 @@ function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; 
     ...cells.map((c) => `${c.label} ${c.v != null ? `${c.v}%` : 'unknown'}`),
     noBattery ? 'no battery reading yet' : null,
   ].filter(Boolean).join(', ')
-  const stateLine = (
-    <span className="hm-dev-state vl-ellipsis" data-state={online ? 'on' : stale ? 'stale' : 'off'}>
-      {state}{detail && <span className="hm-dim"> · {detail}</span>}
-    </span>
-  )
   const old = oldAge(hosts, now, 60_000)
-  // desktop: the last hour of CPU and memory (System > Hosts' sparkline), x by the server's clock up to its newest sample
+  // the last hour of CPU and memory (System > Hosts' sparkline), x by the server's clock up to its newest sample
   const histOn = !compact && !!h && online && h.history.length > 1
   const t1 = histOn ? h.history[h.history.length - 1].t : now
   const hour = histOn ? h.history.filter((p) => p.t >= t1 - HOUR - 30_000) : []
   const hasMem = hour.some((p) => p.mem != null)
   const peak = hour.length > 1 ? Math.round(Math.max(h?.cpu ?? 0, ...hour.map((p) => p.cpu ?? 0))) : null
-  const size = useSize(inRef, !compact)
-  const tall = !compact && !!size && size.h >= DEV_TALL
-  // compact with nothing under the name (offline, not listed): the block hugs its text
-  const bare = !!compact && !cells.length && !noBattery
+  const size = useSize(inRef)
+  const tall = !!size && size.h >= DEV_TALL
 
-  const inner = (
-    <div ref={inRef} className="hm-dev-in" data-compact={compact || undefined} data-tall={tall || undefined} data-bare={bare || undefined}>
-      {model && <div ref={anchor} className="hm-dev-anchor" aria-hidden />}
-      {model && (
-        <div className="hm-dev-scene" aria-hidden>
-          <Hero
-            active={active}
-            pose={devicePose(model)}
-            host={model}
-            anchor={anchor}
-            fill={compact ? 0.9 : 0.96}
-            scrim={0.6}
-            layoutKey={`${model}:${compact ? 'c' : 'f'}:${tall ? 't' : 's'}:${built}`}
-            className="absolute inset-0"
-          />
-        </div>
-      )}
-      <Press className="hm-dev-press" disabled={!id} onPress={() => { if (id) open(id) }} aria-label={`This device, ${label}: ${said}. Open in System`}>
-        <span className="hm-dev-top">
-          <span className={compact ? 'hm-dev-cap' : 'hm-g-label'} data-lit={online || undefined}>
-            <HIcon name={hostIcon(id ?? 'thor')} lit={online} size={compact ? 12 : 14} />This device
-          </span>
-          {!compact && <Chevron />}
-        </span>
-        <span className="hm-dev-id">
-          <span className="hm-dev-name vl-ellipsis">{label}</span>
-          {stateLine}
-        </span>
-        {(cells.length > 0 || noBattery) && (
-          <span className="hm-dev-rows" data-old={old ? '' : undefined}>
-            {noBattery && (
-              <span className="hm-dev-hint vl-ellipsis"><Icon name="battery" size={12} tone="dim" className="hm-ic" />No battery reading yet</span>
-            )}
-            {cells.map((c) => {
-              const sz = h ? cellSizes(h, c.key) : null
-              return (
-                <span key={c.key} className="hm-dev-row" data-alert={c.alert || undefined}>
-                  <Icon name={c.icon} size={tall ? 13 : 12} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />
-                  <span className="hm-dev-k">{c.key === 'bat' ? 'Battery' : c.label}</span>
-                  <span className="hm-dev-sz vl-ellipsis">{sz}</span>
-                  <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
-                  <span className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
-                </span>
-              )
-            })}
-          </span>
+  // the numbers around the model, and the line from each to its part
+  const keys = cells.map((c) => c.key).join(',')
+  const pose = model ? devicePose(model) : 'device'
+  const slots = readSlots(keys, model, pose)
+  const reads = slots.order.map((k) => cells.find((c) => c.key === k)).filter((c): c is HostCell => !!c)
+  // two numbers at most beside a wide slab: they stand in the lower corners
+  const foot = cells.length > 0 && cells.length <= 2 && model !== 'phone'
+  const [hot, setHot] = useState<string | null>(null)
+  const slotsRef = useRef(slots)
+  const lineEls = useRef<Record<string, SVGGElement | null>>({})
+  const barEls = useRef<Record<string, HTMLElement | null>>({})
+  /** where each number's line starts (the inner end of its bar), in the scene's own px */
+  const ends = useRef<Record<string, { x: number; y: number; dir: 1 | -1 }>>({})
+  const drawn = useRef<Record<string, string>>({})
+
+  useLayoutEffect(() => {
+    slotsRef.current = slots
+    const root = inRef.current
+    if (!root) return
+    // Layout offsets, not client rects: the scene draws in the stage's own layout px, which
+    // neither the UI zoom nor the build-in tilt changes (a rect read mid-tilt put the lines off their bars).
+    const measure = () => {
+      const next: typeof ends.current = {}
+      for (const key of slots.order) {
+        const bar = barEls.current[key]
+        if (!bar || bar.offsetWidth <= 0) continue
+        let x = 0, y = 0
+        for (let el: HTMLElement | null = bar; el && el !== root; el = el.offsetParent as HTMLElement | null) {
+          x += el.offsetLeft
+          y += el.offsetTop
+        }
+        const left = slots.slot[key].side === 'l'
+        next[key] = { x: left ? x + bar.offsetWidth + 4 : x - 4, y: y + bar.offsetHeight / 2, dir: left ? 1 : -1 }
+      }
+      ends.current = next
+      drawn.current = {}
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(root)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [slots, built, tall, foot, histOn])
+
+  // every drawn frame: each line from its number to its part, written straight to the SVG (no render)
+  const place = useCallback((pts: readonly HotspotPoint[]) => {
+    const sl = slotsRef.current
+    for (const key of sl.order) {
+      const g = lineEls.current[key]
+      if (!g) continue
+      const p = pts[sl.slot[key].spot]
+      const e = ends.current[key]
+      const sig = p?.ok && e ? `${e.x.toFixed(1)} ${e.y.toFixed(1)} ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.o}` : ''
+      if (drawn.current[key] === sig) continue
+      drawn.current[key] = sig
+      if (!sig || !p || !e) { g.style.opacity = '0'; continue }
+      const mid = e.x + e.dir * Math.min(18, Math.abs(p.x - e.x) * 0.4)
+      g.firstElementChild?.setAttribute('d', `M${e.x.toFixed(1)} ${e.y.toFixed(1)}H${mid.toFixed(1)}L${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+      g.lastElementChild?.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) rotate(45)`)
+      // a part on the far side of the model: its line a step back
+      g.style.opacity = p.o < 1 ? '0.45' : '1'
+    }
+  }, [])
+
+  // a tap (not a drag that turned the model, not the head's own press) opens System > Hosts
+  const downAt = useRef<{ x: number; y: number; t: number } | null>(null)
+  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    downAt.current = e.pointerType === 'mouse' && e.button !== 0 ? null : { x: e.clientX, y: e.clientY, t: e.timeStamp }
+  }
+  const onUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = downAt.current
+    downAt.current = null
+    if (!d || !id || (e.target as Element).closest('button')) return
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || e.timeStamp - d.t > 700) return
+    open(id)
+  }
+
+  const row = (c: HostCell) => {
+    const sz = h ? cellSizes(h, c.key) : null
+    return (
+      <span
+        key={c.key}
+        className="hm-dev-row"
+        data-k={c.key}
+        data-alert={c.alert || undefined}
+        data-hot={hot === c.key || undefined}
+        onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHot(c.key) }}
+        onPointerLeave={() => setHot((cur) => (cur === c.key ? null : cur))}
+      >
+        <span className="hm-dev-k"><Icon name={c.icon} size={tall ? 13 : 12} tone={c.alert ? 'acc2' : 'dim'} className="hm-ic" />{c.key === 'bat' ? 'Battery' : c.label}</span>
+        <span className="hm-mini-v">{c.v != null ? <>{c.v}<small>%</small></> : '--'}</span>
+        <span ref={(el) => { barEls.current[c.key] = el }} className="hm-mini-bar" style={{ '--v': c.v ?? 0 } as Vars} data-empty={c.v == null || undefined}><i /></span>
+        <span className="hm-dev-sz vl-ellipsis">{sz}</span>
+      </span>
+    )
+  }
+
+  return (
+    <section className={cx('hm-stage vl-build', fill && 'hm-grow')} style={bi(i)}>
+      <div
+        ref={inRef}
+        className="hm-dev-in"
+        data-reads={foot ? 'foot' : 'side'}
+        data-model={model ?? undefined}
+        data-compact={compact || undefined}
+        data-tall={tall || undefined}
+        data-bare={!reads.length || undefined}
+        data-state={online ? 'on' : stale ? 'stale' : 'off'}
+        onPointerDown={onDown}
+        onPointerUp={onUp}
+        onPointerCancel={() => { downAt.current = null }}
+      >
+        {model && <div ref={anchor} className="hm-dev-anchor" aria-hidden />}
+        {model && (
+          <div className="hm-dev-scene" aria-hidden>
+            <Hero
+              active={active}
+              pose={pose}
+              host={model}
+              anchor={anchor}
+              fill={0.94}
+              scrim={0}
+              orbitTouch="pan-y"
+              showHotspots={false}
+              onPlace={place}
+              idleFps={24}
+              layoutKey={`${model}:${compact ? 'c' : 'f'}:${foot ? 'foot' : 'side'}:${reads.length}:${tall ? 't' : 's'}:${histOn ? 'h' : ''}:${built}`}
+              className="absolute inset-0"
+            >
+              <svg className="hm-dev-lines" aria-hidden>
+                {reads.filter((c) => slots.slot[c.key].spot >= 0).map((c) => (
+                  <g key={c.key} ref={(el) => { lineEls.current[c.key] = el }} data-k={c.key} data-alert={c.alert || undefined} data-hot={hot === c.key || undefined}>
+                    <path />
+                    <rect x={-3.5} y={-3.5} width={7} height={7} />
+                  </g>
+                ))}
+              </svg>
+            </Hero>
+          </div>
         )}
-        {!compact && !cells.length && !noBattery && h && <span className="hm-dev-off">No stats published</span>}
+        <Press className="hm-dev-press" disabled={!id} onPress={() => { if (id) open(id) }} aria-label={`This device, ${label}: ${said}. Open in System`}>
+          <span className="hm-dev-top">
+            <span className="hm-dev-cap" data-lit={online || undefined}>
+              <HIcon name={hostIcon(id ?? 'thor')} lit={online} size={compact ? 12 : 14} />This device
+            </span>
+            <Chevron />
+          </span>
+          <span className="hm-dev-name vl-ellipsis">{label}</span>
+          <span className="hm-dev-state" data-state={online ? 'on' : stale ? 'stale' : 'off'}>
+            <span>{state}</span>{detail && <span className="hm-dim"> · {detail}</span>}
+          </span>
+          {noBattery && <span className="hm-dev-hint"><Icon name="battery" size={12} tone="dim" className="hm-ic" />No battery reading yet</span>}
+          {!compact && !cells.length && !noBattery && h && <span className="hm-dev-off">No stats published</span>}
+        </Press>
+        {(['l', 'r'] as const).map((side) => {
+          const list = reads.filter((c) => slots.slot[c.key].side === side)
+          return list.length ? (
+            <span key={side} className="hm-dev-rows" data-side={side} data-old={old ? '' : undefined}>
+              {list.map(row)}
+            </span>
+          ) : null
+        })}
         {histOn && hour.length > 1 && (
           <span className="hm-dev-hist" data-old={old ? '' : undefined}>
             <span className="hm-dev-hist-cap">
@@ -1839,15 +2009,8 @@ function ThisDevice({ id, active, i, compact, fill }: { id: HostModelId | null; 
             <span className="hm-dev-spark"><DevSpark h={h} t1={t1} /></span>
           </span>
         )}
-      </Press>
-    </div>
-  )
-
-  if (compact) return inner
-  return (
-    <Panel className={cx('hm-glance hm-dev', fill && 'hm-grow')} i={i} dense>
-      {inner}
-    </Panel>
+      </div>
+    </section>
   )
 }
 

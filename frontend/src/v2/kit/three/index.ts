@@ -1,5 +1,5 @@
 export * from './engine'
-export { WireScene, type WireSceneProps, type FrameStats } from './scene'
+export { WireScene, type WireSceneProps, type FrameStats, type HotspotPoint } from './scene'
 export type { Beam, Flow, Light } from './render'
 export * from './models'
 export { TrackRibbon, TrackRibbon as Ribbon, type TrackRibbonProps, type TrackRibbonProps as RibbonProps } from './TrackRibbon'

@@ -212,8 +212,8 @@ export function hotkeysTests() {
     },
   })
 
-  // the iPad's own Overview in landscape: one screen with lights, tracker, AI, calendar, trade and
-  // the hosts, nothing that scrolls; portrait keeps the two-column board
+  // the iPad's own Overview in landscape: one screen with the stage (this device's model), lights,
+  // tracker, AI, calendar, trade and the hosts, nothing that scrolls; portrait keeps the two-column board
   tests.push({
     name: 'hotkeys:pad-overview',
     group: 'hotkeys',
@@ -230,8 +230,8 @@ export function hotkeysTests() {
         const has = (s) => !!document.querySelector(`.hm-layout ${s}`)
         const p = document.querySelector('.vl-page[data-active]')
         return {
-          want: { lights: has('.hm-lights'), tracker: has('.hm-tracker'), ai: has('.hm-ai'), cal: has('.hm-cal'), trade: has('.hm-trade'), sys: has('.hm-sys') },
-          gone: { quick: /Quick start/i.test(document.querySelector('.hm-layout')?.textContent ?? ''), upload: has('.hm-up'), media: has('.hm-media'), device: has('.hm-dev') },
+          want: { stage: has('.hm-stage [data-wire-scene]'), lights: has('.hm-lights'), tracker: has('.hm-tracker'), ai: has('.hm-ai'), cal: has('.hm-cal'), trade: has('.hm-trade'), sys: has('.hm-sys') },
+          gone: { quick: /Quick start/i.test(document.querySelector('.hm-layout')?.textContent ?? ''), upload: has('.hm-up'), media: has('.hm-media') },
           sh: p?.scrollHeight ?? 0,
           ch: p?.clientHeight ?? 0,
         }

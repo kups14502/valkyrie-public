@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import {
   Camera, FRAME_FX, LAPTOP_FX, MODEL_Y_FX, ODIN_FX, PHONE_FX, POSES, TABLET_FX, TOWER_FX, WireScene, compile, frameHeadset, laptop, modelY, odinRig, phone, tablet, thorTower,
-  type Beam, type CameraPose, type Flow, type Model, type Vec3,
+  projectHotspots,
+  type Beam, type CameraPose, type Flow, type HotspotPoint, type Model, type Vec3,
 } from './three'
 import { useHosts } from './data'
 import { usePalette, useSetting } from './theme'
@@ -109,6 +110,18 @@ function modelPose(id: HostModelId, name: string): CameraPose {
   if (own) return own
   const p = POSES[name] ?? POSES.home
   return MIRROR_YAW[id] ? { ...p, yaw: -p.yaw } : p
+}
+
+/**
+ * Where each of a model's hotspots sits on screen in pose `name`, as fractions
+ * of the view (0..1, x to the right, y down), before the hero fits the model to
+ * its anchor. For laying callouts out around the model: which side a part is
+ * on and which is higher. The fit moves and scales them together, so the order holds.
+ */
+export function hotspotSides(id: HostModelId, name: string): Record<string, { x: number; y: number }> {
+  const out: Record<string, { x: number; y: number }> = {}
+  for (const h of projectHotspots(heroModel(id), modelPose(id, name), 400, 400)) out[h.id] = { x: h.x / 400, y: h.y / 400 }
+  return out
 }
 
 /** Settings > Hero ('v2.hero'). */
@@ -259,13 +272,26 @@ export type HeroProps = {
   activeHotspot?: string | null
   /** darkness 0..1 of the floor on the content side of the anchor, default 0.55 (0 = off; needs `anchor`) */
   scrim?: number
+  /** a drag on the model turns it, default true */
+  orbit?: boolean
+  /** see WireScene: 'pan-y' leaves up-down drags on the model to the page's scroll */
+  orbitTouch?: 'none' | 'pan-y'
+  /** draw the model's diamonds, default true */
+  showHotspots?: boolean
+  /** see WireScene: every hotspot's point after each drawn frame */
+  onPlace?: (pts: readonly HotspotPoint[], w: number, h: number) => void
+  /** see WireScene: frames a second while nothing moves but the ambient motion; unset draws every frame */
+  idleFps?: number
   className?: string
   style?: CSSProperties
   /** HTML overlay inside the scene box (popovers, labels) */
   children?: ReactNode
 }
 
-export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, hostId, onHotspot, activeHotspot, scrim = 0.55, className, style, children }: HeroProps) {
+export function Hero({
+  active, pose, anchor, layoutKey, fill = 0.8, host, hostId, onHotspot, activeHotspot, scrim = 0.55, orbit = true, orbitTouch, showHotspots, onPlace, idleFps,
+  className, style, children,
+}: HeroProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const shell = useShell()
   const palette = usePalette()
@@ -312,7 +338,6 @@ export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, hostId
   const scenePose = useMemo<CameraPose | null>(() => (geo ? fitPose(model, modelPose(id, name), geo, fill) : null), [model, id, name, geo, fill])
   const scrimCss = useMemo(() => (geo && anchor ? scrimStyle(geo, scrim) : null), [geo, anchor, scrim])
 
-
   return (
     <div ref={boxRef} className={cx('vl-hero', className)} style={style} data-hero={id}>
       {scenePose && (
@@ -323,8 +348,12 @@ export function Hero({ active, pose, anchor, layoutKey, fill = 0.8, host, hostId
           palette={palette}
           heat={heat}
           spin={online ? 1 : 0}
-          orbit
+          orbit={orbit}
           orbitArea="model"
+          orbitTouch={orbitTouch}
+          showHotspots={showHotspots}
+          onPlace={onPlace}
+          idleFps={idleFps}
           paused={!active}
           motion={reduced ? 'reduced' : 'full'}
           onHotspot={onHotspot}

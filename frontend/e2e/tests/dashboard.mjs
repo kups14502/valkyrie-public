@@ -26,23 +26,30 @@
 //            poster on the Dashboard and Media > Dashboard loads from that base
 //            with no token. Moved to a remote base, the posters carry the image
 //            token and still load (a tokenless one gets the remote's 401).
-//   layout   no Meals row; three columns on a monitor that fill the page with no
-//            scroll; no apartment anywhere on the Dashboard (the one model it
-//            draws is This device's).
-//   device   This device: the model of the machine the page runs on (the
-//            desktop app's machine name over the Tauri stand-in, held back
+//   layout   no Meals row; the stage (This device's model) is the Dashboard's
+//            largest block on every screen: across the top on the phone (under
+//            the ticker) and the upright iPad, the middle column's head on a
+//            monitor (the middle column the widest, AI and the hosts side by
+//            side under it); three columns on a monitor that fill the page with
+//            no scroll; the newest-addition banner on a 2560 px monitor only; no
+//            apartment anywhere on the Dashboard (the one model it draws is
+//            This device's).
+//   device   This device, the stage: the model of the machine the page runs on
+//            (the desktop app's machine name over the Tauri stand-in, held back
 //            1.2 s so a guess drawn before it answers shows, else the device
 //            profile: thor, mimir, Loki, the phone, the tablet), no other model
 //            drawn first, its caption, name, state and numbers with what each
 //            is out of (cores, used / total; battery and storage on the phone,
-//            the hint before the tablet's first battery reading), the last
-//            hour of CPU and memory in the monitor's box (none in the phone's
-//            and iPad's block), between Lights and Systems on a monitor and at the top
-//            of Systems on the phone and iPad, the model inside its box and
-//            centered on its side, no diamonds, no apartment, no scroll and the
-//            three columns level at 1600x900 and the monitors (app and
-//            browser), and a press over the model opening System > Hosts with
-//            that host picked. /api/hosts is a fixed fake here, with a car in it
+//            the hint before the tablet's first battery reading), each number
+//            off the model and tied to its part by a leader line that ends on
+//            the part as the live camera projects it, the last hour of CPU and
+//            memory along the monitor's stage (none on the phone and iPad), the
+//            model inside its box and centered on its place, none of the
+//            engine's diamonds, no apartment, no scroll and the three columns
+//            level at 1600x900 and the monitors (app and browser), a drag on
+//            the model turning it without leaving the Dashboard, and a tap on
+//            the model opening System > Hosts with that host picked.
+//            /api/hosts is a fixed fake here, with a car in it
 //            (routes/vehicles.ts lists one Model Y by default).
 //   cars     the cars in the Systems box (`dash:cars`): after the phone and
 //            tablet, a car's battery and range and no CPU or memory, a car
@@ -192,14 +199,33 @@ async function lightsUp(page) {
   await sleep(500)
 }
 
-/** n quick presses on one spot, `gap` ms apart (no wait for anything in between). */
+/**
+ * n quick presses on one spot, `gap` ms apart (no wait for anything in between).
+ * The presses go out on the clock, not one per answered frame: a browser that
+ * draws slowly (odin's has no GPU, and the phone's Dashboard now draws its
+ * stage on the first screen) took over 1.5 s to answer three presses one at a
+ * time, which is no longer fast. The answers are collected at the end.
+ */
 async function burst(page, target, n, gap = 110) {
   const at = await page.locate(target)
   if (at.error) throw new Error(at.error)
+  const sent = []
+  const go = (method, params) => { sent.push(page.send(method, params)) }
   for (let k = 0; k < n; k++) {
-    await page.tap({ x: at.x, y: at.y })
+    if (page.dev.mobile) {
+      go('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y, radiusX: 4, radiusY: 4, force: 1, id: 1 }] })
+      await sleep(40)
+      go('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    } else {
+      go('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y })
+      go('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+      await sleep(30)
+      go('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+    }
     if (k < n - 1) await sleep(gap)
   }
+  await Promise.all(sent)
+  await sleep(80)
 }
 
 function lightsTests() {
@@ -320,7 +346,7 @@ function lightsTests() {
           if (blue) t.check(blue.brightness === undefined && blue.color_temp_kelvin === undefined && blue.state === 'on', `the preset carried more than a color: ${JSON.stringify(blue)}`)
         })
 
-        t.note(`commands in arrival order: ${ha.log.map((u) => `${Array.isArray(u.entity_id) ? `[${u.entity_id.map((x) => x.replace('light.e2e_', '')).join('+')}]` : u.entity_id.replace('light.e2e_', '')} ${u.state}${u.rgb_color ? ` rgb ${u.rgb_color}` : ''}`).join(', ')}`)
+        t.note(`commands in arrival order: ${ha.log.map((u) => `${Array.isArray(u.entity_id) ? `[${u.entity_id.map((x) => x.replace('light.e2e_', '')).join('+')}]` : u.entity_id.replace('light.e2e_', '')} ${u.state}${u.rgb_color ? ` rgb ${u.rgb_color}` : ''} at +${u.at - ha.log[0].at} ms`).join(', ')}`)
         const over = Object.entries(ha.maxInflight).filter(([, n]) => n > 1)
         t.check(!over.length, `two commands for one bulb were in flight at once: ${over.map(([id, n]) => `${id} x${n}`).join(', ')}`)
         await t.shot(page)
@@ -702,14 +728,13 @@ function mediaTests() {
         t.check(dash.bases.length === 1 && dash.bases[0] === `${ODIN}/api`, `Dashboard posters load from ${JSON.stringify(dash.bases)}, want odin's base the app moved to`)
         t.check(dash.tokens.every((x) => x === null), 'posters on the tailnet base carry an image token (they need none)')
         t.check(!dash.states.err, `${dash.states.err} Dashboard poster(s) show the title-only fallback`)
-        const ban = await page.eval(() => {
-          const b = document.querySelector('.vl-page[data-active] .hm-ban')
-          const img = b?.querySelector('img')
-          return b ? { state: b.getAttribute('data-state'), ok: !!img && img.complete && img.naturalWidth > 0, src: img?.src.split('/plex/img')[0] ?? null } : null
-        })
-        if (t.check(ban, 'no newest-item banner on the desktop Dashboard')) {
-          t.check(ban.ok && ban.src === `${ODIN}/api`, `the banner image did not load from odin's base (${JSON.stringify(ban)})`)
-        }
+        // 1920x1080: the stage is the Dashboard's picture; the newest addition is named under the posters
+        const newest = await page.eval(() => ({
+          ban: !!document.querySelector('.vl-page[data-active] .hm-ban'),
+          cap: (document.querySelector('.vl-page[data-active] .hm-media-cap')?.textContent || '').replace(/\s+/g, ' ').trim(),
+        }))
+        t.check(!newest.ban, 'a 1920x1080 Dashboard still draws the newest-addition banner (a 2560 px monitor only)')
+        t.check(/^Newest \S/.test(newest.cap), `the newest addition is not named under the posters ("${newest.cap}")`)
         await t.shot(page, 'dash')
 
         await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'Media' })
@@ -819,19 +844,56 @@ function layoutTests() {
             const c = el?.closest('.hm-col')
             return c ? ['hm-a', 'hm-b', 'hm-c'].find((k) => c.classList.contains(k)) ?? '?' : null
           }
+          // every block of the Dashboard as drawn (the columns dissolve on the phone), by area, largest first
+          const area = (el) => { const b = el.getBoundingClientRect(); return Math.round(b.width * b.height) }
+          const blocks = [...lay.querySelectorAll(':scope > .hm-stage, :scope > .hm-tk, .hm-col > *, .hm-pair > *')].filter((e) => !e.classList.contains('hm-pair'))
+          const stage = root.querySelector('.hm-stage')
+          const sb = stage?.getBoundingClientRect()
+          const lb = lay.getBoundingClientRect()
+          const cs = getComputedStyle(lay)
+          const colW = [...lay.querySelectorAll(':scope > .hm-col')].map((c) => Math.round(c.getBoundingClientRect().width))
           return {
             cols: lay?.getAttribute('data-cols') ?? null,
             meals: [...root.querySelectorAll('*')].some((e) => e.children.length === 0 && /\bMeals\b/.test(e.textContent || '')),
             mealsLink: !!root.querySelector('a[href*="/meals"], [data-to*="meals"]'),
             scrollH: root.scrollHeight, clientH: root.clientHeight,
-            where: { lights: colOf('.hm-lights'), trade: colOf('.hm-trade'), media: colOf('.hm-media') },
+            where: { lights: colOf('.hm-lights'), trade: colOf('.hm-trade'), media: colOf('.hm-media'), stage: colOf('.hm-stage'), ai: colOf('.hm-ai'), sys: colOf('.hm-sys'), cal: colOf('.hm-cal') },
+            stage: stage ? {
+              area: area(stage),
+              biggest: blocks.every((e) => e === stage || area(e) <= area(stage)),
+              bigger: blocks.filter((e) => e !== stage && area(e) > area(stage)).map((e) => String(e.className).slice(0, 40)),
+              // how much of the layout's inner width it spans
+              span: (sb.width / (lb.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight))),
+              top: Math.round(sb.top), bottom: Math.round(sb.bottom),
+              before: ['.hm-lights', '.hm-starts, .hm-starts-empty', '.hm-ai', '.hm-sys'].every((q) => { const e = root.querySelector(q); return !e || !!(stage.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING) }),
+              afterTicker: (() => { const tk = lay.querySelector(':scope > .hm-tk'); return !tk || !!(tk.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING) })(),
+              pair: !!root.querySelector('.hm-pair .hm-ai') && !!root.querySelector('.hm-pair .hm-sys'),
+            } : null,
+            colW,
+            banner: !!root.querySelector('.hm-ban'),
+            H: innerHeight,
           }
         })
         t.check(!r.meals && !r.mealsLink, 'the Dashboard still has a Meals row')
         const desk = device.startsWith('desk')
+        // the stage: the model of this device, the Dashboard's largest block on every screen
+        if (t.check(r.stage, 'the Dashboard has no stage (This device)')) {
+          // the phone's Lights box (every bulb and preset) runs longer than its stage; everywhere else the stage is the largest block
+          if (r.cols !== '1') t.check(r.stage.biggest, `the stage (${r.stage.area} px2) is not the Dashboard's largest block: larger are ${JSON.stringify(r.stage.bigger)}`)
+          if (r.cols !== '3') {
+            t.check(r.stage.before && r.stage.afterTicker, 'the stage does not lead the Dashboard (under the trade ticker on the phone)')
+            t.check(r.stage.span > 0.98, `the stage spans ${Math.round(r.stage.span * 100)}% of the ${device}'s width, want all of it`)
+            t.check(r.stage.top >= 0 && r.stage.bottom <= r.H, `the stage is not whole on the first screen (${r.stage.top} to ${r.stage.bottom} of ${r.H})`)
+          }
+        }
         if (desk) {
           t.check(r.cols === '3', `a monitor Dashboard has ${r.cols} columns, want 3`)
-          t.check(r.where.media === 'hm-a' && r.where.trade === 'hm-b' && r.where.lights === 'hm-c', `blocks sit in ${JSON.stringify(r.where)}, want media left, trade middle, lights right`)
+          const xl = device === 'desk1440'
+          t.check(r.where.trade === 'hm-a' && r.where.stage === 'hm-b' && r.where.lights === 'hm-c' && r.where.media === 'hm-c' && r.where.cal === (xl ? 'hm-a' : 'hm-c'),
+            `blocks sit in ${JSON.stringify(r.where)}, want trade left, the stage in the middle, lights and media right, the calendar ${xl ? 'left' : 'right'}`)
+          t.check(r.stage?.pair && r.where.ai === 'hm-b' && r.where.sys === 'hm-b', `AI and the hosts are not side by side under the stage (${JSON.stringify(r.where)})`)
+          t.check(r.colW.length === 3 && r.colW[1] > r.colW[0] * 1.4 && Math.abs(r.colW[0] - r.colW[2]) <= 2, `the columns are ${JSON.stringify(r.colW)} px wide, want the stage's the widest by half and the other two equal`)
+          t.check(r.banner === xl, xl ? 'a 2560 px monitor lost the newest-addition banner' : 'the newest-addition banner is back on a 1920x1080 Dashboard')
           t.check(r.scrollH <= r.clientH + 2, `the monitor Dashboard scrolls (${r.scrollH} > ${r.clientH}): the columns should fill the page exactly`)
         }
         checkNoRoom(t, await page.eval(dashboardScenes))
@@ -879,9 +941,12 @@ function deviceReport() {
   const e = scene?.__wire
   const press = inner.querySelector('.hm-dev-press')
   const col = inner.closest('.hm-col')
-  const order = col ? [...col.children].map((c) => (c.contains(inner) ? (c.classList.contains('hm-sys') ? 'sys+dev' : 'dev') : c.classList.contains('hm-lights') ? 'lights' : c.classList.contains('hm-sys') ? 'sys' : 'other')) : []
-  const inSys = inner.closest('.hm-sys')
+  const stage = inner.closest('.hm-stage')
+  // where the stage sits: its column's blocks in order (a monitor), or the layout's own children (phone, upright iPad)
+  const kind = (c) => (c.contains(inner) ? 'stage' : c.classList.contains('hm-pair') ? 'ai+sys' : c.classList.contains('hm-tk') ? 'ticker' : c.classList.contains('hm-col') ? 'col' : 'other')
+  const order = [...(col ?? stage?.parentElement)?.children ?? []].map(kind)
   let outline = null
+  let spots = {}
   if (e?.r?.model) {
     const c = e.r.model
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
@@ -897,8 +962,24 @@ function deviceReport() {
     const ar = inner.querySelector('.hm-dev-anchor').getBoundingClientRect()
     const k = sr.width / e.r.w
     const a = { l: (ar.left - sr.left) / k, r: (ar.right - sr.left) / k, t: (ar.top - sr.top) / k, b: (ar.bottom - sr.top) / k }
-    outline = { ok, w: e.r.w, h: e.r.h, x0, y0, x1, y1, a, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, moving: JSON.stringify(e.cam.cur) !== JSON.stringify(e.cam.to) }
+    outline = { ok, w: e.r.w, h: e.r.h, x0, y0, x1, y1, a, k, sl: sr.left, st: sr.top, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, moving: JSON.stringify(e.cam.cur) !== JSON.stringify(e.cam.to), yaw: e.cam.dragYaw }
+    // every part of the model as the live camera projects it now, in the scene's px
+    for (const h of c.hotspots) spots[h.id] = e.cam.project(h.at[0], h.at[1], h.at[2], out) ? [out[0], out[1]] : null
   }
+  // each number: its box and its bar's ends in the scene's px, and its leader line (where it starts and ends)
+  const px = (r) => outline ? { l: (r.left - outline.sl) / outline.k, r: (r.right - outline.sl) / outline.k, t: (r.top - outline.st) / outline.k, b: (r.bottom - outline.st) / outline.k } : null
+  const reads = [...inner.querySelectorAll('.hm-dev-row')].map((row) => {
+    const key = row.getAttribute('data-k')
+    const g = inner.querySelector(`.hm-dev-lines g[data-k="${key}"]`)
+    const nums = ((g?.querySelector('path')?.getAttribute('d') || '').match(/-?\d+(\.\d+)?/g) || []).map(Number)
+    return {
+      key,
+      side: row.closest('.hm-dev-rows')?.getAttribute('data-side') ?? null,
+      box: px(row.getBoundingClientRect()),
+      bar: px(row.querySelector('.hm-mini-bar').getBoundingClientRect()),
+      line: g ? { opacity: parseFloat(getComputedStyle(g).opacity), from: nums.slice(0, 2), to: nums.slice(-2) } : null,
+    }
+  })
   const shown = (el) => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0
   const ib = inner.getBoundingClientRect()
   return {
@@ -919,15 +1000,14 @@ function deviceReport() {
       const sv = h.querySelector('svg')?.getBoundingClientRect()
       return { cap: (h.querySelector('.hm-dev-hist-cap')?.textContent || '').replace(/\s+/g, ' ').trim(), cpu: seg('.hm-spark-cpu'), mem: seg('.hm-spark-mem'), h: sv ? Math.round(sv.height) : 0, w: sv ? Math.round(sv.width) : 0 }
     })(),
-    // the text column against the model's anchor: nothing written over the model
-    textRight: Math.round(Math.max(0, ...[...inner.querySelectorAll('.hm-dev-id, .hm-dev-rows, .hm-dev-hist')].map((e) => e.getBoundingClientRect().right))),
-    anchorLeft: Math.round(inner.querySelector('.hm-dev-anchor')?.getBoundingClientRect().left ?? 0),
+    reads, spots,
+    layout: inner.getAttribute('data-reads'),
     tall: inner.hasAttribute('data-tall'),
-    // the text column's blocks top to bottom (head, name, numbers, last hour), as [top, bottom]
-    blocks: [...inner.querySelectorAll('.hm-dev-top, .hm-dev-id, .hm-dev-rows, .hm-dev-hist')].filter(shown).map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)] }),
+    // the last hour's foot against the stage's
+    histEnd: Math.round(inner.querySelector('.hm-dev-hist')?.getBoundingClientRect().bottom ?? 0),
     aria: press?.getAttribute('aria-label') ?? '',
-    order, inSys: !!inSys,
-    beforeRows: inSys ? !!inSys.querySelector('.hm-hrows') && !!(inner.compareDocumentPosition(inSys.querySelector('.hm-hrows')) & Node.DOCUMENT_POSITION_FOLLOWING) : null,
+    order, inCol: col ? ['hm-a', 'hm-b', 'hm-c'].find((k) => col.classList.contains(k)) ?? '?' : null,
+    path: location.pathname,
     diamonds: [...inner.querySelectorAll('[data-hotspot]')].filter(shown).length,
     orbit: shown(inner.querySelector('[data-orbit-zone]')),
     outline,
@@ -971,6 +1051,9 @@ function deviceTests() {
     { name: 'browser', device: 'desktop', want: 'thor', label: 'Thor', state: /^Online/, rows: LOAD, sizes: SIZES, hour: true },
     { name: 'headset', device: 'desktop', storage: { 'valkyrie-device-mode': 'vr' }, want: 'frame', label: 'Loki', state: /^Online/, rows: [...LOAD, 'Battery 72%'], sizes: [...SIZES, ''] },
     { name: 'phone', device: 'phone', want: 'phone', label: 'Phone', state: /^Online$/, rows: ['Battery 64%', 'Storage 40%'], sizes: ['', '101 / 256 GB'] },
+    // the iPad once it reports: two numbers beside a wide slab stand in the stage's lower corners
+    { name: 'ipad-reads', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: ['Battery 81%', 'Storage 25%'], sizes: ['', '64 / 256 GB'], foot: true, tablet: { battery: { percent: 81, status: 'discharging' }, disk: { used: 64e9, total: 256e9, percent: 25 } } },
+    { name: 'ipadland', device: 'ipadland', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/, pad: true },
     { name: 'ipad', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/ },
   ]
   return cases.map((c) => ({
@@ -981,7 +1064,9 @@ function deviceTests() {
     async run(t) {
       const page = await t.page({ storage: c.storage ?? {}, scripts: [...(c.app ? [tauriStub({ hostname: c.app }), slowHostname(1200)] : []), HERO_WATCH] })
       quietThor(page)
-      page.mock('/api/hosts', () => ok(deviceHosts()))
+      const doc = deviceHosts()
+      if (c.tablet) Object.assign(doc.hosts.find((h) => h.host === 'tablet'), c.tablet)
+      page.mock('/api/hosts', () => ok(doc))
       await page.goto('/m/dashboard')
       await shellUp(page)
       await page.waitFor(() => !!document.querySelector('.vl-page[data-active] .hm-dev-in [data-wire-scene]')?.__wire, { timeout: 15_000, message: 'This device drew no model' })
@@ -1000,6 +1085,14 @@ function deviceTests() {
       if (r.error) throw new Error(r.error)
       t.check(!r.outline?.moving, 'the camera never settled on This device')
       t.note(`${c.name}: ${r.hero} "${r.name}" "${r.state}" [${r.rows.join(', ')}] order ${r.order.join(' > ')}`)
+      // how fast this browser draws the stage (odin's has no GPU): frames in one second, and the scene's own draw time
+      const pace = await page.eval(() => new Promise((res) => {
+        let n = 0
+        const t0 = performance.now()
+        const tick = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else res({ fps: n, ms: document.querySelector('.vl-page[data-active] .hm-dev-in [data-wire-scene]')?.getAttribute('data-ms') ?? null }) }
+        requestAnimationFrame(tick)
+      }))
+      t.note(`${c.name}: the stage draws at ${pace.fps} frames a second here, ${pace.ms} ms of drawing a frame`)
       t.check(r.hero === c.want, `This device draws ${r.hero}, want ${c.want}`)
       const heroes = (await page.eval(() => window.__devHeroes ?? [])) ?? []
       t.check(heroes.join('>') === c.want, `This device drew ${heroes.join(' > ') || 'nothing'} on the way; want ${c.want} alone (no other model first)`)
@@ -1007,52 +1100,82 @@ function deviceTests() {
       t.check(r.visible, `This device is not on screen (${JSON.stringify(r.box)})`)
       t.check(r.name === c.label, `This device is named "${r.name}", want ${c.label}`)
       t.check(c.state.test(r.state), `This device reads "${r.state}", want ${c.state}`)
-      t.check(r.rows.join('|') === c.rows.join('|'), `This device's numbers are ${JSON.stringify(r.rows)}, want ${JSON.stringify(c.rows)}`)
-      t.check(r.sizes.join('|') === c.sizes.join('|'), `This device's numbers are out of ${JSON.stringify(r.sizes)}, want ${JSON.stringify(c.sizes)}`)
+      // the numbers stand on the side their part is on, so their order follows the model: compare them as a set, each with what it is out of
+      const pairs = (rows, sizes) => rows.map((x, k) => `${x} (${sizes[k] ?? ''})`).sort().join('|')
+      t.check(pairs(r.rows, r.sizes) === pairs(c.rows, c.sizes), `This device's numbers are ${JSON.stringify(r.rows)} out of ${JSON.stringify(r.sizes)}, want ${JSON.stringify(c.rows)} out of ${JSON.stringify(c.sizes)}`)
       if (c.hour) {
         t.check(r.hist && HOUR_CAP.test(r.hist.cap), `This device's last hour reads ${JSON.stringify(r.hist)}, want "Last hour CPU Mem peak 50%"`)
         if (r.hist) t.check(r.hist.cpu >= 59 && r.hist.mem >= 59 && r.hist.h >= 18 && r.hist.w >= 100, `the last hour draws CPU ${r.hist.cpu} and memory ${r.hist.mem} points in ${r.hist.w}x${r.hist.h}, want the 60 samples each in a visible line`)
-        // no large empty area beside the model: the text column runs to the box's foot, no gap in it over a fifth of the box
+        // the last hour runs along the stage's foot
         const bottom = r.box.t + r.box.h
-        const lastEnd = r.blocks.at(-1)?.[1] ?? r.box.t
-        const gaps = r.blocks.slice(1).map((b, k) => b[0] - r.blocks[k][1])
-        t.check(bottom - lastEnd <= 24 && Math.max(0, ...gaps) <= r.box.h / 5, `This device's text column leaves empty space: blocks ${JSON.stringify(r.blocks)} in a box from ${r.box.t} to ${bottom}`)
+        t.check(bottom - r.histEnd >= 0 && bottom - r.histEnd <= 24, `the last hour ends at ${r.histEnd}, the stage at ${bottom}: want it along the stage's foot`)
       } else {
         t.check(!r.hist, `This device draws a last hour it has no samples for: ${JSON.stringify(r.hist)}`)
       }
       if (c.tall != null) t.check(r.tall === c.tall, `This device ${r.tall ? 'is' : 'is not'} in its tall layout (${JSON.stringify(r.box)}), want ${c.tall ? 'tall' : 'short'}`)
-      t.check(r.textRight <= r.anchorLeft + 2, `This device's text runs over the model (text right ${r.textRight}, model anchor left ${r.anchorLeft})`)
       if (c.hint) t.check(c.hint.test(r.hint), `no battery hint (got "${r.hint}")`)
       else t.check(!r.hint, `a battery hint where a reading came in: "${r.hint}"`)
-      const desk = c.device.startsWith('desk')
-      if (desk) t.check(r.order.join('>') === 'lights>dev>sys', `the right column reads ${r.order.join(' > ')}, want lights > this device > systems`)
-      else t.check(r.inSys && r.beforeRows, `This device is not at the top of the Systems box (in it: ${r.inSys}, before the hosts: ${r.beforeRows})`)
+      const desk = c.device.startsWith('desk') || !!c.pad
+      if (c.pad) t.check(r.inCol === 'hm-b' && r.order[0] === 'stage', `the landscape iPad's stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want it at the head of the middle column`)
+      else if (desk) t.check(r.inCol === 'hm-b' && r.order.join('>') === 'stage>ai+sys', `the stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want the middle column as stage > AI and the hosts`)
+      else t.check(r.inCol === null && /^(ticker>)?stage>col>col$/.test(r.order.join('>')), `the layout reads ${r.order.join(' > ')}, want the stage across the top (under the ticker on the phone), then the columns`)
       checkNoRoom(t, await page.eval(dashboardScenes))
       // a monitor (and the app's window) shows the whole Dashboard: no scroll, the three columns ending together
-      if (desk && !c.storage) {
+      if (desk && !c.storage && !c.pad) {
         const f = await page.eval(pageFit)
         t.check(f.scrollH <= f.clientH + 2, `the Dashboard scrolls (${f.scrollH} > ${f.clientH}) with This device in the right column`)
         const ends = f.ends.filter((v) => v != null)
         t.check(ends.length === 3 && Math.max(...ends) - Math.min(...ends) <= 3, `the three columns end at ${JSON.stringify(f.ends)}, want them level`)
       }
-      t.check(!r.diamonds && !r.orbit, `This device shows ${r.diamonds} diamond(s)${r.orbit ? ' and an orbit zone' : ''}; the press lies over the model`)
+      t.check(!r.diamonds, `the stage shows ${r.diamonds} of the engine's diamonds; its numbers mark the parts`)
+      t.check(r.orbit, 'no orbit zone on the stage: a drag cannot turn the model')
       const o = r.outline
       t.check(o && o.ok, 'the model does not project through the live camera')
       if (o) {
         const in1 = (v, lo, hi) => v >= lo - 2 && v <= hi + 2
         t.check(in1(o.x0, 0, o.w) && in1(o.x1, 0, o.w) && in1(o.y0, 0, o.h) && in1(o.y1, 0, o.h), `the model runs out of its box: ${[o.x0, o.y0, o.x1, o.y1].map(Math.round)} in ${o.w}x${o.h}`)
-        t.check(in1(o.cx, o.a.l, o.a.r) && in1(o.cy, o.a.t, o.a.b), `the model is not centered on its side of the box: center ${Math.round(o.cx)},${Math.round(o.cy)}, anchor ${JSON.stringify(Object.fromEntries(Object.entries(o.a).map(([k, v]) => [k, Math.round(v)])))}`)
+        t.check(in1(o.cx, o.a.l, o.a.r) && in1(o.cy, o.a.t, o.a.b), `the model is not centered on its place in the stage: center ${Math.round(o.cx)},${Math.round(o.cy)}, anchor ${JSON.stringify(Object.fromEntries(Object.entries(o.a).map(([k, v]) => [k, Math.round(v)])))}`)
+        // the model is the stage's subject: its outline takes most of its place one way or the other
+        const fillW = (o.x1 - o.x0) / (o.a.r - o.a.l), fillH = (o.y1 - o.y0) / (o.a.b - o.a.t)
+        t.check(Math.max(fillW, fillH) >= 0.85, `the model fills ${Math.round(fillW * 100)}% by ${Math.round(fillH * 100)}% of its place, want about 94% one way`)
+        // every number off the model, on its own side, and tied to its part: the line starts at its bar's inner end and ends on the part
+        const SPOT = { cpu: 'cpu', mem: 'mem', disk: 'disk', bat: 'battery' }
+        for (const rd of r.reads) {
+          const hit = rd.box && rd.box.l < o.x1 && rd.box.r > o.x0 && rd.box.t < o.y1 && rd.box.b > o.y0
+          t.check(!hit, `the ${rd.key} number lies over the model: ${JSON.stringify(rd.box)} against the model's ${[o.x0, o.y0, o.x1, o.y1].map(Math.round)}`)
+          const at = r.spots[SPOT[rd.key]]
+          if (!t.check(at, `the ${r.hero} model has no ${SPOT[rd.key]} part for the ${rd.key} number`)) continue
+          if (!t.check(rd.line && rd.line.opacity > 0.3 && rd.line.to.length === 2, `the ${rd.key} number has no leader line (${JSON.stringify(rd.line)})`)) continue
+          t.check(Math.hypot(rd.line.to[0] - at[0], rd.line.to[1] - at[1]) <= 2.5, `the ${rd.key} line ends at ${rd.line.to.map(Math.round)}, its part is at ${at.map(Math.round)}`)
+          const inner = rd.side === 'l' ? rd.bar.r : rd.bar.l
+          t.check(Math.abs(rd.line.from[0] - inner) <= 8 && rd.line.from[1] >= rd.bar.t - 3 && rd.line.from[1] <= rd.bar.b + 3, `the ${rd.key} line starts at ${rd.line.from.map(Math.round)}, its bar's inner end is at ${Math.round(inner)},${Math.round((rd.bar.t + rd.bar.b) / 2)}`)
+          t.check(rd.side === 'l' ? at[0] > rd.box.l : at[0] < rd.box.r, `the ${rd.key} number stands on the ${rd.side === 'l' ? 'left' : 'right'}, its part at x ${Math.round(at[0])} is on the other side of it`)
+        }
+        t.check(r.layout === (c.foot ? 'foot' : 'side'), `the numbers stand ${r.layout === 'foot' ? 'in the lower corners' : 'left and right of the model'}, want ${c.foot ? 'the lower corners' : 'left and right'}`)
       }
       t.check(new RegExp(`^This device, ${c.label}:`).test(r.aria), `the press says "${r.aria}"`)
       await t.shot(page, 'dash')
-      // the press, over the model, opens System > Hosts with this device picked
+      // the model's own middle on screen
       const at = await page.eval(() => {
-        const a = document.querySelector('.vl-page[data-active] .hm-dev-anchor')
-        a.scrollIntoView({ block: 'center', behavior: 'instant' })
-        const b = a.getBoundingClientRect()
-        return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+        const inner = document.querySelector('.vl-page[data-active] .hm-dev-in')
+        inner.scrollIntoView({ block: 'center', behavior: 'instant' })
+        const z = inner.querySelector('[data-orbit-zone]').getBoundingClientRect()
+        return { x: z.left + z.width / 2, y: z.top + z.height / 2 }
       })
       await sleep(300)
+      // a drag across the model turns it and stays on the Dashboard
+      await page.swipe(at.x - 30, at.y, at.x + 50, at.y, { steps: 10, ms: 260 })
+      // the turn's inertia dies out well inside this; the ease back starts 2.5 s after the release
+      await sleep(700)
+      const turned = await page.eval(deviceReport)
+      t.check(turned.path === '/m/dashboard' || turned.path === '/m/dashboard/overview', `a drag on the model left the Dashboard for ${turned.path}`)
+      t.check(Math.abs(turned.outline?.yaw ?? 0) > 5, `a drag on the model did not turn it (yaw ${turned.outline?.yaw})`)
+      // turned, every line still ends on its part
+      for (const rd of turned.reads) {
+        const p = turned.spots[{ cpu: 'cpu', mem: 'mem', disk: 'disk', bat: 'battery' }[rd.key]]
+        if (p && rd.line?.to.length === 2 && rd.line.opacity > 0) t.check(Math.hypot(rd.line.to[0] - p[0], rd.line.to[1] - p[1]) <= 4, `turned, the ${rd.key} line ends at ${rd.line.to.map(Math.round)}, its part is at ${p.map(Math.round)}`)
+      }
+      // a tap on the model opens System > Hosts with this device picked
       await page.tap({ x: at.x, y: at.y })
       await page.waitPath('/m/system/hosts', 6000)
       // the System tab mounts with its large model: on a slower browser (odin, no GPU) that takes
