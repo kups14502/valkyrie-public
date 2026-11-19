@@ -263,3 +263,6 @@ html[data-motion='reduced'] .mx-dot { animation: none; }
 .mx-run-cost { margin-left: auto; }
 .mx-run-sum { font-size: 12px; line-height: 17px; color: var(--text); }
 .mx-run[data-status='failed'] .mx-run-sum { color: var(--hot); }
+
+/* the shell turns selection off; what he reads and types here can be copied */
+.mx-msgs, .mx-agent, .mx :is(input, textarea) { -webkit-user-select: text; user-select: text; }

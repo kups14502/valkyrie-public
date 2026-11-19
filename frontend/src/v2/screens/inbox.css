@@ -141,7 +141,7 @@
 
 /* ---------- an open row ---------- */
 
-.ib-detail { display: flex; flex-direction: column; gap: 10px; padding: 0 2px 14px 17px; }
+.ib-detail { display: flex; flex-direction: column; gap: 10px; padding: 0 2px 14px 17px; -webkit-user-select: text; user-select: text; }
 .ib-note { margin: 0; font-size: 12.5px; line-height: 18px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-link { color: var(--fg); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 2px; }
 .ib-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
