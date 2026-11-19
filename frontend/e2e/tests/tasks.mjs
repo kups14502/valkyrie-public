@@ -1,6 +1,7 @@
 // TASKS: the Tasks page (src/v2/screens/Tasks.tsx, /m/tasks) and the dashboard's tasks glance over
 // a fake tasks backend in routes/tasks.ts's shapes. Dates are built from New York's today when the
-// test runs, so the groups are right on any day. Every write is caught in the browser and changes
+// test runs, so the groups are right on any day; the one timed task is due at 11:59 PM, so it is
+// still "today" at any hour (due at 3:30 PM it read overdue on every evening run). Every write is caught in the browser and changes
 // the fake the way the store would. Generic names only: this repo is public.
 //
 //   list       groups in order (Overdue, Today, Next 7 days, Later, No date), due labels, the hot
@@ -38,7 +39,7 @@ function fixture() {
   return {
     tasks: [
       task(proj('proj-one', '', '', 'tab1', 'i1'), 'Send the invoice', plus(t0, -2)),
-      task(proj('proj-one', '', '', 'tab1', 'i2'), 'Call the vendor', `${t0}T15:30`),
+      task(proj('proj-one', '', '', 'tab1', 'i2'), 'Call the vendor', `${t0}T23:59`),
       task({ kind: 'loose', id: 'aaaaaaaaaaa1' }, 'Pick up the package', t0),
       task(proj('proj-two', '', '', 'tab2', 'i3'), 'Review the draft', plus(t0, 3), { area: 'work' }),
       task({ kind: 'loose', id: 'aaaaaaaaaaa2' }, 'Renew the passport', plus(t0, 40)),
@@ -154,7 +155,7 @@ export function tasksTests() {
         ]
         t.check(JSON.stringify(groups.map((g) => [g.id, g.head, g.rows])) === JSON.stringify(want), `groups read ${JSON.stringify(groups)}`)
         const dues = await page.eval(() => [...document.querySelectorAll('.tk-row .tk-due')].map((e) => `${e.dataset.state}:${e.textContent}`))
-        t.check(dues[0].startsWith('overdue:') && dues[1] === 'today:Today, 3:30 PM' && dues[2] === 'today:Today' && dues[3].startsWith('soon:'), `due labels read ${JSON.stringify(dues)}`)
+        t.check(dues[0].startsWith('overdue:') && dues[1] === 'today:Today, 11:59 PM' && dues[2] === 'today:Today' && dues[3].startsWith('soon:'), `due labels read ${JSON.stringify(dues)}`)
         const hot = await page.eval(() => getComputedStyle(document.querySelector('.tk-group[data-group="overdue"] .tk-ghead')).color === getComputedStyle(document.documentElement).getPropertyValue('--hot').trim() || !!document.querySelector('.tk-group[data-group="overdue"]'))
         t.check(hot, 'no Overdue group')
         const from = await page.eval(() => [...document.querySelectorAll('.tk-row .tk-from')].map((e) => e.textContent))
@@ -331,7 +332,7 @@ export function tasksTests() {
         const head = await page.eval(() => document.querySelector('.hm-tasks-head')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
         t.check(/Tasks/i.test(head) && /1 overdue · 2 due today · 6 open/.test(head), `the tasks line reads "${head}"`)
         const rows = await page.eval(() => [...document.querySelectorAll('.hm-tasks .hm-arow')].map((r) => r.innerText.replace(/\s+/g, ' ').trim()))
-        t.check(rows.length === 3 && /^Late Send the invoice/.test(rows[0]) && /^3:30 PM Call the vendor/.test(rows[1]) && /^Today Pick up the package/.test(rows[2]), `the rows read ${JSON.stringify(rows)}`)
+        t.check(rows.length === 3 && /^Late Send the invoice/.test(rows[0]) && /^11:59 PM Call the vendor/.test(rows[1]) && /^Today Pick up the package/.test(rows[2]), `the rows read ${JSON.stringify(rows)}`)
         await t.shot(page, 'glance')
         await page.tap('.hm-tasks-head')
         await page.waitFor(() => location.pathname === '/m/tasks', { message: 'the tasks line did not open /m/tasks' })

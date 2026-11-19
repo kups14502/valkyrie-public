@@ -112,6 +112,11 @@ export function shellChecks(t, r, route) {
   t.check(r.gear, `${tag}: the Settings gear is missing from the status strip`)
   // a full page outside the tabs carries no lights button
   if (route.page) return
+  // a screen that reaches the bottom edge (kit/shell.tsx ScreenDef foot: false) hides it
+  if (route.foot === false) {
+    t.check(!r.lampShown, `${tag}: the lights button shows on a screen that hides it`)
+    return
+  }
   // the lights button: bottom-left, on top of everything
   t.check(r.lamp && r.lampShown, `${tag}: the lights button is missing`)
   if (r.lamp) {

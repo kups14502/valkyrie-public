@@ -2,7 +2,7 @@
 // sub-tab for the iPad under the main monitor, over fakes in the backend's shapes
 // (routes/hostLaunch.ts /hosts/thor/hotkeys). Presses are caught in the browser: nothing reaches thor.
 //
-//   view       the iPad has the sub-tab after Overview and Today, 18 keys, the mic reads live, the
+//   view       the iPad has the sub-tab after Overview and Today, 19 keys, the mic reads live, the
 //              Claude keys take thor's names, no overflow (portrait and landscape)
 //   others     the phone and the desktop have no Hotkeys sub-tab, and its URL lands on Overview
 //   press      a key sends its id; the mic key flips to muted from the next state read; Mode flips
@@ -16,13 +16,13 @@ import { quietThor } from '../lib/fixtures.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const ROUTE = '/m/dashboard/hotkeys'
-const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode', 'vr']
+const IDS = ['mic', 'discordmute', 'discorddeafen', 'claude1', 'claude2', 'claude3', 'dim', 'shot', 'clip', 'play', 'prev', 'next', 'output', 'voldown', 'volup', 'volmute', 'mode', 'vr', 'lock']
 const KEYS = IDS.length
 const CLIPS = [{ name: 'Airhorn', file: 'airhorn.mp3', seconds: 2.4 }, { name: 'Sad trombone', file: 'sad trombone.wav', seconds: 4 }]
 
 function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
-  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', vr: 'off', discord: { muted: false, deafened: false }, played: [] }
-  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, vr: st.vr, discord: st.discord, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
+  const st = { ready, mic: 'live', dim: 0, output: 'Headset', mode: 'work', vr: 'off', lock: false, discord: { muted: false, deafened: false }, played: [] }
+  page.mock('/api/hosts/thor/hotkeys', () => ok({ ready: st.ready, mic: st.mic, dim: st.dim, output: st.output, mode: st.mode, vr: st.vr, lock: st.lock, discord: st.discord, ids: IDS, labels: { claude1: 'Home', claude2: 'Office', claude3: 'Client' } }))
   page.mock('/api/hosts/thor/soundboard', () => (player
     ? ok({ clips, mic: { connected: true, rate: 48000, channels: 2, heartbeatAgeMs: 10 } })
     : ok({ error: 'the soundboard is not running on thor' }, 503)))
@@ -37,6 +37,7 @@ function fakes(page, { ready = true, player = true, clips = CLIPS } = {}) {
     if (w.json.id === 'mic') st.mic = st.mic === 'muted' ? 'live' : 'muted'
     if (w.json.id === 'output') st.output = st.output === 'Headset' ? 'Speakers' : 'Headset'
     if (w.json.id === 'mode') st.mode = st.mode === 'game' ? 'work' : 'game'
+    if (w.json.id === 'lock') st.lock = !st.lock
     if (w.json.id === 'discorddeafen') st.discord.deafened = !st.discord.deafened
     if (w.json.id === 'discordmute') st.discord = st.discord.deafened ? { muted: false, deafened: false } : { ...st.discord, muted: !st.discord.muted }
     if (w.json.id === 'vr') { st.vr = st.vr === 'on' ? 'stopping' : 'starting'; setTimeout(() => { st.vr = st.vr === 'stopping' ? 'off' : 'on' }, 1500) }

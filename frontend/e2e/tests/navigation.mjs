@@ -1,5 +1,5 @@
 // NAVIGATION: tab and sub-tab taps, Settings behind the gear and the way back,
-// swiping between tabs, the old addresses, the iPhone profile landing on v2,
+// a drag across the screen leaving the tab alone, the old addresses, the iPhone profile landing on v2,
 // and the classic pages staying classic (no html[data-v2] left behind).
 
 import { sleep } from '../lib/cdp.mjs'
@@ -184,7 +184,8 @@ export function navigationTests() {
         await shellUp(page)
         await settingsOpen(true)
         await page.tap('.vl-setbar-back')
-        await page.waitPath('/m/dashboard')
+        // the Dashboard has sub-tabs since Today (2026-10-29): going to it lands on Overview
+        await page.waitPath('/m/dashboard/overview')
         await onScreen(page, { screen: 'dashboard', tab: 'Dashboard' })
       })
     },
@@ -197,28 +198,23 @@ export function navigationTests() {
     timeout: 45_000,
     async run(t) {
       const page = await t.page()
-      // an empty session board: a long live list fills the AI tab with swipeable rows and leaves no
-      // free row to swipe the tab on (2026-10-19), which says nothing about the tab swipe itself
       page.mock('/api/session-board', () => ({ status: 200, body: { sessions: [], hookRunsSkipped: 0 } }))
       await page.goto('/m/dashboard')
       await shellUp(page)
       await sleep(1500)
-      await t.step('swipe left: Dashboard to AI', async () => {
-        const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
-        if (!row) throw new Error('no free row on the Dashboard to swipe on')
-        await page.swipe(row.x1, row.y, row.x2, row.y, { steps: 10, ms: 160 })
-        await page.waitPath(/^\/m\/ai\//)
-        await onScreen(page, { screen: 'ai', tab: 'AI' })
-      })
-      await sleep(900)
-      await t.step('swipe right: AI back to the Dashboard', async () => {
-        const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
-        if (!row) throw new Error('no free row on AI to swipe on')
-        await page.swipe(row.x2, row.y, row.x1, row.y, { steps: 10, ms: 160 })
-        await page.waitPath('/m/dashboard')
-        await onScreen(page, { screen: 'dashboard', tab: 'Dashboard' })
-      })
-      await sleep(600)
+      // Tabs change by tap, key or address only: dragging the screen sideways was removed (kit/motion.ts
+      // usePager, commit 05da121). A drag either way across a free row leaves the tab where it is.
+      for (const [name, from, to] of [['left', 'x1', 'x2'], ['right', 'x2', 'x1']]) {
+        await t.step(`a drag to the ${name} does not change the tab`, async () => {
+          const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
+          if (!row) throw new Error('no free row on the Dashboard to drag on')
+          await page.swipe(row[from], row.y, row[to], row.y, { steps: 10, ms: 160 })
+          await sleep(900)
+          const p = await page.path()
+          t.check(p === '/m/dashboard', `a drag to the ${name} moved to ${p}`)
+          await onScreen(page, { screen: 'dashboard', tab: 'Dashboard' })
+        })
+      }
       await t.step('a vertical drag does not change the tab', async () => {
         const row = await page.waitFor(swipeRow, { timeout: 6000 }).catch(() => null)
         if (!row) throw new Error('no free row')
@@ -249,7 +245,7 @@ export function navigationTests() {
       })
       await t.step('the Dashboard usage meters open AI > Usage', async () => {
         await page.tap(tabSel('Dashboard'))
-        await page.waitPath('/m/dashboard')
+        await page.waitPath('/m/dashboard/overview')
         await onScreen(page, { screen: 'dashboard', tab: 'Dashboard' })
         await page.tap({ sel: '.vl-page[data-active] .hm-g-meters' })
         await page.waitPath('/m/ai/usage')
@@ -273,7 +269,7 @@ export function navigationTests() {
     timeout: 60_000,
     async run(t) {
       const page = await t.page()
-      for (const [from, to] of [['/m/home/today', '/m/dashboard'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions']]) {
+      for (const [from, to] of [['/m/home/today', '/m/dashboard/today'], ['/m/claude/sessions', '/m/ai/sessions'], ['/m/claude/projects', '/m/ai/projects'], ['/m/home/settings', '/m/settings'], ['/m', '/m/dashboard'], ['/m/ai/nope', '/m/ai/sessions']]) {
         await t.step(`${from} -> ${to}`, async () => {
           await page.goto(from)
           await page.waitPath(to, 8000)

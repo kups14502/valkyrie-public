@@ -207,7 +207,11 @@ function paletteTests() {
         t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e00000b2&/)
         await page.goto('/m/ai/sessions')
         await shellUp(page)
-        const open = () => page.waitFor(() => document.querySelector('.vl-pal .vl-pal-field input') === document.activeElement, { message: 'the palette did not open with its search focused' })
+        // on a miss, say what the page shows: the palette drawn or not, and where the focus is
+        const open = () => page.waitFor(() => document.querySelector('.vl-pal .vl-pal-field input') === document.activeElement, { message: 'the palette did not open with its search focused' }).catch(async (e) => {
+          const d = await page.eval(() => ({ pal: !!document.querySelector('.vl-pal'), at: `${document.activeElement?.tagName.toLowerCase() ?? 'nothing'}.${String(document.activeElement?.className ?? '').split(' ').slice(0, 2).join('.')}` }))
+          throw new Error(`${e.message}: the palette is ${d.pal ? 'drawn' : 'not drawn'}, the focus is on ${d.at}`)
+        })
         const closed = () => page.waitFor(() => !document.querySelector('.vl-pal'), { message: 'the palette did not close' })
 
         await t.step('Ctrl+K opens it; a search and Enter go to AI > Usage', async () => {
@@ -226,6 +230,12 @@ function paletteTests() {
           await closed()
         })
         await t.step('the strip\'s search button opens it; Escape closes it and gives the focus back', async () => {
+          // The palette stays open only on the history entry it was opened on. The address changes
+          // before the tab it names is drawn (the router commits the new entry a moment later, longer
+          // on a slow browser): a press inside that moment opens the palette on the old entry and it
+          // shuts when the new one lands. Wait until the Usage tab itself is on screen.
+          await page.waitFor(() => document.querySelector('.vl-nav .vl-tab-sub[aria-current="page"]')?.textContent?.trim() === 'Usage', { timeout: 8000, message: 'AI > Usage never became the lit sub-tab' })
+          await sleep(200)
           await page.tap('.vl-strip-search')
           await open()
           await page.key('Escape')
@@ -283,7 +293,8 @@ function paletteTests() {
           await page.goto('/m/lights')
           await shellUp(page)
           await page.key('ArrowRight')
-          await page.waitPath(/^\/m\/media\//)
+          // the tab after Lights is Car (it was Media before the Car tab)
+          await page.waitPath(/^\/m\/car(\/|$)/)
         })
         t.check(!page.writes.length, `the palette wrote something: ${page.writes.map((w) => `${w.method} ${w.path}`).join(', ')}`)
       },
