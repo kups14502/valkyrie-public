@@ -920,6 +920,10 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   /* one column that never grows past the viewport: a wide strip or tab row clips itself instead of widening every row */
   grid-template-columns: minmax(0, 1fr);
 }
+/* a screen with foot: false (kit/shell.tsx) hides the lights button (still mounted, so the palette's
+   lights action keeps working) and reaches the bottom edge */
+.vl-shell[data-nofoot] { --foot-pad: env(safe-area-inset-bottom); }
+.vl-shell[data-nofoot] .vl-foot { display: none; }
 .vl-shell-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 .vl-shell > :not(.vl-shell-backdrop) { position: relative; z-index: 1; }
 .vl-shell > .vl-head { z-index: 3; }

@@ -55,6 +55,12 @@ export type ScreenDef = {
    * screen draws its own 3D floor. A function picks it per sub-tab.
    */
   floor?: FloorSetting | ((sub: string) => FloorSetting)
+  /**
+   * false: no lights button under this screen, and the page keeps no room for
+   * it, so the screen reaches the bottom edge. The player bar still shows
+   * (and the room comes back) while something plays.
+   */
+  foot?: boolean
 }
 
 export type FloorSetting = boolean | 'faint'
@@ -864,6 +870,8 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
   const wantSub = urlTab ? urlSub : lastSub.current[activeId]
   const sub = subs.length ? (wantSub && subs.some((s) => s.id === wantSub) ? wantSub : subs[0].id) : ''
   const floorSetting = floorFor(def, sub)
+  const mini = useMiniPresence()
+  const noFoot = !settingsOpen && def.foot === false && !mini
 
   const activeRef = useRef(activeId)
   activeRef.current = activeId
@@ -1119,7 +1127,7 @@ export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, 
 
   return (
     <ShellCtx.Provider value={api}>
-      <div className="vl-shell" data-screen={settingsOpen ? SETTINGS_ID : activeId}>
+      <div className="vl-shell" data-screen={settingsOpen ? SETTINGS_ID : activeId} data-nofoot={noFoot || undefined}>
         <div className="vl-shell-backdrop">
           <DotFloor handle={floor} className={cx((floorSetting === false || settingsOpen) && 'opacity-0', floorSetting === 'faint' && 'vl-floor-faint')} />
           {backdrop}
