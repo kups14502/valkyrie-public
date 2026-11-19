@@ -3,8 +3,11 @@
 // is caught in the browser and changes the fake the way the store would. Generic names only:
 // this repo is public.
 //
-//   list       newest first, unread rows lit, the alert's hot mark, ET times, the strip's count
-//              with its alert color, no overflow (phone, desktop, desk1080)
+//   list       the board: Needs you (alerts first, then warnings, read last) and Reports, no
+//              Mail panel without mail, unread rows lit, the alert's hot mark, ET times, the
+//              strip's count with its alert color, no overflow (phone, desktop, desk1080)
+//   board      mail: one block per mailbox, one row per sender; a sender's row opens to its
+//              items, an item reads itself, Copy, Archive all; read senders fold behind "Show n more"
 //   open       a row opens to its text with a live link and reads itself; Mark unread; Open
 //              goes to the item's app path; Archive with Undo
 //   bulk       Read all, Archive read, the source filter asking for that source
@@ -31,9 +34,10 @@ function item(id, over = {}) {
 }
 
 /** The fake: items, the GET mocks and the write handler. Returns the state and the GET log. */
-function inboxBackend(page, { down = false } = {}) {
+function inboxBackend(page, { down = false, extra = [] } = {}) {
   const st = {
     items: [
+      ...extra,
       item(1, { source: 'raid', level: 'alert', title: '[odin RAID] Fail on /dev/md0', body: 'mdstat: degraded\nSee https://example.com/raid-guide for the steps', url: '/m/system/hosts' }),
       item(2, { source: 'trade', level: 'info', title: 'Guard v2 | 10:20 ET', body: 'held', pushedAt: null, pushDetail: null }),
       item(3, { source: 'backups', title: 'Backup watchdog: 1 problem', count: 3, firstAt: iso(Date.now() - 3 * 86_400_000) }),
@@ -124,10 +128,10 @@ export function inboxTests() {
         await pageUp(page)
         await rowsUp(page, 4)
         const order = await titles(page)
-        t.check(JSON.stringify(order) === JSON.stringify(['[odin RAID] Fail on /dev/md0', 'Guard v2 | 10:20 ET', 'Backup watchdog: 1 problem', 'Change the filter']), `rows are not newest first: ${JSON.stringify(order)}`)
+        t.check(JSON.stringify(order) === JSON.stringify(['[odin RAID] Fail on /dev/md0', 'Backup watchdog: 1 problem', 'Change the filter', 'Trade']), `rows are not alert, warning, read, then reports: ${JSON.stringify(order)}`)
         const marks = await page.eval(() => [...document.querySelectorAll('.ib-row')].map((r) => `${r.dataset.level}:${r.hasAttribute('data-unread') ? 'u' : 'r'}`))
-        t.check(JSON.stringify(marks) === JSON.stringify(['alert:u', 'info:u', 'warn:u', 'warn:r']), `levels and unread marks read ${JSON.stringify(marks)}`)
-        t.check(await page.eval(() => /×3/.test(document.querySelectorAll('.ib-row')[2]?.innerText ?? '')), 'the folded item does not show ×3')
+        t.check(JSON.stringify(marks) === JSON.stringify(['alert:u', 'warn:u', 'warn:r', 'info:u']), `levels and unread marks read ${JSON.stringify(marks)}`)
+        t.check(await page.eval(() => /×3/.test(document.querySelectorAll('.ib-row')[1]?.innerText ?? '')), 'the folded item does not show ×3')
         const tabN = await page.eval(() => document.querySelector('.ib-tab[data-on] .ib-tab-n')?.textContent ?? '')
         t.check(tabN === '3', `the Inbox tab counts "${tabN}" unread, want 3`)
         const strip = await page.eval(() => {
@@ -135,17 +139,99 @@ export function inboxTests() {
           return b ? { n: b.querySelector('.vl-strip-inbox-n')?.textContent ?? '', alert: b.hasAttribute('data-alert'), label: b.getAttribute('aria-label') } : null
         })
         t.check(strip?.n === '3' && strip.alert && strip.label === 'Inbox: 3 unread, 1 alert', `the strip button reads ${JSON.stringify(strip)}`)
-        const chips = await page.eval(() => [...document.querySelectorAll('.ib-chip')].map((c) => c.textContent))
-        t.check(chips[0] === 'All' && chips.includes('RAID1') && chips.includes('Reminder'), `the source filter reads ${JSON.stringify(chips)}`)
+        const panels = await page.eval(() => [...document.querySelectorAll('.ib-board .ib-panel')].map((p) => `${p.querySelector('.vl-panel-label')?.textContent}:${p.querySelectorAll('.ib-row').length}:${p.querySelector('.vl-panel-value')?.textContent ?? ''}`))
+        t.check(JSON.stringify(panels) === JSON.stringify(['Needs you:3:2new', 'Reports:1:1new']), `the panels read ${JSON.stringify(panels)}`)
+        t.check(await page.eval(() => !!document.querySelector('.ib-need.ib-hot')), 'an unread alert did not turn the Needs you panel hot')
+        t.check(await page.eval(() => document.querySelectorAll('.ib-row .ib-glyph svg').length === 4), 'a row is missing its source icon')
+        t.check(await page.eval(() => !document.querySelector('.ib-chip')), 'the board shows the source filter')
         const times = await page.eval(() => [...document.querySelectorAll('.ib-row time')].map((e) => e.getAttribute('title') ?? ''))
         t.check(times.length === 4 && times.every((x) => / ET$/.test(x)), `row times are not labeled ET: ${JSON.stringify(times)}`)
-        const days = await page.eval(() => [...document.querySelectorAll('.ib-day')].map((d) => d.textContent))
         const clocks = await page.eval(() => [...document.querySelectorAll('.ib-row time')].map((e) => e.textContent))
-        t.check(days.length >= 1 && days.length <= 2 && clocks.every((c) => !/,/.test(c)), `rows are not under day headings with a bare clock: ${JSON.stringify({ days, clocks })}`)
+        t.check(clocks.every((c) => c && !/,/.test(c)), `a row's time is not short: ${JSON.stringify(clocks)}`)
+        if (device !== 'phone') {
+          const cols = await page.eval(() => {
+            const a = document.querySelector('.ib-need')?.getBoundingClientRect()
+            const b = document.querySelector('.ib-reports')?.getBoundingClientRect()
+            return a && b ? { stacked: b.top >= a.bottom, same: Math.abs(a.left - b.left) < 2 } : null
+          })
+          t.check(cols?.stacked && cols.same, `Reports does not sit under Needs you: ${JSON.stringify(cols)}`)
+        }
         const txt = await page.eval(() => document.querySelector('.ib')?.innerText ?? '')
         t.check(!/—/.test(txt), 'an em dash on the inbox page')
         await fits(t, page, `${ROUTE} @${device}`)
         await t.shot(page, 'list')
+      },
+    })
+  }
+
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `inbox:board:${device}`,
+      group: 'inbox',
+      device,
+      timeout: 45_000,
+      async run(t) {
+        const page = await t.page()
+        const mail = (id, source, from, subject, over = {}) => item(id, { source, level: 'info', title: `${from}: ${subject}`, body: `Body of ${id}`, ...over })
+        const read = { readAt: iso(Date.now() - 3600_000) }
+        const st = inboxBackend(page, {
+          extra: [
+            mail(11, 'work-mail', 'Pat Example', 'Printer offline'),
+            mail(12, 'work-mail', 'Pat Example', 'Re: Printer offline'),
+            mail(13, 'personal-mail', 'Acme Store', 'Your order shipped'),
+            ...[21, 22, 23, 24, 25, 26].map((id) => mail(id, 'work-mail', `Reader ${id}`, 'Old note', read)),
+          ],
+        })
+        st.push['work-mail'] = 'auto'
+        st.push['personal-mail'] = 'auto'
+        await page.goto(ROUTE)
+        await pageUp(page)
+        await page.waitFor(() => !!document.querySelector('.ib-mail .ib-row'), { message: 'the Mail panel did not show' })
+        const boxes = await page.eval(() => [...document.querySelectorAll('.ib-mail .ib-box')].map((b) => `${b.querySelector('.ib-box-head span')?.textContent}:${b.querySelectorAll('.ib-row').length}`))
+        // work: Pat (unread) and four of the six read senders; personal: one
+        t.check(JSON.stringify(boxes) === JSON.stringify(['Work:5', 'Personal:1']), `the mailboxes read ${JSON.stringify(boxes)}`)
+        const pat = await page.eval(() => {
+          const r = document.querySelector('.ib-mail .ib-row')
+          return r ? { text: r.querySelector('.ib-text b')?.textContent, badge: r.querySelector('.ib-glyph')?.textContent, unread: r.hasAttribute('data-unread') } : null
+        })
+        t.check(pat?.text === 'Pat Example ×2' && pat.badge === 'PE' && pat.unread, `the sender's row reads ${JSON.stringify(pat)}`)
+        if (device === 'desktop') {
+          const side = await page.eval(() => {
+            const a = document.querySelector('.ib-need')?.getBoundingClientRect()
+            const b = document.querySelector('.ib-mail')?.getBoundingClientRect()
+            return a && b ? b.left >= a.right && Math.abs(a.top - b.top) < 2 : false
+          })
+          t.check(side, 'Mail does not sit beside Needs you on the desktop')
+        } else {
+          const order = await page.eval(() => ['.ib-need', '.ib-mail', '.ib-reports'].map((s) => Math.round(document.querySelector(s)?.getBoundingClientRect().top ?? -1)))
+          t.check(order[0] < order[1] && order[1] < order[2], `the phone does not stack Needs you, Mail, Reports: ${JSON.stringify(order)}`)
+        }
+        await fits(t, page, `${ROUTE} board @${device}`)
+
+        // read senders past the first four fold away
+        await page.tap({ sel: '.ib-more', text: /Show 2 more read/ })
+        await page.waitFor(() => document.querySelectorAll('.ib-mail .ib-box:first-of-type .ib-row').length === 7, { message: 'Show more did not show every sender' })
+
+        // a sender's row opens to its items without reading them
+        await page.tap({ sel: '.ib-row-main', text: /Pat Example/ })
+        await page.waitFor(() => document.querySelectorAll('.ib-row[data-open] .ib-kid').length === 2, { message: 'the sender did not open to two items' })
+        await sleep(300)
+        t.check(page.writes.length === 0, `opening a sender wrote ${page.writes.length} time(s)`)
+        await page.tap({ sel: '.ib-kid-main', text: /^Printer offline/ })
+        let w = await waitW(page, 1)
+        t.check(w.path === '/api/inbox/read' && JSON.stringify(w.json?.ids) === '[11]' && w.json?.read === true, `opening an item sent ${w.method} ${w.path} ${w.body}`)
+        await page.waitFor(() => /Body of 11/.test(document.querySelector('.ib-kid[data-open] .ib-note')?.textContent ?? ''), { message: 'the item did not open to its text' })
+        const sel = await page.eval(() => getComputedStyle(document.querySelector('.ib-kid[data-open] .ib-note')).userSelect)
+        t.check(sel === 'text', `the open text cannot be selected (user-select: ${sel})`)
+        await t.shot(page, 'open')
+        await page.tap({ sel: '.ib-kid[data-open] .vl-link', text: /^Copy/ })
+        await page.waitToast(/Copied|Could not copy/)
+
+        await page.tap({ sel: '.ib-kids-acts .vl-link', text: /Archive all 2/ })
+        w = await waitW(page, 2)
+        t.check(w.path === '/api/inbox/archive' && w.json?.archived === true && JSON.stringify(w.json?.ids) === '[11,12]', `Archive all sent ${w.method} ${w.path} ${w.body}`)
+        await page.waitFor(() => !/Pat Example/.test(document.querySelector('.ib-mail')?.innerText ?? ''), { message: 'the sender stayed after Archive all' })
+        t.check(st.items.filter((i) => i.archivedAt && [11, 12].includes(i.id)).length === 2, 'the fake did not archive both')
       },
     })
   }

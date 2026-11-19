@@ -33,8 +33,8 @@ export type InboxCount = { unread: number; alerts: number; lastAt: string | null
 
 export type InboxPage = { view: InboxView; items: InboxItem[]; sources: InboxSource[]; count: InboxCount }
 
-export const fetchInbox = async (view: InboxView, source?: string | null): Promise<InboxPage> =>
-  (await api.get<InboxPage>('/inbox', { params: { view, ...(source ? { source } : {}) } })).data
+export const fetchInbox = async (view: InboxView, source?: string | null, limit?: number): Promise<InboxPage> =>
+  (await api.get<InboxPage>('/inbox', { params: { view, ...(source ? { source } : {}), ...(limit ? { limit } : {}) } })).data
 
 export const fetchInboxCount = async (): Promise<InboxCount> =>
   (await api.get<InboxCount>('/inbox/count')).data

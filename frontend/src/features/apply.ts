@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { ScreenDef } from '../v2/kit/shell'
+import type { IconRef } from '../v2/kit/icons'
 import type { FeatureClassicPage, FeatureDef, FeatureRoute, FeatureScreen, FeatureSub, FeatureTodayBlock, FeatureWindow, Profile } from './types'
 import { FEATURES } from './index'
 
@@ -76,3 +77,6 @@ export const featureWindow = (id: string): FeatureWindow | undefined => all((f) 
 
 /** Classic pages features add (src/App.tsx routes, lib/nav.ts, lib/vr.ts, the home tiles, the v2 palette, Settings). */
 export const classicPages = (): FeatureClassicPage[] => all((f) => f.classic)
+
+/** The icon of the feature tab with this id, for anything a feature files under its own name (an inbox source). */
+export const featureIcon = (id: string): IconRef | undefined => all((f) => f.screens).find((s) => s.id === id)?.icon
