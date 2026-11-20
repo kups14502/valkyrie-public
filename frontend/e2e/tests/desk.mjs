@@ -25,6 +25,9 @@
 //            "+" puts it back; Stop in the menu takes two presses and sends the kill
 //   new      "+" starts Claude in a launch target, in the focused pane
 //   list     "Sessions" lists every running pane by area, then project, and opens the one picked
+//   closed   under them the closed, not done sessions (thor's, no pane holding them) by area, newest
+//            first; a pick resumes one in the focused pane; Recover all resumes the rest as tabs,
+//            newest first, stops at a full pane list, and sits on the empty Desk too (the phone)
 //   touch    a tap on the focused tab opens its menu (no Open beside), 44 px rows, a press outside closes it
 //   phone    one strip that scrolls sideways, the focused tab kept in view
 
@@ -129,10 +132,16 @@ export function deskBackend(page) {
       return ok({ killed: true })
     }
     if (w.method === 'POST' && w.path === '/api/terminal/sessions') {
+      // the API's cap on open panes (st.full): a 409, as tmux.ts answers
+      if (st.full != null && st.panes.length >= st.full) return { status: 409, body: { error: `${st.panes.length} sessions already open (max ${st.full})` } }
       st.opens.push(w.json)
       const r = termOpened(w.json)
-      st.panes = [...st.panes, { ...r.session, state: 'idle', title: '', stateSince: Date.now(), ask: '' }]
-      return { status: 201, body: r }
+      // each open its own pane (the first keeps the fixture's name); a resume names its conversation as the target
+      const k = st.opens.length
+      const name = k === 1 ? r.name : `vk-e2e0000b${k.toString(16).padStart(2, '0')}`
+      const session = { ...r.session, name, ...(w.json?.mode === 'resume' ? { target: w.json.sessionId } : {}) }
+      st.panes = [...st.panes, { ...session, state: 'idle', title: '', stateSince: Date.now(), ask: '' }]
+      return { status: 201, body: { ...r, name, session } }
     }
     if (w.method === 'POST' && w.path.startsWith('/api/hosts/thor/upload')) {
       st.uploads += 1
@@ -160,6 +169,9 @@ export function deskBackend(page) {
   /** The API answering an empty list (what it does when tmux is slow to reply): every read, or the next one only. */
   st.empty = false
   st.emptyOnce = false
+  /** The session board (its rows can be added to before the page loads), and the cap on open panes (null: none). */
+  st.board = board
+  st.full = null
   return st
 }
 
@@ -948,6 +960,136 @@ function listTests() {
   }]
 }
 
+// closed, not marked done: board rows nothing runs (one per area order case), and the rows that must stay out
+const CL = {
+  work: '0e2e0000-0000-4000-8000-0000000000c1',
+  trip: '0e2e0000-0000-4000-8000-0000000000c2',
+  lamp: '0e2e0000-0000-4000-8000-0000000000c3',
+  done: '0e2e0000-0000-4000-8000-0000000000c4',
+  away: '0e2e0000-0000-4000-8000-0000000000c5',
+}
+function addClosed(st) {
+  const now = Date.now()
+  const row = (sessionId, title, area, ago, o = {}) => ({
+    sessionId, title, titleFromClaude: true, project: 'e2e-folder', area, launchGroup: null, host: o.host ?? 'thor', cwd: o.cwd ?? null,
+    lastActivityUtc: iso(now - ago), bytes: 1000, live: false, onDesk: false, activity: 'closed', disposition: o.done ? 'done' : 'open', resumeCommand: null,
+  })
+  st.board.sessions.push(
+    row(CL.work, 'Quarterly license review', 'work', 2 * 3_600_000, { cwd: 'C:\\Users\\e2e\\Clients\\Acme Corporation' }),
+    row(CL.trip, 'Trip packing list', 'personal', 30 * 60_000),
+    row(CL.lamp, 'Desk lamp wiring', 'personal', 5 * 3_600_000),
+    row(CL.done, 'Finished and marked done', 'personal', 60_000, { done: true }),
+    row(CL.away, 'On another host', 'personal', 60_000, { host: 'mimir' }),
+  )
+  // a closed board row whose conversation a pane holds: the pane's tab is where it lives
+  st.board.sessions = st.board.sessions.map((r) => (r.sessionId === SID.p1 ? { ...r, live: false, activity: 'closed' } : r))
+}
+
+/** The closed section of the open "Sessions" list: its count, Recover all, each area's rows. */
+const closedList = (page) => page.eval(() => {
+  const sec = document.querySelector('.dk-list .dk-closed')
+  if (!sec) return null
+  return {
+    n: sec.querySelector('.dk-closed-head .dk-n')?.textContent ?? '',
+    all: sec.querySelector('.dk-recover')?.textContent.trim() ?? null,
+    quiet: sec.querySelector('.dk-quiet-row')?.textContent ?? '',
+    groups: [...sec.querySelectorAll('.dk-cg')].map((g) => ({
+      area: g.querySelector('.dk-tsec-k')?.textContent ?? '',
+      rows: [...g.querySelectorAll('.dk-crow')].map((r) => r.querySelector('.dk-row-t')?.textContent ?? ''),
+    })),
+  }
+})
+const toastSays = (page, re, message) => until(page, (src) => [...document.querySelectorAll('.vl-toast-msg')].some((m) => new RegExp(src).test(m.textContent)), message, [re.source], 15_000)
+
+function closedTests() {
+  return [{
+    name: 'desk:closed:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 150_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      addClosed(st)
+      await page.goto('/m/desk')
+      await deskUp(page)
+      await t.step('"Sessions" lists the closed, not done sessions under the running ones, by area', async () => {
+        await tap(page, '.vl-page[data-active] .dk-list-btn')
+        await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-crow').length > 0, 'the list shows no closed sessions')
+        const c = await closedList(page)
+        t.check(c.n === '3' && c.all === 'Recover all', `the closed head reads ${JSON.stringify({ n: c.n, all: c.all })}`)
+        t.check(JSON.stringify(c.groups) === JSON.stringify([
+          { area: 'Work', rows: ['Quarterly license review'] },
+          { area: 'Personal', rows: ['Trip packing list', 'Desk lamp wiring'] },
+        ]), `the closed list reads ${JSON.stringify(c.groups)}: want by area, newest first, without the done one, the other host's or the one a pane holds`)
+        const last = await page.eval(() => {
+          const kids = [...document.querySelector('.dk-list').children]
+          return kids[kids.length - 1]?.classList.contains('dk-closed')
+        })
+        t.check(last, 'the closed section is not under the running ones')
+        await t.shot(page, 'closed')
+      })
+      await t.step('a pick resumes it in the focused pane', async () => {
+        await tap(page, { sel: '.dk-closed .dk-crow', text: /Trip packing list/ })
+        await until(page, () => !!document.querySelector('.dk-tab[data-name="vk-e2e0000a01"][data-focus]'), 'the resumed session did not take the focused pane')
+        await inView(page, ['vk-e2e0000a01'])
+        const body = st.opens[0]
+        t.check(body?.mode === 'resume' && body.sessionId === CL.trip && body.label === 'Trip packing list' && body.cols >= 40 && body.rows >= 12, `the resume sent ${JSON.stringify(body)}`)
+        t.check(!(await page.eval(() => !!document.querySelector('.dk-list'))), 'the list stayed open')
+      })
+      await t.step('Recover all stops at a full pane list and says so', async () => {
+        await tap(page, '.vl-page[data-active] .dk-list-btn')
+        await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-crow').length === 2, 'the resumed session is still listed as closed')
+        st.full = st.panes.length + 1
+        await tap(page, { sel: '.dk-closed .dk-recover', text: /Recover all/ })
+        await toastSays(page, /^Reopened 1 of 2: /, 'no word that the pane list was full')
+        t.check(st.opens.length === 2 && st.opens[1].sessionId === CL.work, `the opens: ${JSON.stringify(st.opens.map((o) => o.sessionId))}, want the newest first`)
+        const c = await closedList(page)
+        t.check(c.n === '1' && c.groups[0]?.rows.join() === 'Desk lamp wiring', `after a full list the closed list reads ${JSON.stringify(c)}`)
+      })
+      await t.step('Recover all reopens the rest as tabs and leaves the grid alone', async () => {
+        st.full = null
+        await tap(page, { sel: '.dk-closed .dk-recover', text: /Recover all/ })
+        await toastSays(page, /^Reopened 1 session as tabs$/, 'no word that Recover all finished')
+        t.check(st.opens.length === 3 && st.opens[2].sessionId === CL.lamp && st.opens.every((o) => o.mode === 'resume'), `the opens: ${JSON.stringify(st.opens)}`)
+        const c = await closedList(page)
+        t.check(c.n === '0' && c.all === null && /marked done/.test(c.quiet), `the emptied closed list reads ${JSON.stringify(c)}`)
+        await page.eval(() => document.querySelector('.dk-scrim')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+        await deskUp(page, N + 3)
+        const d = await page.eval(desk)
+        t.check(['vk-e2e0000a01', 'vk-e2e0000b02', 'vk-e2e0000b03'].every((n) => tabNames(d).includes(n)), `the tabs read ${JSON.stringify(tabNames(d))}`)
+        t.check(viewNames(d).join() === 'vk-e2e0000a01', `Recover all changed the grid to ${JSON.stringify(viewNames(d))}`)
+        t.check(!st.kills.length, `a kill went out: ${JSON.stringify(st.kills)}`)
+      })
+    },
+  }, {
+    name: 'desk:closed:phone',
+    group: 'desk',
+    device: 'phone',
+    timeout: 120_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      st.panes = []
+      addClosed(st)
+      await page.goto('/m/desk')
+      // no pane holds the closed board row of p1 here, so it counts too
+      await until(page, () => /Recover all 4/.test(document.querySelector('.vl-page[data-active] .dk-empty .dk-recover-all')?.textContent ?? ''),
+        'the empty Desk offers no Recover all 4', [], 30_000)
+      await t.shot(page, 'empty')
+      await tap(page, '.vl-page[data-active] .dk-empty .dk-recover-all')
+      await toastSays(page, /^Reopened 4 sessions as tabs$/, 'no word that Recover all finished')
+      const want = [SID.p1, CL.trip, CL.work, CL.lamp]
+      t.check(st.opens.map((o) => o.sessionId).join() === want.join(), `the opens: ${JSON.stringify(st.opens.map((o) => o.sessionId))}, want newest first ${JSON.stringify(want)}`)
+      await deskUp(page, 4)
+      const d = await page.eval(desk)
+      t.check(viewNames(d).length === 1, `the phone shows ${JSON.stringify(viewNames(d))}, want one session`)
+    },
+  }]
+}
+
 function touchTests() {
   return [{
     name: 'desk:menu:ipadland',
@@ -1031,5 +1173,5 @@ function phoneTests() {
 }
 
 export function deskTests() {
-  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...touchTests(), ...phoneTests()]
+  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests()]
 }

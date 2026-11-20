@@ -9,7 +9,7 @@ import { BASE_AREAS, PROJ_KEYS, fetchProjList, isClientArea, projAreasQuery } fr
 import { useProfile } from '../../lib/deviceMode'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { errText } from '../../lib/term'
-import { ago, useLaunchTargets, useSessionIndex, useTick, type TargetVM } from '../kit/data'
+import { ago, useLaunchTargets, useSessionIndex, useTick, type SessionBrief, type TargetVM } from '../kit/data'
 import {
   MAX_VIEW, deskLayout, doneAt, editLayout, notePlaced, onDesk, paneState, setDeskInView, syncLayout, unseenDone, useDeskPanes, useDeskStore,
 } from '../kit/desk'
@@ -31,6 +31,9 @@ import './desk.css'
 // session finished while it was out of view (kit/desk.ts), so a glance tells
 // still working, finished, and finished with a question for him. "Sessions"
 // at the strip's start lists them all by area and project; "+" starts one.
+// Under the running ones it lists the sessions closed and not marked done
+// (AI > Sessions' Recent, thor's only): a pick resumes one in the focused pane,
+// and "Recover all" resumes every one of them as a tab.
 //
 // Under it, the grid: one session fills the Desk at first. On a desktop he
 // drags a tab (or a pane's title) onto a pane: its middle puts it in that
@@ -57,6 +60,15 @@ const PANE_MIME = 'application/x-valkyrie-pane'
 const HEAD_H = 26
 /** px between panes (desk.css --dk-gap) */
 const GAP = 6
+/** the machine a closed session can resume on inside Valkyrie */
+const HOME_HOST = 'thor'
+/** ms between two resumes of Recover all: each is an SSH login to thor, and sshd drops logins that pile up */
+const RECOVER_GAP = 700
+/** ms a resumed session stays out of the closed list while the board catches up */
+const REOPEN_GRACE = 15_000
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const statusOf = (e: unknown) => (e as { response?: { status?: number } } | null)?.response?.status
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 
@@ -129,6 +141,10 @@ function usePageVisible(): boolean {
 type PaneMeta = { title: string; area: string; project: string; folder: string; where: string }
 
 type Menu = { name: string; x: number; arm: boolean }
+
+/** The closed, not done sessions of one area, newest first. */
+type ClosedGroup = { area: string; rows: SessionBrief[] }
+type Recover = { done: number; total: number }
 
 export default function Desk({ active }: ScreenProps) {
   const qc = useQueryClient()
@@ -218,6 +234,34 @@ export default function Desk({ active }: ScreenProps) {
 
   const tabs = useMemo(() => sortPanes(onDesk(list)), [sortPanes, list, L.off]) // eslint-disable-line react-hooks/exhaustive-deps
   const tabNames = new Set(tabs.map((s) => s.name))
+
+  // ---------- closed, not marked done: on thor, nothing runs it, no pane holds it ----------
+
+  // ids being resumed right now, and ids resumed a moment ago (the board still reads them closed)
+  const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
+  const [reopened, setReopened] = useState<ReadonlyMap<string, number>>(new Map())
+  const [recover, setRecover] = useState<Recover | null>(null)
+  const recovering = useRef(false)
+  const held = useMemo(() => new Set(list.filter((t) => !t.dead).map(paneSid).filter(Boolean)), [list])
+  const closed = useMemo(() => {
+    // a resume counts until a board read from REOPEN_GRACE after it says otherwise
+    const fresh = (id: string) => (reopened.get(id) ?? -Infinity) + REOPEN_GRACE > index.at
+    const out: SessionBrief[] = []
+    for (const s of index.byId.values()) {
+      if (!s.done && !s.live && s.activity === 'closed' && s.host === HOME_HOST && !held.has(s.id) && !fresh(s.id)) out.push(s)
+    }
+    return out.sort((a, b) => b.last - a.last)
+  }, [index.byId, index.at, held, reopened])
+  const closedGroups = useMemo(() => {
+    const by = new Map<string, SessionBrief[]>()
+    for (const s of closed) {
+      const a = s.area && s.area !== 'other' ? s.area : ''
+      const rows = by.get(a)
+      if (rows) rows.push(s)
+      else by.set(a, [s])
+    }
+    return [...by].map(([area, rows]): ClosedGroup => ({ area, rows })).sort((a, b) => rankOf(a.area) - rankOf(b.area))
+  }, [closed, rankOf])
 
   // the grid: the panes he placed that are still on the Desk; before he placed any, the first tab fills it
   const placedView = L.view.filter((n) => tabNames.has(n))
@@ -437,6 +481,75 @@ export default function Desk({ active }: ScreenProps) {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Resumes a closed session in a new pane on odin; the pane's name, '' when the API named none. */
+  const reopen = async (s: SessionBrief): Promise<string> => {
+    setOpening((o) => new Set(o).add(s.id))
+    try {
+      const r = await openTermSession({ mode: 'resume', sessionId: s.id, label: s.title || undefined, ...gridFor() })
+      seedTerminal(qc, r)
+      setReopened((m) => new Map(m).set(s.id, Date.now()))
+      if (r.name) notePlaced(r.name)
+      return r.name
+    } finally {
+      setOpening((o) => {
+        const next = new Set(o)
+        next.delete(s.id)
+        return next
+      })
+    }
+  }
+
+  /** One closed session, picked from the list: it resumes in the focused pane. */
+  const recoverOne = async (s: SessionBrief) => {
+    if (opening.has(s.id) || recovering.current) return
+    try {
+      const name = await reopen(s)
+      setListOpen(false)
+      if (name) openTab(name)
+    } catch (e) {
+      toast(`Could not reopen ${s.title || 'the session'}: ${errText(e)}`, { ms: 5000 })
+    }
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
+  }
+
+  /**
+   * Recover all: every closed, not done session comes back as a tab, newest
+   * first, one at a time. The grid stays as it is. One failure does not stop
+   * the rest; a full pane list (409) does.
+   */
+  const recoverAll = async () => {
+    const rows = closed.filter((s) => !opening.has(s.id))
+    if (recovering.current || !rows.length) return
+    recovering.current = true
+    setRecover({ done: 0, total: rows.length })
+    let opened = 0
+    let failed = 0
+    let error: unknown = null
+    let full = false
+    for (const [i, s] of rows.entries()) {
+      try {
+        if (await reopen(s)) opened += 1
+      } catch (e) {
+        if (statusOf(e) === 409) {
+          full = true
+          break
+        }
+        failed += 1
+        error ??= e
+      }
+      setRecover((r) => r && { ...r, done: r.done + 1 })
+      if (i < rows.length - 1) await sleep(RECOVER_GAP)
+    }
+    recovering.current = false
+    setRecover(null)
+    void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
+    void qc.invalidateQueries({ queryKey: ['sessionList'] })
+    const total = rows.length
+    if (full) toast(`Reopened ${opened} of ${total}: Valkyrie has no room for more terminals. Close some, then Recover all again.`, { ms: 7000 })
+    else if (failed) toast(`${failed} of ${total} did not reopen: ${errText(error)}`, { ms: 6000 })
+    else toast(`Reopened ${opened} ${opened === 1 ? 'session' : 'sessions'} as tabs`)
   }
 
   // ---------- keys: here, and handed up by a terminal (DeskHost.key) ----------
@@ -752,6 +865,12 @@ export default function Desk({ active }: ScreenProps) {
               <Icon name="add" size={14} tone="fg" glow />
               <span>{list.length ? 'Put one back' : 'New session'}</span>
             </Press>
+            {(closed.length > 0 || recover) && (
+              <Press className="dk-start dk-recover-all" disabled={!!recover} onPress={() => void recoverAll()}>
+                <Icon name="refresh" size={14} tone="fg" glow className={recover ? 'vl-pulse' : undefined} />
+                <span>{recover ? `Recovering ${recover.done}/${recover.total}` : `Recover all ${closed.length}`}</span>
+              </Press>
+            )}
           </div>
         )}
 
@@ -762,7 +881,15 @@ export default function Desk({ active }: ScreenProps) {
             view={view}
             off={L.off}
             focus={focus}
+            closed={closedGroups}
+            closedN={closed.length}
+            closedReady={index.ready}
+            opening={opening}
+            recover={recover}
+            now={now}
             onPick={(name) => { setListOpen(false); place(name) }}
+            onReopen={(s) => void recoverOne(s)}
+            onRecoverAll={() => void recoverAll()}
             onClose={() => setListOpen(false)}
           />
         )}
@@ -920,17 +1047,67 @@ function TabMenu({ title, live, beside, x, arm, onBeside, onCloseTab, onStop, on
   )
 }
 
-// ---------- "Sessions": every running pane by area, then project ----------
+// ---------- "Sessions": every running pane by area, then project; then the closed, not done ones ----------
 
-function SessionList({ groups, meta, view, off, focus, onPick, onClose }: {
+function SessionList({
+  groups, meta, view, off, focus, closed, closedN, closedReady, opening, recover, now, onPick, onReopen, onRecoverAll, onClose,
+}: {
   groups: { area: string; projects: { project: string; rows: TermSession[] }[] }[]
   meta: (s: TermSession) => PaneMeta
   view: string[]
   off: string[]
   focus: string | null
+  closed: ClosedGroup[]
+  closedN: number
+  /** the board has been read this page load */
+  closedReady: boolean
+  /** ids being resumed */
+  opening: ReadonlySet<string>
+  recover: Recover | null
+  now: number
   onPick: (name: string) => void
+  onReopen: (s: SessionBrief) => void
+  onRecoverAll: () => void
   onClose: () => void
 }) {
+  const closedPart = (
+    <section className="dk-closed" aria-label="Closed, not done">
+      <div className="dk-closed-head">
+        <h3 className="dk-k">Closed, not done <span className="dk-n">{closedN}</span></h3>
+        {(closedN > 0 || recover) && (
+          <Press
+            className="dk-recover"
+            disabled={!!recover}
+            title={`Reopen all ${closedN} as tabs on the Desk`}
+            onPress={onRecoverAll}
+          >
+            <Icon name="refresh" size={12} tone="fg" className={recover ? 'vl-pulse' : undefined} />
+            {recover ? `Recovering ${recover.done}/${recover.total}` : 'Recover all'}
+          </Press>
+        )}
+      </div>
+      {!closedReady && <p className="dk-quiet-row">Reading the closed sessions</p>}
+      {closedReady && !closedN && <p className="dk-quiet-row">Every closed session is marked done.</p>}
+      {closed.map((g) => (
+        <div key={g.area || '-'} className="dk-cg">
+          <div className="dk-tsec-k">{areaName(g.area)}</div>
+          <div className="dk-rows">
+            {g.rows.map((s) => {
+              const busy = opening.has(s.id)
+              return (
+                <Press key={s.id} className="dk-row dk-crow" disabled={busy || !!recover} title={s.cwd ?? undefined} onPress={() => onReopen(s)}>
+                  <StateIcon a="closed" size={14} />
+                  <span className="dk-row-t">{s.title || 'Untitled session'}</span>
+                  {s.cwd && <span className="dk-row-f">{shortFolder(s.cwd)}</span>}
+                  <span className="dk-row-s">{busy ? 'opening' : s.last ? ago(s.last, now) : ''}</span>
+                </Press>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
   return (
     <>
       <div className="dk-scrim" onPointerDown={onClose} />
@@ -962,6 +1139,7 @@ function SessionList({ groups, meta, view, off, focus, onPick, onClose }: {
             ))}
           </section>
         ))}
+        {closedPart}
       </div>
     </>
   )

@@ -240,6 +240,37 @@
 }
 .dk-lp + .dk-lp { margin-top: 6px; }
 .dk-row[data-on] .dk-row-t { color: var(--fg); }
+/* under the running ones: the sessions closed and not marked done, and Recover all */
+.dk-closed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.dk-closed-head .dk-k { margin: 0; border-bottom: 0; }
+.dk-recover {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 2px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+}
+.dk[data-coarse] .dk-recover { min-height: 44px; }
+.dk-recover:disabled { opacity: .7; }
+.dk-cg + .dk-cg { margin-top: 6px; }
+.dk-crow .dk-row-t { color: var(--text); }
+.dk-crow .dk-row-s { font-weight: 600; letter-spacing: .04em; text-transform: none; }
+.dk-crow:disabled { opacity: .55; }
+.dk-recover-all:disabled { opacity: .7; }
 .dk-row-f { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--dim); }
 
 /* the tab menu: a short list under the tab; a press outside closes it */
@@ -309,6 +340,8 @@
   .dk-pick-x:hover { color: var(--fg); }
   .dk-chip:not(:disabled):hover { color: var(--fg); border-bottom-color: var(--fg); }
   .dk-row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+  .dk-row:disabled:hover { background: none; }
+  .dk-recover:not(:disabled):hover { text-decoration: underline; text-underline-offset: 4px; }
 }
 
 /* ---------- the badge on the Desk tab: tabs done and not opened yet (the Messages badge's look) ---------- */

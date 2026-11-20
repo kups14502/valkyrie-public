@@ -69,7 +69,9 @@ const REMOTE_SCRIPT = process.env.THOR_REMOTE_SCRIPT || 'C:/Thor/tools/session-b
 
 export const remoteLabel = (): string => `${THOR_USER}@${THOR_HOST}`
 
-export const MAX_SESSIONS = 12
+// The Desk's Recover all reopens every closed, not done session at once (21 on
+// 2026-11-20, beside 7 open), so the cap sits well above a normal day's count.
+export const MAX_SESSIONS = 32
 // Session names are minted here and are the only name a client may hand back,
 // so they are deliberately boring. Anything else on this socket is neither
 // listed nor attachable through the API.
