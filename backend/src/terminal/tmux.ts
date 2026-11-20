@@ -566,6 +566,48 @@ export async function capturePane(name: string, timeoutMs = 5_000): Promise<stri
   }
 }
 
+/**
+ * The screen as capturePane reads it, without its dim text. Claude Code draws
+ * the hint in an empty prompt (Try "fix typecheck errors") and its prompt
+ * suggestions dim, so a check for text typed in the prompt must not read them.
+ */
+export async function capturePaneUndimmed(name: string, timeoutMs = 5_000): Promise<string | null> {
+  if (!SESSION_NAME_RE.test(name)) return null
+  try {
+    return withoutDim(await tmux(['capture-pane', '-p', '-J', '-e', '-t', name], timeoutMs))
+  } catch {
+    return null
+  }
+}
+
+/** Text with its escape sequences removed, and with what an SGR made dim (2, until 22 or a reset) dropped. Newlines stay. */
+export function withoutDim(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  const re = /\x1b\[([0-9;:]*)m|\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g
+  let out = ''
+  let dim = false
+  let at = 0
+  const keep = (text: string) => { out += dim ? text.replace(/[^\n]/g, '') : text }
+  for (const m of s.matchAll(re)) {
+    keep(s.slice(at, m.index))
+    at = (m.index ?? 0) + m[0].length
+    if (m[1] === undefined) continue
+    const codes = m[1] === '' ? ['0'] : m[1].split(/[;:]/)
+    for (let i = 0; i < codes.length; i++) {
+      const c = Number(codes[i] || 0)
+      // an extended color's own numbers are not attributes
+      if (c === 38 || c === 48 || c === 58) {
+        i += codes[i + 1] === '5' ? 2 : codes[i + 1] === '2' ? 4 : 1
+        continue
+      }
+      if (c === 0 || c === 22) dim = false
+      else if (c === 2) dim = true
+    }
+  }
+  keep(s.slice(at))
+  return out
+}
+
 // True while the pane is in copy-mode (a swipe) or any other tmux mode. Keys
 // sent then go to the mode instead of Claude, so such a pane is left alone.
 export async function paneInMode(name: string): Promise<boolean> {

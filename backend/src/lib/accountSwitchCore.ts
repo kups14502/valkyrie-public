@@ -431,7 +431,12 @@ const TAIL_SKIP_RE = /^(?:\s*$|\s*[✻✶✳✢✽·*] |\s*Continuing automatica
 //   3. the session stopped on an account limit: the armed banner is under the
 //      prompt, or the last message above the prompt is the limit line.
 export function paneLimitState(screen: string): PaneVerdict {
-  const lines = String(screen ?? '').replace(/\r/g, '').split('\n').map((l) => l.replace(/\s+$/, ''))
+  const lines = String(screen ?? '').replace(/\r/g, '').split('\n')
+    // capture-pane -J joins a line as wide as the pane to the next one, so a
+    // full-width rule comes back glued to the prompt line under it (or a full
+    // prompt line to the rule): split them apart again
+    .flatMap((l) => l.replace(/^(\s*─{8,})\s*(?=[^─\s])/, '$1\n').replace(/^(\s*[❯>].*?[^─\s])\s*(─{8,}\s*)$/, '$1\n$2').split('\n'))
+    .map((l) => l.replace(/\s+$/, ''))
   const no = (why: string, extra: Partial<PaneVerdict> = {}): PaneVerdict => ({
     limit: null, armed: false, promptFound: false, promptEmpty: false, nudge: false, why, ...extra,
   })

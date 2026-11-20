@@ -17,6 +17,7 @@ import {
   parseRateLimitHeaders, pausedMessage, pickTarget, switchMessage,
   type AccountView, type HostView, type Quota, type SwitchConfig,
 } from '../src/lib/accountSwitchCore.ts'
+import { withoutDim } from '../src/terminal/tmux.ts'
 
 let passed = 0
 const failures: string[] = []
@@ -358,6 +359,31 @@ test('pane: text in the prompt is never submitted', () => {
   assert.equal(paneLimitState(MULTILINE).nudge, false)
 })
 test('pane: a cancelled wait is left alone', () => assert.equal(paneLimitState(CANCELLED).nudge, false))
+// Captured 11-20 (2.1.322, a 120-column pane): capture-pane -J glues the full-width rule over the input box
+// to the prompt line, and the empty prompt shows a dim hint. Raven read that as no prompt at all, then as typed text.
+const W = 120
+const ESC = '\x1b'
+const GLUED = [
+  ' ▐▛███▛█   Claude Code v2.1.322', '▝▜██████▀  Opus 5.5 with xhigh effort · Claude Ultra', ' ▝▝   ▝▝   C:\\Thor', ' '.repeat(W),
+  `${ESC}[38;2;22;133;126m${'─'.repeat(W)}${ESC}[39m>\u00a0${ESC}[2mTry "fix typecheck errors"`,
+  `${ESC}[0m${ESC}[38;2;22;133;126m${'─'.repeat(W)}`,
+  `${ESC}[39m  ${ESC}[1mOpus 5.5${ESC}[0m C:\\Thor | eff xhigh`,
+  '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 5 agents',
+].join('\n')
+test('pane: a rule glued to the prompt still finds the prompt; its dim hint is not typed text', () => {
+  const v = paneLimitState(withoutDim(GLUED))
+  assert.equal(v.promptFound, true)
+  assert.equal(v.promptEmpty, true)
+  // read with the hint, the prompt holds text
+  assert.equal(paneLimitState(withoutDim(GLUED.replace(`${ESC}[2mTry`, 'Try'))).promptEmpty, false)
+  // a full prompt line glued to the rule under it
+  const full = paneLimitState(['x', RULE, '❯ ' + 'a'.repeat(148) + RULE, ...FOOT].join('\n'))
+  assert.equal(full.promptFound, true)
+  assert.equal(full.promptEmpty, false)
+})
+test('pane: withoutDim drops dim text only, and keeps lines', () => {
+  assert.equal(withoutDim(`a${ESC}[2mb${ESC}[22mc\n${ESC}[38;2;2;2;2md${ESC}[2;31me${ESC}[0mf`), 'ac\ndf')
+})
 test('pane: idle and moved-on sessions are left alone', () => {
   assert.equal(paneLimitState(IDLE).nudge, false)
   assert.equal(paneLimitState(IDLE).promptFound, true)

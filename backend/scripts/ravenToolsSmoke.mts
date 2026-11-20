@@ -236,6 +236,10 @@ const board = [
 ]
 let boardUp = true
 let targetsUp = true
+async function fakeCapture(p: string): Promise<string | null> {
+  const list = screensBy.get(p) ?? [IDLE]
+  return list.length > 1 ? list.shift()! : list[0]
+}
 const fakeIo = {
   listPanes: async () => panes.filter((p) => states.get(p.name) !== 'gone').map((p) => ({ ...p, activityAt: clock, dead: states.get(p.name) === 'dead' })),
   createPane: async (o: Record<string, unknown>) => {
@@ -245,10 +249,9 @@ const fakeIo = {
     screensBy.set(name, ['', '', IDLE])
     return name
   },
-  capture: async (p: string) => {
-    const list = screensBy.get(p) ?? [IDLE]
-    return list.length > 1 ? list.shift()! : list[0]
-  },
+  capture: async (p: string) => fakeCapture(p),
+  // the fake screens carry no colors: the read without dim text is the same read
+  capturePrompt: async (p: string) => fakeCapture(p),
   typeLine: async (p: string, text: string) => { typed.push({ pane: p, text }) },
   killPane: async (p: string) => { killed.push(p); states.set(p, 'gone'); return true },
   paneInMode: async () => false,

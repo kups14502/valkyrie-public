@@ -195,7 +195,7 @@ async function waitForPrompt(pane: string): Promise<'ready' | 'dead' | 'timeout'
   for (;;) {
     const state = await io.paneState(pane)
     if (state === 'dead' || state === 'gone') return 'dead'
-    const screen = await io.capture(pane)
+    const screen = await io.capturePrompt(pane)
     if (screen && paneLimitState(screen).promptFound) return 'ready'
     if (io.now() >= until) return 'timeout'
     await io.sleep(1_000)
@@ -207,7 +207,7 @@ async function readyToType(p: TermSession): Promise<void> {
   if (p.dead) throw new RavenToolError(`${p.label} (${p.name}) has ended; start a new one`)
   if (p.mode === 'shell') throw new RavenToolError(`${p.label} (${p.name}) is a shell, not a Claude session; Raven types only into Claude`)
   if (await io.paneInMode(p.name)) await io.leaveMode(p.name)
-  const v = paneLimitState((await io.capture(p.name)) ?? '')
+  const v = paneLimitState((await io.capturePrompt(p.name)) ?? '')
   if (!v.promptFound) throw new RavenToolError(`${p.label} is not at Claude's prompt: a question, a permission prompt or a menu is open. Brendon can answer it at /m/ai/term/${p.name}. Nothing was typed.`)
   if (!v.promptEmpty) throw new RavenToolError(`${p.label} has text typed in its prompt, so Brendon is typing there. Nothing was typed.`)
 }

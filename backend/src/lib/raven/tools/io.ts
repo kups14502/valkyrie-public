@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import {
-  capturePane, createSession, endScroll, killSession, listSessions, paneFacts, paneInMode, typeLine, serverUp,
+  capturePane, capturePaneUndimmed, createSession, endScroll, killSession, listSessions, paneFacts, paneInMode, typeLine, serverUp,
   type CreateOpts, type TermSession,
 } from '../../../terminal/tmux.js'
 import { pageFrom, paneTranscript, readerFor } from '../../../terminal/transcriptFeed.js'
@@ -21,6 +21,8 @@ export type RavenToolsIo = {
   listPanes: () => Promise<TermSession[]>
   createPane: (o: CreateOpts) => Promise<string>
   capture: (pane: string) => Promise<string | null>
+  /** the screen without its dim text (the empty prompt's hint), for the checks before typing */
+  capturePrompt: (pane: string) => Promise<string | null>
   typeLine: (pane: string, text: string) => Promise<void>
   killPane: (pane: string) => Promise<boolean>
   paneInMode: (pane: string) => Promise<boolean>
@@ -57,6 +59,7 @@ const real: RavenToolsIo = {
   listPanes: listSessions,
   createPane: createSession,
   capture: capturePane,
+  capturePrompt: capturePaneUndimmed,
   typeLine,
   killPane: killSession,
   paneInMode,

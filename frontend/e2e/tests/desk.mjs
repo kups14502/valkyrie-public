@@ -696,6 +696,75 @@ function keyTests() {
   }]
 }
 
+/**
+ * A real mouse drag, the browser deciding whether it starts: the mouse goes down on the source and
+ * moves; Chrome hands the drag it started to the test (Input.setInterceptDrags), which carries it to
+ * `to` with the browser's own drag events. null when no drag started.
+ */
+async function realDrag(page, from, to) {
+  await page.send('Input.setInterceptDrags', { enabled: true })
+  let data = null
+  const off = page.on((m) => { if (m.method === 'Input.dragIntercepted') data = m.params.data })
+  try {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y })
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 })
+    for (let i = 1; i <= 10 && !data; i++) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + 4 * i, y: from.y + 4 * i, button: 'left', buttons: 1 })
+      await sleep(80)
+    }
+    if (!data) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: from.x, y: from.y, button: 'left', clickCount: 1 })
+      return null
+    }
+    // the drop targets go up over the terminals once the drag is on
+    await sleep(300)
+    for (const type of ['dragEnter', 'dragOver']) await page.send('Input.dispatchDragEvent', { type, x: to.x, y: to.y, data })
+    await sleep(200)
+    await page.send('Input.dispatchDragEvent', { type: 'dragOver', x: to.x, y: to.y, data })
+    await sleep(200)
+    await page.send('Input.dispatchDragEvent', { type: 'drop', x: to.x, y: to.y, data })
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1 })
+    return data
+  } finally {
+    off()
+    await page.send('Input.setInterceptDrags', { enabled: false }).catch(() => {})
+  }
+}
+
+function realDragTests() {
+  return [{
+    name: 'desk:realdrag:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 120_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      deskBackend(page)
+      await page.goto('/m/desk')
+      await deskUp(page)
+      const box = (sel) => page.eval((s) => {
+        const r = document.querySelector(s)?.getBoundingClientRect()
+        return r ? { l: r.left, t: r.top, w: r.width, h: r.height } : null
+      }, sel)
+      await t.step('a mouse drags a tab by its title onto the pane\'s right edge: the Desk splits', async () => {
+        const tab = await box(`.vl-page[data-active] .dk-tab[data-name="${P.p1}"] .dk-tab-t`)
+        const pane = await box(`.vl-page[data-active] .dk-pane[data-name="${P.w1}"]`)
+        const data = await realDrag(page, { x: tab.l + tab.w / 2, y: tab.t + tab.h / 2 }, { x: pane.l + pane.w * 0.93, y: pane.t + pane.h / 2 })
+        t.check(!!data, 'the browser started no drag from the tab')
+        await inView(page, [P.w1, P.p1])
+      })
+      await t.step('a pane\'s title row dragged onto the other pane\'s middle swaps them', async () => {
+        const head = await box(`.vl-page[data-active] .dk-pane[data-name="${P.p1}"] .dk-head-t`)
+        const pane = await box(`.vl-page[data-active] .dk-pane[data-name="${P.w1}"]`)
+        const data = await realDrag(page, { x: head.l + head.w / 2, y: head.t + head.h / 2 }, { x: pane.l + pane.w / 2, y: pane.t + pane.h / 2 })
+        t.check(!!data, 'the browser started no drag from the title row')
+        await inView(page, [P.p1, P.w1])
+      })
+    },
+  }]
+}
+
 function gridTests() {
   return [{
     name: 'desk:grid:desktop',
@@ -962,5 +1031,5 @@ function phoneTests() {
 }
 
 export function deskTests() {
-  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...closeTests(), ...listTests(), ...touchTests(), ...phoneTests()]
+  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...touchTests(), ...phoneTests()]
 }

@@ -125,6 +125,8 @@ async function openAppWindow(t: DetachTarget, path: string): Promise<void> {
       // hidden until the page mounts (main.tsx shows every app window then), so a load never flashes white
       visible: false,
       backgroundColor: '#000000',
+      // the page's own drag and drop (the Desk's tabs, files onto Raven): WebView2 on Windows hands every drag to Tauri's file drop otherwise
+      dragDropEnabled: false,
     })
     void w.once('tauri://created', () => {
       creating.delete(label)
