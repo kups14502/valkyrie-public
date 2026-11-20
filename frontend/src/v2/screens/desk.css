@@ -1,9 +1,8 @@
 /* The Desk (Desk.tsx) at /m/desk inside the v2 shell's .vl-page. It fills the page instead of
-   scrolling it: a strip of text tabs per column on top (no boxes, a thin underline under the
-   active tab, the AI > Sessions state marks), then the active tabs' terminals side by side. The
-   terminals are one layer of iframes placed per column (--c of --n, --dk-gap apart), so moving a
-   tab or changing the column count never reloads one; the per-column cells above them hold the
-   empty lines, the tab menu and "+". */
+   scrolling it: one strip of text tabs on top (no boxes, a thin underline under the tabs in the
+   grid, the AI > Sessions state marks), then the grid of terminals. The terminals are one layer
+   of iframes placed by inline style (Desk.tsx boxStyle), so a layout change never reloads one;
+   each pane's frame and title row, and the drop targets while a drag is on, lie over them. */
 
 .dk {
   --dk-strip-h: 34px;
@@ -15,33 +14,34 @@
 }
 .dk[data-coarse] { --dk-strip-h: 44px; }
 
-/* one column's share of a row --dk-gap apart, and its left edge */
-.dk-frame, .dk-cell {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: calc((100% - (var(--n) - 1) * var(--dk-gap)) / var(--n));
-  left: calc(((100% - (var(--n) - 1) * var(--dk-gap)) / var(--n) + var(--dk-gap)) * var(--c));
-}
+/* ---------- the strip: "Sessions", the tabs, "+" ---------- */
 
-/* ---------- the tab strips ---------- */
-
-.dk-strips {
-  flex: none;
-  display: grid;
-  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
-  gap: var(--dk-gap);
-}
-.dk-strip {
+.dk-bar {
   position: relative;
+  flex: none;
   display: flex;
   align-items: stretch;
   min-width: 0;
-  /* the tabs get the whole height; the hairline sits under them */
   height: calc(var(--dk-strip-h) + 1px);
   border-bottom: 1px solid var(--line);
 }
-.dk-strip[data-drop] { border-bottom-color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+/* a pane's title dragged here leaves the grid */
+.dk-bar[data-drop] { border-bottom-color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.dk-list-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 2px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-right: 1px solid var(--line);
+}
+.dk-list-btn[aria-expanded='true'] { color: var(--fg); text-shadow: var(--text-glow); }
 /* the tabs: a row that scrolls sideways when they do not fit, "+" right after it */
 .dk-tabs {
   /* the tabs' offsetParent, so their offsets are in the row's own (scrolled) space */
@@ -68,7 +68,18 @@
   max-width: 240px;
 }
 .dk[data-coarse] .dk-tab { flex-shrink: 0; max-width: 210px; }
-/* the active tab: a thin underline over the strip's hairline, lit in the column that has the keys */
+/* where the area changes: a quiet line */
+.dk-tab[data-split] { margin-left: 7px; padding-left: 7px; }
+.dk-tab[data-split]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--line-strong);
+}
+/* in the grid: a thin underline over the strip's hairline, lit on the pane with the keyboard */
 .dk-tab[data-on]::after {
   content: '';
   position: absolute;
@@ -78,8 +89,8 @@
   height: 1px;
   background: var(--line-strong);
 }
-.dk-strip[data-focus] .dk-tab[data-on]::after,
-.dk[data-cols='1'] .dk-tab[data-on]::after { background: var(--fg); box-shadow: 0 0 6px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent); }
+.dk-tab[data-split][data-on]::after { left: 11px; }
+.dk-tab[data-focus]::after { background: var(--fg); box-shadow: 0 0 6px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent); }
 
 .dk-tab-main {
   flex: 1;
@@ -93,7 +104,7 @@
   text-align: left;
 }
 .dk-tab-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* the mark carries the state; the title is quiet, brighter on the active tab, and lit only for a finish not seen yet */
+/* the mark carries the state; the title is quiet, brighter in the grid, and lit only for a finish not seen yet */
 .dk-tab[data-on] .dk-tab-main { color: var(--text); }
 /* finished while out of view: the title lights until he opens it */
 .dk-tab[data-lit] .dk-tab-main { color: var(--fg); font-weight: 700; text-shadow: var(--text-glow); }
@@ -102,7 +113,7 @@
 .dk-mark { width: 18px; height: 18px; }
 .dk-tab-main[data-pressed] { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 
-/* close: on the active tab and under the mouse */
+/* close: on the focused tab and under the mouse */
 .dk-tab-x {
   flex: none;
   display: grid;
@@ -112,10 +123,10 @@
   pointer-events: none;
 }
 .dk[data-coarse] .dk-tab-x { width: 34px; }
-/* a touch screen has no hover: only the active tab keeps room for its x, so more tabs fit the strip */
-.dk[data-coarse] .dk-tab:not([data-on]) .dk-tab-x { width: 0; overflow: hidden; }
-.dk[data-coarse] .dk-tab:not([data-on]) .dk-tab-main { padding-right: 10px; }
-.dk-tab[data-on] .dk-tab-x { opacity: 1; pointer-events: auto; }
+/* a touch screen has no hover: only the focused tab keeps room for its x, so more tabs fit the strip */
+.dk[data-coarse] .dk-tab:not([data-focus]) .dk-tab-x { width: 0; overflow: hidden; }
+.dk[data-coarse] .dk-tab:not([data-focus]) .dk-tab-main { padding-right: 10px; }
+.dk-tab[data-focus] .dk-tab-x { opacity: 1; pointer-events: auto; }
 .dk-tab-x[data-pressed] .vl-icon { color: var(--fg); }
 
 .dk-add {
@@ -126,33 +137,71 @@
 }
 .dk[data-coarse] .dk-add { width: 44px; }
 
-.dk-ncols { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; padding-left: 10px; }
-.dk-ncol { min-width: 18px; padding: 4px 3px; font-size: 11.5px; color: var(--dim); border-bottom: 1px solid transparent; }
-.dk[data-coarse] .dk-ncol { min-width: 34px; padding: 10px 6px; }
-.dk-ncol[data-on] { color: var(--fg); border-bottom-color: var(--fg); text-shadow: var(--text-glow); }
-
 @media (hover: hover) and (pointer: fine) {
   .dk-tab:hover .dk-tab-x { opacity: 1; pointer-events: auto; }
   .dk-tab:not([data-on]):not([data-lit]):hover .dk-tab-main { color: var(--text); }
   .dk-tab-x:hover .vl-icon { color: var(--fg); }
   .dk-add:hover .vl-icon { color: var(--fg); }
-  .dk-ncol:not([data-on]):hover { color: var(--text); }
+  .dk-list-btn:hover { color: var(--text); }
 }
 
-/* ---------- the stage: terminals, then the cells over them ---------- */
+/* ---------- the stage: terminals, each pane's frame and title, the drop targets ---------- */
 
 .dk-stage { position: relative; flex: 1; min-height: 0; margin-top: 6px; }
 .dk-frame {
+  position: absolute;
   z-index: 0;
-  height: 100%;
   border: 0;
   background: #000;
   visibility: hidden;
 }
 .dk-frame[data-on] { z-index: 1; visibility: visible; }
 
-.dk-cell { z-index: 2; pointer-events: none; }
-.dk-cell > * { pointer-events: auto; }
+/* a pane: a hairline frame (lit on the one with the keyboard when there are several) and its title row */
+.dk-pane {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border: 1px solid var(--line);
+}
+.dk-pane[data-focus] { border-color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.dk-head {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--dk-head-h);
+  padding: 0 4px 0 8px;
+  background: #000;
+  border-bottom: 1px solid var(--line);
+  cursor: default;
+}
+.dk-head[draggable='true'] { cursor: grab; }
+.dk-head-mark { flex: none; width: 16px; height: 16px; }
+.dk-head-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 700; color: var(--ink-hi); }
+.dk-pane[data-focus] .dk-head-t, .dk[data-n='1'] .dk-head-t { color: var(--fg); text-shadow: var(--text-glow); }
+.dk-head-f { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--dim); }
+.dk-head-x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-left: auto; opacity: .7; }
+@media (hover: hover) and (pointer: fine) {
+  .dk-head-x:hover { opacity: 1; }
+  .dk-head-x:hover .vl-icon { color: var(--fg); }
+}
+
+/* while a drag is on: a target over each pane, above its terminal; the half (or the whole) it would take lights */
+.dk-drop { position: absolute; z-index: 5; }
+.dk-drop-hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  border: 1px solid var(--fg);
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 35%), transparent);
+}
+.dk-drop-hint[data-zone='left'] { right: 50%; }
+.dk-drop-hint[data-zone='right'] { left: 50%; }
+.dk-drop-hint[data-zone='top'] { bottom: 50%; }
+.dk-drop-hint[data-zone='bottom'] { top: 50%; }
+
 .dk-quiet { margin: 18px 2px; font-size: 12.5px; color: var(--dim); }
 .dk-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 18px 2px; }
 .dk-empty p { margin: 0; font-size: 13px; color: var(--dim); }
@@ -170,6 +219,28 @@
   text-shadow: var(--text-glow);
   border-bottom: 1px solid transparent;
 }
+
+/* "Sessions": every running pane by area and project, under the strip's start */
+.dk-list {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  left: 0;
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 10px 12px 16px;
+  background: rgba(0, 0, 0, .97);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .85);
+}
+.dk-lp + .dk-lp { margin-top: 6px; }
+.dk-row[data-on] .dk-row-t { color: var(--fg); }
+.dk-row-f { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--dim); }
 
 /* the tab menu: a short list under the tab; a press outside closes it */
 .dk-scrim { position: absolute; inset: 0; }
@@ -191,7 +262,7 @@
 .dk-mi[data-arm] { font-weight: 700; }
 .dk-mi[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
 
-/* "+": the cell's own sheet */
+/* "+": a sheet over the whole stage */
 .dk-pick {
   position: absolute;
   inset: 0;
@@ -262,3 +333,9 @@
   /* the phone's tabs are icons: the count sits on the icon's corner */
   .vl-tab-prim .dk-badge { position: absolute; top: 5px; left: calc(50% + 5px); margin: 0; }
 }
+
+/* over the terminals (their layer is z 0 and 1): the menus, their scrims, the sheets */
+.dk-scrim { z-index: 7; }
+.dk-list, .dk-pick { z-index: 8; }
+.dk > .dk-scrim { z-index: 9; }
+.dk > .dk-menu { z-index: 10; top: calc(var(--dk-strip-h) + 4px); }

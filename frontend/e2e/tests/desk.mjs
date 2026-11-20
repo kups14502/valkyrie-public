@@ -1,27 +1,32 @@
 // DESK: the Desk tab (/m/desk, src/v2/screens/Desk.tsx and kit/desk.ts): Claude sessions in tabs
-// like Windows Terminal, one to three columns, over a FAKE pane list. Never a real pane: every
-// /api/terminal/sessions read is answered in the browser with made-up vk-e2e... names, so a tab's
-// terminal (the pop-out page in an iframe) never attaches (its socket is refused in the page),
-// and every write (a new session, a stop) is answered in the browser too.
+// like Windows Terminal, over a grid he builds by dragging, all over a FAKE pane list. Never a real
+// pane: every /api/terminal/sessions read is answered in the browser with made-up vk-e2e... names,
+// so a pane's terminal (the pop-out page in an iframe) never attaches (its socket is refused in the
+// page), and every write (a new session, a stop, an upload) is answered in the browser too.
 //
-//   layout   per device (phone, both iPads, 1600x900, 2560x1440 at 1.2): the column count, tabs per
-//            column by area (work areas first, the rest last), a mark per state (working the bolt,
+//   layout   per device (phone, both iPads, 1600x900, 2560x1440 at 1.2): one strip, the tabs sorted
+//            by area (the client area first, then personal and server, then the unknown) and then
+//            project, a quiet line where the area changes, a mark per state (working the bolt,
 //            asking the bubble, idle the pause circle, an ended pane faint, a shell none), the
-//            title from the pane or the board, the tooltip with area, state and the question,
-//            44 px tabs on a touch screen, nothing wider than the screen, no lights button
+//            title from the pane or the board, the tooltip, 44 px tabs on a touch screen, one
+//            session filling the stage, on a desktop under a title row (title and folder) and as
+//            the bare terminal (no composer, keys, activity column or bar), on a touch screen with
+//            the terminal page's own controls; nothing wider than the screen, no lights button
 //   done     a hidden tab going working to idle, and another working to asking, lights its title;
-//            opening it clears it; a whole run between two reads lights too; an empty list from
-//            the API keeps the layout; the badge counts them (asking tone) on the Desk and from another
-//            screen, survives a reload, and no terminal is mounted before the Desk is opened
-//   keys     Ctrl+Tab, Ctrl+Shift+Tab, Alt+N, Alt+Left/Right, Ctrl+Alt+D, from the Desk and from
-//            inside a tab's terminal (the framed page hands them up)
-//   move     the tab menu's Move right (mouse) and Move left (touch), a drag to the other strip,
-//            the place kept across a reload
-//   close    the x and a middle click take a tab off the Desk, "+" puts it back from Running
-//            sessions; Stop in the menu takes two presses and sends the kill
-//   new      "+" starts Claude in a launch target in that column, the new tab active there
-//   cols     the column control (1, 2, 3), kept across a reload
-//   phone    one strip that scrolls sideways, the active tab kept in view
+//            opening it clears it; a whole run between two reads lights too; an API restart and
+//            empty lists change nothing; the badge counts them (asking tone) from any screen
+//   keys     Ctrl+Tab, Ctrl+Shift+Tab, Alt+N, Alt+Left/Right between panes, Ctrl+Alt+D, from the
+//            Desk and from inside a terminal; inside a terminal Ctrl+V reaches the browser's paste
+//            (xterm would send ^V), Ctrl+C without a selection stays ^C, a pasted screenshot uploads
+//   grid     a tab dragged onto a pane's edge splits it, then 2 over 1, onto its middle takes its
+//            place; a pane's title dragged to the strip leaves the grid; the menu's Open beside;
+//            five panes make 3x3; the grid is kept across a reload
+//   close    the x and a middle click take a tab off the Desk, its pane filled by the next tab;
+//            "+" puts it back; Stop in the menu takes two presses and sends the kill
+//   new      "+" starts Claude in a launch target, in the focused pane
+//   list     "Sessions" lists every running pane by area, then project, and opens the one picked
+//   touch    a tap on the focused tab opens its menu (no Open beside), 44 px rows, a press outside closes it
+//   phone    one strip that scrolls sideways, the focused tab kept in view
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -33,9 +38,10 @@ const iso = (ms) => new Date(ms).toISOString()
 // made-up pane names in the real shape (vk- and 10 hex characters)
 const P = {
   w1: 'vk-e2e00000a1', // work (board area), working
-  w2: 'vk-e2e00000a2', // work (an everyday launch target), asking
+  w2: 'vk-e2e00000a2', // work (its launch target's group), asking
   w3: 'vk-e2e00000a7', // work (board area), working
   p1: 'vk-e2e00000a3', // personal (board), idle
+  pj: 'vk-e2e00000a8', // personal, in a project, idle
   s1: 'vk-e2e00000a4', // server (board), working
   d1: 'vk-e2e00000a5', // personal (board), ended
   sh: 'vk-e2e00000a6', // a shell in a target that names no area
@@ -44,10 +50,15 @@ const SID = {
   w1: '0e2e0000-0000-4000-8000-0000000000e1',
   w3: '0e2e0000-0000-4000-8000-0000000000e7',
   p1: '0e2e0000-0000-4000-8000-0000000000e3',
+  pj: '0e2e0000-0000-4000-8000-0000000000e8',
   s1: '0e2e0000-0000-4000-8000-0000000000e4',
   d1: '0e2e0000-0000-4000-8000-0000000000e5',
 }
 const ASK = 'Should I push the branch now?'
+const PROJECT = 'Garden plan'
+/** The tab order: the client area (work), personal (no project, then the project), server, then the area not known. */
+const ORDER = [P.w1, P.w3, P.w2, P.p1, P.d1, P.pj, P.s1, P.sh]
+const N = ORDER.length
 
 /** The fake pane list, the board that names their areas, and the writes the Desk makes. */
 export function deskBackend(page) {
@@ -55,10 +66,11 @@ export function deskBackend(page) {
   const pane = (name, o) => ({
     name, label: o.label ?? 'e2e', mode: o.mode ?? 'new', host: 'thor', target: o.target ?? '', sessionId: o.sid ?? '',
     createdAt: now - o.age, activityAt: now - 30_000, outputAt: now - 30_000, clients: 0, dead: !!o.dead, deadStatus: o.dead ? 0 : null, deadText: '',
-    size: '120x40', projectId: '', state: o.state, title: o.title ?? '', stateSince: now - (o.since ?? 120_000), ask: o.ask ?? '',
+    size: '120x40', projectId: o.project ?? '', state: o.state, title: o.title ?? '', stateSince: now - (o.since ?? 120_000), ask: o.ask ?? '',
   })
   const st = {
     panes: [
+      pane(P.pj, { sid: SID.pj, state: 'idle', title: 'Seed order', project: 'e2e-garden', age: 1_000_000 }),
       pane(P.w1, { sid: SID.w1, state: 'working', title: 'Fix the login page', age: 900_000 }),
       pane(P.w3, { sid: SID.w3, state: 'working', title: 'Printer queue report', age: 800_000 }),
       pane(P.w2, { target: 'alpha', label: 'Alpha', state: 'asking', ask: ASK, title: 'Mailbox move plan', age: 700_000, since: 600_000 }),
@@ -69,29 +81,36 @@ export function deskBackend(page) {
     ],
     kills: [],
     opens: [],
-    // GET /api/terminal/sessions reads, and each pane's transcript reads (a tab's Chat view)
+    uploads: 0,
+    // GET /api/terminal/sessions reads
     reads: 0,
-    tx: {},
   }
-  const row = (sessionId, title, area) => ({
-    sessionId, title, titleFromClaude: true, project: 'e2e-folder', area, launchGroup: null, host: 'thor', cwd: null,
+  const row = (sessionId, title, area, cwd = null) => ({
+    sessionId, title, titleFromClaude: true, project: 'e2e-folder', area, launchGroup: null, host: 'thor', cwd,
     lastActivityUtc: iso(now - 60_000), bytes: 1000, live: true, onDesk: false, activity: 'idle', disposition: 'open', resumeCommand: null,
   })
   const board = {
     sessions: [
-      row(SID.w1, 'Board title one', 'work'),
+      row(SID.w1, 'Board title one', 'work', 'C:\\Users\\e2e\\Clients\\Acme Corporation'),
       row(SID.w3, 'Board title three', 'work'),
-      row(SID.p1, 'Weekend trip plan', 'personal'),
+      row(SID.p1, 'Weekend trip plan', 'personal', 'C:\\Home'),
+      row(SID.pj, 'Board seed order', 'personal'),
       row(SID.s1, 'Board backup title', 'server'),
       row(SID.d1, 'Board old notes', 'personal'),
     ],
     hookRunsSkipped: 0,
   }
+  const proj = {
+    id: 'e2e-garden', name: PROJECT, area: 'personal', status: 'active', summary: '', nextAction: '', targetKey: 'alpha', exposure: 'private',
+    sessionIds: [SID.pj], nextReminderAt: null, updatedAt: iso(now), rev: 1, lastEvent: null,
+  }
   quietThor(page)
   page.mock('/api/session-board', () => ok(board))
   page.mock('/api/hosts/thor/sessions', () => ok(board))
-  page.mock('/api/hosts/thor/launch-targets', () => ok(TARGETS))
+  // the first everyday target belongs to the work area by its group
+  page.mock('/api/hosts/thor/launch-targets', () => ok({ targets: TARGETS.targets.map((t) => (t.key === 'alpha' ? { ...t, group: 'work' } : t)) }))
   page.mock('/api/proj-areas', () => ok({ areas: ['personal', 'server', 'work'], mixable: ['personal', 'server'] }))
+  page.mock('/api/proj', () => ok([proj]))
   page.mock('/api/terminal/sessions', () => {
     st.reads += 1
     if (st.emptyOnce) {
@@ -100,11 +119,7 @@ export function deskBackend(page) {
     }
     return ok(st.empty ? [] : st.panes)
   })
-  page.mock(/^\/api\/terminal\/sessions\/vk-[0-9a-z]{10}\/transcript$/, ({ path }) => {
-    const name = path.split('/')[4]
-    st.tx[name] = (st.tx[name] ?? 0) + 1
-    return ok({ sessionId: '', entries: [], cursor: 'e2e', more: false })
-  })
+  page.mock(/^\/api\/terminal\/sessions\/vk-[0-9a-z]{10}\/transcript$/, () => ok({ sessionId: '', entries: [], cursor: 'e2e', more: false }))
   page.mock('/api/terminal/status', () => ok({ ok: true, tmux: '3.8', ssh: true, remote: 'thor', serverUp: true, maxSessions: 30 }))
   page.onWrite((w) => {
     const kill = /^\/api\/terminal\/sessions\/(vk-[0-9a-f]{10})\/kill$/.exec(w.path)
@@ -118,6 +133,10 @@ export function deskBackend(page) {
       const r = termOpened(w.json)
       st.panes = [...st.panes, { ...r.session, state: 'idle', title: '', stateSince: Date.now(), ask: '' }]
       return { status: 201, body: r }
+    }
+    if (w.method === 'POST' && w.path.startsWith('/api/hosts/thor/upload')) {
+      st.uploads += 1
+      return ok({ done: true, received: 1, name: 'image.png', path: 'C:\\Thor\\uploads\\image.png', size: 1 })
     }
     return undefined
   })
@@ -133,11 +152,7 @@ export function deskBackend(page) {
     const now = Date.now()
     st.panes = st.panes.map((p) => (p.name === name ? { ...p, state: 'idle', ask: '', stateSince: now, outputAt: now } : p))
   }
-  /**
-   * valkyrie-api restarted: every pane's stateSince is the first read's time, one value for all, and
-   * the mounted terminals attached again (an attach moves the session's activity). One idle pane
-   * printed on the way (a redraw at the new attach).
-   */
+  /** valkyrie-api restarted: every pane's stateSince is the first read's time, and one idle pane printed (a redraw). */
   st.restart = (printed) => {
     const now = Date.now()
     st.panes = st.panes.map((p) => ({ ...p, stateSince: now, activityAt: now, ...(p.name === printed ? { outputAt: now } : {}) }))
@@ -148,48 +163,59 @@ export function deskBackend(page) {
   return st
 }
 
-/** Every strip of the active Desk: its column, focus, its tab row's scroll, and its tabs. */
-function strips() {
-  return [...document.querySelectorAll('.vl-page[data-active] .dk-strip')].map((s) => {
-    const row = s.querySelector('.dk-tabs')
-    const add = s.querySelector('.dk-add')?.getBoundingClientRect()
-    return {
-      col: Number(s.getAttribute('data-col')),
-      focus: s.hasAttribute('data-focus'),
-      sw: row.scrollWidth,
-      cw: row.clientWidth,
-      left: row.scrollLeft,
-      // "+" stays in view whatever the row holds
-      addIn: !!add && add.right <= s.getBoundingClientRect().right + 1 && add.width > 0,
-      tabs: [...s.querySelectorAll('.dk-tab')].map((t) => {
-        const r = t.getBoundingClientRect()
-        const sr = row.getBoundingClientRect()
-        return {
-          name: t.getAttribute('data-name'),
-          on: t.hasAttribute('data-on'),
-          lit: t.hasAttribute('data-lit'),
-          state: t.getAttribute('data-state'),
-          mark: t.querySelector('.vl-sicon')?.getAttribute('data-a') ?? null,
-          title: t.querySelector('.dk-tab-t')?.textContent ?? '',
-          tip: t.getAttribute('title') ?? '',
-          h: r.height,
-          inView: r.left >= sr.left - 1 && r.right <= sr.right + 1,
-        }
-      }),
-    }
-  })
+/** The active Desk: its tabs, the panes in the grid (frame and title row), the strip's scroll. */
+function desk() {
+  const root = document.querySelector('.vl-page[data-active] .dk')
+  const row = root?.querySelector('.dk-tabs')
+  const sr = row?.getBoundingClientRect()
+  const box = (el) => {
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), b: Math.round(r.bottom) }
+  }
+  return {
+    sw: row?.scrollWidth ?? 0,
+    cw: row?.clientWidth ?? 0,
+    left: row?.scrollLeft ?? 0,
+    tabs: [...(root?.querySelectorAll('.dk-tab') ?? [])].map((t) => {
+      const r = t.getBoundingClientRect()
+      return {
+        name: t.getAttribute('data-name'),
+        on: t.hasAttribute('data-on'),
+        focus: t.hasAttribute('data-focus'),
+        split: t.hasAttribute('data-split'),
+        lit: t.hasAttribute('data-lit'),
+        state: t.getAttribute('data-state'),
+        mark: t.querySelector('.vl-sicon')?.getAttribute('data-a') ?? null,
+        title: t.querySelector('.dk-tab-t')?.textContent ?? '',
+        tip: t.getAttribute('title') ?? '',
+        h: r.height,
+        inView: !!sr && r.left >= sr.left - 1 && r.right <= sr.right + 1,
+      }
+    }),
+    // the terminals in view, in the grid's reading order
+    frames: [...(root?.querySelectorAll('.dk-frame[data-on]') ?? [])].map((f) => ({ name: f.getAttribute('data-name'), src: f.getAttribute('src'), ...box(f) }))
+      .sort((a, b) => a.y - b.y || a.x - b.x),
+    mounted: root?.querySelectorAll('.dk-frame').length ?? 0,
+    heads: [...(root?.querySelectorAll('.dk-pane') ?? [])].map((p) => ({
+      title: p.querySelector('.dk-head-t')?.textContent ?? '',
+      folder: p.querySelector('.dk-head-f')?.textContent ?? '',
+      focus: p.hasAttribute('data-focus'),
+      ...box(p),
+    })).sort((a, b) => a.y - b.y || a.x - b.x),
+  }
 }
 
-const names = (cols) => cols.map((c) => c.tabs.map((t) => t.name))
-const activeIn = (cols, c) => cols[c]?.tabs.find((t) => t.on)?.name ?? null
-const tabOf = (cols, name) => cols.flatMap((c) => c.tabs).find((t) => t.name === name) ?? null
+const tabNames = (d) => d.tabs.map((t) => t.name)
+const viewNames = (d) => d.frames.map((f) => f.name)
+const tabOf = (d, name) => d.tabs.find((t) => t.name === name) ?? null
+const focusOf = (d) => d.tabs.find((t) => t.focus)?.name ?? null
 
-async function deskUp(page, n = 7) {
+async function deskUp(page, n = N) {
   await page.waitFor((k) => document.querySelectorAll('.vl-page[data-active] .dk-tab').length >= k, { args: [n], timeout: 30_000, message: `the Desk did not show ${n} tabs` })
-  // the board and the launch targets place the tabs by area as they land, and a late webfont widens
+  // the board, the projects and the launch targets sort the tabs as they land, and a late webfont widens
   // them: wait until nothing moves
-  const shape = () => page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .dk-strip')]
-    .map((s) => [...s.querySelectorAll('.dk-tab')].map((x) => `${x.getAttribute('data-name')}${x.hasAttribute('data-on') ? '*' : ''}@${Math.round(x.getBoundingClientRect().right)}`).join(',')).join('|'))
+  const shape = () => page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .dk-tab')]
+    .map((x) => `${x.getAttribute('data-name')}${x.hasAttribute('data-on') ? '*' : ''}@${Math.round(x.getBoundingClientRect().right)}`).join(','))
   const t0 = Date.now()
   let last = await shape()
   for (;;) {
@@ -212,17 +238,79 @@ async function until(page, fn, message, args = [], timeout = 8000) {
 /** A tap that waits longer for the target to hold still (odin is shared, and a loaded one lays out late). */
 const tap = (page, target, opts = {}) => page.tap(target, { wait: 12_000, ...opts })
 
-/** The Desk opens on a screen in its device's column count, tabs placed by area. */
-const LAYOUTS = {
-  phone: 1,
-  ipad: 1,
-  ipadland: 2,
-  desktop: 2,
-  desk1440: 2,
+const inView = (page, names) => until(page, (want) => {
+  const got = [...document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]')]
+    .map((f) => ({ n: f.getAttribute('data-name'), r: f.getBoundingClientRect() }))
+    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left).map((x) => x.n)
+  return got.join() === want.join()
+}, `the grid never showed ${names.join(', ')}`, [names])
+
+/**
+ * Drags tab `name` onto pane `target` at (fx, fy) of its box, the way the browser does it: dragstart
+ * on the tab, then dragover and drop on the target the Desk puts over that pane once the drag is on.
+ */
+async function dragOnto(page, name, target, fx, fy) {
+  await page.eval((n) => {
+    window.__e2eDT = new DataTransfer()
+    document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`)
+      .dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: window.__e2eDT }))
+  }, name)
+  await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-drop').length > 0, 'the drop targets never came up over the panes')
+  // the drop target covers the pane's whole box (its title row and the terminal under it), as the pane's frame does
+  const at = (type) => page.eval((tgt, x, y, ty) => {
+    const pane = document.querySelector(`.vl-page[data-active] .dk-pane[data-name="${tgt}"]`)
+    if (!pane) return `no pane ${tgt}`
+    const pr = pane.getBoundingClientRect()
+    const drop = [...document.querySelectorAll('.vl-page[data-active] .dk-drop')].find((d) => {
+      const r = d.getBoundingClientRect()
+      return Math.abs(r.left - pr.left) < 2 && Math.abs(r.top - pr.top) < 2
+    })
+    if (!drop) return `no drop target over ${tgt}`
+    const r = drop.getBoundingClientRect()
+    drop.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, dataTransfer: window.__e2eDT, clientX: r.left + r.width * x, clientY: r.top + r.height * y }))
+    return 'ok'
+  }, target, fx, fy, type)
+  for (const type of ['dragover', 'drop']) {
+    const r = await at(type)
+    if (r !== 'ok') throw new Error(r)
+    await sleep(150)
+  }
+  await page.eval((n) => document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`)
+    ?.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: window.__e2eDT })), name)
 }
 
+/** Drags pane `name`'s title row onto the tab strip (it leaves the grid). */
+async function dragHeadToStrip(page, name) {
+  await page.eval((n) => {
+    window.__e2eDT = new DataTransfer()
+    document.querySelector(`.vl-page[data-active] .dk-pane[data-name="${n}"] .dk-head`)
+      .dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: window.__e2eDT }))
+  }, name)
+  await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-drop').length > 0, 'the drag of a title row never started')
+  await page.eval((n) => {
+    const bar = document.querySelector('.vl-page[data-active] .dk-bar')
+    const r = bar.getBoundingClientRect()
+    const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }
+    bar.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: window.__e2eDT, ...at }))
+    bar.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: window.__e2eDT, ...at }))
+    const head = document.querySelector(`.vl-page[data-active] .dk-pane[data-name="${n}"] .dk-head`)
+    head?.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: window.__e2eDT }))
+  }, name)
+}
+
+/** Opens tab `name`'s menu with a right-click and presses `item`. */
+async function menuItem(page, name, item) {
+  const at = await page.locate(`.vl-page[data-active] .dk-tab[data-name="${name}"] .dk-tab-main`)
+  await page.mouse(at.x, at.y, { button: 'right' })
+  await until(page, () => !!document.querySelector('.dk-menu'), 'a right-click did not open the tab menu')
+  await tap(page, { sel: '.dk-menu .dk-mi', text: item })
+}
+
+/** The devices the layout runs on, and whether each builds a grid (a mouse) or shows one session with its own keys. */
+const LAYOUTS = { phone: false, ipad: false, ipadland: false, desktop: true, desk1440: true }
+
 function layoutTests() {
-  return Object.entries(LAYOUTS).map(([device, n]) => ({
+  return Object.entries(LAYOUTS).map(([device, grid]) => ({
     name: `desk:layout:${device}`,
     group: 'desk',
     device,
@@ -233,16 +321,11 @@ function layoutTests() {
       deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
-      const cols = await page.eval(strips)
-      t.check(cols.length === n, `${cols.length} column(s), want ${n} on ${device}`)
-      const work = [P.w1, P.w3, P.w2]
-      const rest = [P.p1, P.s1, P.d1, P.sh]
-      if (n === 1) t.check(JSON.stringify(names(cols)[0]) === JSON.stringify([...work, ...rest]), `the one strip reads ${JSON.stringify(names(cols)[0])}, want every tab oldest first`)
-      else {
-        t.check(JSON.stringify(names(cols)[0]) === JSON.stringify(work), `column 1 holds ${JSON.stringify(names(cols)[0])}, want the work sessions ${JSON.stringify(work)}`)
-        t.check(JSON.stringify(names(cols)[n - 1]) === JSON.stringify(rest), `the last column holds ${JSON.stringify(names(cols)[n - 1])}, want ${JSON.stringify(rest)}`)
-      }
-      const marks = Object.fromEntries(cols.flatMap((c) => c.tabs).map((x) => [x.name, x.mark]))
+      const d = await page.eval(desk)
+      t.check(JSON.stringify(tabNames(d)) === JSON.stringify(ORDER), `the tabs read ${JSON.stringify(tabNames(d))}, want by area then project ${JSON.stringify(ORDER)}`)
+      const splits = d.tabs.filter((x) => x.split).map((x) => x.name)
+      t.check(splits.join() === [P.p1, P.s1, P.sh].join(), `the area lines sit before ${JSON.stringify(splits)}, want personal, server and the unknown`)
+      const marks = Object.fromEntries(d.tabs.map((x) => [x.name, x.mark]))
       t.check(marks[P.w1] === 'working' && marks[P.w2] === 'asking' && marks[P.p1] === 'idle' && marks[P.d1] === 'closed' && marks[P.sh] === null,
         `the marks read ${JSON.stringify(marks)}: want working, asking, idle, an ended pane's faint mark, and no mark on a shell`)
       const icons = await page.eval((w1, w2, p1) => {
@@ -255,51 +338,77 @@ function layoutTests() {
       t.check(/vl-icon-fg/.test(icons.w?.cls) && /vl-icon-glow/.test(icons.w?.cls) && /zap/.test(icons.w?.lucide), `working is not the lit bolt: ${JSON.stringify(icons.w)}`)
       t.check(/vl-icon-acc2/.test(icons.a?.cls) && /vl-icon-glow/.test(icons.a?.cls) && /message-circle-question/.test(icons.a?.lucide), `asking is not the lit bubble in the second accent: ${JSON.stringify(icons.a)}`)
       t.check(/vl-icon-dim/.test(icons.i?.cls) && !/vl-icon-glow/.test(icons.i?.cls) && /circle-pause/.test(icons.i?.lucide), `idle is not the dim pause circle: ${JSON.stringify(icons.i)}`)
-      const titles = Object.fromEntries(cols.flatMap((c) => c.tabs).map((x) => [x.name, x.title]))
+      const titles = Object.fromEntries(d.tabs.map((x) => [x.name, x.title]))
       t.check(titles[P.w1] === 'Fix the login page', `a pane's own title should name its tab, got "${titles[P.w1]}"`)
       t.check(titles[P.p1] === 'Weekend trip plan', `a pane with no title should take the board's, got "${titles[P.p1]}"`)
       t.check(titles[P.sh] === 'Gamma sh', `a shell should keep its label, got "${titles[P.sh]}"`)
-      const tip = tabOf(cols, P.w2)?.tip ?? ''
+      const tip = tabOf(d, P.w2)?.tip ?? ''
       t.check(tip.includes('Mailbox move plan') && /asking for \d+m/.test(tip) && tip.includes(ASK), `the asking tab's tooltip reads ${JSON.stringify(tip)}: want its title, "asking for Nm" and the question`)
-      t.check(/Work · working for/.test(tabOf(cols, P.w1)?.tip ?? ''), `the work tab's tooltip reads ${JSON.stringify(tabOf(cols, P.w1)?.tip)}: want its area and how long it has worked`)
-      t.check(/ended/.test(tabOf(cols, P.d1)?.tip ?? ''), `the ended tab's tooltip reads ${JSON.stringify(tabOf(cols, P.d1)?.tip)}`)
-      if (device !== 'desktop' && device !== 'desk1440') {
-        const short = cols.flatMap((c) => c.tabs).filter((x) => x.h < 43.5)
+      t.check(/Work · working for/.test(tabOf(d, P.w1)?.tip ?? '') && (tabOf(d, P.w1)?.tip ?? '').includes('Acme Corporation'), `the work tab's tooltip reads ${JSON.stringify(tabOf(d, P.w1)?.tip)}: want its area, how long it has worked and its folder`)
+      t.check(new RegExp(`Personal · ${PROJECT}`).test(tabOf(d, P.pj)?.tip ?? ''), `the project tab's tooltip reads ${JSON.stringify(tabOf(d, P.pj)?.tip)}`)
+      t.check(/ended/.test(tabOf(d, P.d1)?.tip ?? ''), `the ended tab's tooltip reads ${JSON.stringify(tabOf(d, P.d1)?.tip)}`)
+      if (!grid) {
+        const short = d.tabs.filter((x) => x.h < 43.5)
         t.check(!short.length, `tabs under 44 px on a touch screen: ${short.map((x) => `${x.name} ${x.h}`).join(', ')}`)
       }
-      t.check(cols.every((c) => c.addIn), `"+" is scrolled out of a strip: ${JSON.stringify(cols.map((c) => c.addIn))}`)
+      t.check(await page.eval(() => {
+        const a = document.querySelector('.vl-page[data-active] .dk-add')?.getBoundingClientRect()
+        const bar = document.querySelector('.vl-page[data-active] .dk-bar')?.getBoundingClientRect()
+        return !!a && !!bar && a.width > 0 && a.right <= bar.right + 1
+      }), '"+" is scrolled out of the strip')
+      t.check(await page.eval(() => !!document.querySelector('.vl-page[data-active] .dk-list-btn')), 'no "Sessions" button at the start of the strip')
       if (device === 'phone') {
         const thin = (await page.eval(() => [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((b) => b.getBoundingClientRect().width))).filter((w) => w < 40)
         t.check(!thin.length, `phone tab icons narrower than 40 px: ${thin.join(', ')}`)
       }
-      // one terminal per column, the active tab's, filling the rest of the screen
-      const frames = await page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .dk-frame')].map((f) => {
-        const r = f.getBoundingClientRect()
-        return { name: f.getAttribute('data-name'), on: f.hasAttribute('data-on'), src: f.getAttribute('src'), w: r.width, h: r.height, b: r.bottom }
-      }))
-      const shown = frames.filter((f) => f.on)
-      t.check(shown.length === n, `${shown.length} terminal(s) on screen, want ${n}`)
-      t.check(shown.every((f) => f.src === `/m/w/term/${f.name}` && f.h > 300), `the terminals are ${JSON.stringify(shown)}`)
+      // one session fills the Desk: the first tab, focused
+      t.check(viewNames(d).join() === P.w1 && focusOf(d) === P.w1, `the Desk opened on ${JSON.stringify(viewNames(d))} (focus ${focusOf(d)}), want the first tab alone`)
+      const f = d.frames[0]
+      t.check(f?.src === `/m/w/term/${P.w1}` && f.h > 300, `the terminal is ${JSON.stringify(f)}`)
+      if (grid) {
+        t.check(d.heads.length === 1 && d.heads[0].title === 'Fix the login page' && d.heads[0].folder === 'Acme Corporation',
+          `the pane's title row reads ${JSON.stringify(d.heads)}, want its title and its folder`)
+        t.check(!!f && d.heads[0] && f.y >= d.heads[0].y + 20, 'the terminal is not under the title row')
+      } else t.check(!d.heads.length, `a touch screen draws the Desk's title rows: ${JSON.stringify(d.heads)}`)
       const r = await page.eval(layoutReport)
       t.check(r.docSW <= r.W + 1, `the page is wider than the screen (${r.docSW} > ${r.W})${r.wide.length ? `: ${r.wide.join(', ')}` : ''}`)
       t.check(r.areaSW <= r.areaCW + 1, `the Desk is wider than its screen (${r.areaSW} > ${r.areaCW})`)
       const foot = await page.eval(() => ({ lamp: !!document.querySelector('.vl-lamp') && getComputedStyle(document.querySelector('.vl-foot')).display !== 'none', H: innerHeight }))
       t.check(!foot.lamp, 'the lights button shows over the Desk')
-      t.check(shown.every((f) => f.b <= foot.H + 1 && f.b >= foot.H - 60), `the terminals do not reach the bottom of the screen: ${JSON.stringify(shown.map((f) => f.b))} of ${foot.H}`)
-      const tabs = await page.eval(() => [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((b) => ({ label: b.querySelector('.vl-tab-label')?.textContent?.trim(), r: b.getBoundingClientRect().right })))
-      const labels = tabs.map((x) => x.label)
-      // right after the conversation with Raven (its tab reads Messages until it is renamed Raven)
-      t.check(labels.indexOf('Desk') === 2 && /^(Messages|Raven)$/.test(labels[1] ?? ''), `the Desk tab is not third, after Dashboard and Raven: ${labels.join(', ')}`)
-      t.check(tabs.every((x) => x.r <= r.W + 1), `a tab in the nav runs off the screen: ${JSON.stringify(tabs)}`)
-      // each shown terminal is the pop-out page, framed: no status strip of its own
-      await t.step('the terminals render in their tabs', async () => {
+      t.check(!!f && f.b <= foot.H + 1 && f.b >= foot.H - 60, `the terminal does not reach the bottom of the screen: ${f?.b} of ${foot.H}`)
+      const navTabs = await page.eval(() => [...document.querySelectorAll('.vl-nav .vl-tab-prim')].map((b) => ({ label: b.querySelector('.vl-tab-label')?.textContent?.trim(), r: b.getBoundingClientRect().right })))
+      const labels = navTabs.map((x) => x.label)
+      t.check(labels.indexOf('Desk') === 2 && labels[1] === 'Raven', `the Desk tab is not third, after Dashboard and Raven: ${labels.join(', ')}`)
+      t.check(navTabs.every((x) => x.r <= r.W + 1), `a tab in the nav runs off the screen: ${JSON.stringify(navTabs)}`)
+      // the terminal is the pop-out page, framed: no status strip; on a desktop the bare terminal alone
+      await t.step('the terminal renders in its pane', async () => {
         await page.waitFor(() => {
           const on = [...document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]')]
-          try { return on.length > 0 && on.every((f) => !!f.contentDocument?.querySelector('[data-term-root][data-standalone]')) } catch { return false }
-        }, { timeout: 90_000, message: 'a tab\'s terminal page never rendered in its frame' })
+          try { return on.length > 0 && on.every((x) => !!x.contentDocument?.querySelector('[data-term-root][data-standalone]')) } catch { return false }
+        }, { timeout: 90_000, message: 'the terminal page never rendered in its pane' })
         await sleep(1500)
-        const strips = await page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]')].map((f) => !!f.contentDocument?.querySelector('.vl-strip')))
-        t.check(strips.every((x) => !x), 'a framed terminal draws its own status strip')
+        const inside = await page.eval(() => {
+          const doc = document.querySelector('.vl-page[data-active] .dk-frame[data-on]')?.contentDocument
+          const root = doc?.querySelector('[data-term-root]')
+          return {
+            strip: !!doc?.querySelector('.vl-strip'),
+            bare: root?.hasAttribute('data-bare') ?? null,
+            bar: !!doc?.querySelector('.vsk-head'),
+            comp: !!doc?.querySelector('.vsk-comp'),
+            keys: !!doc?.querySelector('.vsk-keys'),
+            side: !!doc?.querySelector('.vsk-side'),
+            chat: root?.getAttribute('data-view') ?? null,
+            term: !!doc?.querySelector('.vsk-term .xterm'),
+          }
+        })
+        t.check(!inside.strip, 'a framed terminal draws its own status strip')
+        t.check(inside.term, 'no terminal in the pane')
+        if (grid) {
+          t.check(inside.bare && !inside.bar && !inside.comp && !inside.keys && !inside.side && inside.chat === 'term',
+            `a desktop pane is not the bare terminal: ${JSON.stringify(inside)}`)
+        } else {
+          t.check(!inside.bare && inside.comp && inside.keys, `a touch screen lost the terminal page's own controls: ${JSON.stringify(inside)}`)
+        }
       })
       await t.shot(page)
     },
@@ -325,15 +434,15 @@ function doneTests() {
       })
       await tap(page, { sel: '.vl-nav .vl-tab-prim', text: /^\s*Desk\s*$/ })
       await deskUp(page)
-      let cols = await page.eval(strips)
-      t.check(activeIn(cols, 0) === P.w1 && activeIn(cols, 1) === P.p1, `the active tabs are ${activeIn(cols, 0)} and ${activeIn(cols, 1)}`)
-      t.check(!cols.flatMap((c) => c.tabs).some((x) => x.lit), 'a tab is lit before anything finished')
+      let d = await page.eval(desk)
+      t.check(viewNames(d).join() === P.w1, `the grid shows ${JSON.stringify(viewNames(d))}`)
+      t.check(!d.tabs.some((x) => x.lit), 'a tab is lit before anything finished')
       await t.step('working to idle and working to asking on hidden tabs light them', async () => {
         st.set(P.s1, 'idle')
         st.set(P.w3, 'asking', 'Which printer is the default?')
         await until(page, (a, b) => !!document.querySelector(`.dk-tab[data-name="${a}"][data-lit]`) && !!document.querySelector(`.dk-tab[data-name="${b}"][data-lit]`), 'the two finished tabs never lit (the Desk polls every 2 s)', [P.s1, P.w3], 9000)
-        cols = await page.eval(strips)
-        t.check(tabOf(cols, P.s1)?.mark === 'idle' && tabOf(cols, P.w3)?.mark === 'asking', `their marks read ${tabOf(cols, P.s1)?.mark} and ${tabOf(cols, P.w3)?.mark}`)
+        d = await page.eval(desk)
+        t.check(tabOf(d, P.s1)?.mark === 'idle' && tabOf(d, P.w3)?.mark === 'asking', `their marks read ${tabOf(d, P.s1)?.mark} and ${tabOf(d, P.w3)?.mark}`)
         const style = await page.eval((a, b) => {
           const w = (n) => getComputedStyle(document.querySelector(`.dk-tab[data-name="${n}"] .dk-tab-main`)).fontWeight
           return { lit: w(a), plain: w(b) }
@@ -352,23 +461,24 @@ function doneTests() {
         await until(page, (a) => !document.querySelector(`.dk-tab[data-name="${a}"][data-lit]`), 'the opened asking tab is still lit', [P.w3])
         b = await badge(page)
         t.check(!b, `the badge still reads ${JSON.stringify(b)} with nothing unseen`)
-        cols = await page.eval(strips)
-        t.check(tabOf(cols, P.w3)?.mark === 'asking', 'the asking tab lost its bubble once opened')
+        d = await page.eval(desk)
+        t.check(tabOf(d, P.w3)?.mark === 'asking', 'the asking tab lost its bubble once opened')
+        t.check(viewNames(d).join() === P.w3, `a tab opened from the strip did not take the one pane: ${JSON.stringify(viewNames(d))}`)
       })
-      await t.step('the active tab finishing in view does not light', async () => {
+      await t.step('the session in view finishing does not light', async () => {
         st.set(P.w1, 'working')
         await sleep(2600)
         await tap(page, `.dk-tab[data-name="${P.w1}"] .dk-tab-main`)
         await sleep(400)
         st.set(P.w1, 'idle')
-        await until(page, (a) => document.querySelector(`.dk-tab[data-name="${a}"]`)?.getAttribute('data-state') === 'idle', 'the active tab never read idle', [P.w1], 8000)
+        await until(page, (a) => document.querySelector(`.dk-tab[data-name="${a}"]`)?.getAttribute('data-state') === 'idle', 'the tab in view never read idle', [P.w1], 8000)
         await sleep(300)
-        cols = await page.eval(strips)
-        t.check(!tabOf(cols, P.w1)?.lit, 'the tab in view lit when it finished')
+        d = await page.eval(desk)
+        t.check(!tabOf(d, P.w1)?.lit, 'the tab in view lit when it finished')
       })
       await t.step('a whole run between two reads lights a hidden tab', async () => {
-        cols = await page.eval(strips)
-        t.check(activeIn(cols, 1) !== P.p1, `the personal tab is in view (${activeIn(cols, 1)}), the step needs it hidden`)
+        d = await page.eval(desk)
+        t.check(!viewNames(d).includes(P.p1), 'the personal tab is in view, the step needs it hidden')
         st.ran(P.p1)
         await until(page, (a) => !!document.querySelector(`.dk-tab[data-name="${a}"][data-lit]`), 'a run that started and finished between two reads never lit', [P.p1], 9000)
         await tap(page, `.dk-tab[data-name="${P.p1}"] .dk-tab-main`)
@@ -377,16 +487,15 @@ function doneTests() {
       })
       await t.step('an API restart (every stateSince moves, the terminals attach again) lights nothing', async () => {
         await sleep(2600)
-        cols = await page.eval(strips)
-        t.check(!cols.flatMap((c) => c.tabs).some((x) => x.lit), `a tab is lit before the restart: ${JSON.stringify(cols.flatMap((c) => c.tabs).filter((x) => x.lit).map((x) => x.name))}`)
-        t.check(activeIn(cols, 1) !== P.p1, 'the personal tab is in view, the step needs it hidden')
+        d = await page.eval(desk)
+        t.check(!d.tabs.some((x) => x.lit), `a tab is lit before the restart: ${JSON.stringify(d.tabs.filter((x) => x.lit).map((x) => x.name))}`)
+        t.check(!viewNames(d).includes(P.p1), 'the personal tab is in view, the step needs it hidden')
         st.restart(P.p1)
         await sleep(5000)
-        cols = await page.eval(strips)
-        const lit = cols.flatMap((c) => c.tabs).filter((x) => x.lit).map((x) => x.name)
+        d = await page.eval(desk)
+        const lit = d.tabs.filter((x) => x.lit).map((x) => x.name)
         t.check(!lit.length, `an API restart lit ${JSON.stringify(lit)}`)
-        const b = await badge(page)
-        t.check(!b, `the badge reads ${JSON.stringify(b)} after an API restart`)
+        t.check(!(await badge(page)), 'the badge shows after an API restart')
       })
       await t.step('one empty read keeps every tab and its mounted terminal', async () => {
         const before = await page.eval(() => {
@@ -394,7 +503,7 @@ function doneTests() {
           fs.forEach((f) => { f.dataset.e2eKeep = '1' })
           return { frames: fs.length, tabs: document.querySelectorAll('.vl-page[data-active] .dk-tab').length }
         })
-        t.check(before.frames >= 2, `${before.frames} terminal(s) mounted, the step needs the two active tabs`)
+        t.check(before.frames >= 2, `${before.frames} terminal(s) mounted, the step needs the ones opened above kept`)
         st.emptyOnce = true
         const r0 = st.reads
         for (let i = 0; i < 20 && st.reads < r0 + 3; i++) await sleep(500)
@@ -407,19 +516,19 @@ function doneTests() {
         t.check(after.tabs === before.tabs, `one empty read changed the tabs: ${before.tabs} -> ${after.tabs}`)
         t.check(after.kept === before.frames, `one empty read reloaded the terminals: ${after.kept} of ${before.frames} kept (${after.frames} mounted)`)
       })
-      await t.step('an empty list from the API keeps the tabs where he put them', async () => {
+      await t.step('an empty list from the API keeps the tabs and the grid', async () => {
         // a middle click takes it off the Desk (desk:close drives the real mouse)
         await page.eval((n) => document.querySelector(`.dk-tab[data-name="${n}"]`)?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })), P.d1)
         await until(page, (n) => !document.querySelector(`.dk-tab[data-name="${n}"]`), 'the ended tab did not leave the Desk', [P.d1])
-        const before = JSON.stringify(names(await page.eval(strips)))
-        const saved = await page.eval(() => localStorage.getItem('v2.desk.layout'))
+        const before = JSON.stringify(tabNames(await page.eval(desk)))
+        const saved = await page.eval(() => localStorage.getItem('v2.desk.grid'))
         st.empty = true
         await sleep(5000)
-        const during = await page.eval(() => localStorage.getItem('v2.desk.layout'))
+        const during = await page.eval(() => localStorage.getItem('v2.desk.grid'))
         st.empty = false
-        await deskUp(page, 6)
-        const after = JSON.stringify(names(await page.eval(strips)))
-        t.check(during === saved, `an empty list rewrote the saved layout: ${during}`)
+        await deskUp(page, N - 1)
+        const after = JSON.stringify(tabNames(await page.eval(desk)))
+        t.check(during === saved, `an empty list rewrote the saved grid: ${during}`)
         t.check(after === before, `the tabs came back as ${after}, want ${before} (the closed tab off the Desk)`)
       })
       await t.step('the badge counts from another screen, and keeps its count across a reload', async () => {
@@ -452,14 +561,15 @@ function keyTests() {
       const st = deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
-      const act = async (c) => activeIn(await page.eval(strips), c)
+      const focused = async () => focusOf(await page.eval(desk))
       const framed = (name) => page.waitFor((n) => {
         const f = document.querySelector(`.dk-frame[data-name="${n}"]`)
-        try { return !!f?.contentDocument?.querySelector('[data-term-root]') } catch { return false }
-      }, { args: [name], timeout: 90_000, message: `the terminal page in ${name}'s tab never rendered` })
+        try { return !!f?.contentDocument?.querySelector('[data-term-root] .xterm-helper-textarea') } catch { return false }
+      }, { args: [name], timeout: 90_000, message: `the terminal page in ${name}'s pane never rendered` })
+      const isFocused = (n) => until(page, (x) => !!document.querySelector(`.dk-tab[data-name="${x}"][data-focus]`), `${n} did not take the focused pane`, [n])
       await t.step('Ctrl+Tab and Ctrl+Shift+Tab from the Desk', async () => {
         await page.key('Tab', { ctrl: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Tab did not open the next tab', [P.w3])
+        await isFocused(P.w3)
       })
       await t.step('Ctrl+Tab from inside a terminal (handed up by the framed page)', async () => {
         await framed(P.w3)
@@ -467,15 +577,46 @@ function keyTests() {
         const inFrame = await page.eval((n) => document.activeElement === document.querySelector(`.dk-frame[data-name="${n}"]`), P.w3)
         t.check(inFrame, 'the opened tab did not take the keyboard (the focus is not in its terminal)')
         await page.key('Tab', { ctrl: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Tab inside a terminal did not reach the Desk', [P.w2])
+        await isFocused(P.w2)
         await framed(P.w2)
-        // a tab mounted by that key loaded after it was focused: on a loaded odin, put the focus back in its terminal
+        // a pane mounted by that key loaded after it was focused: on a loaded odin, put the focus back in its terminal
         await page.eval((n) => document.querySelector(`.dk-frame[data-name="${n}"]`)?.contentWindow?.focus(), P.w2)
         await sleep(300)
         await page.key('Tab', { ctrl: true, shift: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Shift+Tab inside a terminal did not go back', [P.w3])
+        await isFocused(P.w3)
       })
-      // the rest from the Desk itself: a tab whose terminal is still loading would take the key (on a loaded odin
+      await t.step('inside a terminal Ctrl+V reaches the paste, Ctrl+C with nothing selected stays ^C, a screenshot uploads', async () => {
+        const keys = await page.eval((n) => {
+          const w = document.querySelector(`.dk-frame[data-name="${n}"]`)?.contentWindow
+          const ta = w?.document.querySelector('.xterm-helper-textarea')
+          if (!w || !ta) return null
+          ta.focus()
+          const send = (o) => {
+            const e = new w.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...o })
+            ta.dispatchEvent(e)
+            return e.defaultPrevented
+          }
+          return {
+            ctrlV: send({ key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true }),
+            ctrlShiftV: send({ key: 'V', code: 'KeyV', keyCode: 86, ctrlKey: true, shiftKey: true }),
+            shiftIns: send({ key: 'Insert', code: 'Insert', keyCode: 45, shiftKey: true }),
+            ctrlC: send({ key: 'c', code: 'KeyC', keyCode: 67, ctrlKey: true }),
+          }
+        }, P.w3)
+        t.check(keys && !keys.ctrlV && !keys.ctrlShiftV && !keys.shiftIns, `a paste key was swallowed by the terminal (true = held back): ${JSON.stringify(keys)}`)
+        t.check(keys?.ctrlC === true, `Ctrl+C with nothing selected did not go to the session as ^C: ${JSON.stringify(keys)}`)
+        const u0 = st.uploads
+        await page.eval((n) => {
+          const w = document.querySelector(`.dk-frame[data-name="${n}"]`)?.contentWindow
+          const ta = w?.document.querySelector('.xterm-helper-textarea')
+          const dt = new w.DataTransfer()
+          dt.items.add(new w.File([new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4])], 'image.png', { type: 'image/png' }))
+          ta.dispatchEvent(new w.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }))
+        }, P.w3)
+        for (let i = 0; i < 20 && st.uploads === u0; i++) await sleep(250)
+        t.check(st.uploads > u0, 'a pasted screenshot was not sent to thor')
+      })
+      // the rest from the Desk itself: a pane whose terminal is still loading would take the key (on a loaded odin
       // that takes long), so the focus goes back to the Desk before each one
       const host = async () => {
         await sleep(250)
@@ -488,49 +629,47 @@ function keyTests() {
       await t.step('Ctrl+Shift+Tab wraps to the last tab', async () => {
         await host()
         await page.key('Tab', { ctrl: true, shift: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Shift+Tab did not go back to the first tab', [P.w1])
+        await isFocused(P.w1)
         await host()
         await page.key('Tab', { ctrl: true, shift: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Shift+Tab did not wrap to the last tab', [P.w2])
+        await isFocused(P.sh)
       })
-      await t.step('Alt+N opens tab N of the column', async () => {
+      await t.step('Alt+N opens tab N', async () => {
         await host()
         await page.key('1', { alt: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Alt+1 did not open the first tab', [P.w1])
+        await isFocused(P.w1)
         await host()
         await page.key('3', { alt: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Alt+3 did not open the third tab', [P.w2])
+        await isFocused(P.w2)
         await host()
         await page.key('9', { alt: true })
         await sleep(400)
-        t.check((await act(0)) === P.w2, 'Alt+9 with three tabs changed the tab')
+        t.check((await focused()) === P.w2, 'Alt+9 with eight tabs changed the tab')
       })
-      await t.step('Alt+Right and Alt+Left move between the columns', async () => {
-        await host()
-        await page.key('ArrowRight', { alt: true })
-        await until(page, () => !!document.querySelector('.dk-strip[data-col="1"][data-focus]'), 'Alt+Right did not focus the right column')
-        await host()
-        await page.key('2', { alt: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="1"] .dk-tab[data-name="${n}"][data-on]`), 'Alt+2 in the right column did not open its second tab', [P.s1])
+      await t.step('Alt+Right and Alt+Left move between the panes of the grid', async () => {
+        await menuItem(page, P.s1, 'Open beside')
+        await inView(page, [P.w2, P.s1])
         await host()
         await page.key('ArrowLeft', { alt: true })
-        await until(page, () => !!document.querySelector('.dk-strip[data-col="0"][data-focus]'), 'Alt+Left did not focus the left column')
-        t.check((await act(0)) === P.w2 && (await act(1)) === P.s1, 'moving between columns changed a tab')
+        await isFocused(P.w2)
+        await host()
+        await page.key('ArrowRight', { alt: true })
+        await isFocused(P.s1)
+        t.check(viewNames(await page.eval(desk)).join() === [P.w2, P.s1].join(), 'moving between panes changed the grid')
       })
       await t.step('Ctrl+Alt+D opens the session waiting longest, then the next', async () => {
-        // the server tab finishes while hidden; the asking one has waited longer
-        await tap(page, `.dk-tab[data-name="${P.p1}"] .dk-tab-main`)
-        await sleep(300)
-        st.set(P.s1, 'idle')
-        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-lit]`), 'the hidden server tab never lit', [P.s1], 9000)
-        await tap(page, `.dk-tab[data-name="${P.w1}"] .dk-tab-main`)
+        // the personal tab finishes while hidden; the asking one has waited longer
+        st.set(P.p1, 'working')
+        await sleep(2600)
+        st.set(P.p1, 'idle')
+        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-lit]`), 'the hidden personal tab never lit', [P.p1], 9000)
+        await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
         await host()
         await page.key('d', { ctrl: true, alt: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Ctrl+Alt+D did not open the asking session first', [P.w2])
+        await isFocused(P.w2)
         await host()
         await page.key('d', { ctrl: true, alt: true })
-        await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="1"] .dk-tab[data-name="${n}"][data-on]`) && !document.querySelector(`.dk-tab[data-name="${n}"][data-lit]`), 'Ctrl+Alt+D did not go on to the finished session', [P.s1])
-        t.check(await page.eval(() => !!document.querySelector('.dk-strip[data-col="1"][data-focus]')), 'Ctrl+Alt+D did not focus the column it opened')
+        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`) && !document.querySelector(`.dk-tab[data-name="${n}"][data-lit]`), 'Ctrl+Alt+D did not go on to the finished session', [P.p1])
       })
       await t.step('normal typing inside a terminal stays in the session', async () => {
         await tap(page, `.dk-tab[data-name="${P.w1}"] .dk-tab-main`)
@@ -546,118 +685,82 @@ function keyTests() {
           return {
             a: send({ key: 'a', code: 'KeyA' }),
             altShift1: send({ key: '!', code: 'Digit1', altKey: true, shiftKey: true }),
-            ctrlD: send({ key: 'd', code: 'KeyD', ctrlKey: true }),
           }
         }, P.w1)
-        t.check(typed && !typed.a && !typed.altShift1 && !typed.ctrlD, `the framed page held back plain keys: ${JSON.stringify(typed)}`)
+        t.check(typed && !typed.altShift1, `the framed page held back a plain key: ${JSON.stringify(typed)}`)
         await sleep(300)
-        t.check((await act(0)) === P.w1, 'a plain key changed the tab')
-      })
-      await t.step("a hidden tab's terminal page stops its quick reads, and reads again when opened", async () => {
-        // w3 was opened above, so it is mounted; w1 is in view
-        await framed(P.w3)
-        await sleep(2500)
-        const t0 = { ...st.tx }
-        await sleep(10_000)
-        const hidden = (st.tx[P.w3] ?? 0) - (t0[P.w3] ?? 0)
-        const shown = (st.tx[P.w1] ?? 0) - (t0[P.w1] ?? 0)
-        t.note(`transcript reads in 10 s: in view ${shown}, hidden ${hidden}`)
-        t.check(shown >= 2, `the tab in view read its transcript ${shown} time(s) in 10 s (the step needs Chat polling to show)`)
-        t.check(hidden <= 1, `the hidden tab read its transcript ${hidden} time(s) in 10 s, want at most 1 (it polls every 20 s while hidden)`)
-        const t1 = st.tx[P.w3] ?? 0
-        await tap(page, `.dk-tab[data-name="${P.w3}"] .dk-tab-main`)
-        for (let i = 0; i < 10 && (st.tx[P.w3] ?? 0) === t1; i++) await sleep(300)
-        t.check((st.tx[P.w3] ?? 0) > t1, 'the tab did not read its transcript within 3 s of being opened')
+        t.check((await focused()) === P.w1, 'a plain key changed the tab')
       })
       t.check(!st.kills.length && !st.opens.length, 'a key wrote something')
     },
   }]
 }
 
-function moveTests() {
-  return [
-    {
-      name: 'desk:move:desktop',
-      group: 'desk',
-      device: 'desktop',
-      timeout: 150_000,
-      async run(t) {
-        t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
-        const page = await t.page({ stubFrames: true })
-        deskBackend(page)
+function gridTests() {
+  return [{
+    name: 'desk:grid:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 200_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      await page.goto('/m/desk')
+      await deskUp(page)
+      const stageW = await page.eval(() => document.querySelector('.vl-page[data-active] .dk-stage').getBoundingClientRect().width)
+      await t.step('a tab dropped on a pane\'s right edge splits the Desk', async () => {
+        await dragOnto(page, P.p1, P.w1, 0.92, 0.5)
+        await inView(page, [P.w1, P.p1])
+        const d = await page.eval(desk)
+        const [a, b] = d.frames
+        t.check(Math.abs(a.y - b.y) <= 1 && Math.abs(a.w - b.w) <= 2 && a.w < stageW * 0.55 && a.w > stageW * 0.45, `the split is not side by side, half each: ${JSON.stringify(d.frames)}`)
+        t.check(focusOf(d) === P.p1 && d.heads.length === 2, `after the split the focus is ${focusOf(d)} with ${d.heads.length} title rows`)
+        t.check(d.heads.find((h) => h.focus)?.title === 'Weekend trip plan', 'the dropped pane is not the lit one')
+        await t.shot(page, 'split')
+      })
+      await t.step('one dropped on a pane\'s bottom edge makes two over one', async () => {
+        await dragOnto(page, P.s1, P.p1, 0.5, 0.95)
+        await inView(page, [P.w1, P.p1, P.s1])
+        const d = await page.eval(desk)
+        const [a, b, c] = d.frames
+        t.check(Math.abs(a.y - b.y) <= 1 && c.y > a.b && c.w > stageW * 0.95, `three panes are not two over one full row: ${JSON.stringify(d.frames)}`)
+      })
+      await t.step('a tab dropped on a pane\'s middle takes its place', async () => {
+        await dragOnto(page, P.w3, P.w1, 0.5, 0.5)
+        await inView(page, [P.w3, P.p1, P.s1])
+        const d = await page.eval(desk)
+        t.check(tabNames(d).includes(P.w1) && !tabOf(d, P.w1)?.on, 'the replaced session is not a tab out of the grid')
+      })
+      await t.step('a pane\'s title dragged to the strip leaves the grid, the tab stays', async () => {
+        await dragHeadToStrip(page, P.s1)
+        await inView(page, [P.w3, P.p1])
+        t.check(tabNames(await page.eval(desk)).includes(P.s1), 'the session left the strip too')
+      })
+      await t.step('the menu opens a tab beside the focused pane; four make 2x2, five make 3x3', async () => {
+        await tap(page, `.dk-tab[data-name="${P.p1}"] .dk-tab-main`)
+        await menuItem(page, P.w2, 'Open beside')
+        await inView(page, [P.w3, P.p1, P.w2])
+        await menuItem(page, P.pj, 'Open beside')
+        let d = await page.eval(desk)
+        t.check(d.frames.length === 4 && new Set(d.frames.map((f) => f.w)).size <= 2 && d.frames[0].w < stageW * 0.55, `four panes are not 2x2: ${JSON.stringify(d.frames)}`)
+        await menuItem(page, P.s1, 'Open beside')
+        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 5, 'the fifth pane did not open')
+        d = await page.eval(desk)
+        const top = d.frames.filter((f) => Math.abs(f.y - d.frames[0].y) <= 1)
+        t.check(top.length === 3 && top.every((f) => f.w < stageW * 0.36), `five panes do not start a 3x3 grid: ${JSON.stringify(d.frames)}`)
+        await t.shot(page, 'five')
+      })
+      await t.step('the grid is kept across a reload', async () => {
+        const before = viewNames(await page.eval(desk))
+        await sleep(300)
         await page.goto('/m/desk')
         await deskUp(page)
-        await t.step('the tab menu moves a tab right (right-click)', async () => {
-          const at = await page.locate(`.dk-tab[data-name="${P.w3}"] .dk-tab-main`)
-          await page.mouse(at.x, at.y, { button: 'right' })
-          await until(page, () => !!document.querySelector('.dk-menu'), 'a right-click did not open the tab menu')
-          const items = await page.eval(() => [...document.querySelectorAll('.dk-menu .dk-mi')].map((b) => b.textContent.trim()))
-          t.check(items.join('|') === 'Move right|Close tab|Stop session', `the menu of a left-column tab offers ${items.join(', ')}`)
-          await tap(page, { sel: '.dk-menu .dk-mi', text: 'Move right' })
-          await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="1"] .dk-tab[data-name="${n}"][data-on]`), 'Move right did not put the tab, active, in the right column', [P.w3])
-          const cols = await page.eval(strips)
-          t.check(names(cols)[1].at(-1) === P.w3, `the moved tab is not at the end of its new column: ${JSON.stringify(names(cols)[1])}`)
-          t.check(activeIn(cols, 0) === P.w1, `the left column's active tab is ${activeIn(cols, 0)}`)
-        })
-        await t.step('a drag puts a tab in the other strip', async () => {
-          await page.eval((n) => {
-            const dt = new DataTransfer()
-            const tab = document.querySelector(`.dk-tab[data-name="${n}"]`)
-            const strip = document.querySelector('.dk-strip[data-col="0"]')
-            const ev = (type, el) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }))
-            ev('dragstart', tab)
-            ev('dragover', strip)
-            ev('drop', strip)
-            ev('dragend', tab)
-          }, P.p1)
-          await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'the dragged tab is not in the left strip', [P.p1])
-          const draggable = await page.eval((n) => document.querySelector(`.dk-tab[data-name="${n}"]`)?.getAttribute('draggable'), P.w1)
-          t.check(draggable === 'true', `a tab is not draggable with a mouse (${draggable})`)
-        })
-        await t.step('the places are kept across a reload', async () => {
-          await sleep(300)
-          await page.goto('/m/desk')
-          await deskUp(page)
-          const cols = await page.eval(strips)
-          t.check(names(cols)[0].includes(P.p1) && names(cols)[1].includes(P.w3), `after a reload the columns read ${JSON.stringify(names(cols))}`)
-          t.check(activeIn(cols, 0) === P.p1 && activeIn(cols, 1) === P.w3, `after a reload the active tabs are ${activeIn(cols, 0)} and ${activeIn(cols, 1)}`)
-        })
-      },
+        await inView(page, before)
+      })
+      t.check(!st.kills.length && !st.opens.length, 'a layout change wrote something')
     },
-    {
-      name: 'desk:move:ipadland',
-      group: 'desk',
-      device: 'ipadland',
-      timeout: 150_000,
-      async run(t) {
-        t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
-        const page = await t.page({ stubFrames: true })
-        deskBackend(page)
-        await page.goto('/m/desk')
-        await deskUp(page)
-        await t.step('a tap on the active tab opens its menu; Move left', async () => {
-          await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
-          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-on]`), 'a tap did not open the tab', [P.s1])
-          await sleep(300)
-          t.check(!(await page.eval(() => !!document.querySelector('.dk-menu'))), 'the first tap opened the menu instead of the tab')
-          await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
-          await until(page, () => !!document.querySelector('.dk-menu'), 'a tap on the active tab did not open its menu')
-          const items = await page.eval(() => [...document.querySelectorAll('.dk-menu .dk-mi')].map((b) => ({ t: b.textContent.trim(), h: b.getBoundingClientRect().height })))
-          t.check(items.map((x) => x.t).join('|') === 'Move left|Close tab|Stop session', `the menu offers ${items.map((x) => x.t).join(', ')}`)
-          t.check(items.every((x) => x.h >= 44), `menu rows under 44 px: ${JSON.stringify(items)}`)
-          await t.shot(page, 'menu')
-          await tap(page, { sel: '.dk-menu .dk-mi', text: 'Move left' })
-          await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="0"] .dk-tab[data-name="${n}"][data-on]`), 'Move left did not put the tab in the left column', [P.s1])
-        })
-        await t.step('a press outside closes the menu', async () => {
-          await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
-          await until(page, () => !!document.querySelector('.dk-menu'), 'the menu did not open again')
-          await tap(page, '.dk-cell[data-col="0"] .dk-scrim', { allowCovered: true })
-          await until(page, () => !document.querySelector('.dk-menu'), 'a press outside did not close the menu')
-        })
-      },
-    },
-  ]
+  }]
 }
 
 function closeTests() {
@@ -673,11 +776,10 @@ function closeTests() {
         const st = deskBackend(page)
         await page.goto('/m/desk')
         await deskUp(page)
-        await t.step('the x takes the active tab off the Desk, the session keeps running', async () => {
+        await t.step('the x takes the tab off the Desk, the next tab fills its pane, the session keeps running', async () => {
           await tap(page, `.dk-tab[data-name="${P.w1}"] .dk-tab-x`)
           await until(page, (n) => !document.querySelector(`.dk-tab[data-name="${n}"]`), 'the closed tab is still on the Desk', [P.w1])
-          const cols = await page.eval(strips)
-          t.check(activeIn(cols, 0) === P.w3, `after the close the left column shows ${activeIn(cols, 0)}, want its next tab`)
+          await inView(page, [P.w3])
           t.check(!st.kills.length, `closing a tab stopped its session: ${st.kills.join(', ')}`)
         })
         await t.step('a middle click closes a tab', async () => {
@@ -685,23 +787,21 @@ function closeTests() {
           await page.mouse(at.x, at.y, { button: 'middle' })
           await until(page, (n) => !document.querySelector(`.dk-tab[data-name="${n}"]`), 'a middle click did not close the tab', [P.sh])
         })
-        await t.step('"+" puts a running session back in its column', async () => {
-          await tap(page, '.dk-strip[data-col="1"] .dk-add')
-          await until(page, () => !!document.querySelector('.dk-cell[data-col="1"] .dk-pick'), '"+" did not open the new tab sheet')
+        await t.step('"+" puts a running session back', async () => {
+          await tap(page, '.vl-page[data-active] .dk-add')
+          await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-pick'), '"+" did not open the new session sheet')
           const rows = await page.eval(() => [...document.querySelectorAll('.dk-pick .dk-row .dk-row-t')].map((e) => e.textContent))
-          t.check(rows.join('|') === 'Fix the login page|Gamma sh', `Running sessions lists ${JSON.stringify(rows)}, want the two closed tabs`)
+          t.check(rows.join('|') === 'Fix the login page|Gamma sh', `Off the Desk lists ${JSON.stringify(rows)}, want the two closed tabs`)
           const chips = await page.eval(() => [...document.querySelectorAll('.dk-pick .dk-chip')].map((e) => e.textContent.trim()))
           t.check(chips.join('|') === 'Alpha|Beta|Gamma', `the launch targets offered are ${JSON.stringify(chips)}`)
           await t.shot(page, 'plus')
           await tap(page, { sel: '.dk-pick .dk-row', text: /Fix the login page/ })
-          await until(page, (n) => !!document.querySelector(`.dk-strip[data-col="1"] .dk-tab[data-name="${n}"][data-on]`), 'the session did not come back, active, in the column whose "+" was pressed', [P.w1])
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'the session did not come back in the focused pane', [P.w1])
+          await inView(page, [P.w1])
           t.check(!(await page.eval(() => !!document.querySelector('.dk-pick'))), 'the sheet stayed open')
         })
         await t.step('Stop in the tab menu takes two presses and ends the session', async () => {
-          const at = await page.locate(`.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
-          await page.mouse(at.x, at.y, { button: 'right' })
-          await until(page, () => !!document.querySelector('.dk-menu'), 'no tab menu')
-          await tap(page, { sel: '.dk-menu .dk-mi', text: 'Stop session' })
+          await menuItem(page, P.s1, 'Stop session')
           await until(page, () => /Press again/.test(document.querySelector('.dk-menu .dk-mi[data-tone="hot"]')?.textContent ?? ''), 'Stop did not ask for a second press')
           t.check(!st.kills.length, 'the first press stopped the session')
           // the second press right away, where the armed row is: it disarms after 3.5 s
@@ -724,24 +824,23 @@ function closeTests() {
         const st = deskBackend(page)
         await page.goto('/m/desk')
         await deskUp(page)
-        await tap(page, '.dk-strip[data-col="0"] .dk-add')
-        await until(page, () => !!document.querySelector('.dk-cell[data-col="0"] .dk-pick'), '"+" did not open the new tab sheet')
+        await tap(page, '.vl-page[data-active] .dk-add')
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-pick'), '"+" did not open the new session sheet')
         // the chips carry the targets' short names (lib/quickSessions shortName), as AI > Sessions does
         await tap(page, { sel: '.dk-pick .dk-chip', text: /^\s*Beta\s*$/ })
-        await until(page, () => !!document.querySelector('.dk-strip[data-col="0"] .dk-tab[data-name="vk-e2e0000a01"][data-on]'), 'the new session is not the active tab of the column whose "+" was pressed')
+        await until(page, () => !!document.querySelector('.dk-tab[data-name="vk-e2e0000a01"][data-focus]'), 'the new session did not take the focused pane')
+        await inView(page, ['vk-e2e0000a01'])
         const body = st.opens[0]
         t.check(body?.mode === 'new' && body.target === 'beta' && body.label === 'Beta' && body.cols >= 40 && body.rows >= 12, `the start sent ${JSON.stringify(body)}`)
-        const cols = await page.eval(strips)
-        t.check(names(cols)[0].at(-1) === 'vk-e2e0000a01', `the new tab is not at the end of its column: ${JSON.stringify(names(cols)[0])}`)
         t.check(st.opens.length === 1 && !st.kills.length, `writes: ${st.opens.length} start(s), ${st.kills.length} kill(s)`)
       },
     },
   ]
 }
 
-function colsTests() {
+function listTests() {
   return [{
-    name: 'desk:cols:desktop',
+    name: 'desk:list:desktop',
     group: 'desk',
     device: 'desktop',
     timeout: 120_000,
@@ -751,26 +850,68 @@ function colsTests() {
       deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
-      const count = async () => (await page.eval(strips)).length
-      t.check(await page.eval(() => document.querySelector('.dk-ncol[data-on]')?.textContent) === '2', 'the column control does not show 2 lit at 1600 px')
-      await tap(page, '.dk-ncol[aria-label="1 column"]')
-      await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-strip').length === 1, 'picking 1 did not leave one column')
-      await tap(page, '.dk-ncol[aria-label="3 columns"]')
-      await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-strip').length === 3, 'picking 3 did not make three columns')
-      let cols = await page.eval(strips)
-      t.check(names(cols)[0].join() === [P.w1, P.w3, P.w2].join() && names(cols)[1].length === 0 && names(cols)[2].length === 4, `three columns read ${JSON.stringify(names(cols))}: want the work tabs left and the rest right`)
-      const quiet = await page.eval(() => document.querySelector('.dk-cell[data-col="1"] .dk-quiet')?.textContent ?? '')
-      t.check(/No tabs here/.test(quiet), `the empty middle column says "${quiet}"`)
-      const frames = await page.eval(() => [...document.querySelectorAll('.dk-frame[data-on]')].map((f) => Math.round(f.getBoundingClientRect().width)))
-      t.check(frames.length === 2 && frames.every((w) => Math.abs(w - frames[0]) <= 1), `the two terminals are ${JSON.stringify(frames)} wide, want a third of the Desk each`)
-      await t.shot(page, 'three')
+      // one off the Desk: the list still names it
+      await page.eval((n) => document.querySelector(`.dk-tab[data-name="${n}"]`)?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })), P.d1)
+      await until(page, (n) => !document.querySelector(`.dk-tab[data-name="${n}"]`), 'the ended tab did not leave the Desk', [P.d1])
+      await tap(page, '.vl-page[data-active] .dk-list-btn')
+      await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-list'), '"Sessions" did not open the list')
+      const shape = await page.eval(() => [...document.querySelectorAll('.dk-list .dk-lg')].map((g) => ({
+        area: g.querySelector('.dk-k')?.textContent ?? '',
+        parts: [...g.querySelectorAll('.dk-lp')].map((p) => ({
+          project: p.querySelector('.dk-tsec-k')?.textContent ?? '',
+          rows: [...p.querySelectorAll('.dk-row')].map((r) => `${r.querySelector('.dk-row-t')?.textContent}|${r.querySelector('.dk-row-s')?.textContent}`),
+        })),
+      })))
+      t.check(shape.map((g) => g.area).join() === 'Work,Personal,Server,Other', `the list's areas read ${JSON.stringify(shape.map((g) => g.area))}`)
+      const personal = shape.find((g) => g.area === 'Personal')
+      t.check(personal?.parts.length === 2 && personal.parts[0].project === '' && personal.parts[1].project === PROJECT && personal.parts[1].rows[0]?.startsWith('Seed order'),
+        `Personal reads ${JSON.stringify(personal)}: want its sessions, then the project's under its name`)
+      t.check(personal?.parts[0].rows.some((r) => r === 'Old notes|off the desk'), `the session off the Desk is not marked so: ${JSON.stringify(personal?.parts[0].rows)}`)
+      t.check(shape[0]?.parts[0].rows[0] === 'Fix the login page|here', `the session in view is not marked: ${JSON.stringify(shape[0]?.parts[0].rows)}`)
+      await t.shot(page, 'list')
+      await tap(page, { sel: '.dk-list .dk-row', text: /Backup check/ })
+      await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a pick from the list did not open it', [P.s1])
+      t.check(!(await page.eval(() => !!document.querySelector('.dk-list'))), 'the list stayed open')
+      await tap(page, '.vl-page[data-active] .dk-list-btn')
+      await tap(page, { sel: '.dk-list .dk-row', text: /Old notes/ })
+      await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a session off the Desk did not come back from the list', [P.d1])
+    },
+  }]
+}
+
+function touchTests() {
+  return [{
+    name: 'desk:menu:ipadland',
+    group: 'desk',
+    device: 'ipadland',
+    timeout: 150_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
-      t.check((await count()) === 3, 'the column count was not kept across a reload')
-      await tap(page, '.dk-ncol[aria-label="2 columns"]')
-      await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-strip').length === 2, 'picking 2 did not make two columns')
-      cols = await page.eval(strips)
-      t.check(names(cols)[1].length === 4, `back at two columns the right one reads ${JSON.stringify(names(cols)[1])}`)
+      await t.step('a tap opens a tab; a tap on the focused tab opens its menu', async () => {
+        await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
+        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a tap did not open the tab', [P.s1])
+        await inView(page, [P.s1])
+        await sleep(300)
+        t.check(!(await page.eval(() => !!document.querySelector('.dk-menu'))), 'the first tap opened the menu instead of the tab')
+        await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
+        await until(page, () => !!document.querySelector('.dk-menu'), 'a tap on the focused tab did not open its menu')
+        const items = await page.eval(() => [...document.querySelectorAll('.dk-menu .dk-mi')].map((b) => ({ t: b.textContent.trim(), h: b.getBoundingClientRect().height })))
+        t.check(items.map((x) => x.t).join('|') === 'Close tab|Stop session', `the menu offers ${items.map((x) => x.t).join(', ')}`)
+        t.check(items.every((x) => x.h >= 44), `menu rows under 44 px: ${JSON.stringify(items)}`)
+        await t.shot(page, 'menu')
+      })
+      await t.step('a press outside closes the menu', async () => {
+        const box = await page.eval(() => {
+          const r = document.querySelector('.vl-page[data-active] .dk-stage').getBoundingClientRect()
+          return { x: r.left + r.width * 0.7, y: r.top + r.height * 0.6 }
+        })
+        await page.mouse(box.x, box.y)
+        await until(page, () => !document.querySelector('.dk-menu'), 'a press outside did not close the menu')
+      })
     },
   }]
 }
@@ -787,9 +928,9 @@ function phoneTests() {
       deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
-      let s = (await page.eval(strips))[0]
-      t.check(s.sw > s.cw + 20, `the strip does not scroll sideways (${s.sw} of ${s.cw})`)
-      t.check(!(await page.eval(() => !!document.querySelector('.dk-ncols'))), 'the phone shows the column control')
+      let d = await page.eval(desk)
+      t.check(d.sw > d.cw + 20, `the strip does not scroll sideways (${d.sw} of ${d.cw})`)
+      t.check(!(await page.eval(() => !!document.querySelector('.dk-list-btn span'))), 'the phone spells out "Sessions" in the strip')
       await t.step('a swipe scrolls the strip, not the page', async () => {
         const r = await page.eval(() => {
           const b = document.querySelector('.vl-page[data-active] .dk-tabs').getBoundingClientRect()
@@ -797,20 +938,21 @@ function phoneTests() {
         })
         await page.swipe(r.r - 30, r.y, r.l + 40, r.y)
         await sleep(500)
-        s = (await page.eval(strips))[0]
-        t.check(s.left > 20, `a swipe left the strip at scrollLeft ${s.left}`)
+        d = await page.eval(desk)
+        t.check(d.left > 20, `a swipe left the strip at scrollLeft ${d.left}`)
         t.check((await page.path()) === '/m/desk', `the swipe moved the page to ${await page.path()}`)
       })
-      await t.step('the active tab is kept in view', async () => {
+      await t.step('the focused tab is kept in view', async () => {
         await tap(page, `.dk-tab[data-name="${P.sh}"] .dk-tab-main`)
-        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-on]`), 'the last tab did not open', [P.sh])
+        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'the last tab did not open', [P.sh])
         await page.eval(() => { document.querySelector('.vl-page[data-active] .dk-tabs').scrollLeft = 0 })
         await page.goto('/m/desk')
         await deskUp(page)
         await sleep(400)
-        s = (await page.eval(strips))[0]
-        const tab = s.tabs.find((x) => x.name === P.sh)
-        t.check(tab?.on && tab.inView, `after a reload the active last tab is not in view (scrollLeft ${s.left}, ${JSON.stringify(tab)})`)
+        d = await page.eval(desk)
+        const tab = d.tabs.find((x) => x.name === P.sh)
+        t.check(tab?.focus && tab.inView, `after a reload the focused last tab is not in view (scrollLeft ${d.left}, ${JSON.stringify(tab)})`)
+        t.check(viewNames(d).join() === P.sh, `the phone shows ${JSON.stringify(viewNames(d))}, want the one tab`)
         await t.shot(page)
       })
       const r = await page.eval(layoutReport)
@@ -820,5 +962,5 @@ function phoneTests() {
 }
 
 export function deskTests() {
-  return [...layoutTests(), ...doneTests(), ...keyTests(), ...moveTests(), ...closeTests(), ...colsTests(), ...phoneTests()]
+  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...closeTests(), ...listTests(), ...touchTests(), ...phoneTests()]
 }

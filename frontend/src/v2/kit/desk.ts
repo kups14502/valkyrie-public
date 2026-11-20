@@ -221,7 +221,7 @@ if (typeof window !== 'undefined') {
   })
 }
 
-/** The tabs in view right now (the active tab of each column while the Desk is on screen and the app shows); they count as seen. */
+/** The panes in view right now (the grid's panes while the Desk is on screen and the app shows); they count as seen. */
 export function setDeskInView(names: string[]): void {
   inView = new Set(names)
   const now = Date.now()
@@ -238,48 +238,38 @@ export function setDeskInView(names: string[]): void {
   }
 }
 
-// ---------- where the tabs sit ----------
+// ---------- where the panes sit ----------
 //
-// order: every pane on the Desk, in tab order (a column shows its own in this
-// order). col: a column he put a tab in (by drag, the tab menu, or "+" in that
-// column); clamped to the column count. work: whether a pane belongs to a work
-// area, frozen once known so a board that stops answering never reshuffles the
-// tabs. off: panes he took off the Desk (they come back from "+"). active: the
-// active tab of each column. cols: the column count he picked, 0 = this
-// device's default.
+// view: the panes in the grid, in reading order. One fills the Desk, two split
+// it side by side, three and four make 2x2, five to nine 3x3 (a short last
+// row's panes share its width). He changes it by dragging tabs and pane titles
+// (screens/Desk.tsx). off: panes he took off the Desk (the session list and "+"
+// put them back). focus: the pane with the keyboard; a tab picked from the
+// strip opens there. The tab order is not kept here: the Desk sorts the tabs
+// by area, then project, every time.
 
 export type DeskLayout = {
-  order: string[]
-  col: Record<string, number>
-  work: Record<string, boolean>
+  view: string[]
   off: string[]
-  active: (string | null)[]
-  cols: 0 | 1 | 2 | 3
+  focus: string | null
 }
 
-const LAYOUT_KEY = 'v2.desk.layout'
+/** The most panes the grid shows (3x3). */
+export const MAX_VIEW = 9
+
+const LAYOUT_KEY = 'v2.desk.grid'
 
 function loadLayout(): DeskLayout {
-  // the headset's first Desk kept a plain list of screens and a column count; neither carries over
+  // the column Desk (11-18 to 11-19) and the headset's first Desk kept other shapes; none carries over
   try {
-    localStorage.removeItem('v2.desk.panes')
-    localStorage.removeItem('v2.desk.cols')
+    for (const k of ['v2.desk.layout', 'v2.desk.panes', 'v2.desk.cols']) localStorage.removeItem(k)
   } catch { /* storage unavailable */ }
   const raw = read<Partial<DeskLayout>>(LAYOUT_KEY) ?? {}
   const names = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((n): n is string => typeof n === 'string' && TERM_NAME_RE.test(n)))] : [])
-  const rec = <T>(v: unknown, ok: (x: unknown) => x is T): Record<string, T> => {
-    const out: Record<string, T> = {}
-    if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (TERM_NAME_RE.test(k) && ok(x)) out[k] = x
-    return out
-  }
-  const cols = Number(raw.cols)
   return {
-    order: names(raw.order),
-    col: rec(raw.col, (x): x is number => x === 0 || x === 1 || x === 2),
-    work: rec(raw.work, (x): x is boolean => typeof x === 'boolean'),
+    view: names(raw.view).slice(0, MAX_VIEW),
     off: names(raw.off),
-    active: Array.isArray(raw.active) ? raw.active.slice(0, 3).map((n) => (typeof n === 'string' && TERM_NAME_RE.test(n) ? n : null)) : [],
-    cols: cols === 1 || cols === 2 || cols === 3 ? cols : 0,
+    focus: typeof raw.focus === 'string' && TERM_NAME_RE.test(raw.focus) ? raw.focus : null,
   }
 }
 
@@ -289,8 +279,9 @@ export const deskLayout = (): DeskLayout => layout
 
 /** Changes the layout (a new object, so memos see it), saves it and re-renders the Desk and the badge. */
 export function editLayout(fn: (l: DeskLayout) => DeskLayout | void): void {
-  const draft: DeskLayout = { ...layout, order: [...layout.order], col: { ...layout.col }, work: { ...layout.work }, off: [...layout.off], active: [...layout.active] }
+  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off] }
   const next = fn(draft) ?? draft
+  next.view = [...new Set(next.view)].slice(0, MAX_VIEW)
   if (JSON.stringify(next) === JSON.stringify(layout)) return
   layout = next
   write(LAYOUT_KEY, layout)
@@ -300,52 +291,35 @@ export function editLayout(fn: (l: DeskLayout) => DeskLayout | void): void {
 const placed = new Map<string, number>()
 const PLACE_GRACE_MS = 10_000
 
-/** A pane he just put in a column (a new session, or one handed over by a tab): kept through the next reads. */
+/** A pane he just put on the Desk (a new session, or one handed over by a tab): kept through the next reads. */
 export function notePlaced(name: string): void {
   placed.set(name, Date.now())
 }
 
 /**
- * Follows a fresh pane list: a pane never seen joins the end of the order (its
- * column's end), and every name that is no longer open leaves the layout. An
- * empty list changes nothing (onDesk shows no tab for a name that is not open).
+ * Follows a fresh pane list: every name that is no longer open leaves the
+ * layout. An empty list changes nothing (the API answers one when tmux is slow too).
  */
 export function syncLayout(list: TermSession[]): void {
-  // the API answers an empty list when tmux is slow to reply too: never wipe his placement on one
   if (!list.length) return
   const open = new Set(list.map((s) => s.name))
-  // a pane placed a moment ago counts as open: a read that left before it started must not drop its column
+  // a pane placed a moment ago counts as open: a read that left before it started must not drop it
   const t = Date.now()
   for (const [n, at] of placed) {
     if (t - at < PLACE_GRACE_MS) open.add(n)
     else placed.delete(n)
   }
-  const known = new Set([...layout.order, ...layout.off])
-  // oldest first, the way the tabs of a terminal window grow
-  const fresh = list.filter((s) => !known.has(s.name)).sort((a, b) => a.createdAt - b.createdAt).map((s) => s.name)
-  const gone = [...known].some((n) => !open.has(n)) || Object.keys(layout.col).some((n) => !open.has(n)) || Object.keys(layout.work).some((n) => !open.has(n))
-  if (!fresh.length && !gone) return
+  const gone = layout.view.some((n) => !open.has(n)) || layout.off.some((n) => !open.has(n)) || (!!layout.focus && !open.has(layout.focus))
+  if (!gone) return
   editLayout((l) => {
-    l.order = [...l.order.filter((n) => open.has(n)), ...fresh]
+    l.view = l.view.filter((n) => open.has(n))
     l.off = l.off.filter((n) => open.has(n))
-    for (const k of Object.keys(l.col)) if (!open.has(k)) delete l.col[k]
-    for (const k of Object.keys(l.work)) if (!open.has(k)) delete l.work[k]
-    l.active = l.active.map((n) => (n && open.has(n) ? n : null))
+    if (l.focus && !open.has(l.focus)) l.focus = null
   })
 }
 
-/** The panes on the Desk (open, and not taken off it), in tab order. */
+/** The panes on the Desk: open, and not taken off it (in the list's order; the Desk sorts them). */
 export function onDesk(list: TermSession[]): TermSession[] {
   const off = new Set(layout.off)
-  const byName = new Map(list.filter((s) => !off.has(s.name)).map((s) => [s.name, s]))
-  const out: TermSession[] = []
-  for (const n of layout.order) {
-    const s = byName.get(n)
-    if (s) {
-      out.push(s)
-      byName.delete(n)
-    }
-  }
-  // a pane the layout has not taken in yet (the list just changed) goes last
-  return [...out, ...[...byName.values()].sort((a, b) => a.createdAt - b.createdAt)]
+  return list.filter((s) => !off.has(s.name))
 }

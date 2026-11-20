@@ -26,21 +26,21 @@ export const isFramed: boolean = isEmbedded && !isXrPanel
 
 // The v2 Desk (v2/screens/Desk.tsx) puts this on its window so the sessions in
 // its tabs can ask it for things a pop-out window would do for itself: open
-// another session (a tab beside this one), close (the tab leaves the Desk),
+// another session (in this pane's place), close (the tab leaves the Desk),
 // the Desk's own keys, which a terminal with the focus hands up instead of
 // typing them into the session, and whether its tab is in view.
 export type DeskHost = {
   open: (name: string, from: Window) => void
   close: (from: Window) => void
   key: (chord: DeskChord, from: Window) => void
-  /** true while this tab is the active tab of its column and the Desk is the screen in front */
+  /** true while this pane is in the Desk's grid and the Desk is the screen in front */
   shown: (from: Window) => boolean
 }
 
 /**
- * The Desk's keys: Ctrl+Tab and Ctrl+Shift+Tab (next and previous tab of the
- * column), Alt+1 to Alt+9 (tab N of the column), Alt+Left and Alt+Right (the
- * column beside), Ctrl+Alt+D (the session done the longest). Claude Code binds
+ * The Desk's keys: Ctrl+Tab and Ctrl+Shift+Tab (next and previous tab), Alt+1
+ * to Alt+9 (tab N), Alt+Left and Alt+Right (the pane before or after in the grid),
+ * Ctrl+Alt+D (the session done the longest). Claude Code binds
  * none of them (its defaults checked in 2.1.303).
  */
 export type DeskChord = 'next' | 'prev' | 'left' | 'right' | 'done' | `tab${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`

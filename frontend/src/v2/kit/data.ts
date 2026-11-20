@@ -403,7 +403,8 @@ export type SessionVM = {
 }
 
 /** One session of the WHOLE board (done ones included), for looking sessions up by id. */
-export type SessionBrief = SessionVM & { done: boolean }
+/** the index's row: also whether it is done, and the folder it runs in on its host (null when unknown) */
+export type SessionBrief = SessionVM & { done: boolean; cwd: string | null }
 
 export type SessionIndex = {
   /** every session on the board by id; empty until the first board fetch of this page load */
@@ -444,6 +445,7 @@ export function useSessions(): Live<SessionVM[]> {
       resume: s.resumeCommand,
       onDesk: s.onDesk,
       done: s.done,
+      cwd: s.cwd,
     }))
     sessionIndex = { byId: new Map(all.map((b) => [b.id, b])), at: Date.now() }
     indexListeners.forEach((l) => l())
@@ -451,7 +453,13 @@ export function useSessions(): Live<SessionVM[]> {
       .filter((s) => !s.done)
       .sort((a, b) => b.last - a.last)
       .slice(0, 40)
-      .map(({ done: _done, ...vm }): SessionVM => vm)
+      .map((s): SessionVM => {
+        // the persisted view model leaves the index's own fields out
+        const vm: SessionVM & Partial<Pick<SessionBrief, 'done' | 'cwd'>> = { ...s }
+        delete vm.done
+        delete vm.cwd
+        return vm
+      })
   }, 15_000, { revive: (d) => (Array.isArray(d) ? (d as Partial<SessionVM>[]).map((x) => ({ resume: null, onDesk: false, ...x }) as SessionVM) : undefined) })
 }
 

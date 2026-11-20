@@ -378,3 +378,15 @@ html[data-motion='reduced'] .vtm-more { animation: none; }
 @media (max-width: 420px) {
   .vtm[data-view='chat'] .vsk-meta > .vsk-m:not(.vsk-m-host):not(.vtm-mode):not(.vtm-conn) { display: none; }
 }
+
+/* ---- a Desk tab on a desktop (Term.tsx bare): the terminal alone, edge to edge; the Desk draws its title ---- */
+.vtm[data-bare] { grid-template-rows: minmax(0, 1fr); }
+.vtm[data-bare] .vsk-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'term';
+  column-gap: 0;
+  padding: 0;
+}
+.vtm[data-bare] .vsk-termbox { border: 0; }
+.vtm[data-bare] .vsk-term { inset: 4px 2px 2px 8px; }

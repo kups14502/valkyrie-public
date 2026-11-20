@@ -133,6 +133,10 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   const md = useMedia('(min-width: 640px)')
   const lg = useMedia('(min-width: 1200px)')
   const coarse = useMedia('(pointer: coarse)')
+  // A Desk tab on a desktop: the terminal alone, edge to edge, with a real
+  // keyboard. The Desk draws the title over it; the composer, the keys, the
+  // activity column, the bar and Chat are for touch screens (his ask, 11-19).
+  const bare = isFramed && !coarse
 
   const hostRef = useRef<HTMLDivElement>(null)
   const probeRef = useRef<HTMLDivElement>(null)
@@ -218,7 +222,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   // socket and its screen reading underneath: the composer, the plates and the
   // working state all still come from the real pane.
   const [viewPick, setViewPick] = useSetting<View>('termView', 'chat', VIEWS)
-  const chat = !shell && viewPick === 'chat'
+  const chat = !shell && viewPick === 'chat' && !bare
   useLayoutEffect(() => { chatRef.current = chat }, [chat])
   const tx = useTranscript(name, chat && !!session && !session.dead)
   const chatTodos = useMemo(() => (chat ? liveTodos(tx.entries) : null), [chat, tx.entries])
@@ -285,6 +289,20 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     // focus refuses, so a stray focus cannot make the geometry predict a
     // keyboard that never comes.
     setup: (term) => {
+      // Paste and copy as in Windows Terminal. xterm turns Ctrl+V into ^V and
+      // swallows the key, so no paste ever reaches the page: Ctrl+V,
+      // Ctrl+Shift+V and Shift+Insert go to the browser instead, whose paste
+      // lands in xterm's own paste handler (bracketed when the CLI asked).
+      // Ctrl+C with text selected copies it; without a selection it is ^C.
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.altKey || e.metaKey) return true
+        const k = e.key.toLowerCase()
+        const paste = (e.ctrlKey && k === 'v') || (e.shiftKey && !e.ctrlKey && e.key === 'Insert')
+        const copy = e.ctrlKey && k === 'c' && term.hasSelection()
+        if (!paste && !copy) return true
+        if (copy && e.type === 'keyup') window.setTimeout(() => term.clearSelection(), 0)
+        return false
+      })
       const ta = term.textarea
       if (!ta || !coarseRef.current) return
       ta.readOnly = true
@@ -580,6 +598,26 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
     },
   })
 
+  // A pasted screenshot (a paste with no text in it) goes to thor like a
+  // picked photo, and its path is typed into the prompt. A paste with text
+  // stays text: Excel and Word put a picture of the copied cells beside it.
+  const sendFiles = up.send
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onPaste = (e: ClipboardEvent) => {
+      const cd = e.clipboardData
+      if (!cd || cd.getData('text/plain')) return
+      const files = Array.from(cd.files).filter((f) => /^(image|video)\//.test(f.type))
+      if (!files.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      sendFiles(files, name)
+    }
+    root.addEventListener('paste', onPaste, true)
+    return () => root.removeEventListener('paste', onPaste, true)
+  }, [name, sendFiles])
+
   // ---------- sessions ----------
 
   const go = useCallback((n: string, label?: string) => {
@@ -718,9 +756,9 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
   }, [standalone, title])
 
   return (
-    <div ref={rootRef} className="vsk vtm" data-term-root data-phase={phase} data-view={chat ? 'chat' : 'term'} data-direct={direct || undefined} data-standalone={standalone || undefined}>
+    <div ref={rootRef} className="vsk vtm" data-term-root data-phase={phase} data-view={chat ? 'chat' : 'term'} data-direct={direct || undefined} data-standalone={standalone || undefined} data-bare={bare || undefined}>
       {up.inputs}
-      <header className="vsk-head">
+      {!bare && <header className="vsk-head">
         {/* a tab of the Desk sits under the Desk's own tab strip */}
         {!isFramed && <StatusStrip onSettings={standalone ? undefined : () => navigate(`${BASE}/settings`)} />}
         {/* in a pop-out the bar is title bar too: its empty parts drag the window as the strip's do */}
@@ -758,7 +796,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
           <span className="vtm-dot" data-conn={conn} title={CONN_WORD[conn]} aria-label={`Connection: ${CONN_WORD[conn]}`} role="img" />
         </div>
         <div className="vl-nav-line vsk-line" />
-      </header>
+      </header>}
 
       <div className="vsk-body">
         {/* The stage: the only box whose size varies, and everything over the
@@ -963,7 +1001,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
           )}
         </div>
 
-        <div className="vsk-comp">
+        {!bare && <div className="vsk-comp">
           {slash.length > 0 && (
             <div className="vtm-chips">
               {slash.map((c) => (
@@ -1012,10 +1050,10 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
                 : <CornerDownLeft size={17} strokeWidth={2} className="vl-icon vl-icon-ink" aria-hidden />}
             </Press>
           </div>
-        </div>
+        </div>}
 
         {/* the side column on wide screens; on the phone its parts take their own rows */}
-        <aside className="vsk-side">
+        {!bare && <aside className="vsk-side">
           <div className="vsk-meta">
             <span className="vsk-m vsk-m-host" title={`Runs on ${host}`}>
               <Icon name={hostIcon(host)} size={12} tone="fg" glow={conn === 'live'} />
@@ -1073,7 +1111,7 @@ function Term({ name, standalone }: { name: string; standalone: boolean }) {
               )
             })}
           </div>
-        </aside>
+        </aside>}
       </div>
 
       <ToastHost className="vsk-toasts" />

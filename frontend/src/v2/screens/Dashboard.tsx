@@ -1534,7 +1534,8 @@ function RavenBlock({ active, i }: { active: boolean; i: number }) {
   }, [active, replyId, unread, qc])
 
   return (
-    <section className="hm-sec hm-rv" aria-label="Raven">
+    // a boxed panel like Calendar, so the chat reads apart from the plain sections around it (his ask, 11-19)
+    <section className="vl-panel hm-sec hm-rv" data-dense="" data-lit={busy || undefined} aria-label="Raven">
       <Press className="hm-head hm-rv-head vl-build" style={bi(i)} onPress={() => go(RAVEN)} aria-label={`Raven${page || failed ? `, ${status}` : ''}, open the conversation`}>
         <span className="hm-head-label" data-lit={busy || undefined}><HIcon name="raven" lit={busy} />Raven</span>
         <span className="hm-head-value hm-rv-status" data-busy={busy || undefined} data-state={failed ? 'error' : page?.status} title={status}>

@@ -5,74 +5,115 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { killTermSession, openTermSession, termLabel, type PaneState, type TermSession } from '../../lib/api'
 import { DESK_FOCUS_EVENT, DESK_SHOWN_EVENT, deskChord, type DeskChord, type DeskHost } from '../../lib/embed'
-import { BASE_AREAS, projAreasQuery } from '../../lib/projectsApi'
+import { BASE_AREAS, PROJ_KEYS, fetchProjList, isClientArea, projAreasQuery } from '../../lib/projectsApi'
 import { useProfile } from '../../lib/deviceMode'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { errText } from '../../lib/term'
 import { ago, useLaunchTargets, useSessionIndex, useTick, type TargetVM } from '../kit/data'
 import {
-  deskLayout, doneAt, editLayout, notePlaced, onDesk, paneState, setDeskInView, syncLayout, unseenDone, useDeskPanes, useDeskStore,
+  MAX_VIEW, deskLayout, doneAt, editLayout, notePlaced, onDesk, paneState, setDeskInView, syncLayout, unseenDone, useDeskPanes, useDeskStore,
 } from '../kit/desk'
+import { ChevronDown, ListTree } from 'lucide-react'
 import { Icon, StateIcon } from '../kit/icons'
 import type { SessionState } from '../kit/sessionState'
 import type { ScreenProps } from '../kit/shell'
 import { Press, cx, toast } from '../kit/ui'
 import './desk.css'
 
-// The Desk (/m/desk), on every device right after Messages: where he works in
-// Claude sessions inside Valkyrie, with tabs like Windows Terminal. One to
-// three columns side by side, each a tab group: a strip of tabs on top, the
-// active tab's session below, filling the screen's height.
+// The Desk (/m/desk), on every device right after Raven: where he works in
+// Claude sessions inside Valkyrie, with tabs like Windows Terminal.
 //
-// Every open Valkyrie pane on odin is a tab (the tmux list), new ones joining
-// the end of their column. A tab shows the session's state with the AI >
-// Sessions icons (kit/icons StateIcon: working the bolt, asking the bubble in
-// the second accent, idle the pause circle) and its title, which also lights
-// when the session finished while the tab was out of view (kit/desk.ts), so a
-// glance tells still working, finished, and finished with a question for him.
-// Closing a tab only takes it off the Desk ("+" puts it back); the tab menu
-// stops the session itself.
+// One strip of tabs on top: every open Valkyrie pane on odin (the tmux list),
+// sorted by area (the client areas in odin's order, then personal and server)
+// and then by project. A tab shows the session's state with the AI > Sessions
+// icons (kit/icons StateIcon: working the bolt, asking the bubble in the second
+// accent, idle the pause circle) and its title, which also lights when the
+// session finished while it was out of view (kit/desk.ts), so a glance tells
+// still working, finished, and finished with a question for him. "Sessions"
+// at the strip's start lists them all by area and project; "+" starts one.
 //
-// A tab's session is the pop-out terminal page (/m/w/term/<name>) in an
-// iframe, so it is exactly what a pop-out window shows. The most recent tabs
-// stay mounted and hidden, so a switch back is instant and keeps the
-// scrollback. Nothing is mounted until the Desk is first opened: every tab is
-// in the pager at once, and an iframe attaches to its pane and sizes it. The
-// terminals ask the Desk for what a pop-out does for itself, and hand it the
-// Desk's keys, through window.valkyrieDesk (lib/embed.ts DeskHost).
+// Under it, the grid: one session fills the Desk at first. On a desktop he
+// drags a tab (or a pane's title) onto a pane: its middle puts it in that
+// pane's place, an edge puts it beside it, so the grid grows from one to a
+// split, 2x2 and 3x3 (kit/desk.ts view). Each pane is the bare terminal under
+// a title row: the session's title and the folder it runs in. A touch screen
+// shows one session at a time, with the terminal page's composer and keys.
 //
-// Placement, order, the active tabs and the column count are kept per device.
+// A pane's session is the pop-out terminal page (/m/w/term/<name>) in an
+// iframe. The panes in view and the most recent others stay mounted, so a
+// switch back is instant and keeps the scrollback; every iframe is one layer
+// placed by style, so a layout change never reloads one. The terminals ask
+// the Desk for what a pop-out does for itself, and hand it the Desk's keys,
+// through window.valkyrieDesk (lib/embed.ts DeskHost).
 
 const EMPTY: TermSession[] = []
-/** iframes kept mounted across all columns (each is a whole page); fewer on the phone */
-const MAX_MOUNTED = 8
-const MAX_MOUNTED_PHONE = 4
-/** px between columns (desk.css --dk-gap) */
-const GAP = 10
-/** the terminal page's default font, for sizing a session before its tab attaches */
+/** iframes kept mounted (each is a whole page): the grid's panes, then the most recent others */
+const MAX_MOUNTED = 12
+const MAX_MOUNTED_TOUCH = 4
+/** the terminal page's default font, for sizing a session before its pane attaches */
 const FONT_PX = 14
 const PANE_MIME = 'application/x-valkyrie-pane'
+/** px: a pane's title row on a desktop (desk.css .dk-head) */
+const HEAD_H = 26
+/** px between panes (desk.css --dk-gap) */
+const GAP = 6
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
-type Device = ReturnType<typeof useProfile>['resolved']
-
-/** This device's column count when he has not picked one: phone 1, iPad 1 upright and 2 on its side, a monitor 2 (1 when narrow), the headset 3. */
-function autoCols(device: Device, w: number, h: number): 1 | 2 | 3 {
-  if (device === 'vr') return 3
-  if (device === 'iphone') return 1
-  if (device === 'ipad') return w > h ? 2 : 1
-  return w > 0 && w < 1200 ? 1 : 2
-}
 
 const WORD: Record<PaneState, string> = { working: 'working', asking: 'asking', idle: 'idle', shell: 'shell', dead: 'ended' }
 
 /** The mark's icon for a pane state; a shell has none, an ended pane the faint closed mark. */
 const markOf = (st: PaneState): SessionState | null => (st === 'shell' ? null : st === 'dead' ? 'closed' : st)
 
-const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : '')
-const isWorkArea = (a: string) => a !== '' && a !== 'personal' && a !== 'server' && a !== 'other'
+const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
 /** The conversation a pane runs: a new pane knows it from the start, a resume keeps it as its target. */
 const paneSid = (t: TermSession) => t.sessionId || (t.mode === 'resume' ? t.target : '')
+
+/** The folder a pane runs in, short: the whole path when it is short, else its last folder. */
+function shortFolder(cwd: string): string {
+  const p = cwd.replace(/[\\/]+$/, '')
+  return p.length <= 24 ? p : p.split(/[\\/]/).pop() || p
+}
+
+// ---------- the grid ----------
+
+/** Columns for n panes: one, a split side by side, 2x2, 3x3. */
+const gridCols = (n: number) => (n <= 1 ? 1 : n <= 4 ? 2 : 3)
+
+type Box = { x: number; y: number; w: number; h: number }
+/** Pane i of n, as fractions of the stage: a short last row's panes share its width. */
+function cellBox(i: number, n: number): Box {
+  const c = gridCols(n)
+  const rows = Math.ceil(n / c)
+  const r = Math.floor(i / c)
+  const inRow = r === rows - 1 ? n - r * c : c
+  return { x: (i - r * c) / inRow, y: r / rows, w: 1 / inRow, h: 1 / rows }
+}
+const FULL: Box = { x: 0, y: 0, w: 1, h: 1 }
+/** A box as CSS: GAP apart inside the stage, flush with its edges, `top` px kept clear at the top (the title row). */
+function boxStyle(b: Box, top = 0): CSSProperties {
+  const l = b.x > 0.001 ? GAP / 2 : 0
+  const r = b.x + b.w < 0.999 ? GAP / 2 : 0
+  const t = b.y > 0.001 ? GAP / 2 : 0
+  const btm = b.y + b.h < 0.999 ? GAP / 2 : 0
+  return {
+    left: `calc(${b.x * 100}% + ${l}px)`,
+    top: `calc(${b.y * 100}% + ${t + top}px)`,
+    width: `calc(${b.w * 100}% - ${l + r}px)`,
+    height: `calc(${b.h * 100}% - ${t + btm + top}px)`,
+  }
+}
+
+type Zone = 'left' | 'right' | 'top' | 'bottom' | 'center'
+/** Where in a pane a drop lands: within a quarter of an edge puts the pane beside it, the middle in its place. */
+function zoneAt(e: { clientX: number; clientY: number }, el: HTMLElement): Zone {
+  const r = el.getBoundingClientRect()
+  const x = (e.clientX - r.left) / Math.max(1, r.width)
+  const y = (e.clientY - r.top) / Math.max(1, r.height)
+  const d = { left: x, right: 1 - x, top: y, bottom: 1 - y }
+  const [edge, dist] = (Object.entries(d) as [Zone, number][]).sort((a, b) => a[1] - b[1])[0]
+  return dist < 0.25 ? edge : 'center'
+}
 
 function usePageVisible(): boolean {
   const [v, setV] = useState(() => typeof document === 'undefined' || !document.hidden)
@@ -84,32 +125,33 @@ function usePageVisible(): boolean {
   return v
 }
 
-type Menu = { name: string; col: number; x: number; arm: boolean }
+/** What the Desk knows about a pane besides the tmux row: its area, project and folder. */
+type PaneMeta = { title: string; area: string; project: string; folder: string; where: string }
+
+type Menu = { name: string; x: number; arm: boolean }
 
 export default function Desk({ active }: ScreenProps) {
   const qc = useQueryClient()
   const device = useProfile().resolved
   const phone = device === 'iphone'
   const coarse = useMemo(() => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches, [])
+  // the grid needs a mouse to drag with, and room: a touch screen shows one session with its own keys
+  const grid = !coarse && !phone
   const visible = usePageVisible()
   const onScreen = active && visible
 
   const rootRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const stripEls = useRef(new Map<number, HTMLDivElement>())
+  const stripRef = useRef<HTMLDivElement>(null)
   const frames = useRef(new Map<string, HTMLIFrameElement>())
-  // the Desk's own size (the UI zoom hides from media queries) and its stage's, in layout px
-  const [box, setBox] = useState({ w: 0, h: 0, sw: 0, sh: 0 })
+  // the stage's size in layout px (the UI zoom hides from media queries)
+  const [stage, setStage] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
-    const el = rootRef.current
     const st = stageRef.current
-    if (!el || !st) return
-    const read = () => setBox((b) => (b.w === el.clientWidth && b.h === el.clientHeight && b.sw === st.clientWidth && b.sh === st.clientHeight
-      ? b
-      : { w: el.clientWidth, h: el.clientHeight, sw: st.clientWidth, sh: st.clientHeight }))
+    if (!st) return
+    const read = () => setStage((b) => (b.w === st.clientWidth && b.h === st.clientHeight ? b : { w: st.clientWidth, h: st.clientHeight }))
     read()
     const ro = new ResizeObserver(read)
-    ro.observe(el)
     ro.observe(st)
     return () => ro.disconnect()
   }, [])
@@ -125,6 +167,7 @@ export default function Desk({ active }: ScreenProps) {
   const index = useSessionIndex()
   const targets = useLaunchTargets()
   const areas = useQuery(projAreasQuery).data ?? BASE_AREAS
+  const projects = useQuery({ queryKey: PROJ_KEYS.list, queryFn: () => fetchProjList(), staleTime: 60_000 })
   const now = useTick(active ? 30_000 : 300_000)
   const titles = useMemo(() => {
     const m = new Map<string, string>()
@@ -132,71 +175,88 @@ export default function Desk({ active }: ScreenProps) {
     return m
   }, [index.byId])
 
-  // ---------- area: which column a tab starts in ----------
+  // ---------- each pane's area, project and folder; the tabs in order ----------
 
-  /** The pane's area: its conversation's on the board, else what its launch target says. '' = not known yet. */
-  const areaOf = useCallback((s: TermSession): string => {
-    const sid = paneSid(s)
-    const a = sid ? index.byId.get(sid)?.area : undefined
-    if (a) return a
-    if (s.mode === 'resume' || !s.target) return ''
-    if (s.target === 'personal' || s.target === 'server' || areas.includes(s.target)) return s.target
-    return ''
-  }, [index.byId, areas])
+  const meta = useMemo(() => {
+    const projById = new Map((projects.data ?? []).map((p) => [p.id, p]))
+    const targetByKey = new Map((targets.data ?? []).map((t) => [t.key, t]))
+    const out = new Map<string, PaneMeta>()
+    for (const s of list) {
+      const sid = paneSid(s)
+      const b = sid ? index.byId.get(sid) : undefined
+      const proj = s.projectId ? projById.get(s.projectId) : undefined
+      const t = s.mode !== 'resume' && s.target ? targetByKey.get(s.target) : undefined
+      const fromTarget = t?.group && areas.includes(t.group) ? t.group : s.mode !== 'resume' && areas.includes(s.target) ? s.target : ''
+      const boardArea = b?.area && b.area !== 'other' ? b.area : ''
+      const cwd = b?.cwd ?? ''
+      out.set(s.name, {
+        title: s.title || termLabel(s, titles),
+        area: boardArea || proj?.area || fromTarget,
+        project: proj?.name ?? '',
+        folder: cwd ? shortFolder(cwd) : t?.label ?? '',
+        where: cwd || t?.label || '',
+      })
+    }
+    return out
+  }, [list, index.byId, projects.data, targets.data, areas, titles])
+  const metaOf = (s: TermSession): PaneMeta => meta.get(s.name) ?? { title: s.title || termLabel(s, titles), area: '', project: '', folder: '', where: '' }
 
-  /** true for a work area: any area that is not personal or server; the everyday launch targets besides those are work. null = not known yet. */
-  const workOf = useCallback((s: TermSession): boolean | null => {
-    const a = areaOf(s)
-    if (a) return isWorkArea(a)
-    const t = s.mode !== 'resume' ? (targets.data ?? []).find((x) => x.key === s.target) : undefined
-    return t && t.phone && !t.project ? true : null
-  }, [areaOf, targets.data])
+  // the client areas first, in odin's order, then personal and server; a pane whose area is not known yet last
+  const areaOrder = useMemo(() => [...areas.filter(isClientArea), ...BASE_AREAS], [areas])
+  const rankOf = useCallback((a: string) => {
+    const i = areaOrder.indexOf(a)
+    return i < 0 ? areaOrder.length : i
+  }, [areaOrder])
+  const sortPanes = useCallback((xs: TermSession[]): TermSession[] => [...xs].sort((a, b) => {
+    const ma = meta.get(a.name)
+    const mb = meta.get(b.name)
+    return rankOf(ma?.area ?? '') - rankOf(mb?.area ?? '')
+      || Number(!!ma?.project) - Number(!!mb?.project)
+      || (ma?.project ?? '').localeCompare(mb?.project ?? '')
+      || a.createdAt - b.createdAt
+  }), [meta, rankOf])
 
-  const tabs = onDesk(list)
-  const n: 1 | 2 | 3 = phone ? 1 : L.cols || autoCols(device, box.w, box.h)
-  const colOf = (s: TermSession): number => {
-    if (n === 1) return 0
-    const c = L.col[s.name]
-    if (c !== undefined) return Math.min(c, n - 1)
-    return (L.work[s.name] ?? workOf(s)) === true ? 0 : n - 1
-  }
-  const columns: TermSession[][] = Array.from({ length: n }, () => [])
-  for (const s of tabs) columns[colOf(s)].push(s)
-  const actives = columns.map((col, c) => col.find((s) => s.name === L.active[c]) ?? col[0] ?? null)
-  const activeKey = actives.map((s) => s?.name ?? '').join(',')
+  const tabs = useMemo(() => sortPanes(onDesk(list)), [sortPanes, list, L.off]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tabNames = new Set(tabs.map((s) => s.name))
 
-  // an area once known stays: a board that stops answering never moves a tab
-  const learn = tabs.filter((s) => L.work[s.name] === undefined).map((s) => [s.name, workOf(s)] as const).filter((x) => x[1] !== null)
-  const learnKey = learn.map(([k, v]) => `${k}:${v}`).join(',')
+  // the grid: the panes he placed that are still on the Desk; before he placed any, the first tab fills it
+  const placedView = L.view.filter((n) => tabNames.has(n))
+  const focusName = L.focus && tabNames.has(L.focus) ? L.focus : null
+  const view: string[] = !grid
+    ? [focusName ?? placedView[0] ?? tabs[0]?.name].filter((x): x is string => !!x)
+    : placedView.length ? placedView : tabs[0] ? [tabs[0].name] : []
+  const n = view.length
+  const focus = focusName && view.includes(focusName) ? focusName : view[0] ?? null
+  const viewKey = view.join(',')
+
+  // the panes in view count as seen while the Desk shows
   useEffect(() => {
-    if (!learn.length) return
-    editLayout((l) => { for (const [k, v] of learn) l.work[k] = v === true })
+    setDeskInView(onScreen ? view : [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [learnKey])
-
-  // the tabs in view count as seen: the active tab of each column while the Desk shows
-  useEffect(() => {
-    setDeskInView(onScreen ? actives.filter((s): s is TermSession => !!s).map((s) => s.name) : [])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onScreen, activeKey])
+  }, [onScreen, viewKey])
   useEffect(() => () => setDeskInView([]), [])
 
-  // ---------- mounted terminals: the active tabs, then the most recently opened ----------
+  // ---------- mounted terminals: the grid's, then the most recently opened ----------
 
   const [woke, setWoke] = useState(active)
   if (active && !woke) setWoke(true)
-  // the tabs he opened, most recent first (a tab active only while the list was loading is not one)
   const [recent, setRecent] = useState<string[]>([])
-  const max = phone ? MAX_MOUNTED_PHONE : MAX_MOUNTED
-  const tabNames = new Set(tabs.map((s) => s.name))
-  const activeNames = actives.filter((s): s is TermSession => !!s).map((s) => s.name)
-  const mounted = woke ? [...new Set([...activeNames, ...recent])].filter((x) => tabNames.has(x)).slice(0, Math.max(max, activeNames.length)) : []
+  const max = coarse ? MAX_MOUNTED_TOUCH : MAX_MOUNTED
+  const mounted = woke ? [...new Set([...view, ...recent])].filter((x) => tabNames.has(x)).slice(0, Math.max(max, n)) : []
   // a stable DOM order: moving an iframe in the DOM reloads it
   const mountedSorted = [...mounted].sort()
-  // the tabs in view: a mounted one behind another keeps its terminal attached but stops its quick polls
+  // a pane out of view keeps the box it last had, so hiding it never resizes its session
+  const [boxes, setBoxes] = useState<{ key: string; at: Record<string, Box> }>({ key: '', at: {} })
+  if (boxes.key !== viewKey) {
+    const at = { ...boxes.at }
+    view.forEach((name, i) => { at[name] = cellBox(i, n) })
+    setBoxes({ key: viewKey, at })
+  }
+  const lastBox = boxes.at
+  // the panes in view: a mounted one out of view keeps its terminal attached but stops its quick polls
   // (lib/embed.ts deskTabShown, read by the terminal page)
   const shownRef = useRef(new Set<string>())
-  const shownKey = active ? activeNames.join(',') : ''
+  const shownKey = active ? viewKey : ''
   useEffect(() => {
     shownRef.current = new Set(shownKey ? shownKey.split(',') : [])
     for (const f of frames.current.values()) {
@@ -206,17 +266,14 @@ export default function Desk({ active }: ScreenProps) {
     }
   }, [shownKey])
 
-  // the tab menu (long press, right-click, a tap on the active tab on a touch screen) and "+"
   const [menu, setMenu] = useState<Menu | null>(null)
-  const [picker, setPicker] = useState<number | null>(null)
+  const [picker, setPicker] = useState(false)
+  const [listOpen, setListOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-
-  const [focusCol, setFocusCol] = useState(0)
-  const fc = Math.min(focusCol, n - 1)
   const focusRef = useRef<string | null>(null)
-  // what the callbacks below (keys, the terminals' requests) read: the tabs as last drawn
-  const tabsRef = useRef({ columns, actives, n, fc })
-  useLayoutEffect(() => { tabsRef.current = { columns, actives, n, fc } })
+  // what the callbacks below (keys, the terminals' requests) read: the Desk as last drawn
+  const cur = useRef({ view, focus, tabs, grid })
+  useLayoutEffect(() => { cur.current = { view, focus, tabs, grid } })
 
   const focusFrame = useCallback((name: string) => {
     if (coarse) return
@@ -228,47 +285,94 @@ export default function Desk({ active }: ScreenProps) {
     } catch { /* not loaded yet: onLoad tries again */ }
   }, [coarse])
 
-  /** Opens a tab: active in its column, that column focused, the keyboard in its terminal. */
-  const openTab = useCallback((c: number, name: string) => {
-    editLayout((l) => {
-      l.active[c] = name
-      for (let i = 0; i < 3; i++) if (i !== c && l.active[i] === name) l.active[i] = null
-    })
-    setFocusCol(c)
-    // the tab it replaces stays mounted too: switching back is instant
-    const was = tabsRef.current.actives[c]?.name
-    setRecent((r) => [...new Set([name, ...(was ? [was] : []), ...r])].slice(0, 16))
+  const keyboardTo = useCallback((name: string) => {
     focusRef.current = name
     requestAnimationFrame(() => requestAnimationFrame(() => focusFrame(name)))
   }, [focusFrame])
 
-  /** Takes a tab off the Desk; the column's neighbor tab becomes active. */
+  /** Opens a session: in view already, it takes the keyboard; else it takes the focused pane's place (that one stays a tab). */
+  const openTab = useCallback((name: string) => {
+    const { view: v, focus: f, grid: g } = cur.current
+    const was = f && f !== name ? f : null
+    editLayout((l) => {
+      l.off = l.off.filter((x) => x !== name)
+      if (!g) l.view = [name]
+      else if (!v.includes(name)) {
+        const next = [...v]
+        const i = f ? next.indexOf(f) : -1
+        if (i >= 0) next[i] = name
+        else if (next.length) next[0] = name
+        else next.push(name)
+        l.view = next
+      } else l.view = v
+      l.focus = name
+    })
+    setRecent((r) => [...new Set([name, ...(was ? [was] : []), ...r])].slice(0, 16))
+    keyboardTo(name)
+  }, [keyboardTo])
+
+  /** A drop on pane `target`: its middle swaps the two (or puts the dragged one in its place), an edge puts it beside. */
+  const dropOn = useCallback((name: string, target: string, zone: Zone) => {
+    const v = cur.current.view
+    if (name === target || !v.includes(target)) return
+    editLayout((l) => {
+      l.off = l.off.filter((x) => x !== name)
+      let next = [...v]
+      const from = next.indexOf(name)
+      const ti = next.indexOf(target)
+      if (zone === 'center' || (from < 0 && next.length >= MAX_VIEW)) {
+        if (from >= 0) next[from] = target
+        next[ti] = name
+      } else {
+        next = next.filter((x) => x !== name)
+        next.splice(next.indexOf(target) + (zone === 'right' || zone === 'bottom' ? 1 : 0), 0, name)
+      }
+      l.view = next
+      l.focus = name
+    })
+    setRecent((r) => [...new Set([name, target, ...r])].slice(0, 16))
+    keyboardTo(name)
+  }, [keyboardTo])
+
+  /** Takes a pane out of the grid (it stays a tab); its neighbor takes the keyboard. */
+  const unview = useCallback((name: string) => {
+    const v = cur.current.view
+    if (v.length < 2 || !v.includes(name)) return
+    const i = v.indexOf(name)
+    const next = v.filter((x) => x !== name)
+    const to = next[Math.min(i, next.length - 1)]
+    editLayout((l) => {
+      l.view = next
+      if (cur.current.focus === name || !l.focus) l.focus = to
+    })
+    if (cur.current.focus === name) keyboardTo(to)
+  }, [keyboardTo])
+
+  /** Takes a tab off the Desk ("+" and the session list put it back); its neighbor fills its pane. */
   const closeTab = useCallback((name: string) => {
-    const cols = tabsRef.current.columns
-    const c = cols.findIndex((col) => col.some((s) => s.name === name))
-    const col = c >= 0 ? cols[c] : []
-    const i = col.findIndex((s) => s.name === name)
-    const next = col[i + 1]?.name ?? col[i - 1]?.name ?? null
+    const { view: v, tabs: ts } = cur.current
+    const i = ts.findIndex((s) => s.name === name)
+    const rest = ts.filter((s) => s.name !== name && !v.includes(s.name))
+    const fill = rest.find((_, k) => k >= i)?.name ?? rest[rest.length - 1]?.name ?? null
     editLayout((l) => {
       if (!l.off.includes(name)) l.off.push(name)
-      l.active = l.active.map((x) => (x === name ? null : x))
-      if (c >= 0 && tabsRef.current.actives[c]?.name === name) l.active[c] = next
+      const at = v.indexOf(name)
+      const next = [...v]
+      if (at >= 0) {
+        // the only pane: the next tab takes its place; one of several: the grid closes up
+        if (next.length === 1 && fill) next[0] = fill
+        else next.splice(at, 1)
+      }
+      l.view = next
+      if (l.focus === name) l.focus = next[Math.min(Math.max(at, 0), next.length - 1)] ?? null
     })
     setMenu(null)
   }, [])
 
-  /** Puts a pane in column c, at the end or before `before`, and opens it there. */
-  const place = useCallback((name: string, c: number, before?: string | null) => {
+  /** Puts a pane on the Desk (a new session, one put back) and opens it. */
+  const place = useCallback((name: string) => {
     notePlaced(name)
-    editLayout((l) => {
-      l.off = l.off.filter((x) => x !== name)
-      l.col[name] = c
-      l.order = l.order.filter((x) => x !== name)
-      const i = before ? l.order.indexOf(before) : -1
-      if (i >= 0) l.order.splice(i, 0, name)
-      else l.order.push(name)
-    })
-    openTab(c, name)
+    openTab(name)
   }, [openTab])
 
   // ---------- menus ----------
@@ -279,21 +383,23 @@ export default function Desk({ active }: ScreenProps) {
     return () => clearTimeout(t)
   }, [menu?.arm])
   useEffect(() => {
-    if (!menu && picker === null) return
+    if (!menu && !picker && !listOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       setMenu(null)
-      setPicker(null)
+      setPicker(false)
+      setListOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menu, picker])
+  }, [menu, picker, listOpen])
 
-  const openMenu = (name: string, c: number, el: HTMLElement | null) => {
-    const strip = el?.closest('.dk-strip')
-    const x = el && strip ? Math.max(0, el.getBoundingClientRect().left - strip.getBoundingClientRect().left) : 0
-    setPicker(null)
-    setMenu({ name, col: c, x, arm: false })
+  const openMenu = (name: string, el: HTMLElement | null) => {
+    const root = rootRef.current
+    const x = el && root ? Math.max(0, el.getBoundingClientRect().left - root.getBoundingClientRect().left) : 0
+    setPicker(false)
+    setListOpen(false)
+    setMenu({ name, x, arm: false })
   }
 
   const stop = async (name: string) => {
@@ -310,21 +416,22 @@ export default function Desk({ active }: ScreenProps) {
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
   }
 
-  /** A new session's first grid: about the size of the column it is about to fill. */
+  /** A new session's first grid: about the size of the pane it is about to fill. */
   const gridFor = () => {
-    const w = ((box.sw || box.w) - (n - 1) * GAP) / n
-    const h = box.sh || box.h
-    return { cols: Math.max(40, Math.floor((w - 24) / (FONT_PX * 0.6))), rows: Math.max(12, Math.floor((h - 150) / (FONT_PX * 1.32))) }
+    const b = focus ? cellBox(Math.max(0, view.indexOf(focus)), n) : FULL
+    const w = (stage.w || 1200) * b.w
+    const h = (stage.h || 800) * b.h - (grid ? HEAD_H : 0)
+    return { cols: Math.max(40, Math.floor((w - 24) / (FONT_PX * 0.6))), rows: Math.max(12, Math.floor((h - (grid ? 16 : 150)) / (FONT_PX * 1.32))) }
   }
 
-  const start = async (c: number, t: TargetVM) => {
+  const start = async (t: TargetVM) => {
     if (busy) return
     setBusy(true)
     try {
       const r = await openTermSession({ mode: 'new', target: t.key, label: t.label, ...gridFor() })
       seedTerminal(qc, r)
-      setPicker(null)
-      if (r.name) place(r.name, c)
+      setPicker(false)
+      if (r.name) place(r.name)
     } catch (e) {
       toast(`Could not start ${t.label}: ${errText(e)}`, { ms: 5000 })
     } finally {
@@ -334,32 +441,28 @@ export default function Desk({ active }: ScreenProps) {
 
   // ---------- keys: here, and handed up by a terminal (DeskHost.key) ----------
 
-  const onChord = useCallback((chord: DeskChord, from?: number) => {
-    const { columns: cols, actives: acts, n: count, fc: f } = tabsRef.current
-    const c = Math.min(from ?? f, count - 1)
-    const col = cols[c] ?? []
-    const cur = acts[c]
+  const onChord = useCallback((chord: DeskChord, from?: string) => {
+    const { view: v, focus: f, tabs: ts } = cur.current
+    const here = from ?? f
     if (chord === 'next' || chord === 'prev') {
-      if (!col.length) return
-      const i = Math.max(0, col.findIndex((s) => s.name === cur?.name))
-      openTab(c, col[(i + (chord === 'next' ? 1 : -1) + col.length) % col.length].name)
+      if (!ts.length) return
+      const i = Math.max(0, ts.findIndex((s) => s.name === here))
+      openTab(ts[(i + (chord === 'next' ? 1 : -1) + ts.length) % ts.length].name)
     } else if (chord === 'left' || chord === 'right') {
-      const to = Math.max(0, Math.min(count - 1, c + (chord === 'right' ? 1 : -1)))
-      const a = acts[to]
-      setFocusCol(to)
-      if (a) openTab(to, a.name)
+      if (v.length < 2) return
+      const i = Math.max(0, v.indexOf(here ?? ''))
+      openTab(v[(i + (chord === 'right' ? 1 : -1) + v.length) % v.length])
     } else if (chord === 'done') {
       // finished and not seen yet, or asking: the one that has waited longest first
-      const all = cols.flatMap((cc, i) => cc.map((s) => ({ s, c: i })))
-      const waiting = all
-        .filter(({ s }) => unseenDone(s.name) || paneState(s) === 'asking')
-        .sort((a, b) => (doneAt(a.s.name) || a.s.stateSince || 0) - (doneAt(b.s.name) || b.s.stateSince || 0))
-      const next = waiting.find(({ s, c: i }) => !(i === c && s.name === cur?.name)) ?? null
-      if (next) openTab(next.c, next.s.name)
+      const waiting = ts
+        .filter((s) => unseenDone(s.name) || paneState(s) === 'asking')
+        .sort((a, b) => (doneAt(a.name) || a.stateSince || 0) - (doneAt(b.name) || b.stateSince || 0))
+      const next = waiting.find((s) => s.name !== here) ?? null
+      if (next) openTab(next.name)
       else toast('No session is waiting for you')
     } else {
       const k = Number(chord.slice(3)) - 1
-      if (col[k]) openTab(c, col[k].name)
+      if (ts[k]) openTab(ts[k].name)
     }
   }, [openTab])
 
@@ -377,35 +480,25 @@ export default function Desk({ active }: ScreenProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [active, onChord])
 
-  // What the terminal in a tab asks for (lib/embed.ts DeskHost).
-  const colOfFrame = (from: Window): { name: string; c: number } | null => {
-    for (const [name, el] of frames.current) {
-      if (el.contentWindow !== from) continue
-      const { columns: cols } = tabsRef.current
-      const c = cols.findIndex((col) => col.some((s) => s.name === name))
-      return { name, c: Math.max(0, c) }
-    }
+  // What the terminal in a pane asks for (lib/embed.ts DeskHost).
+  const nameOf = (from: Window): string | null => {
+    for (const [name, el] of frames.current) if (el.contentWindow === from) return name
     return null
   }
-  const colOfFrameRef = useRef(colOfFrame)
-  useLayoutEffect(() => { colOfFrameRef.current = colOfFrame })
   useEffect(() => {
     const host: DeskHost = {
-      open: (name, from) => {
-        const at = colOfFrameRef.current(from)
-        const { columns: cols } = tabsRef.current
-        const here = cols.findIndex((col) => col.some((s) => s.name === name))
-        if (here >= 0) openTab(here, name)
-        else place(name, at?.c ?? 0)
+      open: (name) => {
+        if (cur.current.tabs.some((s) => s.name === name)) openTab(name)
+        else place(name)
       },
       close: (from) => {
-        const at = colOfFrameRef.current(from)
-        if (at) closeTab(at.name)
+        const name = nameOf(from)
+        if (name) closeTab(name)
       },
-      key: (chord, from) => onChord(chord, colOfFrameRef.current(from)?.c),
+      key: (chord, from) => onChord(chord, nameOf(from) ?? undefined),
       shown: (from) => {
-        const at = colOfFrameRef.current(from)
-        return !!at && shownRef.current.has(at.name)
+        const name = nameOf(from)
+        return !!name && shownRef.current.has(name)
       },
     }
     const w = window as Window & { valkyrieDesk?: DeskHost }
@@ -413,41 +506,72 @@ export default function Desk({ active }: ScreenProps) {
     return () => { if (w.valkyrieDesk === host) delete w.valkyrieDesk }
   }, [openTab, place, closeTab, onChord])
 
-  // a strip that scrolls sideways (the phone, a crowded column) keeps its active tab in view: when it
-  // changes, and when the tabs before it change width (titles from the board, a late webfont)
-  const titleKey = columns.map((col) => col.map((s) => s.title || termLabel(s, titles)).join('\n')).join('\t')
+  // the strip keeps the focused tab in view when it scrolls sideways (the phone, many tabs)
+  const titleKey = tabs.map((s) => metaOf(s).title).join('\n')
   useLayoutEffect(() => {
-    const keep = () => stripEls.current.forEach((row, c) => {
-      const a = tabsRef.current.actives[c]
-      const el = a ? row.querySelector<HTMLElement>(`[data-name="${a.name}"]`) : null
-      if (!el) return
+    const keep = () => {
+      const row = stripRef.current
+      const el = focus && row ? row.querySelector<HTMLElement>(`[data-name="${focus}"]`) : null
+      if (!row || !el) return
       const l = el.offsetLeft
       const r = l + el.offsetWidth
       if (l < row.scrollLeft) row.scrollLeft = Math.max(0, l - 8)
       else if (r > row.scrollLeft + row.clientWidth) row.scrollLeft = r - row.clientWidth + 8
-    })
+    }
     keep()
     let live = true
     void document.fonts?.ready.then(() => { if (live) keep() })
     return () => { live = false }
-  }, [activeKey, n, titleKey])
+  }, [focus, titleKey])
 
-  // ---------- drag a tab to another strip (a mouse) ----------
+  // ---------- drag a tab or a pane's title (a mouse) ----------
 
-  const [dropCol, setDropCol] = useState<number | null>(null)
-  const dragOver = (c: number) => (e: ReactDragEvent<HTMLDivElement>) => {
+  const [drag, setDrag] = useState<{ name: string; from: 'tab' | 'pane' } | null>(null)
+  const [dropAt, setDropAt] = useState<{ target: string; zone: Zone } | null>(null)
+  const [stripDrop, setStripDrop] = useState(false)
+  const beginDrag = (name: string, from: 'tab' | 'pane') => (e: ReactDragEvent) => {
+    e.dataTransfer.setData(PANE_MIME, name)
+    e.dataTransfer.effectAllowed = 'move'
+    setMenu(null)
+    // the drop targets go up over the terminals a moment later: changing the page inside dragstart can cancel the drag
+    window.setTimeout(() => setDrag({ name, from }), 0)
+  }
+  const endDrag = () => {
+    setDrag(null)
+    setDropAt(null)
+    setStripDrop(false)
+  }
+  const overPane = (target: string) => (e: ReactDragEvent<HTMLDivElement>) => {
     if (!Array.from(e.dataTransfer.types).includes(PANE_MIME)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    if (dropCol !== c) setDropCol(c)
+    let zone = zoneAt(e, e.currentTarget)
+    // a full 3x3 grid takes no pane beside another: the drop puts it in that pane's place
+    if (zone !== 'center' && n >= MAX_VIEW && !(drag && view.includes(drag.name))) zone = 'center'
+    if (dropAt?.target !== target || dropAt.zone !== zone) setDropAt({ target, zone })
   }
-  const drop = (c: number) => (e: ReactDragEvent<HTMLDivElement>) => {
+  const dropPane = (target: string) => (e: ReactDragEvent<HTMLDivElement>) => {
     const name = e.dataTransfer.getData(PANE_MIME)
-    setDropCol(null)
+    const zone = dropAt?.target === target ? dropAt.zone : zoneAt(e, e.currentTarget)
+    endDrag()
     if (!name || !tabNames.has(name)) return
     e.preventDefault()
-    const over = (e.target as HTMLElement).closest<HTMLElement>('.dk-tab')?.dataset.name ?? null
-    place(name, c, over && over !== name ? over : null)
+    dropOn(name, target, zone)
+  }
+  // a pane's title dropped on the tab strip takes it out of the grid
+  const overStrip = (e: ReactDragEvent<HTMLDivElement>) => {
+    if (drag?.from !== 'pane' || n < 2 || !Array.from(e.dataTransfer.types).includes(PANE_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (!stripDrop) setStripDrop(true)
+  }
+  const dropStrip = (e: ReactDragEvent<HTMLDivElement>) => {
+    const name = e.dataTransfer.getData(PANE_MIME)
+    const from = drag?.from
+    endDrag()
+    if (from !== 'pane' || !name) return
+    e.preventDefault()
+    unview(name)
   }
 
   // ---------- render ----------
@@ -455,98 +579,104 @@ export default function Desk({ active }: ScreenProps) {
   const loaded = !!steadyList || list.length > 0
   const empty = loaded && !tabs.length
   const menuTab = menu ? tabs.find((x) => x.name === menu.name) ?? null : null
-  const offDesk = list.filter((s) => L.off.includes(s.name))
-  const vars: Vars = { '--n': n, '--dk-gap': `${GAP}px` }
+  const offDesk = sortPanes(list.filter((s) => L.off.includes(s.name)))
+  const headH = grid ? HEAD_H : 0
+  const vars: Vars = { '--dk-gap': `${GAP}px`, '--dk-head-h': `${HEAD_H}px` }
 
-  const tooltip = (s: TermSession, title: string) => {
+  const tooltip = (s: TermSession) => {
+    const m = metaOf(s)
     const st = paneState(s)
-    const area = areaName(areaOf(s))
     const word = st === 'idle' && unseenDone(s.name) ? 'done' : WORD[st]
     const since = s.stateSince && st !== 'dead' ? ` for ${ago(s.stateSince, now)}` : ''
-    const lines = [title, [area, `${word}${since}`].filter(Boolean).join(' · ')]
+    const lines = [m.title, [m.area && areaName(m.area), m.project, `${word}${since}`].filter(Boolean).join(' · ')]
+    if (m.where) lines.push(m.where)
     if (st === 'asking' && s.ask) lines.push(s.ask)
     return lines.join('\n')
   }
 
+  // the session list: every running pane by area, then project
+  const groups = useMemo(() => {
+    const out: { area: string; projects: { project: string; rows: TermSession[] }[] }[] = []
+    for (const s of sortPanes(list)) {
+      const m = meta.get(s.name)
+      const area = m?.area ?? ''
+      const project = m?.project ?? ''
+      let g = out[out.length - 1]
+      if (!g || g.area !== area) out.push((g = { area, projects: [] }))
+      let p = g.projects[g.projects.length - 1]
+      if (!p || p.project !== project) g.projects.push((p = { project, rows: [] }))
+      p.rows.push(s)
+    }
+    return out
+  }, [list, sortPanes, meta])
+
   return (
-    <div ref={rootRef} className="dk" style={vars} data-cols={n} data-coarse={coarse || undefined}>
-      {/* an empty Desk on the phone has no strip: nothing to switch, and no column control there */}
-      {!(empty && phone) && <div className="dk-strips">
-        {columns.map((col, c) => (
-          <div
-            key={c}
-            className="dk-strip"
-            data-col={c}
-            data-focus={(n > 1 && fc === c) || undefined}
-            data-drop={dropCol === c || undefined}
-            onPointerDown={() => setFocusCol(c)}
-            onDragOver={dragOver(c)}
-            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropCol(null) }}
-            onDrop={drop(c)}
+    <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-n={n}>
+      {/* an empty Desk on the phone has no strip: nothing to switch */}
+      {!(empty && phone) && (
+        <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
+          <Press
+            className="dk-list-btn"
+            aria-expanded={listOpen}
+            aria-label="All sessions"
+            title="All sessions, by area and project"
+            onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
           >
-            {/* the tabs scroll sideways when they do not fit; "+" and the column control stay in view after them */}
-            <div
-              ref={(el) => { if (el) stripEls.current.set(c, el); else stripEls.current.delete(c) }}
-              className="dk-tabs"
-              role="tablist"
-              aria-label={n > 1 ? `Column ${c + 1}` : 'Sessions'}
-            >
-              {col.map((s) => (
+            <Icon name={ListTree} size={coarse ? 17 : 14} tone={listOpen ? 'fg' : 'dim'} glow={listOpen} />
+            {!phone && <span>Sessions</span>}
+            <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
+          </Press>
+          <div ref={stripRef} className="dk-tabs" role="tablist" aria-label="Sessions">
+            {tabs.map((s, i) => {
+              const m = metaOf(s)
+              // a quiet line where the area changes
+              const prev = tabs[i - 1]
+              const split = !!prev && (meta.get(prev.name)?.area ?? '') !== m.area
+              return (
                 <Tab
                   key={s.name}
                   s={s}
-                  title={s.title || termLabel(s, titles)}
-                  tip={tooltip}
-                  on={actives[c]?.name === s.name}
+                  title={m.title}
+                  tip={tooltip(s)}
+                  split={split}
+                  on={view.includes(s.name)}
+                  focused={focus === s.name}
                   coarse={coarse}
-                  draggable={!coarse && (n > 1 || col.length > 1)}
+                  draggable={grid}
                   onOpen={(el) => {
-                    if (actives[c]?.name === s.name && coarse) openMenu(s.name, c, el)
-                    else openTab(c, s.name)
+                    if (focus === s.name && coarse) openMenu(s.name, el)
+                    else openTab(s.name)
                   }}
-                  onMenu={(el) => openMenu(s.name, c, el)}
+                  onMenu={(el) => openMenu(s.name, el)}
                   onClose={() => closeTab(s.name)}
+                  onDragStart={beginDrag(s.name, 'tab')}
+                  onDragEnd={endDrag}
                 />
-              ))}
-            </div>
-            {/* an empty Desk has one way to start: the line under the strip */}
-            {!empty && <Press
-              className="dk-add"
-              aria-label="New tab"
-              title="New tab: start a session or put one back"
-              aria-expanded={picker === c}
-              onPress={() => { setMenu(null); setPicker((p) => (p === c ? null : c)) }}
-            >
-              <Icon name="add" size={coarse ? 18 : 15} tone={picker === c ? 'fg' : 'dim'} glow={picker === c} />
-            </Press>}
-            {!phone && c === n - 1 && (
-              <div className="dk-ncols" role="group" aria-label="Columns">
-                {([1, 2, 3] as const).map((v) => (
-                  <Press
-                    key={v}
-                    className="dk-ncol"
-                    data-on={n === v || undefined}
-                    aria-pressed={n === v}
-                    aria-label={`${v} ${v === 1 ? 'column' : 'columns'}`}
-                    title={`${v} ${v === 1 ? 'column' : 'columns'}`}
-                    onPress={() => editLayout((l) => { l.cols = v })}
-                  >
-                    {v}
-                  </Press>
-                ))}
-              </div>
-            )}
+              )
+            })}
           </div>
-        ))}
-      </div>}
+          {!empty && (
+            <Press
+              className="dk-add"
+              aria-label="New session"
+              title="New session, or put one back"
+              aria-expanded={picker}
+              onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}
+            >
+              <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
+            </Press>
+          )}
+        </div>
+      )}
 
       <div ref={stageRef} className="dk-stage">
-        {/* the terminals, one layer for every column, so moving a tab or changing the column count never reloads one */}
+        {/* the terminals, one layer, so a layout change never reloads one */}
         {mountedSorted.map((name) => {
           const s = tabs.find((x) => x.name === name)
           if (!s) return null
-          const c = colOf(s)
-          const on = actives[c]?.name === name
+          const i = view.indexOf(name)
+          const on = i >= 0
+          const b = on ? cellBox(i, n) : lastBox[name] ?? FULL
           return (
             <iframe
               key={name}
@@ -554,81 +684,144 @@ export default function Desk({ active }: ScreenProps) {
               className="dk-frame"
               data-name={name}
               data-on={on || undefined}
-              style={{ '--c': c } as Vars}
-              title={s.title || termLabel(s, titles)}
+              style={boxStyle(b, headH)}
+              title={metaOf(s).title}
               src={`/m/w/term/${encodeURIComponent(name)}`}
               inert={!on || undefined}
               onLoad={() => { if (focusRef.current === name && on) focusFrame(name) }}
-              onFocus={() => setFocusCol(c)}
+              onFocus={() => { if (on && cur.current.focus !== name) editLayout((l) => { l.focus = name }) }}
             />
           )
         })}
 
-        {columns.map((col, c) => (
-          <div key={c} className="dk-cell" style={{ '--c': c } as Vars} data-col={c}>
-            {!loaded && c === 0 && (
-              <p className="dk-quiet">{panes.isError ? `Could not read the sessions: ${errText(panes.error)}` : 'Reading sessions'}</p>
-            )}
-            {empty && c === 0 && (
-              <div className="dk-empty">
-                {/* every pane can be off the Desk while it runs: then "+" puts them back */}
-                <p>{list.length ? `${list.length} running, none on the Desk.` : 'No session is open.'}</p>
-                <Press className="dk-start" aria-expanded={picker === 0} onPress={() => { setMenu(null); setPicker((p) => (p === 0 ? null : 0)) }}>
-                  <Icon name="add" size={14} tone="fg" glow />
-                  <span>{list.length ? 'New tab' : 'New session'}</span>
-                </Press>
+        {/* each pane's frame and title row, over its terminal */}
+        {grid && view.map((name, i) => {
+          const s = tabs.find((x) => x.name === name)
+          if (!s) return null
+          const m = metaOf(s)
+          const st = paneState(s)
+          const mark = markOf(st)
+          return (
+            <div key={name} className="dk-pane" data-name={name} style={boxStyle(cellBox(i, n))} data-focus={(n > 1 && focus === name) || undefined}>
+              <div
+                className="dk-head"
+                data-state={st}
+                draggable={n > 1}
+                title={tooltip(s)}
+                onDragStart={beginDrag(name, 'pane')}
+                onDragEnd={endDrag}
+                onPointerDown={() => openTab(name)}
+              >
+                {mark && <StateIcon a={mark} size={13} className="dk-head-mark" />}
+                <span className="dk-head-t">{m.title}</span>
+                {m.folder && <span className="dk-head-f">{m.folder}</span>}
+                {n > 1 && (
+                  <Press className="dk-head-x" aria-label={`Take ${m.title} out of the grid`} title="Take it out of the grid (it stays a tab)" onPointerDown={(e) => e.stopPropagation()} onPress={() => unview(name)}>
+                    <Icon name="stop" size={11} tone="dim" />
+                  </Press>
+                )}
               </div>
-            )}
-            {loaded && tabs.length > 0 && !col.length && (
-              <p className="dk-quiet">{coarse ? 'No tabs here. Move one with its menu, or start one with +.' : 'No tabs here. Drag one over, or start one with +.'}</p>
-            )}
+            </div>
+          )
+        })}
 
-            {menu && menu.col === c && menuTab && (
-              <TabMenu
-                title={menuTab.title || termLabel(menuTab, titles)}
-                live={!menuTab.dead}
-                left={c > 0}
-                right={c < n - 1}
-                x={Math.min(menu.x, Math.max(0, (box.w - (n - 1) * GAP) / n - 210))}
-                arm={menu.arm}
-                onMove={(d) => { setMenu(null); place(menuTab.name, c + d) }}
-                onCloseTab={() => closeTab(menuTab.name)}
-                onStop={() => { if (!menu.arm) setMenu({ ...menu, arm: true }); else void stop(menuTab.name) }}
-                onDismiss={() => setMenu(null)}
-              />
-            )}
+        {/* while a drag is on: one target over each pane (a terminal's iframe would swallow the drag), lit where it would land */}
+        {drag && grid && view.map((name, i) => {
+          const z = dropAt?.target === name ? dropAt.zone : null
+          return (
+            <div
+              key={name}
+              className="dk-drop"
+              style={boxStyle(cellBox(i, n))}
+              data-self={drag.name === name || undefined}
+              onDragOver={overPane(name)}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt((d) => (d?.target === name ? null : d)) }}
+              onDrop={dropPane(name)}
+            >
+              {z && drag.name !== name && <div className="dk-drop-hint" data-zone={z} />}
+            </div>
+          )
+        })}
 
-            {picker === c && (
-              <NewTab
-                wide={!phone}
-                busy={busy}
-                targets={targets}
-                off={offDesk}
-                titles={titles}
-                onStart={(t) => void start(c, t)}
-                onPutBack={(name) => { setPicker(null); place(name, c) }}
-                onClose={() => setPicker(null)}
-              />
-            )}
+        {!loaded && <p className="dk-quiet">{panes.isError ? `Could not read the sessions: ${errText(panes.error)}` : 'Reading sessions'}</p>}
+        {empty && (
+          <div className="dk-empty">
+            {/* every pane can be off the Desk while it runs: then "+" puts them back */}
+            <p>{list.length ? `${list.length} running, none on the Desk.` : 'No session is open.'}</p>
+            <Press className="dk-start" aria-expanded={picker} onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}>
+              <Icon name="add" size={14} tone="fg" glow />
+              <span>{list.length ? 'Put one back' : 'New session'}</span>
+            </Press>
           </div>
-        ))}
+        )}
+
+        {listOpen && (
+          <SessionList
+            groups={groups}
+            meta={metaOf}
+            view={view}
+            off={L.off}
+            focus={focus}
+            onPick={(name) => { setListOpen(false); place(name) }}
+            onClose={() => setListOpen(false)}
+          />
+        )}
+
+        {picker && (
+          <NewTab
+            wide={!phone}
+            busy={busy}
+            targets={targets}
+            off={offDesk}
+            meta={metaOf}
+            onStart={(t) => void start(t)}
+            onPutBack={(name) => { setPicker(false); place(name) }}
+            onClose={() => setPicker(false)}
+          />
+        )}
       </div>
+
+      {menu && menuTab && (
+        <TabMenu
+          title={metaOf(menuTab).title}
+          live={!menuTab.dead}
+          beside={grid && !view.includes(menuTab.name) && n < MAX_VIEW}
+          x={Math.min(menu.x, Math.max(0, stage.w - 210))}
+          arm={menu.arm}
+          onBeside={() => {
+            setMenu(null)
+            const target = focus ?? view[view.length - 1]
+            if (target) dropOn(menuTab.name, target, 'right')
+            else openTab(menuTab.name)
+          }}
+          onCloseTab={() => closeTab(menuTab.name)}
+          onStop={() => { if (!menu.arm) setMenu({ ...menu, arm: true }); else void stop(menuTab.name) }}
+          onDismiss={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
 
 // ---------- a tab ----------
 
-function Tab({ s, title, tip, on, coarse, draggable, onOpen, onMenu, onClose }: {
+function Tab({ s, title, tip, split, on, focused, coarse, draggable, onOpen, onMenu, onClose, onDragStart, onDragEnd }: {
   s: TermSession
   title: string
-  tip: (s: TermSession, title: string) => string
+  tip: string
+  /** the first tab of another area: a quiet line before it */
+  split: boolean
+  /** in the grid */
   on: boolean
+  /** the pane with the keyboard */
+  focused: boolean
   coarse: boolean
   draggable: boolean
   onOpen: (el: HTMLElement | null) => void
   onMenu: (el: HTMLElement | null) => void
   onClose: () => void
+  onDragStart: (e: ReactDragEvent) => void
+  onDragEnd: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const st = paneState(s)
@@ -653,14 +846,14 @@ function Tab({ s, title, tip, on, coarse, draggable, onOpen, onMenu, onClose }: 
       className="dk-tab"
       data-name={s.name}
       data-on={on || undefined}
+      data-focus={focused || undefined}
+      data-split={split || undefined}
       data-state={st}
       data-lit={lit || undefined}
-      title={tip(s, title)}
+      title={tip}
       draggable={draggable}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(PANE_MIME, s.name)
-        e.dataTransfer.effectAllowed = 'move'
-      }}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onContextMenu={(e) => {
         e.preventDefault()
         onMenu(ref.current)
@@ -689,24 +882,24 @@ function Tab({ s, title, tip, on, coarse, draggable, onOpen, onMenu, onClose }: 
         {mark && <StateIcon a={mark} size={coarse ? 15 : 14} className="dk-mark" />}
         <span className="dk-tab-t">{title}</span>
       </Press>
-      <Press className="dk-tab-x" aria-label={`Close the ${title} tab`} title="Close tab (the session keeps running)" tabIndex={on ? 0 : -1} onPress={onClose}>
+      <Press className="dk-tab-x" aria-label={`Close the ${title} tab`} title="Close tab (the session keeps running)" tabIndex={focused ? 0 : -1} onPress={onClose}>
         <Icon name="stop" size={coarse ? 14 : 12} tone="dim" />
       </Press>
     </div>
   )
 }
 
-// ---------- a tab's menu: move it, close it, stop its session ----------
+// ---------- a tab's menu: open it beside, close it, stop its session ----------
 
-function TabMenu({ title, live, left, right, x, arm, onMove, onCloseTab, onStop, onDismiss }: {
+function TabMenu({ title, live, beside, x, arm, onBeside, onCloseTab, onStop, onDismiss }: {
   title: string
   live: boolean
-  left: boolean
-  right: boolean
+  /** it is not in the grid and the grid has room: it can open beside the focused pane */
+  beside: boolean
   x: number
   /** Stop was pressed once: the next press stops the session */
   arm: boolean
-  onMove: (d: -1 | 1) => void
+  onBeside: () => void
   onCloseTab: () => void
   onStop: () => void
   onDismiss: () => void
@@ -715,8 +908,7 @@ function TabMenu({ title, live, left, right, x, arm, onMove, onCloseTab, onStop,
     <>
       <div className="dk-scrim" onPointerDown={onDismiss} />
       <div className="dk-menu" role="menu" aria-label={`${title}: tab`} style={{ left: x }}>
-        {left && <Press role="menuitem" className="dk-mi" onPress={() => onMove(-1)}>Move left</Press>}
-        {right && <Press role="menuitem" className="dk-mi" onPress={() => onMove(1)}>Move right</Press>}
+        {beside && <Press role="menuitem" className="dk-mi" onPress={onBeside}>Open beside</Press>}
         <Press role="menuitem" className="dk-mi" onPress={onCloseTab}>Close tab</Press>
         {live && (
           <Press role="menuitem" className="dk-mi" data-tone="hot" data-arm={arm || undefined} onPress={onStop}>
@@ -728,14 +920,61 @@ function TabMenu({ title, live, left, right, x, arm, onMove, onCloseTab, onStop,
   )
 }
 
-// ---------- "+": a new session in this column, or a running one put back ----------
+// ---------- "Sessions": every running pane by area, then project ----------
 
-function NewTab({ wide, busy, targets, off, titles, onStart, onPutBack, onClose }: {
+function SessionList({ groups, meta, view, off, focus, onPick, onClose }: {
+  groups: { area: string; projects: { project: string; rows: TermSession[] }[] }[]
+  meta: (s: TermSession) => PaneMeta
+  view: string[]
+  off: string[]
+  focus: string | null
+  onPick: (name: string) => void
+  onClose: () => void
+}) {
+  return (
+    <>
+      <div className="dk-scrim" onPointerDown={onClose} />
+      <div className="dk-list" role="dialog" aria-label="All sessions">
+        {!groups.length && <p className="dk-quiet-row">No session is open.</p>}
+        {groups.map((g) => (
+          <section key={g.area || '-'} className="dk-lg">
+            <h3 className="dk-k">{areaName(g.area)}</h3>
+            {g.projects.map((p) => (
+              <div key={p.project || '-'} className="dk-lp">
+                {p.project && <div className="dk-tsec-k">{p.project}</div>}
+                <div className="dk-rows">
+                  {p.rows.map((s) => {
+                    const m = meta(s)
+                    const st = paneState(s)
+                    const mark = markOf(st)
+                    const where = s.name === focus ? 'here' : view.includes(s.name) ? 'in view' : off.includes(s.name) ? 'off the desk' : ''
+                    return (
+                      <Press key={s.name} className="dk-row" data-on={view.includes(s.name) || undefined} title={m.where} onPress={() => onPick(s.name)}>
+                        {mark ? <StateIcon a={mark} size={14} /> : <span className="dk-row-nomark" aria-hidden />}
+                        <span className={cx('dk-row-t', st === 'dead' && 'dk-row-dead')}>{m.title}</span>
+                        {m.folder && <span className="dk-row-f">{m.folder}</span>}
+                        <span className="dk-row-s">{where || WORD[st]}</span>
+                      </Press>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </>
+  )
+}
+
+// ---------- "+": a new session, or a running one put back ----------
+
+function NewTab({ wide, busy, targets, off, meta, onStart, onPutBack, onClose }: {
   wide: boolean
   busy: boolean
   targets: ReturnType<typeof useLaunchTargets>
   off: TermSession[]
-  titles: Map<string, string>
+  meta: (s: TermSession) => PaneMeta
   onStart: (t: TargetVM) => void
   onPutBack: (name: string) => void
   onClose: () => void
@@ -749,9 +988,9 @@ function NewTab({ wide, busy, targets, off, titles, onStart, onPutBack, onClose 
     { label: 'More', items: wide ? all.filter((t) => !t.phone) : [] },
   ].filter((x) => x.items.length)
   return (
-    <div className="dk-pick" role="dialog" aria-label="New tab">
+    <div className="dk-pick" role="dialog" aria-label="New session">
       <div className="dk-pick-head">
-        <h2>New tab</h2>
+        <h2>New session</h2>
         <Press className="dk-pick-x" onPress={onClose}>Close</Press>
       </div>
       <section>
@@ -774,16 +1013,18 @@ function NewTab({ wide, busy, targets, off, titles, onStart, onPutBack, onClose 
         ))}
       </section>
       <section>
-        <h3 className="dk-k">Running sessions <span className="dk-n">{off.length}</span></h3>
+        <h3 className="dk-k">Off the Desk <span className="dk-n">{off.length}</span></h3>
         {!off.length && <p className="dk-quiet-row">Every running session is on the Desk.</p>}
         <div className="dk-rows">
           {off.map((s) => {
             const st = paneState(s)
             const mark = markOf(st)
+            const m = meta(s)
             return (
-              <Press key={s.name} className="dk-row" onPress={() => onPutBack(s.name)}>
+              <Press key={s.name} className="dk-row" title={m.where} onPress={() => onPutBack(s.name)}>
                 {mark ? <StateIcon a={mark} size={14} /> : <span className="dk-row-nomark" aria-hidden />}
-                <span className={cx('dk-row-t', st === 'dead' && 'dk-row-dead')}>{s.title || termLabel(s, titles)}</span>
+                <span className={cx('dk-row-t', st === 'dead' && 'dk-row-dead')}>{m.title}</span>
+                {m.folder && <span className="dk-row-f">{m.folder}</span>}
                 <span className="dk-row-s">{WORD[st]}</span>
               </Press>
             )
@@ -798,8 +1039,8 @@ function NewTab({ wide, busy, targets, off, titles, onStart, onPutBack, onClose 
 
 /**
  * How many tabs finished and are not opened yet, on the Desk tab from any
- * screen (the Messages badge's look); in the asking tone while one of them
- * asks him something.
+ * screen (the Raven badge's look); in the asking tone while one of them asks
+ * him something.
  */
 export function DeskBadge() {
   const { list } = useDeskPanes(15_000)

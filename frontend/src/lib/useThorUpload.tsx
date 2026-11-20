@@ -109,5 +109,6 @@ export function useThorUpload<T = undefined>({ onDone, clearAfterMs }: Options<T
 
   const busy = items.some((i) => i.state === 'queued' || i.state === 'up')
 
-  return { items, busy, inputs, openCamera, openFiles, dismiss }
+  // files from elsewhere (a pasted screenshot) go the same way as picked ones
+  return { items, busy, inputs, openCamera, openFiles, dismiss, send: run }
 }
