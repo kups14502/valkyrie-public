@@ -509,6 +509,31 @@ html[data-motion='reduced'] .vm-eq[data-on] i { animation: none; transform: scal
 @media (max-width: 639px) {
   .vm-whero-title { display: block; white-space: nowrap; text-overflow: ellipsis; }
 }
+/* desktop: a wider side column, and the hero fills it. The hero is as tall as the visible page (the
+   column is sticky, Media.tsx publishes the page height as --vm-ph), the backdrop takes the height
+   the text leaves (16:9 up to a square, cropped to fit), and the type is a size up. */
+@media (min-width: 1100px) {
+  .vm-split-dash { grid-template-columns: minmax(440px, 46%) minmax(0, 1fr); }
+  .vm-split-dash > .vm-side { container-type: inline-size; }
+  .vm-split-dash .vm-whero {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(var(--vm-ph, 100vh) - var(--foot-pad, 0px) - 28px);
+  }
+  .vm-split-dash .vm-whero-art { flex: 1 1 auto; aspect-ratio: auto; min-height: 56.25cqi; max-height: 100cqi; }
+  .vm-split-dash .vm-whero-text { margin-top: -96px; padding: 0 4px; }
+  .vm-split-dash .vm-cap { gap: 8px; font-size: 12px; line-height: 16px; }
+  .vm-split-dash .vm-cap .vl-icon { width: 16px; height: 16px; }
+  .vm-split-dash .vm-whero-title { margin-top: 8px; font-size: clamp(32px, 7cqi, 48px); line-height: 1.12; }
+  .vm-split-dash .vm-whero-meta { margin-top: 8px; font-size: 16px; line-height: 22px; }
+  .vm-split-dash .vm-whero-sum { margin-top: 12px; max-width: none; min-height: 115px; font-size: 15px; line-height: 23px; -webkit-line-clamp: 5; }
+  .vm-split-dash .vm-open { min-height: 54px; margin-top: 18px; padding: 0 22px 0 18px; gap: 10px; font-size: 16px; }
+  .vm-split-dash .vm-open .vl-icon { width: 20px; height: 20px; }
+}
+/* a tall desktop: the synopsis gets the room the square backdrop leaves */
+@media (min-width: 1100px) and (min-height: 1200px) {
+  .vm-split-dash .vm-whero-sum { min-height: 184px; -webkit-line-clamp: 8; }
+}
 
 /* ---------- Music hero ---------- */
 .vm-mhero {

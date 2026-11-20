@@ -23,9 +23,11 @@ import './lights.css'
 // writes through src/lib/lights.ts useLightsControl: its desire overlay shows
 // what was asked at once and falls back to the bulb's real state when the call
 // fails, and the apartment re-lights from that same state.
-// Phone: one column. Landscape and desktop: master + presets | bulbs | apartment + Thor RGB.
+// Phone: one column. Landscape and a narrow window: master + presets | bulbs | apartment + Thor RGB.
 // The pad profile (an iPad, the headset) gets its own two layouts, everything a size up with
-// touch targets of 48 px or more (see usePadShape and lights.css "the pad profile").
+// touch targets of 48 px or more (see useShape and lights.css "the pad profile"). A desktop window
+// gets the 'desk' layout: the controls on the left, the apartment filling the right, the whole
+// window used (lights.css "the desktop window").
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 /** raw: Home Assistant's 0-255 brightness, sent back with a color pick so the bulb keeps its level */
@@ -138,37 +140,54 @@ function useMedia(q: string): boolean {
   return m
 }
 
-/** the room panel's header band: the plan fits under it (the pad's larger header needs more) */
+/** the room panel's header band: the plan fits under it (the pad's and a tall desk's larger header need more) */
 const ROOM_HD = 24
 const ROOM_HD_PAD = 34
-/** a room label's width per character: 11 px mono, and the pad's 13 px (lights.css --wire-label) */
+const ROOM_HD_TALL = 40
+/** a room label's width per character: 11 px mono, the pad's 13 px and a tall desk's 15 px (lights.css --wire-label) */
 const LABEL_CH = 6.8
 const LABEL_CH_PAD = 8.3
+const LABEL_CH_TALL = 9.6
+
+/** a desktop window at least this wide, with a page at least this tall (CSS px, after the UI zoom), gets the 'desk' layout */
+const DESK_W = 1100
+const DESK_H = 600
+/** a desk page this tall takes the larger step (lights.css data-tall) */
+const DESK_TALL_H = 1030
 
 /**
- * The pad profile's layout, from the screen's real width (the UI zoom hides from media queries):
+ * The layout, from the screen's real size (the UI zoom hides from media queries). The pad profile:
  * 'tall' (upright) puts the apartment across the top, 'wide' (on its side) gives the apartment
- * and the controls a half each. A pad window too narrow for either (Split View) keeps the phone
- * column, and so does every other profile ('base').
+ * and the controls a half each, and a pad window too narrow for either (Split View) keeps the
+ * phone column. Any other profile: 'desk' for a desktop-sized window (`tall` when its page has
+ * the height for the larger step), else 'base'. Publishes the page's height as --lt-ph, which
+ * the desk layout sizes the apartment column by.
  */
-type Shape = 'base' | 'tall' | 'wide'
-function usePadShape(box: RefObject<HTMLElement | null>, pad: boolean): Shape {
-  const [shape, setShape] = useState<Shape>('base')
+type Shape = 'base' | 'tall' | 'wide' | 'desk'
+function useShape(box: RefObject<HTMLElement | null>, pad: boolean): { shape: Shape; tall: boolean } {
+  const [s, setS] = useState<{ shape: Shape; tall: boolean }>({ shape: 'base', tall: false })
   useLayoutEffect(() => {
     const el = box.current
-    if (!pad || !el) return
+    if (!el) return
+    const page = el.closest<HTMLElement>('.vl-page')
     const measure = () => {
       const w = el.clientWidth
-      const next: Shape = w < 600 ? 'base' : w >= 960 && window.innerWidth > window.innerHeight ? 'wide' : 'tall'
-      setShape(next)
+      const ph = page?.clientHeight ?? 0
+      if (el.style.getPropertyValue('--lt-ph') !== `${ph}px`) el.style.setProperty('--lt-ph', `${ph}px`)
+      const shape: Shape = pad
+        ? (w < 600 ? 'base' : w >= 960 && window.innerWidth > window.innerHeight ? 'wide' : 'tall')
+        : (w >= DESK_W && ph >= DESK_H ? 'desk' : 'base')
+      const tall = shape === 'desk' && ph >= DESK_TALL_H
+      setS((cur) => (cur.shape === shape && cur.tall === tall ? cur : { shape, tall }))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    if (page) ro.observe(page)
     window.addEventListener('resize', measure)
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
   }, [box, pad])
-  return pad ? shape : 'base'
+  return s
 }
 /** a lit bulb's pool of light on the floor, plan meters (about one room's width) */
 const POOL_M = 1.5
@@ -290,9 +309,9 @@ export default function Lights({ active }: ScreenProps) {
   const wide = useMedia('(min-width: 1100px)')
   const pad = useProfile().size === 'pad'
   const layoutRef = useRef<HTMLDivElement>(null)
-  const shape = usePadShape(layoutRef, pad)
+  const { shape, tall } = useShape(layoutRef, pad)
   const big = shape !== 'base'
-  // a wide screen and the pad's large room label every bulb
+  // a wide screen, the pad and the desk label every bulb
   const labelAll = wide || big
   const now = useTick(5000)
 
@@ -405,14 +424,15 @@ export default function Lights({ active }: ScreenProps) {
   }, [model, labelAll, litKey, shownSel])
 
   // The plan fills the box under its header band. A wide screen labels every bulb, so the fit keeps
-  // each label (11 px mono, 13 on the pad, starting 18 px right of its diamond) inside the box too.
+  // each label (11 px mono, 13 on the pad and the desk, 15 on a tall desk, starting 18 px right of
+  // its diamond) inside the box too.
   const view = useMemo<CameraPose | null>(() => {
     if (!size) return null
-    const ch = big ? LABEL_CH_PAD : LABEL_CH
+    const ch = tall ? LABEL_CH_TALL : big ? LABEL_CH_PAD : LABEL_CH
     const labels = labelAll ? Object.fromEntries(model.hotspots.map((h) => [h.id, 24 + h.label.length * ch])) : undefined
-    const side = big ? 10 : 6
-    return apartmentView(model, size.w, size.h, { top: big ? ROOM_HD_PAD : ROOM_HD, right: side, bottom: side, left: side, labels })
-  }, [model, size, labelAll, big])
+    const side = tall ? 14 : big ? 10 : 6
+    return apartmentView(model, size.w, size.h, { top: tall ? ROOM_HD_TALL : big ? ROOM_HD_PAD : ROOM_HD, right: side, bottom: side, left: side, labels })
+  }, [model, size, labelAll, big, tall])
   const pose = useMemo<CameraPose | null>(() => {
     if (!view) return null
     // hidden: wait a little wider and lower, so opening the tab dollies into the apartment
@@ -551,6 +571,9 @@ export default function Lights({ active }: ScreenProps) {
             orbit
             orbitArea="model"
             paused={!active}
+            // the desk's apartment is a large box always on screen: a still plan redraws at the idle rate, not every
+            // frame (a full-rate redraw of a box this size starved the page on a software renderer)
+            idleFps={shape === 'desk' ? 24 : undefined}
             motion={reduced ? 'reduced' : 'full'}
             activeHotspot={shownSel}
             hotspotLabels
@@ -607,6 +630,7 @@ export default function Lights({ active }: ScreenProps) {
   // The columns by layout. The apartment always lives in column c, so a pad turning between
   // its two layouts moves the panels around it and never rebuilds the 3D scene.
   //   base: master + presets | bulbs | apartment + Thor RGB (the phone stacks them, see lights.css)
+  //   desk: the same columns; lights.css stacks master + presets over the bulbs, the apartment beside them
   //   tall: the apartment across the top; master + Thor RGB beside the presets; the bulbs across the bottom
   //   wide: master, apartment, Thor RGB | presets, bulbs
   const col = (id: 'a' | 'b' | 'c' | 'd', kids: ReactNode[]) => <div key={id} className={`lt-col lt-col-${id}`}>{kids}</div>
@@ -617,7 +641,7 @@ export default function Lights({ active }: ScreenProps) {
       : [col('a', [masterPanel, presetsPanel]), col('b', [bulbsPanel]), col('c', [roomPanel, rgbPanel])]
 
   return (
-    <div ref={layoutRef} className="lt-layout vl-screen" data-shape={big ? shape : undefined}>
+    <div ref={layoutRef} className="lt-layout vl-screen" data-shape={big ? shape : undefined} data-tall={tall || undefined}>
       {cols}
     </div>
   )

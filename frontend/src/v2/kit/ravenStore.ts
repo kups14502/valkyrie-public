@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiErrorText, fetchImgToken, imgTrusted } from '../../lib/api'
 import {
-  RAVEN_FILE_MAX, fetchMsgCount, fetchRaven, patchSettings, ravenFileUrl, saveRavenSettings, uploadRavenFile, waitMsgChange,
+  RAVEN_FILE_MAX, fetchMsgCount, fetchRaven, patchSettings, ravenFileUrl, saveRavenSettings, transcribeRaven, uploadRavenFile, waitMsgChange,
   type RavenFile, type RavenPage, type RavenSettingsPatch,
 } from '../../lib/ravenApi'
 import { toast } from './ui'
@@ -307,3 +307,202 @@ export function useKeyboardInset(on: boolean): number {
   }, [on])
   return on ? inset : 0
 }
+
+// ---------- voice input ----------
+// One recorder for the whole app. The mic button in a composer starts and stops it; the push-to-talk key (held)
+// does the same from anywhere. The clip goes to odin (POST /api/raven/transcribe, whisper on odin) and the words
+// land in a composer's box for him to read and edit: never sent by themselves. Each visible composer registers a
+// sink; the words go to the composer whose mic was tapped, else the one in front (the last to register), else they
+// wait for the next composer to open.
+
+export type VoicePhase = 'idle' | 'starting' | 'recording' | 'writing'
+export type VoiceState = { phase: VoicePhase; since: number; owner: number | null; ptt: boolean }
+
+let voice: VoiceState = { phase: 'idle', since: 0, owner: null, ptt: false }
+const voiceSubs = new Set<() => void>()
+const setVoice = (p: Partial<VoiceState>) => {
+  voice = { ...voice, ...p }
+  for (const f of voiceSubs) f()
+}
+const voiceSubscribe = (f: () => void) => {
+  voiceSubs.add(f)
+  return () => { voiceSubs.delete(f) }
+}
+
+/** The recorder's state, for the mic buttons and the recording line. */
+export function useRavenVoice(): VoiceState {
+  return useSyncExternalStore(voiceSubscribe, () => voice, () => voice)
+}
+
+type Sink = { id: number; put: (text: string) => void }
+const sinks: Sink[] = []
+let sinkSeq = 0
+let pendingWords: string | null = null
+
+/** A composer takes the words while `on` (its screen in front). Answers the id its mic button passes. */
+export function useVoiceSink(on: boolean, put: (text: string) => void): number {
+  const [id] = useState(() => ++sinkSeq)
+  const ref = useRef(put)
+  useEffect(() => { ref.current = put })
+  useEffect(() => {
+    if (!on) return
+    const sink: Sink = { id, put: (t) => ref.current(t) }
+    sinks.push(sink)
+    if (pendingWords !== null) {
+      const t = pendingWords
+      pendingWords = null
+      sink.put(t)
+    }
+    return () => {
+      const i = sinks.indexOf(sink)
+      if (i >= 0) sinks.splice(i, 1)
+    }
+  }, [on, id])
+  return id
+}
+
+const MAX_CLIP_MS = 3 * 60_000
+let rec: { mr: MediaRecorder; stream: MediaStream; chunks: Blob[]; type: string; started: number; timer: number } | null = null
+let stopAsked = false
+
+const MIME_TRY = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+
+function micError(e: unknown): string {
+  const name = (e as { name?: string })?.name ?? ''
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Microphone access is blocked. Allow the microphone for Valkyrie (iPhone and iPad: Settings > Safari > Microphone), then try again.'
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No microphone found on this device.'
+  if (name === 'NotReadableError') return 'The microphone is busy in another app.'
+  return 'The microphone did not start.'
+}
+
+function deliver(text: string, owner: number | null): void {
+  const sink = sinks.find((s) => s.id === owner) ?? sinks[sinks.length - 1]
+  if (sink) sink.put(text)
+  else pendingWords = text
+}
+
+/** Starts recording; owner = the composer whose mic was tapped (null: the one in front). */
+export async function voiceStart(owner: number | null, ptt = false): Promise<void> {
+  if (voice.phase !== 'idle') return
+  const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined
+  if (!window.isSecureContext || !md?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    toast('Voice input needs Valkyrie on its https address, in a browser that can record.', { ms: 6000 })
+    return
+  }
+  stopAsked = false
+  setVoice({ phase: 'starting', owner, ptt, since: Date.now() })
+  let stream: MediaStream
+  try {
+    stream = await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+  } catch (e) {
+    setVoice({ phase: 'idle', owner: null, ptt: false })
+    toast(micError(e), { ms: 7000 })
+    return
+  }
+  // he let go of the key while the permission prompt was up: nothing to record
+  if (stopAsked) {
+    for (const t of stream.getTracks()) t.stop()
+    setVoice({ phase: 'idle', owner: null, ptt: false })
+    return
+  }
+  const type = MIME_TRY.find((t) => MediaRecorder.isTypeSupported?.(t)) ?? ''
+  const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined)
+  const chunks: Blob[] = []
+  mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data) }
+  mr.onstop = () => { void finish() }
+  const started = Date.now()
+  rec = { mr, stream, chunks, type: mr.mimeType || type || 'audio/webm', started, timer: window.setTimeout(() => voiceStop(), MAX_CLIP_MS) }
+  mr.start(1000)
+  setVoice({ phase: 'recording', since: started })
+}
+
+/** Stops recording; the words follow once odin has written them down. */
+export function voiceStop(): void {
+  if (voice.phase === 'starting') {
+    stopAsked = true
+    return
+  }
+  if (voice.phase !== 'recording' || !rec) return
+  if (rec.mr.state !== 'inactive') rec.mr.stop()
+}
+
+export function voiceToggle(owner: number | null): void {
+  if (voice.phase === 'idle') void voiceStart(owner)
+  else voiceStop()
+}
+
+async function finish(): Promise<void> {
+  const r = rec
+  rec = null
+  if (!r) return
+  window.clearTimeout(r.timer)
+  for (const t of r.stream.getTracks()) t.stop()
+  const owner = voice.owner
+  const clip = new Blob(r.chunks, { type: r.type })
+  if (Date.now() - r.started < 500 || clip.size < 600) {
+    setVoice({ phase: 'idle', owner: null, ptt: false })
+    toast('Too short to write down. Hold the key, or keep the mic on, while you talk.', { ms: 4000 })
+    return
+  }
+  setVoice({ phase: 'writing' })
+  try {
+    const text = await transcribeRaven(clip)
+    if (text) deliver(text, owner)
+    else toast('Nothing was heard in that recording.', { ms: 4000 })
+  } catch (e) {
+    toast(apiErrorText(e, 'Could not write the recording down'), { ms: 6000 })
+  } finally {
+    setVoice({ phase: 'idle', owner: null, ptt: false })
+  }
+}
+
+// ---------- push to talk: the key, per device ----------
+
+export type PttKey = { code: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
+const PTT_STORE = 'valkyrie-raven-ptt'
+const PTT_EVENT = 'valkyrie-raven-ptt'
+/** F8: free in Chrome, Edge, the desktop app and Windows, and not one of his keyboard's macro keys. */
+export const DEFAULT_PTT: PttKey = { code: 'F8', ctrl: false, alt: false, shift: false, meta: false }
+
+function readPtt(): PttKey | null {
+  try {
+    const raw = localStorage.getItem(PTT_STORE)
+    if (raw === null) return DEFAULT_PTT
+    if (raw === 'off') return null
+    const k = JSON.parse(raw) as Partial<PttKey>
+    return typeof k.code === 'string' && k.code ? { code: k.code, ctrl: !!k.ctrl, alt: !!k.alt, shift: !!k.shift, meta: !!k.meta } : DEFAULT_PTT
+  } catch {
+    return DEFAULT_PTT
+  }
+}
+
+/** The push-to-talk key on this device (null: off) and its setter. */
+export function usePttKey(): [PttKey | null, (k: PttKey | null) => void] {
+  const [k, setK] = useState<PttKey | null>(readPtt)
+  useEffect(() => {
+    const on = () => setK(readPtt())
+    window.addEventListener(PTT_EVENT, on)
+    window.addEventListener('storage', on)
+    return () => { window.removeEventListener(PTT_EVENT, on); window.removeEventListener('storage', on) }
+  }, [])
+  const set = useCallback((next: PttKey | null) => {
+    try { localStorage.setItem(PTT_STORE, next ? JSON.stringify(next) : 'off') } catch { /* private mode: this session only */ }
+    setK(next)
+    window.dispatchEvent(new Event(PTT_EVENT))
+  }, [])
+  return [k, set]
+}
+
+/** "F8", "Ctrl+Alt+K". */
+export function pttLabel(k: PttKey): string {
+  const key = k.code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ')
+  return [k.ctrl && 'Ctrl', k.alt && 'Alt', k.shift && 'Shift', k.meta && 'Win', key].filter(Boolean).join('+')
+}
+
+/** A key that never types: a function key, or anything held with Ctrl, Alt or Win. */
+export const pttAllowed = (k: PttKey): boolean => /^F(?:[1-9]|1\d|2[0-4])$/.test(k.code) || k.ctrl || k.alt || k.meta
+
+export const pttMatches = (e: KeyboardEvent, k: PttKey): boolean =>
+  e.code === k.code && e.ctrlKey === k.ctrl && e.altKey === k.alt && e.shiftKey === k.shift && e.metaKey === k.meta

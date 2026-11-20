@@ -10,11 +10,11 @@ export const RAVEN_ID = 'raven'
 export const RAVEN_CHANNEL = 'raven'
 export const RAVEN_NAME = 'Raven'
 
-/** The models Raven runs on, by family; the model id for each comes from RAVEN_MODELS (lib/raven/models.ts). */
-export type RavenTier = 'haiku' | 'sonnet' | 'opus' | 'fable'
+/** A model's key in Raven's catalog (lib/raven/models.ts: opus, sonnet, haiku, fable-5-2, fable, or one RAVEN_MODELS adds). */
+export type RavenTier = string
 export type RavenEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 /** The efforts Brendon picks from in the app. */
-export type RavenPickEffort = 'low' | 'medium' | 'high'
+export type RavenPickEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * Which automatic rule chose a run's model and effort: the router sorted his message as simple or complex, it came

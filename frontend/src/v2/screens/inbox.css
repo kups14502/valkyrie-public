@@ -165,7 +165,15 @@
 .ib-link { color: var(--fg); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 2px; }
 .ib-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .ib-acts .vl-btn-line { min-height: 32px; }
+/* an outside Open is a real link drawn as the line button */
+.ib-out { text-decoration: none; }
 .ib-when { margin: 0; font-size: 11px; line-height: 15px; color: var(--faint); }
+/* a mail item's whole message: what the sender wrote, then what folds behind the toggle, set off by a hairline */
+.ib-mailtext { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.ib-mailtext .ib-note { align-self: stretch; }
+.ib-note.ib-quoted { padding-left: 10px; border-left: 1px solid var(--line); color: var(--dim); }
+.ib-quote-toggle { padding: 2px 0; font-size: 11.5px; color: var(--dim); }
+@media (hover: hover) and (pointer: fine) { .ib-quote-toggle:hover { color: var(--fg); } }
 
 /* ---------- the board: Needs you, Mail, Reports ---------- */
 

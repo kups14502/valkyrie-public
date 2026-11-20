@@ -662,37 +662,79 @@ router.post(
 // The same upload from inside the API (Raven hands a DM attachment to a
 // session on thor): the chunks the page would send, and the path thor saved
 // it under. Throws with thor's own words when it refuses the file.
+//
+// thor's agent answers one request at a time, and its repair task restarts it
+// when /health is slow, so a chunk can time out or arrive cut short while it
+// is busy or coming back (2026-11-20, 2:03 PM ET: "chunk arrived short", then
+// a restart, and the screenshot never reached the session). A chunk that fails
+// that way is sent again, for about a minute and a half, from wherever thor
+// says its copy stands: the half file stays on thor's disk across a restart.
+const UPLOAD_RETRY_MS = [1_500, 3_000, 6_000, 12_000, 20_000, 30_000]
+const UPLOAD_CHUNK_TIMEOUT_MS = Number(process.env.THOR_UPLOAD_CHUNK_TIMEOUT_MS || 60_000)
+const UPLOAD_RETRY_SCALE = Number(process.env.THOR_UPLOAD_RETRY_SCALE || 1)
+
+type ChunkAnswer = { status: number; body: Record<string, unknown> | null } | { error: string }
+
+async function sendChunk(qs: URLSearchParams, chunk: Buffer): Promise<ChunkAnswer> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPLOAD_CHUNK_TIMEOUT_MS)
+  try {
+    const r = await undiciFetch(`${BASE}/upload?${qs}`, {
+      method: 'POST',
+      signal: controller.signal,
+      dispatcher: agent,
+      headers: { Authorization: `Bearer ${LAUNCHER_TOKEN}`, 'Content-Type': 'application/octet-stream' },
+      body: chunk,
+    })
+    let body: Record<string, unknown> | null = null
+    try { body = (await r.json()) as Record<string, unknown> } catch { body = null }
+    return { status: r.status, body }
+  } catch (err) {
+    return { error: controller.signal.aborted ? `no answer in ${Math.round(UPLOAD_CHUNK_TIMEOUT_MS / 1000)} s` : (err as Error).message }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** A failed chunk worth sending again: no answer, thor busy or restarting, a cut-short chunk, an offset thor disagrees with. */
+function chunkRetryable(a: ChunkAnswer): boolean {
+  if ('error' in a) return true
+  if (a.status === 409 || a.status === 408 || a.status === 429) return true
+  if (a.status === 400) return /arrived short/i.test(String(a.body?.error ?? ''))
+  return a.status >= 500 && a.status !== 507
+}
+
 export async function uploadToThor(name: string, data: Buffer): Promise<{ path: string; name: string; size: number }> {
   if (!LAUNCHER_TOKEN) throw new Error('THOR_LAUNCHER_TOKEN is not set on the api host')
   if (!data.length || data.length > UPLOAD_MAX) throw new Error('the file is empty or too large for thor')
   const id = randomBytes(16).toString('hex')
-  for (let offset = 0; ;) {
+  let offset = 0
+  let fails = 0
+  for (;;) {
     const chunk = data.subarray(offset, offset + UPLOAD_CHUNK_MAX)
     const qs = new URLSearchParams({ id, name: name.slice(0, 255), offset: String(offset), total: String(data.length) })
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 60_000)
-    let status: number
-    let body: Record<string, unknown> | null = null
-    try {
-      const r = await undiciFetch(`${BASE}/upload?${qs}`, {
-        method: 'POST',
-        signal: controller.signal,
-        dispatcher: agent,
-        headers: { Authorization: `Bearer ${LAUNCHER_TOKEN}`, 'Content-Type': 'application/octet-stream' },
-        body: chunk,
-      })
-      status = r.status
-      try { body = (await r.json()) as Record<string, unknown> } catch { body = null }
-    } catch (err) {
-      throw new Error(`thor is not answering (${(err as Error).message})`)
-    } finally {
-      clearTimeout(timer)
+    const a = await sendChunk(qs, chunk)
+    if (!('error' in a) && a.status === 200 && a.body) {
+      if (a.body.done === true && typeof a.body.path === 'string') {
+        return { path: a.body.path, name: String(a.body.name ?? name), size: Number(a.body.size) || data.length }
+      }
+      const received = Number(a.body.received)
+      if (!Number.isSafeInteger(received) || received <= offset || received > data.length) throw new Error('thor did not take the chunk')
+      offset = received
+      fails = 0
+      continue
     }
-    if (status !== 200 || !body) throw new Error(String(body?.error ?? `thor answered ${status}`))
-    if (body.done === true && typeof body.path === 'string') return { path: body.path, name: String(body.name ?? name), size: Number(body.size) || data.length }
-    const received = Number(body.received)
-    if (!Number.isSafeInteger(received) || received <= offset) throw new Error('thor did not take the chunk')
-    offset = received
+    if (!chunkRetryable(a) || fails >= UPLOAD_RETRY_MS.length) {
+      if ('error' in a) throw new Error(`thor is not answering (${a.error})`)
+      throw new Error(String(a.body?.error ?? `thor answered ${a.status}`))
+    }
+    const why = 'error' in a ? a.error : `${a.status} ${String(a.body?.error ?? '')}`.trim()
+    console.warn(`[upload] ${name} to thor: ${why}; sending again from ${offset} (try ${fails + 2})`)
+    await new Promise((r) => setTimeout(r, UPLOAD_RETRY_MS[fails] * UPLOAD_RETRY_SCALE))
+    fails++
+    // thor says where its half file stands (a 409, or the 400 that put it back); resume from there
+    const said = 'error' in a ? NaN : Number(a.body?.received)
+    if (Number.isSafeInteger(said) && said >= 0 && said <= data.length) offset = said
   }
 }
 

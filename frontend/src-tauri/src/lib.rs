@@ -47,6 +47,66 @@ fn is_host(s: &str) -> bool {
       .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
 }
 
+/// An http(s) address with nothing that could read as a second argument: the
+/// page sends `new URL(...).href`, which is already percent-encoded ASCII.
+fn is_web_url(s: &str) -> bool {
+  s.len() <= 4096
+    && (s.starts_with("https://") || s.starts_with("http://"))
+    && s.bytes().all(|c| c.is_ascii_graphic() && c != b'"')
+}
+
+/// Open an http(s) address in the system's default browser.
+///
+/// The webview opens no new window by itself: wry gives every window.open and
+/// target="_blank" link to the app's on_new_window handler and, with none set,
+/// marks the request handled and opens nothing. src/lib/external.ts sends
+/// those addresses here instead. Hand-written like the commands below rather
+/// than tauri-plugin-opener: it opens one web address and nothing else.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+  if !is_web_url(&url) {
+    return Err("not an http(s) address".into());
+  }
+
+  #[cfg(target_os = "windows")]
+  {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // url.dll's FileProtocolHandler hands the address to the default browser
+    // with no shell in between, so an & in a query string stays in the address.
+    std::process::Command::new("rundll32.exe")
+      .args(["url.dll,FileProtocolHandler", &url])
+      .creation_flags(CREATE_NO_WINDOW)
+      .spawn()
+      .map(|_| ())
+      .map_err(|e| format!("could not open the browser: {e}"))
+  }
+
+  #[cfg(target_os = "macos")]
+  {
+    std::process::Command::new("open")
+      .arg(&url)
+      .spawn()
+      .map(|_| ())
+      .map_err(|e| format!("could not open the browser: {e}"))
+  }
+
+  #[cfg(target_os = "linux")]
+  {
+    std::process::Command::new("xdg-open")
+      .arg(&url)
+      .spawn()
+      .map(|_| ())
+      .map_err(|e| format!("could not open the browser: {e}"))
+  }
+
+  #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+  {
+    let _ = url;
+    Err("opening the system browser is only wired up for the desktop app".into())
+  }
+}
+
 /// A Windows Terminal window name, which is what makes tabs land in one window
 /// per group instead of scattering. Rejects wt's own reserved names: a bare
 /// number means "that window id", and `new` and `last` are keywords, so a group
@@ -297,7 +357,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![open_session_ssh, open_new_ssh, local_hostname])
+    .invoke_handler(tauri::generate_handler![open_session_ssh, open_new_ssh, local_hostname, open_external])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

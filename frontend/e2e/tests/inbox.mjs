@@ -10,6 +10,12 @@
 //              items, an item reads itself, Copy, Archive all; read senders fold behind "Show n more"
 //   open       a row opens to its text with a live link and reads itself; Mark unread; Open
 //              goes to the item's app path; Archive with Undo
+//   mail-body  an open mail item shows its whole message (GET /api/mail/item/:id), the help
+//              desk marker and quoted mail folded behind "Show quoted text"; Open is a real link
+//              to the message (Outlook), or "Open iCloud" to the web mail for a message with no
+//              link of its own; with no mail behind the item, its preview and its own link
+//   mail-open:tauri  in the desktop app, Open, Open iCloud and a link in the body go to the
+//              system browser (the open_external command), the page stays put
 //   bulk       Read all, Archive read, the source filter asking for that source
 //   sources    the Sources tab and a push setting sent as a PUT
 //   push-tap   ?item=<id> opens and reads that row; an archived one is found in the archive
@@ -18,6 +24,7 @@
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
+import { tauriCallsFull, tauriStub } from '../lib/tauri.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const ROUTE = '/m/inbox'
@@ -34,7 +41,12 @@ function item(id, over = {}) {
 }
 
 /** The fake: items, the GET mocks and the write handler. Returns the state and the GET log. */
-function inboxBackend(page, { down = false, extra = [] } = {}) {
+function inboxBackend(page, { down = false, extra = [], mail = {} } = {}) {
+  // the mail behind an item (routes/mail.ts GET /api/mail/item/:id), by item id; any other id is 404
+  page.mock(/^\/api\/mail\/item\/\d+$/, ({ path }) => {
+    const m = mail[Number(path.split('/').pop())]
+    return m ? ok(m) : { status: 404, body: { error: 'no mail for that item' } }
+  })
   const st = {
     items: [
       ...extra,
@@ -112,6 +124,54 @@ async function fits(t, page, tag) {
   t.check(!r.crash, `${tag}: the crash screen is showing`)
   t.check(r.docSW <= r.W + 1, `${tag}: the page is wider than the viewport (${r.docSW} > ${r.W})${r.wide?.length ? `: ${r.wide.join(', ')}` : ''}`)
 }
+
+// Mail with its whole text (the mail-body tests): a help desk reply in iCloud, whose item holds only
+// the preview cut mid-word and whose mailbox has no link to one message, and an Outlook reply that
+// quotes the message before it. A third item has no mail behind it (the 404 an older backend gives).
+const DESK_BODY = [
+  '##- Please type your reply above this line -##',
+  '',
+  '----------------------------------------------',
+  '',
+  'Hi Alex,',
+  '',
+  "Thanks for the follow-up. I'm sorry that your package is still delayed. While Sam is unavailable, I'm happy to assist you.",
+  '',
+  "We've checked the tracking, and it still shows the package in transit. We'll follow up with the carrier.",
+  '',
+  'Best regards,',
+  'Pat',
+  '',
+  '--------------------------------',
+  'This email is a service from Example Help.',
+  '',
+  '[AB12CD-EF34G]',
+].join('\n')
+const DESK_PREVIEW = "##- Please type your reply above this line -## ---------------------------------------------- Hi Alex, Thanks for the follow-up. I'm sorry that your package is still delayed. While Sam is unavailable, I'm happy to assist you. We've chec"
+const ICLOUD_WEB = 'https://www.icloud.com/mail/'
+const OUTLOOK_LINK = 'https://outlook.office365.com/owa/?ItemID=e2e-32&exvsurl=1&viewmodel=ReadMessageItem'
+const REPLY_BODY = 'Fixed it this morning. The steps are at https://example.com/printer-guide\n\nSam\n\nOn Mon, Nov 16, 2026 at 10:00 AM Pat Example <pat@example.com> wrote:\n\n> Is the printer on the third floor fixed?'
+
+function mailFake(page) {
+  const mail = (id, source, from, subject, body, url) => item(id, { source, level: 'info', title: `${from}: ${subject}`, body, url, pushedAt: null, pushDetail: null })
+  const at = (id) => iso(Date.now() - id * 7 * MIN)
+  return inboxBackend(page, {
+    extra: [
+      mail(31, 'personal-mail', 'Pat (Example Help)', 'Order Status - 001-12345', DESK_PREVIEW, ICLOUD_WEB),
+      mail(32, 'work-mail', 'Sam Example', 'Re: Printer offline', REPLY_BODY.replace(/\s+/g, ' ').slice(0, 240), OUTLOOK_LINK),
+      mail(33, 'work-mail', 'Lee Example', 'Lunch Friday', 'Are you free for lunch Friday?', 'https://outlook.office365.com/owa/?ItemID=e2e-33'),
+    ],
+    mail: {
+      31: { mailbox: 'icloud', label: 'iCloud', fromName: 'Pat (Example Help)', fromAddress: 'help@example.com', subject: 'Order Status - 001-12345', receivedAt: at(31), preview: DESK_PREVIEW, body: DESK_BODY, webLink: null, web: ICLOUD_WEB },
+      32: { mailbox: 'work', label: 'Work mail', fromName: 'Sam Example', fromAddress: 'sam@example.com', subject: 'Re: Printer offline', receivedAt: at(32), preview: '', body: REPLY_BODY, webLink: OUTLOOK_LINK, web: null },
+    },
+  })
+}
+
+/** The open row's links among its actions: text, href, target and rel. */
+const actLinks = (page) => page.eval(() => [...document.querySelectorAll('.ib-row[data-open] .ib-acts a')]
+  .map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'), target: a.getAttribute('target'), rel: a.getAttribute('rel') })))
+const openText = (page) => page.eval(() => document.querySelector('.ib-row[data-open] .ib-mailtext')?.innerText ?? '')
 
 export function inboxTests() {
   const tests = []
@@ -280,6 +340,106 @@ export function inboxTests() {
       await page.waitFor(() => !!document.querySelector('.ib-row[data-open] .vl-btn-line'), { message: 'the RAID row has no Open' })
       await page.tap({ sel: '.ib-row[data-open] .vl-btn-line', text: /Open/ })
       await page.waitFor(() => location.pathname === '/m/system/hosts', { message: 'Open did not go to /m/system/hosts' })
+    },
+  })
+
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `inbox:mail-body:${device}`,
+      group: 'inbox',
+      device,
+      timeout: 50_000,
+      async run(t) {
+        const page = await t.page()
+        mailFake(page)
+        await page.goto(ROUTE)
+        await pageUp(page)
+        await page.waitFor(() => !!document.querySelector('.ib-mail .ib-row'), { message: 'the Mail panel did not show' })
+
+        // the help desk reply: the whole message in place, its marker and footer folded
+        await page.tap({ sel: '.ib-mail .ib-row-main', text: /Example Help/ })
+        const w = await waitW(page, 1)
+        t.check(w.path === '/api/inbox/read' && JSON.stringify(w.json?.ids) === '[31]', `opening the mail sent ${w.method} ${w.path} ${w.body}`)
+        await page.waitFor(() => !!document.querySelector('.ib-row[data-open] .ib-mailtext'), { message: 'the open mail did not show its whole message' })
+        t.check(page.api.some((r) => r.path === '/api/mail/item/31'), 'opening the mail never asked for its message')
+        let text = await openText(page)
+        t.check(/We've checked the tracking, and it still shows the package in transit\. We'll follow up with the carrier\./.test(text) && /Best regards,\nPat/.test(text),
+          `the open mail is not the whole message: ${JSON.stringify(text.slice(0, 400))}`)
+        t.check(/^Hi Alex,/.test(text), `the open mail does not start at the greeting: ${JSON.stringify(text.slice(0, 80))}`)
+        t.check(!/reply above this line|AB12CD-EF34G|This email is a service/.test(text), `the help desk marker or footer shows before the toggle: ${JSON.stringify(text)}`)
+        await page.tap({ sel: '.ib-row[data-open] .ib-quote-toggle', text: /Show quoted text/ })
+        await page.waitFor(() => document.querySelectorAll('.ib-row[data-open] .ib-quoted').length === 2, { message: 'Show quoted text did not show the marker and the footer' })
+        const quoted = await page.eval(() => [...document.querySelectorAll('.ib-row[data-open] .ib-quoted')].map((p) => p.textContent))
+        t.check(/reply above this line/.test(quoted[0]) && /AB12CD-EF34G/.test(quoted[1]), `the quoted parts read ${JSON.stringify(quoted)}`)
+        t.check(await page.eval(() => document.querySelector('.ib-row[data-open] .ib-quote-toggle')?.textContent === 'Hide quoted text'), 'the toggle does not turn to Hide quoted text')
+        await page.tap({ sel: '.ib-row[data-open] .ib-quote-toggle', text: /Hide quoted text/ })
+        await page.waitFor(() => !document.querySelector('.ib-row[data-open] .ib-quoted'), { message: 'Hide quoted text left the quoted text showing' })
+        // no link of its own: no Open to nowhere, the mailbox's web mail instead, as a real link
+        let links = await actLinks(page)
+        t.check(links.length === 1 && links[0].text === 'Open iCloud' && links[0].href === ICLOUD_WEB && links[0].target === '_blank' && /noopener/.test(links[0].rel ?? ''),
+          `a message with no link of its own offers ${JSON.stringify(links)}, want one Open iCloud link to the web mail`)
+        t.check(await page.eval(() => getComputedStyle(document.querySelector('.ib-row[data-open] .ib-mailtext .ib-note')).userSelect) === 'text', 'the message cannot be selected')
+        await fits(t, page, `${ROUTE} mail body @${device}`)
+        await t.shot(page, 'mail-body')
+
+        // the Outlook reply: what Sam wrote, the quoted message folded, Open is the message itself
+        await page.tap({ sel: '.ib-mail .ib-row-main', text: /Sam Example/ })
+        await page.waitFor(() => /Fixed it this morning/.test(document.querySelector('.ib-row[data-open] .ib-mailtext')?.innerText ?? ''), { message: 'the Outlook reply did not show its message' })
+        text = await openText(page)
+        t.check(!/third floor|wrote:/.test(text) && /\nSam\b/.test(text), `the quoted message shows before the toggle: ${JSON.stringify(text)}`)
+        t.check(await page.eval(() => document.querySelector('.ib-row[data-open] .ib-mailtext .ib-link')?.getAttribute('href')) === 'https://example.com/printer-guide', 'the link in the message is not live')
+        links = await actLinks(page)
+        t.check(links.length === 1 && links[0].text === 'Open' && links[0].href === OUTLOOK_LINK && links[0].target === '_blank' && /noopener/.test(links[0].rel ?? ''),
+          `the Outlook message's Open is ${JSON.stringify(links)}, want a link to the message`)
+
+        // no mail behind the item (an older backend): its preview, and its own link as Open
+        await page.tap({ sel: '.ib-mail .ib-row-main', text: /Lee Example/ })
+        await page.waitFor(() => !!document.querySelector('.ib-row[data-open] .ib-acts a'), { message: 'an item with no mail behind it has no Open' })
+        t.check(await page.eval(() => /Are you free for lunch Friday\?/.test(document.querySelector('.ib-row[data-open] .ib-note')?.textContent ?? '') && !document.querySelector('.ib-row[data-open] .ib-mailtext')),
+          'the item with no mail behind it does not show its preview')
+        links = await actLinks(page)
+        t.check(links.length === 1 && links[0].text === 'Open' && links[0].href === 'https://outlook.office365.com/owa/?ItemID=e2e-33', `its Open is ${JSON.stringify(links)}`)
+      },
+    })
+  }
+
+  tests.push({
+    name: 'inbox:mail-open:tauri',
+    group: 'inbox',
+    device: 'desktop',
+    timeout: 45_000,
+    async run(t) {
+      // the desktop app: its webview opens no window by itself, so every outside link goes to open_external
+      const page = await t.page({ scripts: [tauriStub()] })
+      mailFake(page)
+      await page.goto(ROUTE)
+      await pageUp(page)
+      await page.waitFor(() => !!document.querySelector('.ib-mail .ib-row'), { message: 'the Mail panel did not show' })
+      const opened = async (from) => (await tauriCallsFull(page, from)).filter((c) => c.cmd === 'open_external').map((c) => c.args?.url)
+      const asked = (n) => page.waitFor((k) => (window.__tauriCalls ?? []).filter((c) => c.cmd === 'open_external').length >= k, { args: [n], message: `the app was not asked to open browser link ${n}` })
+
+      await page.tap({ sel: '.ib-mail .ib-row-main', text: /Sam Example/ })
+      await page.waitFor(() => !!document.querySelector('.ib-row[data-open] .ib-out'), { message: 'the Outlook message has no Open' })
+      let from = (await tauriCallsFull(page)).length
+      await page.tap({ sel: '.ib-row[data-open] .ib-out', text: /^\s*Open\s*$/ })
+      await asked(1)
+      let urls = await opened(from)
+      t.check(urls.length === 1 && urls[0] === OUTLOOK_LINK, `Open asked for ${JSON.stringify(urls)}, want the message's link`)
+
+      from = (await tauriCallsFull(page)).length
+      await page.tap({ sel: '.ib-row[data-open] .ib-mailtext .ib-link' })
+      await asked(2)
+      urls = await opened(from)
+      t.check(urls.length === 1 && urls[0] === 'https://example.com/printer-guide', `the link in the message asked for ${JSON.stringify(urls)}`)
+
+      await page.tap({ sel: '.ib-mail .ib-row-main', text: /Example Help/ })
+      await page.waitFor(() => !!document.querySelector('.ib-row[data-open] .ib-out'), { message: 'the iCloud message has no Open iCloud' })
+      from = (await tauriCallsFull(page)).length
+      await page.tap({ sel: '.ib-row[data-open] .ib-out', text: /Open iCloud/ })
+      await asked(3)
+      urls = await opened(from)
+      t.check(urls.length === 1 && urls[0] === ICLOUD_WEB, `Open iCloud asked for ${JSON.stringify(urls)}`)
+      t.check(await page.eval(() => location.pathname) === ROUTE, 'an outside link moved the app off the inbox')
     },
   })
 

@@ -239,6 +239,25 @@
   box-shadow: 0 8px 28px rgba(0, 0, 0, .85);
 }
 .dk-lp + .dk-lp { margin-top: 6px; }
+/* each area's name folds its rows away; folded when the list opens */
+.dk-fold {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.dk[data-coarse] .dk-fold { min-height: 44px; }
+.dk-fold-i { flex: none; transition: transform .12s; }
+.dk-fold[aria-expanded='false'] .dk-fold-i { transform: rotate(-90deg); }
+.dk-fold[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.dk-lg .dk-k { padding-bottom: 0; }
 .dk-row[data-on] .dk-row-t { color: var(--fg); }
 /* under the running ones: the sessions closed and not marked done, and Recover all */
 .dk-closed-head {
@@ -342,6 +361,8 @@
   .dk-row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-row:disabled:hover { background: none; }
   .dk-recover:not(:disabled):hover { text-decoration: underline; text-underline-offset: 4px; }
+  .dk-fold:hover .dk-fold-t { color: var(--text); }
+  .dk-fold:hover .dk-fold-i { color: var(--fg); }
 }
 
 /* ---------- the badge on the Desk tab: tabs done and not opened yet (the Messages badge's look) ---------- */

@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
+  Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { useIsFetching, useMutation, useQueryClient, type Mutation, type QueryClient } from '@tanstack/react-query'
@@ -284,9 +284,11 @@ export default function Dashboard({ active }: ScreenProps) {
           </>
         ) : (
           <>
+            {/* left: Raven on top with its last few exchanges, then Upload, Quick Start, the tracker,
+                and the calendar down to the bottom of the page */}
             <div className="hm-col hm-a">
+              <RavenBlock active={active} i={1} turns={3} />
               <UploadBlock wide />
-              <RavenBlock active={active} i={2} />
               <QuickStart />
               <Tracker />
               <Calendar onOpen={setCal} fit={fill} />
@@ -1195,7 +1197,8 @@ function keepLines(view: CalView, tasks: number, n: number): { kept: Set<CalLine
  * due tasks follow today. A day heading opens the calendar on that day; an
  * event opens it there with its details. `fit` (a monitor or the landscape
  * iPad): as many lines as the column has room for (keepLines picks which),
- * then "+N more"; otherwise up to `max` events.
+ * then "+N more"; on a monitor the box reaches the bottom of its column.
+ * Otherwise up to `max` events.
  */
 function Calendar({ onOpen, fit, max = 10 }: { onOpen: (o: CalendarOpen) => void; fit?: boolean; max?: number }) {
   const cal = useCalendar(DAYS)
@@ -1327,7 +1330,7 @@ function Calendar({ onOpen, fit, max = 10 }: { onOpen: (o: CalendarOpen) => void
   if (!fit) return body
   return (
     <div className="hm-cal-slot" ref={slot}>
-      <div ref={box}>{body}</div>
+      <div className="hm-cal-box" ref={box}>{body}</div>
     </div>
   )
 }
@@ -1475,22 +1478,80 @@ function ravenPlain(m: RavenMsg): string {
   return out || (n ? `${n} ${n === 1 ? 'file' : 'files'}` : '')
 }
 
-/** His newest line, and Raven's newest own reply after it (relays are not part of the exchange). */
-function lastExchange(messages: RavenMsg[]): { me: RavenMsg | null; reply: RavenMsg | null } {
-  const me = messages.findLast((m) => m.author === 'brendon') ?? null
-  const reply = messages.findLast((m) => m.author === 'raven' && !m.meta.relay && (!me || m.id > me.id)) ?? null
-  return { me, reply }
+/** the Raven block's exchange window: data-more (a faded top edge) while it is scrolled past its first line */
+const moreAbove = (el: HTMLElement) => el.toggleAttribute('data-more', el.scrollTop > 1)
+
+/** the height a monitor's left column keeps for the calendar under Raven: its head, Today with the next event, the tasks line, "+N more" */
+const CAL_ROOM = 200
+
+/**
+ * A monitor: the most px the Raven block's exchange window can take so the left
+ * column still ends at the bottom of the page with CAL_ROOM left for the
+ * calendar. The column is the fill height (--hm-h on the layout, less its
+ * padding); the blocks beside Raven and Raven's own head and box are measured,
+ * none of which depend on the window, so this never feeds back. null when the
+ * layout does not fill.
+ */
+function useLogRoom(sec: RefObject<HTMLElement | null>, log: RefObject<HTMLElement | null>, on: boolean): number | null {
+  const [room, setRoom] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = sec.current
+    const win = log.current
+    const col = el?.parentElement
+    const lay = col?.parentElement
+    if (!on || !el || !win || !col || !lay) return
+    const px = (v: string) => parseFloat(v) || 0
+    const measure = () => {
+      const fillH = px(lay.style.getPropertyValue('--hm-h'))
+      let r: number | null = null
+      if (fillH > 0) {
+        const kids = [...col.children] as HTMLElement[]
+        const others = kids.reduce((s, k) => (k === el || k.classList.contains('hm-cal-slot') ? s : s + k.offsetHeight), 0)
+        const gaps = px(getComputedStyle(col).rowGap) * (kids.length - 1)
+        const ls = getComputedStyle(lay)
+        r = Math.floor(fillH - px(ls.paddingTop) - px(ls.paddingBottom) - others - gaps - (el.offsetHeight - win.offsetHeight) - CAL_ROOM)
+      }
+      setRoom((cur) => (cur === r ? cur : r))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(lay)
+    for (const k of col.children) ro.observe(k)
+    return () => ro.disconnect()
+  }, [sec, log, on])
+  return on ? room : null
+}
+
+type Turn = { me: RavenMsg | null; reply: RavenMsg | null }
+
+/**
+ * His last `n` lines, oldest first, each with Raven's newest own reply before his next line (relays are
+ * not part of an exchange). No line from him yet: Raven's newest own line alone.
+ */
+function lastTurns(messages: RavenMsg[], n: number): Turn[] {
+  const mine = messages.filter((m) => m.author === 'brendon').slice(-n)
+  const own = messages.filter((m) => m.author === 'raven' && !m.meta.relay)
+  if (!mine.length) {
+    const reply = own.at(-1)
+    return reply ? [{ me: null, reply }] : []
+  }
+  return mine.map((me, k) => {
+    const until = mine[k + 1]?.id ?? Infinity
+    return { me, reply: own.findLast((m) => m.id > me.id && m.id < until) ?? null }
+  })
 }
 
 /**
  * Raven on the Dashboard, where the corner button would be (kit/raven.tsx
  * hides it here): the heading with Raven's live status (the Raven screen's
- * words), his last line and Raven's latest reply, each clipped, and a one-line
- * box. A send goes the Raven screen's way (source app) and the reply shows
- * here when it lands. The heading opens the conversation; Ctrl+Shift+Space and
- * the palette's "Message Raven" focus the box.
+ * words), his last `turns` lines each with Raven's reply (each clipped), and
+ * the box. One exchange and a one-line box on the phone and the iPads; a
+ * monitor shows the last few in a window that scrolls (newest at the bottom)
+ * over a two-line box. A send goes the Raven screen's way (source app) and the
+ * reply shows here when it lands. The heading opens the conversation;
+ * Ctrl+Shift+Space and the palette's "Message Raven" focus the box.
  */
-function RavenBlock({ active, i }: { active: boolean; i: number }) {
+function RavenBlock({ active, i, turns = 1 }: { active: boolean; i: number; turns?: number }) {
   const { go } = useShell()
   const qc = useQueryClient()
   // the long-poll only while a reply is due (below); otherwise the slow re-read and the app coming back to the front
@@ -1499,7 +1560,9 @@ function RavenBlock({ active, i }: { active: boolean; i: number }) {
   const page = q.data
   const [text, setText] = useState('')
   const [sentId, setSentId] = useState(0)
-  const box = useRef<HTMLInputElement>(null)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const sec = useRef<HTMLElement>(null)
+  const log = useRef<HTMLDivElement>(null)
   useIntent('raven:compose', () => box.current?.focus(), active)
 
   const send = useMutation({
@@ -1520,10 +1583,33 @@ function RavenBlock({ active, i }: { active: boolean; i: number }) {
   const busy = ravenBusy(page)
   const failed = q.isError && !page
   const status = failed ? 'not answering' : page ? ravenStatusText(page) : '--'
-  const { me, reply } = lastExchange(page?.messages ?? [])
+  const list = useMemo(() => lastTurns(page?.messages ?? [], turns), [page?.messages, turns])
+  const { me, reply } = list.at(-1) ?? { me: null, reply: null }
   // a reply is due: a line sent from here has none yet, or Raven is at work
   const due = busy || (!!sentId && me?.id === sentId && !reply)
   if (due !== live) setLive(due)
+  // the window opens on the newest line, and comes back to it when a line lands or Raven starts or stops;
+  // data-more fades its top edge while there is more above
+  const shown = list.map((x) => `${x.me?.id ?? 0}.${x.reply?.id ?? 0}`).join()
+  useLayoutEffect(() => {
+    const el = log.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    moreAbove(el)
+  }, [shown, busy])
+  // and when the window itself changes size (on a monitor it gives way to the blocks under it)
+  const hasLog = !!page && list.length > 0
+  useLayoutEffect(() => {
+    const el = log.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      el.scrollTop = el.scrollHeight
+      moreAbove(el)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [hasLog])
+  const room = useLogRoom(sec, log, turns > 1 && hasLog)
 
   // a reply to a line sent from here is read once it shows (the quick sheet's rule), so the tab's badge does not count it
   const replyId = sentId && me?.id === sentId ? reply?.id ?? 0 : 0
@@ -1535,7 +1621,7 @@ function RavenBlock({ active, i }: { active: boolean; i: number }) {
 
   return (
     // a boxed panel like Calendar, so the chat reads apart from the plain sections around it (his ask, 11-19)
-    <section className="vl-panel hm-sec hm-rv" data-dense="" data-lit={busy || undefined} aria-label="Raven">
+    <section ref={sec} className="vl-panel hm-sec hm-rv" data-dense="" data-lit={busy || undefined} data-turns={turns > 1 || undefined} aria-label="Raven">
       <Press className="hm-head hm-rv-head vl-build" style={bi(i)} onPress={() => go(RAVEN)} aria-label={`Raven${page || failed ? `, ${status}` : ''}, open the conversation`}>
         <span className="hm-head-label" data-lit={busy || undefined}><HIcon name="raven" lit={busy} />Raven</span>
         <span className="hm-head-value hm-rv-status" data-busy={busy || undefined} data-state={failed ? 'error' : page?.status} title={status}>
@@ -1543,29 +1629,53 @@ function RavenBlock({ active, i }: { active: boolean; i: number }) {
           <Chevron />
         </span>
       </Press>
-      {page && (me || reply) ? (
-        <div className="hm-rv-x vl-build" style={bi(i + 1)}>
-          {me && (
-            <>
-              <span className="hm-rv-who">You</span>
-              <p className="hm-rv-text" data-who="me">{ravenPlain(me)}</p>
-            </>
-          )}
-          <span className="hm-rv-who">Raven</span>
-          {reply ? <p className="hm-rv-text" data-who="raven" data-error={reply.meta.error ? '' : undefined}>{ravenPlain(reply)}</p>
-            : busy ? <p className="hm-rv-text hm-rv-wait" data-who="raven"><span className="hm-rv-pulse" aria-hidden />{status}</p>
-            : <p className="hm-rv-text hm-dim" data-who="raven">No reply yet</p>}
+      {hasLog ? (
+        // the scroller wraps the grid: a grid with a height cap would squeeze its rows instead of scrolling
+        <div
+          className="hm-rv-log vl-build"
+          style={{ ...bi(i + 1), ...(room !== null ? { '--rv-room': `${room}px` } : null) } as Vars}
+          ref={log}
+          onScroll={(e) => moreAbove(e.currentTarget)}
+        >
+          <div className="hm-rv-x">
+            {list.map((x, k) => (
+              <Fragment key={x.me?.id ?? x.reply?.id}>
+                {k > 0 && <i className="hm-rv-sep" aria-hidden />}
+                {x.me && (
+                  <>
+                    <span className="hm-rv-who">You</span>
+                    <p className="hm-rv-text" data-who="me">{ravenPlain(x.me)}</p>
+                  </>
+                )}
+                {x.reply ? (
+                  <>
+                    <span className="hm-rv-who">Raven</span>
+                    <p className="hm-rv-text" data-who="raven" data-error={x.reply.meta.error ? '' : undefined}>{ravenPlain(x.reply)}</p>
+                  </>
+                ) : k === list.length - 1 && (
+                  <>
+                    <span className="hm-rv-who">Raven</span>
+                    {busy ? <p className="hm-rv-text hm-rv-wait" data-who="raven"><span className="hm-rv-pulse" aria-hidden />{status}</p>
+                      : <p className="hm-rv-text hm-dim" data-who="raven">No reply yet</p>}
+                  </>
+                )}
+              </Fragment>
+            ))}
+          </div>
         </div>
       ) : (
         <p className="hm-quiet vl-build" style={bi(i + 1)}>{failed ? `Raven is not answering: ${apiErrorText(q.error, 'no reply from Valkyrie')}` : page ? 'Nothing yet. Ask Raven anything.' : 'Reading Raven'}</p>
       )}
       <form className="hm-rv-form vl-build" style={bi(i + 1)} onSubmit={(e) => { e.preventDefault(); submit() }}>
-        <input
+        <textarea
           ref={box}
+          className="hm-rv-box"
+          rows={turns > 1 ? 2 : 1}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+            // Enter sends, Shift+Enter is a new line
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
             e.preventDefault()
             submit()
           }}

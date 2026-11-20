@@ -394,3 +394,39 @@ html[data-motion='reduced'] .rv-rules-box, html[data-motion='reduced'] .rv-rules
   .rv-menu-item { min-height: 42px; font-size: 14px; }
   .rv-rules select { height: 40px; font-size: 16px; }
 }
+
+/* ---------- voice input: the mic left of the pick, red while it records, a line over the box ---------- */
+.rv-compose { container-type: inline-size; }
+.rv-mic {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 0 2px;
+  border-radius: 50%;
+  color: var(--dim);
+  transition: color .15s, background-color .15s, box-shadow .15s;
+}
+.rv-mic .vl-icon { color: inherit; vertical-align: 0; }
+.rv-mic[data-on] { color: #fff; background: var(--hot); box-shadow: 0 0 14px color-mix(in srgb, var(--hot) 70%, transparent); animation: rv-rec-pulse 1.2s ease-in-out infinite; }
+.rv-mic[data-busy] { color: var(--fg); }
+.rv-mic:disabled { cursor: default; opacity: .55; }
+.rv-mic[data-on]:disabled, .rv-mic[data-busy]:disabled { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .rv-mic:not([data-on]):hover { color: var(--text); background: color-mix(in srgb, var(--fg) 10%, transparent); } }
+.rv-compose[data-rec] { border-color: var(--hot); box-shadow: 0 0 0 1px color-mix(in srgb, var(--hot) 45%, transparent); }
+.rv-rec { display: flex; align-items: center; gap: 8px; padding: 6px 12px 0; font-size: 12px; color: var(--hot); }
+.rv-rec[data-phase='writing'] { color: var(--fg); }
+.rv-rec-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--hot); box-shadow: 0 0 8px var(--hot); animation: rv-blink 1s ease-in-out infinite; }
+.rv-rec-how { color: var(--dim); }
+@keyframes rv-rec-pulse { 50% { box-shadow: 0 0 4px color-mix(in srgb, var(--hot) 40%, transparent); } }
+html[data-motion='reduced'] .rv-mic[data-on], html[data-motion='reduced'] .rv-rec-dot { animation: none; }
+@media (pointer: coarse) { .rv-mic::after { content: ''; position: absolute; inset: -5px -2px; } }
+/* a narrow box (the phone): the pick drops its gauge and padding so the text keeps its room */
+@container (max-width: 440px) {
+  .rv-pickb { padding: 0 5px; }
+  .rv-pickb .vl-icon { display: none; }
+  .rv-mic { width: 30px; }
+}
+.rv-ptt-row .st-row-value[data-listening] { color: var(--fg); }

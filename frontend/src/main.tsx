@@ -6,6 +6,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { isTauri } from './lib/auth'
+import { installExternalLinks } from './lib/external'
 import { classicToV2, getTabUi, resolveProfile, safeV2Path, tabWantsV2 } from './lib/deviceMode'
 import { isEmbedded } from './lib/embed'
 
@@ -16,6 +17,8 @@ if (isTauri()) {
   // a service worker would only serve stale UI after an update. Make sure none
   // is registered (including one left by an earlier build that shipped the SW).
   navigator.serviceWorker?.getRegistrations?.().then((rs) => rs.forEach((r) => void r.unregister())).catch(() => {})
+  // the webview drops every new window: outside links go to the system browser (desktop only)
+  installExternalLinks()
 } else {
   const updateSW = registerSW({
     immediate: true,

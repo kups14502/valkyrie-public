@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import { requireStrongAuth, viaCloudflare } from '../middleware/auth.js'
 import { InboxError } from '../lib/inboxStore.js'
-import { mailboxes, syncMailbox, unreadMail } from '../lib/mailStore.js'
+import { mailForInbox, mailboxes, syncMailbox, unreadMail } from '../lib/mailStore.js'
 
 // Mail rows from thor's sync job (lib/mailStore.ts has the rules). The sync
 // takes strong auth (thor is a trusted tailnet device); reading takes the
@@ -29,6 +29,15 @@ router.post('/mail/sync', requireStrongAuth, h(async (req, res) => {
 router.get('/mail', h((req, res) => {
   const hide = viaCloudflare(req)
   res.json({ mailboxes: mailboxes(hide), unread: unreadMail(hide) })
+}))
+
+// one inbox item's mail with its whole text (the inbox reads it when the item opens)
+router.get('/mail/item/:inboxId', h((req, res) => {
+  const id = Number(req.params.inboxId)
+  if (!Number.isSafeInteger(id) || id < 1) throw new InboxError('inboxId must be a positive whole number')
+  const m = mailForInbox(id, viaCloudflare(req))
+  if (!m) return res.status(404).json({ error: 'no mail for that item' })
+  res.json(m)
 }))
 
 export default router

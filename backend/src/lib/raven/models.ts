@@ -12,33 +12,64 @@ import type { RavenEffort, RavenTier } from './types.js'
 // credits), is retried once on the fallback, and the refused id is remembered
 // for six hours.
 
-export const TIERS: RavenTier[] = ['opus', 'sonnet', 'haiku', 'fable']
 export const ROUTER_EFFORTS: RavenEffort[] = ['low', 'medium', 'high', 'xhigh']
 
-const DEFAULT_MODELS: Record<RavenTier, string> = {
-  haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-1',
-}
-const FALLBACK_MODELS: Record<RavenTier, string> = {
-  haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5-5', fable: 'claude-opus-5-5',
-}
+/**
+ * The models Raven offers, in the picker's order: the one place to add a model. `key` is what the pick and the rules
+ * save (keep it stable), `id` what the CLI gets, `fallback` the id a run moves to when the CLI or the account refuses
+ * `id`. RAVEN_MODELS (JSON) changes ids or adds models without a code change: an object of key to id
+ * ({"opus":"claude-opus-6"}) or a list of {key, id, fallback?} entries (a new key joins the end of the picker).
+ * The keys haiku (the router) and sonnet (the retry after a silent reply) must stay.
+ */
+const CATALOG: { key: RavenTier; id: string; fallback: string }[] = [
+  { key: 'opus', id: 'claude-opus-5-5', fallback: 'claude-opus-5-5' },
+  { key: 'sonnet', id: 'claude-sonnet-5-5', fallback: 'claude-sonnet-5' },
+  { key: 'haiku', id: 'claude-haiku-5-5', fallback: 'claude-haiku-4-5-20251001' },
+  { key: 'fable-5-2', id: 'claude-fable-5-2', fallback: 'claude-opus-5-5' },
+  { key: 'fable', id: 'claude-fable-5-1', fallback: 'claude-opus-5-5' },
+]
 const MODEL_ID_RE = /^[a-z0-9][a-z0-9.\-[\]]{2,80}$/i
+const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 const ROUTER_TIMEOUT_MS = Number(process.env.RAVEN_ROUTER_TIMEOUT_MS || 20_000)
 const BAD_FOR_MS = 6 * 3_600_000
 
 const bad = new Map<string, { at: number; why: string }>()
 
-function configured(): Record<RavenTier, string> {
-  const out = { ...DEFAULT_MODELS }
+type Entry = { key: RavenTier; id: string; fallback: string }
+
+/** The catalog with RAVEN_MODELS applied, read each time (the smoke test changes the env between runs). */
+function catalog(): Entry[] {
+  const out = CATALOG.map((e) => ({ ...e }))
   const raw = process.env.RAVEN_MODELS
   if (!raw) return out
   try {
-    const o = JSON.parse(raw) as Record<string, unknown>
-    for (const t of TIERS) if (typeof o[t] === 'string' && MODEL_ID_RE.test(o[t] as string)) out[t] = o[t] as string
+    const o = JSON.parse(raw) as unknown
+    const list: { key?: unknown; id?: unknown; fallback?: unknown }[] = Array.isArray(o)
+      ? o
+      : Object.entries((o ?? {}) as Record<string, unknown>).map(([key, id]) => ({ key, id }))
+    for (const x of list) {
+      const key = String(x?.key ?? '')
+      if (!KEY_RE.test(key) || typeof x.id !== 'string' || !MODEL_ID_RE.test(x.id)) continue
+      const fallback = typeof x.fallback === 'string' && MODEL_ID_RE.test(x.fallback) ? x.fallback : null
+      const have = out.find((e) => e.key === key)
+      if (have) {
+        have.id = x.id
+        if (fallback) have.fallback = fallback
+      } else {
+        out.push({ key, id: x.id, fallback: fallback ?? 'claude-opus-5-5' })
+      }
+    }
   } catch {
-    console.error('[raven] RAVEN_MODELS is not valid JSON; using the defaults')
+    console.error('[raven] RAVEN_MODELS is not valid JSON; using the built-in models')
   }
   return out
 }
+
+const entry = (key: RavenTier): Entry => catalog().find((e) => e.key === key) ?? catalog()[0]
+
+/** Every model key in the picker's order. */
+export const modelKeys = (): RavenTier[] => catalog().map((e) => e.key)
+export const isModelKey = (v: unknown): v is RavenTier => typeof v === 'string' && modelKeys().includes(v)
 
 /** Why the CLI refused this id in the last six hours, or null. */
 export function badWhy(id: string): string | null {
@@ -53,17 +84,17 @@ export function badWhy(id: string): string | null {
 const isBad = (id: string) => badWhy(id) !== null
 
 /** The id a family is configured to run on, refused or not. */
-export const wantedModel = (tier: RavenTier): string => configured()[tier]
+export const wantedModel = (tier: RavenTier): string => entry(tier).id
 
 /** The model id a family runs on now: the configured one, or its fallback while the configured one is refused. */
 export function modelFor(tier: RavenTier): string {
   const want = wantedModel(tier)
-  return isBad(want) ? FALLBACK_MODELS[tier] : want
+  return isBad(want) ? entry(tier).fallback : want
 }
 
 /** The id to retry on after `model` was refused, or null when there is nothing else to try. */
 export function fallbackFor(tier: RavenTier, model: string): string | null {
-  const f = FALLBACK_MODELS[tier]
+  const f = entry(tier).fallback
   return f !== model && !isBad(f) ? f : null
 }
 
@@ -123,14 +154,13 @@ export function modelLabel(id: string | null | undefined): string {
   return `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}${m[3] ? `.${m[3]}` : ''}`
 }
 
-/** One model in the app's picker: the family, the id it runs, its name, and why it is refused right now. */
-export type RavenModelInfo = { key: RavenTier; id: string; label: string; unavailable?: string }
+/** One model in the app's picker: its key, the id it runs, its name, why it is refused right now and what runs instead. */
+export type RavenModelInfo = { key: RavenTier; id: string; label: string; unavailable?: string; fallback?: string }
 
 export function ravenModels(): RavenModelInfo[] {
-  return TIERS.map((key) => {
-    const id = wantedModel(key)
+  return catalog().map(({ key, id, fallback }) => {
     const why = badWhy(id)
-    return { key, id, label: modelLabel(id), ...(why ? { unavailable: why } : {}) }
+    return { key, id, label: modelLabel(id), ...(why ? { unavailable: why, fallback: modelLabel(fallback) } : {}) }
   })
 }
 

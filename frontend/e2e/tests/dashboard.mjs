@@ -45,8 +45,9 @@
 //            day's all-day events on one line, a meeting's Join link (Teams in
 //            the notes, Zoom in the location) and a plain location otherwise,
 //            a day heading opening the calendar on that day; on a monitor and
-//            the landscape iPad the block keeps its natural height inside its
-//            column and folds the rest into "+N more this week", the next event
+//            the landscape iPad the block ends inside its column (on a monitor
+//            it reaches the column's bottom, on the iPad it keeps its natural
+//            height) and folds the rest into "+N more this week", the next event
 //            always kept; no horizontal overflow. A week of 70 events folds
 //            the same way on a monitor (no crash); an event over midnight
 //            leads once, its end named with its day.
@@ -73,7 +74,8 @@
 //            that car picked; the monitor still fits without a scroll.
 //   raven    the Raven block (`dash:raven`) over a fake /api/raven: its status and the last
 //            exchange (his last line, Raven's own reply after it, one or two lines each), right
-//            under the stage on the phone and the iPads and under Upload on a monitor, no
+//            under the stage on the phone and the iPads; on a monitor the head of the left column
+//            over Upload with the last few exchanges (newest in view) and a two-line box, no
 //            corner button beside it, a send carrying the Raven screen's body (source app), Raven
 //            working then the reply in the block (and read there), the heading opening /m/raven,
 //            no scroll on a monitor or the landscape iPad, nothing wider than the screen.
@@ -1110,6 +1112,8 @@ function calendarTests() {
         } else {
           // a fill layout: the box ends inside its column, nothing scrolls
           t.check(r.slot && r.slot.calBottom <= r.slot.slotBottom + 1, `the Calendar box runs past its column (${JSON.stringify(r.slot)})`)
+          // a monitor: the box itself reaches the bottom of the left column, no empty page under it
+          if (device === 'desktop') t.check(r.slot && r.slot.calBottom >= r.slot.slotBottom - 1, `the Calendar box ends above its column's bottom (${JSON.stringify(r.slot)}), want it to reach it`)
           t.check(r.scrollH <= r.clientH + 2, `the Dashboard scrolls (${r.scrollH} > ${r.clientH}) with the calendar's week on it`)
           t.check(r.heads[0]?.name === 'Today', `the first day heading reads "${r.heads[0]?.name}", want Today`)
           t.check(!r.heads.some((h) => h.name === NY_HEAD.format(nyStart(keyPlus(t0, 2)) + 12 * 3_600_000)), 'an empty day has a heading')
@@ -1550,23 +1554,30 @@ function ravenBlockSnap() {
   const root = document.querySelector('.vl-page[data-active]')
   const rv = root?.querySelector('.hm-rv')
   const lay = root?.querySelector('.hm-layout')
-  const text = (who) => rv?.querySelector(`.hm-rv-text[data-who="${who}"]`)
+  // the newest of his lines and of Raven's (a monitor shows the last few exchanges, oldest first)
+  const text = (who) => [...(rv?.querySelectorAll(`.hm-rv-text[data-who="${who}"]`) ?? [])].at(-1)
   const lines = (el) => (el ? Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) : 0)
-  const prev = rv?.previousElementSibling
+  const kind = (el) => (el ? (el.classList.contains('hm-stage') ? 'stage' : el.classList.contains('hm-up') ? 'upload' : el.querySelector('.hm-starts, .hm-starts-empty') ? 'quick start' : String(el.className).slice(0, 40)) : null)
   const W = document.documentElement.clientWidth
   const b = rv?.getBoundingClientRect()
+  const log = rv?.querySelector('.hm-rv-log')
   return {
     found: !!rv,
     status: rv?.querySelector('.hm-rv-status')?.textContent?.trim() ?? null,
     me: text('me')?.textContent ?? null,
     raven: text('raven')?.textContent ?? null,
+    mine: rv?.querySelectorAll('.hm-rv-text[data-who="me"]').length ?? 0,
     wait: !!rv?.querySelector('.hm-rv-wait'),
     meLines: lines(text('me')),
     ravenLines: lines(text('raven')),
-    box: rv?.querySelector('.hm-rv-form input')?.value ?? null,
-    focused: document.activeElement === rv?.querySelector('.hm-rv-form input'),
-    // where it sits: right after the stage (phone, iPads) or right under Upload (monitors)
-    after: prev ? (prev.classList.contains('hm-stage') ? 'stage' : prev.classList.contains('hm-up') ? 'upload' : prev.querySelector('.hm-starts, .hm-starts-empty') ? 'quick start' : String(prev.className).slice(0, 40)) : null,
+    // the exchange window opens on the newest line
+    atEnd: log ? log.scrollTop + log.clientHeight >= log.scrollHeight - 2 : false,
+    box: rv?.querySelector('.hm-rv-form textarea')?.value ?? null,
+    boxH: Math.round(rv?.querySelector('.hm-rv-form textarea')?.offsetHeight ?? 0),
+    focused: document.activeElement === rv?.querySelector('.hm-rv-form textarea'),
+    // where it sits: right after the stage (phone, iPads) or at the head of the left column over Upload (monitors)
+    after: kind(rv?.previousElementSibling),
+    before: kind(rv?.nextElementSibling),
     col: rv?.closest('.hm-col') ? ['hm-a', 'hm-b', 'hm-c'].find((k) => rv.closest('.hm-col').classList.contains(k)) : null,
     cols: lay?.getAttribute('data-cols') ?? null,
     pad: !!lay?.hasAttribute('data-pad'),
@@ -1598,18 +1609,25 @@ function ravenBlockTests() {
         t.check(s.status === 'idle', `the block's status reads ${JSON.stringify(s.status)}, want idle`)
         t.check(s.me === 'Here are the photo and the notes', `his last line reads ${JSON.stringify(s.me)}`)
         t.check(s.raven === 'Got both. The photo shows the jammed tray.', `Raven's line reads ${JSON.stringify(s.raven)}`)
-        t.check(s.meLines >= 1 && s.meLines <= 2 && s.ravenLines >= 1 && s.ravenLines <= 2, `the exchange takes ${s.meLines} and ${s.ravenLines} lines, want one or two each`)
+        const desk = device.startsWith('desk')
+        const monitor = device === 'desktop' || desk
+        // a monitor: up to four lines each (the last few exchanges); elsewhere one or two
+        const most = monitor ? 4 : 2
+        t.check(s.meLines >= 1 && s.meLines <= most && s.ravenLines >= 1 && s.ravenLines <= most, `the exchange takes ${s.meLines} and ${s.ravenLines} lines, want 1 to ${most} each`)
         t.check(!s.fab, 'the corner button shows on the Dashboard beside the Raven block')
         t.check(!s.dash, 'an em dash in the Raven block')
         t.check(s.inside, 'the Raven block runs past the screen')
-        const desk = device.startsWith('desk')
-        if (device === 'desktop' || desk) {
-          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === 'upload', `on a monitor the block sits in ${s.col} after ${s.after}, want the left column right under Upload`)
+        if (monitor) {
+          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === null && s.before === 'upload', `on a monitor the block sits in ${s.col} after ${s.after}, before ${s.before}, want the head of the left column with Upload under it`)
+          // both of his lines in the fake (101 and 106) with Raven's replies, the window on the newest, a two-line box
+          t.check(s.mine === 2 && s.atEnd, `on a monitor the block shows ${s.mine} of his lines${s.atEnd ? '' : ', not scrolled to the newest'}, want his last two exchanges ending on the newest`)
+          t.check(s.boxH >= 52, `on a monitor the box is ${s.boxH} px tall, want two lines (52 px or more)`)
         } else if (device === 'ipadland') {
           t.check(s.pad && s.col === 'hm-b' && s.after === 'stage', `on the landscape iPad the block sits in ${s.col} after ${s.after}, want right under the stage`)
         } else {
           t.check(!s.col && s.after === 'stage', `on the ${device} the block sits after ${s.after} (column ${s.col}), want right under the stage`)
         }
+        if (!monitor) t.check(s.mine === 1, `on the ${device} the block shows ${s.mine} of his lines, want the last exchange alone`)
         if (device !== 'phone' && device !== 'ipad') t.check(s.scrollH <= s.clientH + 2, `the Dashboard scrolls with the Raven block (${s.scrollH} > ${s.clientH})`)
         const lr = await page.eval(layoutReport)
         t.check(lr.docSW <= lr.W + 1, `the Dashboard is wider than the screen (${lr.docSW} > ${lr.W})${lr.wide?.length ? `: ${lr.wide.join(', ')}` : ''}`)
@@ -1617,12 +1635,12 @@ function ravenBlockTests() {
 
         // a send: the button on a touch screen, Enter on a keyboard; the Raven screen's body (source app)
         const want = `Check the printer from ${device}`
-        if (device === 'desktop' || desk) {
-          await page.eval(() => document.querySelector('.vl-page[data-active] .hm-rv-form input')?.focus())
+        if (monitor) {
+          await page.eval(() => document.querySelector('.vl-page[data-active] .hm-rv-form textarea')?.focus())
           await page.type(want)
           await page.key('Enter')
         } else {
-          await page.tap({ sel: '.vl-page[data-active] .hm-rv-form input' }, { wait: 40_000 })
+          await page.tap({ sel: '.vl-page[data-active] .hm-rv-form textarea' }, { wait: 40_000 })
           await page.type(want)
           await page.tap({ sel: '.vl-page[data-active] .hm-rv-send' }, { wait: 40_000 })
         }
@@ -1631,7 +1649,7 @@ function ravenBlockTests() {
         t.check(st.sent.length === 1 && st.sent[0].text === want && st.sent[0].source === 'app' && !st.sent[0].files, `the send carried ${JSON.stringify(st.sent)}`)
         await page.waitFor((w) => {
           const rv = document.querySelector('.vl-page[data-active] .hm-rv')
-          return rv?.querySelector('.hm-rv-text[data-who="me"]')?.textContent === w && rv.querySelector('.hm-rv-form input')?.value === ''
+          return [...(rv?.querySelectorAll('.hm-rv-text[data-who="me"]') ?? [])].at(-1)?.textContent === w && rv.querySelector('.hm-rv-form textarea')?.value === ''
         }, { args: [want], timeout: 60_000, interval: 250, message: 'the sent line did not show in the block, or the box kept the text' })
           .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await page.eval(ravenBlockSnap))}`))
         await page.waitFor(() => {
@@ -1642,7 +1660,7 @@ function ravenBlockTests() {
         await t.shot(page, 'working')
         await page.waitFor((w) => {
           const rv = document.querySelector('.vl-page[data-active] .hm-rv')
-          return rv?.querySelector('.hm-rv-text[data-who="raven"]')?.textContent === `Done: ${w}` && rv.querySelector('.hm-rv-status')?.textContent?.trim() === 'idle'
+          return [...(rv?.querySelectorAll('.hm-rv-text[data-who="raven"]') ?? [])].at(-1)?.textContent === `Done: ${w}` && rv.querySelector('.hm-rv-status')?.textContent?.trim() === 'idle'
         }, { args: [want], timeout: 90_000, interval: 250, message: 'the reply did not show in the block' })
           .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await page.eval(ravenBlockSnap))}`))
         // the reply to his line is read where he saw it

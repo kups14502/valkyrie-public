@@ -10,6 +10,7 @@ import { paneBusy } from '../../../terminal/paneState.js'
 import type { TranscriptEntry } from '../../../terminal/transcript.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
+import { noteRavenTouched } from './owned.js'
 import { getWatch, listWatches, removeWatch, startWatch, watchKey } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
@@ -399,6 +400,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       if (live) {
         await readyToType(live)
         if (watch) await startWatch({ pane: live.name, label: live.label, sessionId: live.sessionId, followUp: a.followUp })
+        noteRavenTouched(live.sessionId)
         await typeInto(live.name, live.label, text)
         ctx.acted()
         return { pane: live.name, label: live.label, note: 'the main terminal was already open, so the prompt went there', watching: watch, open: `/m/ai/term/${live.name}` }
@@ -407,6 +409,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       ctx.acted()
       if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true })
       await promptOrThrow(opened.pane, opened.label)
+      noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, text)
       return { pane: opened.pane, label: opened.label, sessionId: opened.sessionId, watching: watch, open: `/m/ai/term/${opened.pane}` }
     }
@@ -416,6 +419,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     ctx.acted()
     if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true })
     await promptOrThrow(pane, label)
+    noteRavenTouched(sessionId)
     await typeInto(pane, label, text)
     return { pane, label, sessionId, watching: watch, open: `/m/ai/term/${pane}` }
   }))
@@ -442,12 +446,14 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       ctx.acted()
       if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true })
       await promptOrThrow(opened.pane, opened.label)
+      noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, line)
       return { pane: opened.pane, label: opened.label, started: true, attached: paths.length ? paths : undefined, watching: watch, open: `/m/ai/term/${opened.pane}` }
     }
     const p = r.pane
     await readyToType(p)
     if (watch) await startWatch({ pane: p.name, label: p.label, sessionId: p.sessionId, followUp: a.followUp })
+    noteRavenTouched(p.sessionId)
     await typeInto(p.name, p.label, line)
     ctx.acted()
     return { pane: p.name, label: p.label, attached: paths.length ? paths : undefined, watching: watch, open: `/m/ai/term/${p.name}` }

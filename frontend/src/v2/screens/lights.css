@@ -513,7 +513,7 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
    bulbs across the bottom; 'wide' (on its side): All lights, the apartment and Thor RGB on the left,
    the presets and the bulbs on the right. Everything is a size up, every press 48 px or more, and
    the apartment takes the height the controls leave on the screen. Panels keep their natural
-   height. */
+   height. The desktop window ('desk', at the end of this file) starts from these sizes too. */
 .lt-layout[data-shape] {
   display: grid;
   gap: 10px 16px;
@@ -627,3 +627,105 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
   .lt-layout[data-shape] .lt-rgb { flex-direction: column; align-items: stretch; gap: 10px; }
   .lt-layout[data-shape] .lt-rgb-seg { width: 100%; }
 }
+
+/* ---------- the desktop window ----------
+   Lights.tsx sets data-shape='desk' for a desktop-sized window (1100 px wide or more after the UI
+   zoom). The layout fills the window: All lights and the presets over the bulbs on the left, the
+   apartment and Thor RGB on the right. The bulb rows share the height the controls leave, and the
+   apartment takes the full page height above Thor RGB. It starts from the pad sizes above; a tall
+   page (data-tall) takes one more step. */
+.lt-layout[data-shape='desk'] {
+  grid-template-columns: clamp(520px, 42%, 880px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'a c' 'b c';
+  gap: 10px 24px;
+  align-items: stretch;
+  padding-top: 10px;
+}
+.lt-layout[data-shape='desk'] .lt-col-a { grid-area: a; }
+.lt-layout[data-shape='desk'] .lt-col-b { grid-area: b; }
+/* the controls lean toward the room on their right (f005), the room stays square-on */
+.lt-layout[data-shape='desk'] .lt-col-a,
+.lt-layout[data-shape='desk'] .lt-col-b { transform: perspective(1400px) rotateY(5deg); transform-origin: 0% 50%; }
+/* the room column is the visible page, never the controls' height (a bulb's open colors do not
+   resize the room), and it stays in view if the controls scroll */
+.lt-layout[data-shape='desk'] .lt-col-c {
+  grid-area: c;
+  align-self: start;
+  position: sticky;
+  top: 10px;
+  height: calc(var(--lt-ph, 100vh) - var(--foot-pad, 0px) - 22px);
+}
+.lt-layout[data-shape='desk'] .lt-p-room { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.lt-layout[data-shape='desk'] .lt-room { flex: 1 1 0; min-height: 0; height: auto; aspect-ratio: auto; }
+/* the bulbs panel takes the rest of the left column; its rows share it, each centered in its share */
+.lt-layout[data-shape='desk'] .lt-p-bulbs { flex: 1 1 auto; display: flex; flex-direction: column; }
+.lt-layout[data-shape='desk'] .lt-p-bulbs > .vl-panel-body,
+.lt-layout[data-shape='desk'] .lt-bulbs { flex: 1 1 auto; display: flex; flex-direction: column; }
+.lt-layout[data-shape='desk'] .lt-bulb-wrap { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; }
+/* a 900 px desktop: a little less padding, so the five bulbs fit above the fold */
+.lt-layout[data-shape='desk']:not([data-tall]) .vl-panel { padding: 10px 14px 12px; }
+.lt-layout[data-shape='desk']:not([data-tall]) .lt-p-room.vl-panel { padding: 0; }
+.lt-layout[data-shape='desk']:not([data-tall]) .vl-panel-body { margin-top: 8px; }
+.lt-layout[data-shape='desk']:not([data-tall]) .lt-pre { height: 54px; }
+
+/* a tall desk page: everything one more step up */
+.lt-layout[data-tall] { row-gap: 12px; }
+.lt-layout[data-tall] .lt-col { gap: 12px; }
+.lt-layout[data-tall] .vl-panel { --ch: 9px; padding: 14px 18px 18px; }
+.lt-layout[data-tall] .vl-panel[data-dense] { padding: 14px 18px; }
+.lt-layout[data-tall] .lt-p-room.vl-panel { padding: 0; }
+.lt-layout[data-tall] .vl-panel-body { margin-top: 12px; }
+.lt-layout[data-tall] .vl-panel-label { font-size: 14.5px; line-height: 20px; }
+.lt-layout[data-tall] .vl-panel-value { font-size: 18px; line-height: 20px; }
+.lt-layout[data-tall] .vl-panel-icon { width: 20px; height: 20px; }
+.lt-layout[data-tall] .lt-count { font-size: 18px; gap: 7px; }
+.lt-layout[data-tall] .lt-count b { font-size: 38px; line-height: 28px; }
+.lt-layout[data-tall] .lt-count-na { font-size: 18px; }
+.lt-layout[data-tall] .lt-age { font-size: 14px; }
+.lt-layout[data-tall] .lt-note { font-size: 15px; line-height: 21px; }
+
+.lt-layout[data-tall] .lt-master { gap: 14px; }
+.lt-layout[data-tall] .lt-mpwr { width: 132px; height: 92px; gap: 8px; }
+.lt-layout[data-tall] .lt-mpwr .vl-icon { width: 36px; height: 36px; }
+.lt-layout[data-tall] .lt-mpwr-cap { font-size: 12.5px; }
+.lt-layout[data-tall] .lt-sl[data-size='lg'] { --h: 92px; height: 92px; }
+.lt-layout[data-tall] .lt-sl-read { right: 20px; font-size: 27px; }
+.lt-layout[data-tall] .lt-sl-read small { font-size: 17px; }
+
+.lt-layout[data-tall] .lt-pres { gap: 10px; }
+.lt-layout[data-tall] .lt-pre { height: 70px; gap: 12px; padding: 0 16px 0 18px; }
+.lt-layout[data-tall] .lt-chip { width: 16px; height: 16px; }
+.lt-layout[data-tall] .lt-pre-name { font-size: 17.5px; }
+.lt-layout[data-tall] .lt-pre-ic { width: 20px; height: 20px; }
+
+.lt-layout[data-tall] .lt-bulb { min-height: 76px; gap: 14px; }
+.lt-layout[data-tall] .lt-bulb-wrap::before { inset: 0 -18px; }
+.lt-layout[data-tall] .lt-bulb-id { width: 240px; min-height: 76px; gap: 14px; }
+.lt-layout[data-tall] .lt-bulb-ic { width: 28px; height: 28px; }
+.lt-layout[data-tall] .lt-bulb-name { font-size: 19.5px; }
+.lt-layout[data-tall] .lt-bulb-more { width: 18px; height: 18px; }
+.lt-layout[data-tall] .lt-sl { --h: 38px; height: 64px; }
+.lt-layout[data-tall] .lt-sl[data-look='line'] .lt-sl-bar { transform: scaleY(calc(2 / 38)); }
+.lt-layout[data-tall] .lt-pct { width: 60px; font-size: 18px; }
+.lt-layout[data-tall] .lt-pct small { font-size: 12.5px; }
+.lt-layout[data-tall] .lt-tg { width: 76px; height: 56px; }
+.lt-layout[data-tall] .lt-tg .vl-icon { width: 24px; height: 24px; }
+.lt-layout[data-tall] .lt-na { font-size: 15.5px; }
+.lt-layout[data-tall] .lt-empty { min-height: 56px; font-size: 16.5px; }
+.lt-layout[data-tall] .lt-strip { padding: 4px 0 14px; }
+.lt-layout[data-tall] .lt-sws { gap: 10px; }
+.lt-layout[data-tall] .lt-sw { height: 56px; }
+.lt-layout[data-tall] .lt-sw-ic { width: 21px; height: 21px; }
+
+.lt-layout[data-tall] .lt-room { --wire-label: 15px; }
+.lt-layout[data-tall] .lt-room-hd { left: 18px; right: 18px; top: 13px; font-size: 17px; line-height: 22px; }
+.lt-layout[data-tall] .lt-room-label { font-size: 14.5px; }
+.lt-layout[data-tall] .lt-room-label .lt-hd-ic { width: 19px; height: 19px; vertical-align: -3px; }
+
+.lt-layout[data-tall] .lt-rgb { gap: 16px; min-height: 58px; }
+.lt-layout[data-tall] .lt-rgb-name { font-size: 14.5px; line-height: 22px; }
+.lt-layout[data-tall] .lt-rgb-name .lt-hd-ic { width: 20px; height: 20px; margin-right: 10px; }
+.lt-layout[data-tall] .lt-rgb-state { padding-left: 30px; font-size: 15px; line-height: 20px; }
+.lt-layout[data-tall] .lt-rgb-seg { width: 300px; height: 58px; font-size: 16px; }
+.lt-layout[data-tall] .lt-rgb-seg .vl-icon { width: 20px; height: 20px; }

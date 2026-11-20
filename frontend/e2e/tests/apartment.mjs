@@ -353,6 +353,16 @@ function lightsSizeTests() {
           }
           // the five bulbs, the presets and the room all fit the screen with nothing selected
           t.check(r.scroll.h <= r.scroll.client + 1, `${device}: the tab scrolls (${r.scroll.h} px for a ${r.scroll.client} px page) with nothing selected`)
+        } else if (device === 'desktop') {
+          // the desktop window: the apartment fills the right of the window, the controls are a size up, nothing scrolls
+          t.check(r.shape === 'desk', `${device}: the layout is "${r.shape}", want the desktop's "desk"`)
+          atLeast('the apartment\'s width', r.room?.w, r.layoutW * 0.5)
+          atLeast('the apartment\'s height', r.room?.h, 600)
+          atLeast('a bulb row', r.rows?.h, 56)
+          atLeast('a bulb name', r.nameFs, 16)
+          atLeast('a preset name', r.presetFs, 15)
+          atLeast('a bulb power box\'s press height', r.toggles?.h, 48)
+          t.check(r.scroll.h <= r.scroll.client + 1, `${device}: the tab scrolls (${r.scroll.h} px for a ${r.scroll.client} px page) with nothing selected`)
         } else {
           t.check(r.shape === 'base', `${device}: the layout is "${r.shape}", the pad's layouts are for the pad profile only`)
         }

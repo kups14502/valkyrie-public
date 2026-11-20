@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type
 import { createPortal, flushSync } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Bird, Check, FileText, Gauge, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Bird, Check, FileText, Gauge, Mic, Paperclip, Square, X } from 'lucide-react'
 import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { useProfile } from '../../lib/deviceMode'
@@ -13,8 +13,10 @@ import {
 } from '../../lib/ravenApi'
 import {
   addToThread, openRavenQuick, refreshRavenUnread, setQuickOpen, setQuickOpener, useKeyboardInset, useQuickOpen, useRaven,
-  useRavenDraft, useRavenFileUrl, useRavenUnread, useSaveRavenSettings, type RavenDraft,
+  useRavenDraft, useRavenFileUrl, useRavenUnread, useRavenVoice, useSaveRavenSettings, useVoiceSink, usePttKey, pttAllowed, pttLabel,
+  pttMatches, voiceStart, voiceStop, voiceToggle, type PttKey, type RavenDraft,
 } from './ravenStore'
+import { useTick } from './data'
 import { requestIntent } from './shell'
 import { Icon } from './icons'
 import { Press, cx, toast } from './ui'
@@ -43,7 +45,7 @@ const ACCEPT = 'image/*,video/*,application/pdf,text/*,*/*'
  * Enter sends with a keyboard and mouse, Shift+Enter is a new line; a pasted
  * or dropped file attaches.
  */
-export function RavenComposer({ draft, onSend, sending, placeholder, taRef, className, maxHeight = 180, tools }: {
+export function RavenComposer({ draft, onSend, sending, placeholder, taRef, className, maxHeight = 180, tools, voiceOn = true }: {
   draft: RavenDraft
   onSend: () => void
   sending: boolean
@@ -54,9 +56,24 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
   maxHeight?: number
   /** small controls between the text and Send (the model and effort pick) */
   tools?: ReactNode
+  /** this box is on screen: voice input (the mic, push to talk) writes into it */
+  voiceOn?: boolean
 }) {
   const pick = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
+  // the words from a recording join the end of what is there, for him to read and edit; never sent by themselves
+  const textRef = useRef(draft.text)
+  useEffect(() => { textRef.current = draft.text })
+  const voiceId = useVoiceSink(voiceOn, (words) => {
+    const cur = textRef.current.replace(/\s+$/, '')
+    draft.setText(cur ? `${cur} ${words}` : words)
+    const el = taRef.current
+    if (el) requestAnimationFrame(() => { el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length) })
+  })
+  const voice = useRavenVoice()
+  const mine = voice.phase !== 'idle' && (voice.owner === voiceId || (voice.owner === null && voiceOn))
+  const recording = mine && (voice.phase === 'recording' || voice.phase === 'starting')
+  const writing = mine && voice.phase === 'writing'
   useLayoutEffect(() => {
     const el = taRef.current
     if (!el) return
@@ -97,7 +114,8 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
   }
 
   return (
-    <form className={cx('rv-compose', className)} data-over={over || undefined} onSubmit={(e) => { e.preventDefault(); submit() }} {...drag}>
+    <form className={cx('rv-compose', className)} data-over={over || undefined} data-rec={recording || undefined} onSubmit={(e) => { e.preventDefault(); submit() }} {...drag}>
+      {(recording || writing) && <VoiceLine phase={voice.phase} since={voice.since} ptt={voice.ptt} />}
       {draft.files.length > 0 && (
         <div className="rv-chips" aria-label="Attachments">
           {draft.files.map((f) => (
@@ -145,6 +163,19 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
           aria-label={placeholder}
           enterKeyHint="send"
         />
+        <Press
+          type="button"
+          className="rv-mic"
+          data-on={recording || undefined}
+          data-busy={writing || undefined}
+          aria-pressed={recording}
+          aria-label={recording ? 'Stop recording' : writing ? 'Writing the recording down' : 'Record a voice message'}
+          title={recording ? 'Stop recording' : 'Record a voice message'}
+          disabled={writing || (voice.phase !== 'idle' && !mine)}
+          onPress={() => voiceToggle(voiceId)}
+        >
+          {recording ? <Square size={13} strokeWidth={2.4} aria-hidden /> : <Mic size={17} strokeWidth={1.6} className="vl-icon" aria-hidden />}
+        </Press>
         {tools}
         <Press
           type="button"
@@ -162,10 +193,26 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
   )
 }
 
+/** Over the box while it records: a red dot, "Recording 0:07" and how to stop; then "Writing it down". */
+function VoiceLine({ phase, since, ptt }: { phase: string; since: number; ptt: boolean }) {
+  const now = useTick(phase === 'writing' ? 60_000 : 500)
+  const [key] = usePttKey()
+  if (phase === 'writing') return <div className="rv-rec" data-phase="writing" role="status">Writing it down</div>
+  const secs = Math.max(0, Math.floor((now - since) / 1000))
+  const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
+  return (
+    <div className="rv-rec" data-phase="recording" role="status">
+      <span className="rv-rec-dot" aria-hidden />
+      <span>{phase === 'starting' ? 'Starting the microphone' : `Recording ${clock}`}</span>
+      <span className="rv-rec-how">{ptt && key ? `release ${pttLabel(key)} to stop` : 'tap the square to stop'}</span>
+    </div>
+  )
+}
+
 // ------------------------------------------------- the model and effort pick ---
 
-const EFFORT_NAME: Record<RavenPickEffort, string> = { low: 'Low', medium: 'Medium', high: 'High' }
-const PICK_EFFORTS: RavenPickEffort[] = ['low', 'medium', 'high']
+const EFFORT_NAME: Record<RavenPickEffort, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh', max: 'Max' }
+const PICK_EFFORTS: RavenPickEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const RULE_NOTE: Record<RavenRuleKey, string> = {
   simple: 'Quick lookups, grocery adds, one quick action',
   complex: 'Several steps, work tickets, client mail, planning',
@@ -246,7 +293,7 @@ export function RavenPick({ page }: { page: RavenPage | undefined }) {
       {menu === 'model' && (
         <div className="rv-menu" role="menu" aria-label="Model">
           {item(s.model === 'auto', 'Automatic', () => pick({ model: 'auto' }), 'per message')}
-          {models.map((m) => item(s.model === m.key, m.label, () => pick({ model: m.key }), m.unavailable ? `${m.unavailable}, runs Opus` : undefined))}
+          {models.map((m) => item(s.model === m.key, m.label, () => pick({ model: m.key }), m.unavailable ? `${m.unavailable}${m.fallback ? `, runs ${m.fallback}` : ''}` : undefined))}
           <Press role="menuitem" className="rv-menu-item rv-menu-more" onPress={openRules}>Automatic rules</Press>
         </div>
       )}
@@ -328,6 +375,41 @@ function RavenRules({ settings, models, onClose }: { settings: RavenSettings; mo
       </section>
     </div>,
     document.body,
+  )
+}
+
+/**
+ * Settings: the push-to-talk key on this device. Change listens for the next key: a function key, or one held with
+ * Ctrl, Alt or Win (a plain letter would stop him typing it); Escape cancels, Backspace turns push to talk off.
+ */
+export function PushToTalkRow() {
+  const [key, setKey] = usePttKey()
+  const [listening, setListening] = useState(false)
+  useEffect(() => {
+    if (!listening) return
+    const on = (e: globalThis.KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') { setListening(false); return }
+      if (e.key === 'Backspace' || e.key === 'Delete') { setKey(null); setListening(false); return }
+      if (['Control', 'Shift', 'Alt', 'Meta', 'OS'].includes(e.key)) return
+      const k: PttKey = { code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }
+      if (!pttAllowed(k)) { toast('Pick a function key (F1 to F24), or a key held with Ctrl or Alt', { ms: 4000 }); return }
+      setKey(k)
+      setListening(false)
+    }
+    window.addEventListener('keydown', on, true)
+    return () => window.removeEventListener('keydown', on, true)
+  }, [listening, setKey])
+  return (
+    <div className="st-row rv-ptt-row">
+      <span className="st-row-icon st-row-glyph" aria-hidden><Mic size={14} strokeWidth={1.7} className="vl-icon vl-icon-dim" /></span>
+      <span className="st-row-label">Push to talk</span>
+      <span className="st-row-value vl-ellipsis" data-listening={listening || undefined}>
+        {listening ? 'Press the key to use. Esc cancels, Backspace turns it off' : key ? `Hold ${pttLabel(key)} to talk to Raven` : 'Off'}
+      </span>
+      <Press className="vl-link vl-hit st-row-act" onPress={() => setListening((v) => !v)}>{listening ? 'Cancel' : 'Change'}</Press>
+    </div>
   )
 }
 
@@ -439,6 +521,38 @@ export function RavenQuick() {
     })
     return () => setQuickOpener(null)
   }, [])
+
+  // push to talk: hold the key (Settings, F8 by default) anywhere in v2; the words land in the Raven tab's box when
+  // it is in front, else the quick sheet opens and takes them
+  const [ptt] = usePttKey()
+  useEffect(() => {
+    if (!ptt) return
+    let held = false
+    const down = (e: globalThis.KeyboardEvent) => {
+      if (!pttMatches(e, ptt)) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.repeat || held) return
+      held = true
+      openRavenQuick()
+      void voiceStart(null, true)
+    }
+    const up = (e: globalThis.KeyboardEvent) => {
+      if (e.code !== ptt.code || !held) return
+      held = false
+      e.preventDefault()
+      voiceStop()
+    }
+    const lost = () => { if (held) { held = false; voiceStop() } }
+    window.addEventListener('keydown', down, true)
+    window.addEventListener('keyup', up, true)
+    window.addEventListener('blur', lost)
+    return () => {
+      window.removeEventListener('keydown', down, true)
+      window.removeEventListener('keyup', up, true)
+      window.removeEventListener('blur', lost)
+    }
+  }, [ptt])
 
   // Ctrl+Shift+Space anywhere in v2, the office's one key (thor sends the chord)
   useEffect(() => {
@@ -558,6 +672,7 @@ export function RavenQuick() {
           className="rv-q-compose"
           maxHeight={140}
           tools={<RavenPick page={page} />}
+          voiceOn={open}
         />
       </section>
     </div>,

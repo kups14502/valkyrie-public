@@ -42,7 +42,7 @@ import todayRoute from './routes/today.js'
 import mailRoute from './routes/mail.js'
 import msgRoute from './routes/msg.js'
 import agentMcpRoute from './routes/agentMcp.js'
-import ravenRoute, { RAVEN_UPLOAD_PATH } from './routes/raven.js'
+import ravenRoute, { RAVEN_TRANSCRIBE_PATH, RAVEN_UPLOAD_PATH } from './routes/raven.js'
 import ravenMcpRoute from './routes/ravenMcp.js'
 import { startAlerts } from './alerts.js'
 import { startAccountSwitch } from './lib/accountSwitch.js'
@@ -99,7 +99,7 @@ const jsonLarge = express.json({ limit: '12mb' })
 const LARGE_BODY_PATHS = new Set(['/api/meals/estimate', ...FEATURES.flatMap((f) => f.largeBodyPaths ?? [])])
 app.use((req, res, next) => {
   // a Raven attachment upload is the raw file (up to 50 MB), streamed to disk by its route
-  if (req.method === 'POST' && req.path === RAVEN_UPLOAD_PATH) return next()
+  if (req.method === 'POST' && (req.path === RAVEN_UPLOAD_PATH || req.path === RAVEN_TRANSCRIBE_PATH)) return next()
   return (LARGE_BODY_PATHS.has(req.path) ? jsonLarge : jsonSmall)(req, res, next)
 })
 

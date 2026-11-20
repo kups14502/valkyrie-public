@@ -8,6 +8,7 @@ import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
 import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenState, stopRaven, waitForReply, withTimeout } from '../lib/raven/run.js'
 import { ravenPickView, setRavenSettings } from '../lib/raven/settings.js'
+import { readClip, transcribe } from '../lib/raven/voice.js'
 import { ravenRelayTitles, ravenSessionsState } from '../lib/raven/tools/index.js'
 import { RAVEN_CHANNEL, type RavenNotice } from '../lib/raven/types.js'
 
@@ -22,6 +23,8 @@ const router = Router()
 
 /** POST here carries the raw file, so index.ts keeps the JSON body parser off it. */
 export const RAVEN_UPLOAD_PATH = '/api/raven/files'
+/** POST here carries a raw voice clip; the JSON body parser stays off it too. */
+export const RAVEN_TRANSCRIBE_PATH = '/api/raven/transcribe'
 const SAY_WAIT_MS = Number(process.env.RAVEN_SAY_WAIT_MS || 55_000)
 
 function h(fn: (req: Request, res: Response) => unknown) {
@@ -128,6 +131,12 @@ router.post('/raven/read', h((req, res) => {
 
 router.post('/raven/stop', h((_req, res) => {
   res.json({ ok: true, stopped: stopRaven() })
+}))
+
+// Voice input: the recorded clip, raw, in; its words out (lib/raven/voice.ts). Nothing is stored.
+router.post('/raven/transcribe', h(async (req, res) => {
+  const { data, mime } = await readClip(req)
+  res.json({ text: await transcribe(data, mime) })
 }))
 
 // The model and effort pick: { model?, effort?, rules?: { simple?: { model?, effort? }, ... }, reset? }

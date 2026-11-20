@@ -2,13 +2,22 @@ import { createHash } from 'node:crypto'
 import { openDb } from './db.js'
 import { InboxError, markRead, postInbox, setArchived, setSourcePrivate, SOURCE_RE } from './inboxStore.js'
 
-// Mail, as a list: what a person sees in an inbox row, never the body.
+// Mail, as a list: what a person sees in an inbox row, and the message's text.
 //
 // A job on thor (C:\Thor\tools\mail-sync\Sync-Mail.ps1) reads each work
 // mailbox with the existing app-only access there and posts its last 48 hours
 // here every few minutes: sender, subject, a short preview, received time,
 // read state, Focused or Other, the Outlook web link. The certificate never
-// leaves thor; Valkyrie only ever holds these rows.
+// leaves thor; Valkyrie only ever holds these rows. A job on odin
+// (~/mail-sync/icloud_sync.py) does the same for the iCloud mailbox over IMAP.
+//
+// The body (2026-11-20): the inbox cut a message off at its preview, so the
+// jobs also send the plain text of Focused mail (capped; BODY_MAX here too).
+// It is stored with the row and served one message at a time
+// (GET /api/mail/item/:inboxId); the list and the inbox items never carry it.
+// A mailbox with no link to one message (iCloud) sends its web mail address
+// as every row's webLink and as its own webUrl: that is the mailbox's web
+// mail, not the message's link.
 //
 // What it does with them:
 //   * keeps 14 days of rows and each mailbox's unread count (Today, the brief);
@@ -58,15 +67,19 @@ const db = openDb('mail', `
   );
   CREATE INDEX IF NOT EXISTS ix_mail_recent ON mail_messages (receivedAt);
 `)
+// added 2026-11-20 to tables that already hold rows: the message's text and the mailbox's web mail
+const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+if (!columns('mail_messages').includes('body')) db.exec('ALTER TABLE mail_messages ADD COLUMN body TEXT')
+if (!columns('mailboxes').includes('webUrl')) db.exec('ALTER TABLE mailboxes ADD COLUMN webUrl TEXT')
 
 type BoxRow = {
   key: string; label: string; source: string; private: 0 | 1; unread: number | null; total: number | null
-  syncedAt: string | null; error: string | null; errorAt: string | null
+  syncedAt: string | null; error: string | null; errorAt: string | null; webUrl: string | null
 }
 type MsgRow = {
   mailbox: string; id: string; fromName: string; fromAddress: string; subject: string; preview: string
   receivedAt: string; isRead: 0 | 1; webLink: string | null; importance: string; flagged: 0 | 1; focused: 0 | 1
-  inboxId: number | null; firstSeenAt: string
+  inboxId: number | null; firstSeenAt: string; body: string | null
 }
 
 export type Mailbox = { key: string; label: string; source: string; unread: number | null; syncedAt: string | null; stale: boolean; error: string | null }
@@ -75,8 +88,31 @@ export type MailMessage = {
   receivedAt: string; isRead: boolean; webLink: string | null; flagged: boolean; important: boolean
 }
 
+/** The mail behind one inbox item, its whole text included (GET /api/mail/item/:inboxId). */
+export type MailBody = {
+  mailbox: string; label: string; fromName: string; fromAddress: string; subject: string; receivedAt: string
+  preview: string
+  /** the plain text, at most BODY_MAX characters; null for a row no sync has sent it for */
+  body: string | null
+  /** the message's own link (Outlook on the web); null when the mailbox has none for one message */
+  webLink: string | null
+  /** the mailbox's web mail (iCloud Mail), only when the message has no link of its own */
+  web: string | null
+}
+
 const nowIso = () => new Date().toISOString()
 const clip = (v: unknown, max: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
+const BODY_MAX = 16_000
+/** A body as plain text: line breaks kept; control characters, trailing blanks and runs of empty lines gone. */
+function tidyBody(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.replace(/\r\n?/g, '\n')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b\ufeff]/g, '')
+    .replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, BODY_MAX)
+  return s || null
+}
+const httpsOrNull = (v: unknown, max: number) => (typeof v === 'string' && /^https:\/\//.test(v) ? v.slice(0, max) : null)
 const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 // A sender that only ever sends automatically: the mailbox name, or the
@@ -116,7 +152,7 @@ export function addMailFilters(extra: MailFilter[]): void {
 const filtered = (m: { fromAddress: string; subject: string; preview: string }) => filters.some((f) => f(m))
 
 type SyncInput = {
-  mailbox?: { key?: unknown; label?: unknown; source?: unknown; private?: unknown }
+  mailbox?: { key?: unknown; label?: unknown; source?: unknown; private?: unknown; webUrl?: unknown }
   unread?: unknown; total?: unknown; error?: unknown
   messages?: unknown
 }
@@ -139,10 +175,10 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
       .run(key, label, source, priv ? 1 : 0, clip(input.error, 300), at)
     return { added: 0, known: 0, markedRead: 0 }
   }
-  db.prepare(`INSERT INTO mailboxes (key, label, source, private, unread, total, syncedAt, error, errorAt) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+  db.prepare(`INSERT INTO mailboxes (key, label, source, private, unread, total, syncedAt, error, errorAt, webUrl) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
     ON CONFLICT(key) DO UPDATE SET label = excluded.label, source = excluded.source, private = excluded.private,
-      unread = excluded.unread, total = excluded.total, syncedAt = excluded.syncedAt, error = NULL, errorAt = NULL`)
-    .run(key, label, source, priv ? 1 : 0, Number(input.unread) || 0, Number(input.total) || 0, at)
+      unread = excluded.unread, total = excluded.total, syncedAt = excluded.syncedAt, error = NULL, errorAt = NULL, webUrl = excluded.webUrl`)
+    .run(key, label, source, priv ? 1 : 0, Number(input.unread) || 0, Number(input.total) || 0, at, httpsOrNull(mb.webUrl, 300))
 
   const list = Array.isArray(input.messages) ? input.messages.slice(0, 200) as Record<string, unknown>[] : []
   let added = 0, known = 0, markedRead = 0
@@ -151,12 +187,14 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
     const received = String(m.receivedAt ?? '')
     if (!id || id.length > 400 || Number.isNaN(Date.parse(received))) continue
     const isRead = m.isRead === true
-    const link = typeof m.webLink === 'string' && /^https:\/\//.test(m.webLink) ? m.webLink.slice(0, 1000) : null
+    const link = httpsOrNull(m.webLink, 1000)
+    const body = tidyBody(m.body)
     const before = db.prepare('SELECT * FROM mail_messages WHERE mailbox = ? AND id = ?').get(key, id) as MsgRow | undefined
     if (before) {
       known++
-      db.prepare('UPDATE mail_messages SET isRead = ?, flagged = ?, focused = ? WHERE mailbox = ? AND id = ?')
-        .run(isRead ? 1 : 0, m.flagged === true ? 1 : 0, m.focused === false ? 0 : 1, key, id)
+      // a row from before the body, or one a full post went without it, takes the text once
+      db.prepare('UPDATE mail_messages SET isRead = ?, flagged = ?, focused = ?, body = COALESCE(body, ?) WHERE mailbox = ? AND id = ?')
+        .run(isRead ? 1 : 0, m.flagged === true ? 1 : 0, m.focused === false ? 0 : 1, body, key, id)
       // read in Outlook: read here too
       if (isRead && !before.isRead && before.inboxId) markedRead += markRead({ ids: [before.inboxId] }, true)
       continue
@@ -165,7 +203,7 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
       mailbox: key, id, fromName: clip(m.fromName, 120), fromAddress: clip(m.fromAddress, 200), subject: clip(m.subject, 300),
       preview: clip(m.preview, 300), receivedAt: new Date(received).toISOString(), isRead: isRead ? 1 : 0, webLink: link,
       importance: clip(m.importance, 10) || 'normal', flagged: m.flagged === true ? 1 : 0, focused: m.focused === false ? 0 : 1,
-      inboxId: null, firstSeenAt: at,
+      inboxId: null, firstSeenAt: at, body,
     }
     // the same message delivered to another mailbox already has an item: share it
     const twin = db.prepare(`SELECT inboxId FROM mail_messages WHERE mailbox != ? AND fromAddress = ? AND subject = ?
@@ -187,8 +225,8 @@ export async function syncMailbox(input: SyncInput): Promise<{ added: number; kn
         console.error('[mail] inbox post failed:', (err as Error).message)
       }
     }
-    db.prepare(`INSERT INTO mail_messages (mailbox, id, fromName, fromAddress, subject, preview, receivedAt, isRead, webLink, importance, flagged, focused, inboxId, firstSeenAt)
-      VALUES (@mailbox, @id, @fromName, @fromAddress, @subject, @preview, @receivedAt, @isRead, @webLink, @importance, @flagged, @focused, @inboxId, @firstSeenAt)`).run(row)
+    db.prepare(`INSERT INTO mail_messages (mailbox, id, fromName, fromAddress, subject, preview, receivedAt, isRead, webLink, importance, flagged, focused, inboxId, firstSeenAt, body)
+      VALUES (@mailbox, @id, @fromName, @fromAddress, @subject, @preview, @receivedAt, @isRead, @webLink, @importance, @flagged, @focused, @inboxId, @firstSeenAt, @body)`).run(row)
   }
   db.prepare('DELETE FROM mail_messages WHERE receivedAt < ?').run(new Date(Date.now() - KEEP_DAYS * 86_400_000).toISOString())
   return { added, known, markedRead }
@@ -216,4 +254,25 @@ export function unreadMail(hidePrivate: boolean, days = 3, limit = 30): MailMess
       subject: m.subject, preview: m.preview, receivedAt: m.receivedAt, isRead: false, webLink: m.webLink,
       flagged: m.flagged === 1, important: m.importance === 'high',
     }))
+}
+
+/**
+ * The mail behind an inbox item, body included, or null: no row has that item
+ * (not mail, or older than KEEP_DAYS), or its mailbox is private and the call
+ * came through Cloudflare. A message in two mailboxes shares one item; the copy
+ * with a body (then the one with a link) answers.
+ */
+export function mailForInbox(inboxId: number, hidePrivate: boolean): MailBody | null {
+  const boxes = new Map((db.prepare('SELECT key, label, private, webUrl FROM mailboxes').all() as Pick<BoxRow, 'key' | 'label' | 'private' | 'webUrl'>[])
+    .map((b) => [b.key, b]))
+  const m = (db.prepare('SELECT * FROM mail_messages WHERE inboxId = ? ORDER BY body IS NULL, webLink IS NULL, firstSeenAt').all(inboxId) as MsgRow[])
+    .find((r) => !(hidePrivate && (boxes.get(r.mailbox)?.private ?? 1)))
+  if (!m) return null
+  const box = boxes.get(m.mailbox)
+  const web = box?.webUrl ?? null
+  const own = m.webLink && m.webLink !== web ? m.webLink : null
+  return {
+    mailbox: m.mailbox, label: box?.label ?? m.mailbox, fromName: m.fromName, fromAddress: m.fromAddress, subject: m.subject,
+    receivedAt: m.receivedAt, preview: m.preview, body: m.body, webLink: own, web: own ? null : web,
+  }
 }

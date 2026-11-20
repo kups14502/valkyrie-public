@@ -414,11 +414,11 @@ router({})
 check('GET /raven carries the pick: Automatic, the default rules', rv.settings?.model === 'auto' && rv.settings.effort === 'auto'
   && rv.settings.rules.simple.model === 'sonnet' && rv.settings.rules.simple.effort === 'low' && rv.settings.rules.complex.model === 'opus'
   && rv.settings.rules.complex.effort === 'high' && rv.settings.rules.voice.model === 'sonnet' && rv.settings.rules.background.effort === 'low', rv.settings)
-check('GET /raven lists the four models in order', rv.models?.map((m: any) => `${m.key}:${m.label}`).join(',') === 'opus:Opus 5.5,sonnet:Sonnet 5.5,haiku:Haiku 5.5,fable:Fable 5.1', rv.models)
+check('GET /raven lists the five models in order', rv.models?.map((m: any) => `${m.key}:${m.label}`).join(',') === 'opus:Opus 5.5,sonnet:Sonnet 5.5,haiku:Haiku 5.5,fable-5-2:Fable 5.2,fable:Fable 5.1', rv.models)
 check('a refused model says why', rv.models.find((m: any) => m.key === 'sonnet')?.unavailable === 'not available' && !rv.models.find((m: any) => m.key === 'opus')?.unavailable, rv.models)
 const seq0 = store.currentSeq()
 const refusedPicks = [
-  { model: 'gpt' }, { effort: 'xhigh' }, { rules: { nightly: { model: 'opus' } } }, { rules: { simple: { effort: 'max' } } }, { rules: 'opus' },
+  { model: 'gpt' }, { effort: 'ultra' }, { rules: { nightly: { model: 'opus' } } }, { rules: { simple: { effort: 'huge' } } }, { rules: 'opus' },
 ]
 const codes: number[] = []
 for (const b of refusedPicks) codes.push((await j('POST', '/raven/settings', b))[0])
@@ -474,8 +474,8 @@ check('fable refused for credits: retried once on opus', cs.map((c) => c.model).
 check('the reply names the model that ran and the one wanted', reply?.meta.tier === 'fable' && reply.meta.model === 'claude-opus-5-5'
   && reply.meta.asked === 'claude-fable-5-1' && reply.meta.effort === 'medium', reply?.meta)
 ;[, sv] = await j('GET', '/raven/settings')
-check('the picker marks fable: needs usage credits', sv.models.find((m: any) => m.key === 'fable')?.unavailable === 'needs usage credits'
-  && sv.models.find((m: any) => m.key === 'fable')?.label === 'Fable 5.1', sv.models)
+check('the picker marks fable: needs usage credits, runs Opus 5.5', sv.models.find((m: any) => m.key === 'fable')?.unavailable === 'needs usage credits'
+  && sv.models.find((m: any) => m.key === 'fable')?.label === 'Fable 5.1' && sv.models.find((m: any) => m.key === 'fable')?.fallback === 'Opus 5.5', sv.models)
 queue({ result: 'straight to opus' })
 before = calls().length
 await j('POST', '/raven/messages', { text: 'and the next one' })
@@ -483,6 +483,37 @@ await ravenIdle()
 cs = calls().slice(before).filter((c) => c.kind === 'raven')
 check('fable remembered: the next run goes straight to opus', cs.map((c) => c.model).join(',') === 'claude-opus-5-5' && lastRavenMsg()?.meta.asked === 'claude-fable-5-1', cs)
 
+// Fable 5.2 ("You're out of usage credits. Switch to another model") and the two top efforts
+w('credit-models.json', JSON.stringify(['claude-fable-5-1', 'claude-fable-5-2']))
+await j('POST', '/raven/settings', { model: 'fable-5-2', effort: 'max' })
+queue({ result: 'max on opus' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'think hard about this' })
+await ravenIdle()
+cs = calls().slice(before).filter((c) => c.kind === 'raven')
+check('fable 5.2 at max: the CLI gets claude-fable-5-2 --effort max, then Opus 5.5 at max', cs.map((c) => `${c.model}/${c.effort}`).join(',') === 'claude-fable-5-2/max,claude-opus-5-5/max'
+  && lastRavenMsg()?.meta.asked === 'claude-fable-5-2' && lastRavenMsg()?.meta.effort === 'max', cs)
+;[kst, sv] = await j('POST', '/raven/settings', { model: 'auto', effort: 'auto', rules: { complex: { model: 'fable-5-2', effort: 'xhigh' } } })
+check('a rule can take Fable 5.2 and xhigh', kst === 200 && sv.settings.rules.complex.model === 'fable-5-2' && sv.settings.rules.complex.effort === 'xhigh', sv.settings)
+router({ answer: '{"kind":"complex","why":"a big plan"}' })
+queue({ result: 'planned' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'plan the quarter' })
+await ravenIdle()
+cs = calls().slice(before).filter((c) => c.kind === 'raven')
+check('the complex rule runs Fable 5.2 (on Opus) at xhigh', cs.map((c) => `${c.model}/${c.effort}`).join(',') === 'claude-opus-5-5/xhigh' && lastRavenMsg()?.meta.rule === 'complex', cs)
+// a model added by config alone joins the picker and can be picked
+process.env.RAVEN_MODELS = JSON.stringify([{ key: 'opus-next', id: 'claude-opus-6-0' }])
+;[, sv] = await j('GET', '/raven/settings')
+check('RAVEN_MODELS adds a model at the end of the picker', sv.models.at(-1)?.key === 'opus-next' && sv.models.at(-1)?.label === 'Opus 6.0' && sv.models.length === 6, sv.models)
+;[kst] = await j('POST', '/raven/settings', { model: 'opus-next', effort: 'low' })
+queue({ result: 'on the next opus' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'try the new one' })
+await ravenIdle()
+cs = calls().slice(before).filter((c) => c.kind === 'raven')
+check('the added model runs with its own id', kst === 200 && cs.map((c) => c.model).join(',') === 'claude-opus-6-0', cs)
+delete process.env.RAVEN_MODELS
 const bgRoute = await pickMod.chooseRoute({ ...pickMod.ravenSettings(), rules: { ...pickMod.ravenSettings().rules, background: { model: 'opus', effort: 'medium' } } },
   { fromBrendon: false, voice: false, text: '', files: 0 })
 check('a run he did not start follows the background rule', bgRoute.tier === 'opus' && bgRoute.effort === 'medium' && bgRoute.rule === 'background', bgRoute)

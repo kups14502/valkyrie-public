@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { DatabaseBackup, FileText, Mail } from 'lucide-react'
 import { Button, Panel, Press, Segmented, cx, toast } from '../kit/ui'
-import { Icon, type IconRef } from '../kit/icons'
+import { Icon, SlotIcon, type IconRef } from '../kit/icons'
 import { useTick } from '../kit/data'
 import { apiErrorText } from '../../lib/api'
 import { featureIcon } from '../../features/apply'
@@ -12,6 +12,8 @@ import {
   archiveInbox, fetchInbox, markInboxRead, setInboxPush,
   type InboxItem, type InboxLevel, type InboxPage as InboxData, type InboxSelection, type InboxView, type PushSetting,
 } from '../../lib/inboxApi'
+import { fetchMailItem } from '../../lib/mailApi'
+import { splitQuoted } from '../../lib/mailText'
 import { PageFrame } from './Calendar'
 import './inbox.css'
 
@@ -29,7 +31,16 @@ import './inbox.css'
 // A panel with nothing in it is not drawn. A row with one item opens to its
 // text; a row with several opens to its items, each opening in turn. Opening an
 // unread item reads it. An open item has Open (its link), Copy, Mark unread and
-// Archive. The Archive tab and a source filter show the flat list under day
+// Archive. An open mail item reads its whole message from the mail store
+// (GET /api/mail/item/:id; the item itself only holds the preview, which he
+// found cut off mid-word, 2026-11-20), with a help desk's "reply above this
+// line" marker and the quoted earlier messages folded behind "Show quoted
+// text" (lib/mailText.ts). Its Open is the message's own link (Outlook on the
+// web); a message with none (iCloud) offers its mailbox's web mail instead.
+// An outside Open is a real link: Safari on the iPhone and iPad refuses a
+// script window.open on the release of a tap, and the desktop app hands the
+// link to the system browser (lib/external.ts). The Archive tab and a source
+// filter show the flat list under day
 // headings (Today, Yesterday, Fri, Oct 30) with the same rows. Sources sets
 // each source's push. A push notification lands here with ?item=<id>, which
 // opens and reads that item.
@@ -221,10 +232,40 @@ function board(items: InboxItem[]): Board {
 }
 
 /** The body as plain text with its links live. */
-function Linked({ text }: { text: string }) {
+function Linked({ text, className }: { text: string; className?: string }) {
   const parts: ReactNode[] = text.split(URL_RE).map((p, k) =>
     k % 2 ? <a key={k} href={p} target="_blank" rel="noopener noreferrer" className="ib-link">{p.length > 60 ? `${p.slice(0, 58)}…` : p}</a> : p)
-  return <p className="ib-note">{parts}</p>
+  return <p className={cx('ib-note', className)}>{parts}</p>
+}
+
+/** A whole message: what the sender wrote, the rest (quoted mail, a help desk's marker) behind a toggle. */
+function MailText({ body }: { body: string }) {
+  const parts = useMemo(() => splitQuoted(body), [body])
+  const [all, setAll] = useState(false)
+  return (
+    <div className="ib-mailtext">
+      {parts.map((p, k) => (!p.quoted || all) && <Linked key={k} text={p.text} className={p.quoted ? 'ib-quoted' : undefined} />)}
+      {parts.some((p) => p.quoted) && (
+        <Press className="ib-quote-toggle" aria-expanded={all} onPress={() => setAll((v) => !v)}>
+          {all ? 'Hide quoted text' : 'Show quoted text'}
+        </Press>
+      )}
+    </div>
+  )
+}
+
+/**
+ * An outside link as a line button: a real link, so a tap opens it on the iPhone and iPad
+ * (Safari refuses a script window.open on the release of a tap), and the desktop app sends it
+ * to the system browser (lib/external.ts).
+ */
+function OutLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a className="vl-press vl-btn-line ib-out" href={href} target="_blank" rel="noopener noreferrer">
+      <SlotIcon icon="go" size={15} />
+      {children}
+    </a>
+  )
 }
 
 export default function InboxPage() {
@@ -266,6 +307,16 @@ function InboxScreen({ asked }: { asked: number | null }) {
   })
   const items = useMemo(() => q.data?.items ?? [], [q.data])
   const b = useMemo(() => board(onBoard ? items : []), [onBoard, items])
+  // the open mail item's whole message (a 404: no mail row behind it, or a backend from before the body)
+  const openMail = openId != null && items.some((it) => it.id === openId && isMail(it.source))
+  const mailQ = useQuery({
+    queryKey: ['inbox-mail', openId],
+    queryFn: () => fetchMailItem(openId!),
+    enabled: openMail,
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
   const count = q.data?.count
   const sources = q.data?.sources ?? []
 
@@ -349,13 +400,11 @@ function InboxScreen({ asked }: { asked: number | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, q.data])
 
-  const openLink = (url: string) => {
-    if (url.startsWith('/')) navigate(url, { state: { v2Back: true } })
-    else window.open(url, '_blank', 'noopener,noreferrer')
-  }
+  // an app path; an outside link is an OutLink
+  const openLink = (path: string) => navigate(path, { state: { v2Back: true } })
 
-  const copy = async (it: InboxItem) => {
-    toast((await copyText(it.body || it.title)) ? 'Copied' : 'Could not copy. Select the text instead.', { ms: 2500 })
+  const copy = async (text: string) => {
+    toast((await copyText(text)) ? 'Copied' : 'Could not copy. Select the text instead.', { ms: 2500 })
   }
 
   const toggleGroup = (g: Group) => {
@@ -375,25 +424,34 @@ function InboxScreen({ asked }: { asked: number | null }) {
   }
 
   /** An open item: its whole text and what he can do with it. */
-  const detail = (it: InboxItem) => (
-    <div className="ib-detail">
-      {it.body && <Linked text={it.body} />}
-      <div className="ib-acts">
-        {it.url && <Button kind="line" icon="go" onPress={() => openLink(it.url!)}>Open</Button>}
-        <Button kind="link" onPress={() => void copy(it)}>Copy</Button>
-        {!it.archivedAt && it.readAt && (
-          <Button kind="link" onPress={() => { setOpenId(null); read.mutate({ sel: { ids: [it.id] }, value: false }) }}>Mark unread</Button>
-        )}
-        <Button kind="link" onPress={() => { setOpenId(null); archive.mutate({ sel: { ids: [it.id] }, value: !it.archivedAt }) }}>
-          {it.archivedAt ? 'Back to inbox' : 'Archive'}
-        </Button>
+  const detail = (it: InboxItem) => {
+    const mail = isMail(it.source) && it.id === openId
+    const m = mail ? mailQ.data ?? null : null
+    // a mail item's link waits for its mail (so Open never changes under him); without the mail store, the item's own
+    const link = !mail ? it.url : m ? m.webLink : mailQ.isPending ? null : it.url
+    const web = !link && m?.web ? m.web : null
+    return (
+      <div className="ib-detail">
+        {m?.body ? <MailText body={m.body} /> : it.body && <Linked text={it.body} />}
+        {m && !m.body && <p className="ib-when">Only the preview came through for this message.</p>}
+        <div className="ib-acts">
+          {link && (link.startsWith('/') ? <Button kind="line" icon="go" onPress={() => openLink(link)}>Open</Button> : <OutLink href={link}>Open</OutLink>)}
+          {web && <OutLink href={web}>Open {m!.label}</OutLink>}
+          <Button kind="link" onPress={() => void copy(m?.body || it.body || it.title)}>Copy</Button>
+          {!it.archivedAt && it.readAt && (
+            <Button kind="link" onPress={() => { setOpenId(null); read.mutate({ sel: { ids: [it.id] }, value: false }) }}>Mark unread</Button>
+          )}
+          <Button kind="link" onPress={() => { setOpenId(null); archive.mutate({ sel: { ids: [it.id] }, value: !it.archivedAt }) }}>
+            {it.archivedAt ? 'Back to inbox' : 'Archive'}
+          </Button>
+        </div>
+        <p className="ib-when">
+          {it.count > 1 ? `${it.count} times, first ${full(it.firstAt)}, last ${full(it.lastAt)}` : full(it.lastAt)}
+          {it.pushedAt ? ' · pushed' : it.pushDetail ? ` · push failed: ${it.pushDetail}` : ''}
+        </p>
       </div>
-      <p className="ib-when">
-        {it.count > 1 ? `${it.count} times, first ${full(it.firstAt)}, last ${full(it.lastAt)}` : full(it.lastAt)}
-        {it.pushedAt ? ' · pushed' : it.pushDetail ? ` · push failed: ${it.pushDetail}` : ''}
-      </p>
-    </div>
-  )
+    )
+  }
 
   /** An open row of several: each item on a line, opening in turn, then the whole row's actions. */
   const kids = (g: Group) => {

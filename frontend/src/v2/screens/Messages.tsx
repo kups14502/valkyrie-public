@@ -249,7 +249,7 @@ export default function Messages({ active }: ScreenProps) {
             )}
           </div>
         </div>
-        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} />
+        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} voiceOn={active} />
       </section>
       {wide && connected && <aside className="rv-conn rv-side" aria-label="Connected">{connected}</aside>}
     </div>

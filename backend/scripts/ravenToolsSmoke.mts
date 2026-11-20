@@ -617,6 +617,13 @@ agents.syncRoster()
   r = await call('session_send', { session: mainPane, text: 'What is in this photo?', files: ['f1'] })
   check('session_send: attachment copied to thor', !r.isError && uploads.length === 1 && uploads[0].name === 'photo.jpg', { r, uploads })
   check('session_send: its thor path follows the text', typed[typed.length - 1].text === 'What is in this photo? (attached, on thor: C:\\Thor\\uploads\\20261119-photo.jpg)', typed[typed.length - 1])
+  {
+    // the phone alerts skip a session Raven typed into (routes/push.ts session-waiting)
+    const ownedMod = await import('../src/lib/raven/tools/owned.ts')
+    const sid = (await fakeIo.listPanes()).find((p: any) => p.name === mainPane)?.sessionId
+    check('owned: a session Raven typed into is Raven\'s, so its alerts are skipped', !!sid && ownedMod.ravenOwnsSession(sid) !== null, { sid, why: sid && ownedMod.ravenOwnsSession(sid) })
+    check('owned: a session Raven never touched is his', ownedMod.ravenOwnsSession('11111111-2222-3333-4444-555555555555') === null && ownedMod.ravenOwnsSession('') === null)
+  }
   const typedBefore = typed.length
   uploadFails = true
   r = await call('session_send', { session: mainPane, text: 'and this one', files: ['f1'] })

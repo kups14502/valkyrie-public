@@ -919,6 +919,21 @@ function closeTests() {
   ]
 }
 
+/** The running areas' folds in the open "Sessions" list: name, count, open or not. */
+const folds = () => [...document.querySelectorAll('.dk-list .dk-lg .dk-fold')].map((f) => ({
+  area: f.querySelector('.dk-fold-t')?.textContent ?? '',
+  n: f.querySelector('.dk-n')?.textContent ?? '',
+  open: f.getAttribute('aria-expanded') === 'true',
+}))
+/** Opens every folded area under `scope`, one press each. */
+async function unfoldAll(page, scope) {
+  const left = (s) => document.querySelectorAll(`${s} .dk-fold[aria-expanded="false"]`).length
+  for (let k = await page.eval(left, scope); k > 0; k--) {
+    await tap(page, `${scope} .dk-fold[aria-expanded="false"]`)
+    await until(page, (s, n) => document.querySelectorAll(`${s} .dk-fold[aria-expanded="false"]`).length < n, `a fold under ${scope} did not open`, [scope, k])
+  }
+}
+
 function listTests() {
   return [{
     name: 'desk:list:desktop',
@@ -936,8 +951,14 @@ function listTests() {
       await until(page, (n) => !document.querySelector(`.dk-tab[data-name="${n}"]`), 'the ended tab did not leave the Desk', [P.d1])
       await tap(page, '.vl-page[data-active] .dk-list-btn')
       await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-list'), '"Sessions" did not open the list')
+      const folded = await page.eval(folds)
+      t.check(folded.length === 4 && folded.every((f) => !f.open) && folded.every((f) => +f.n > 0),
+        `the areas open folded with a count: ${JSON.stringify(folded)}`)
+      t.check(!(await page.eval(() => document.querySelectorAll('.dk-list .dk-lg .dk-row').length)), 'a folded area shows its rows')
+      await t.shot(page, 'list-folded')
+      await unfoldAll(page, '.dk-list .dk-lg')
       const shape = await page.eval(() => [...document.querySelectorAll('.dk-list .dk-lg')].map((g) => ({
-        area: g.querySelector('.dk-k')?.textContent ?? '',
+        area: g.querySelector('.dk-fold-t')?.textContent ?? '',
         parts: [...g.querySelectorAll('.dk-lp')].map((p) => ({
           project: p.querySelector('.dk-tsec-k')?.textContent ?? '',
           rows: [...p.querySelectorAll('.dk-row')].map((r) => `${r.querySelector('.dk-row-t')?.textContent}|${r.querySelector('.dk-row-s')?.textContent}`),
@@ -954,6 +975,8 @@ function listTests() {
       await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a pick from the list did not open it', [P.s1])
       t.check(!(await page.eval(() => !!document.querySelector('.dk-list'))), 'the list stayed open')
       await tap(page, '.vl-page[data-active] .dk-list-btn')
+      await until(page, () => document.querySelectorAll('.dk-list .dk-lg .dk-fold[aria-expanded="false"]').length === 4, 'the areas did not fold again when the list reopened')
+      await tap(page, { sel: '.dk-list .dk-lg .dk-fold', text: /^Personal/ })
       await tap(page, { sel: '.dk-list .dk-row', text: /Old notes/ })
       await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a session off the Desk did not come back from the list', [P.d1])
     },
@@ -994,7 +1017,7 @@ const closedList = (page) => page.eval(() => {
     all: sec.querySelector('.dk-recover')?.textContent.trim() ?? null,
     quiet: sec.querySelector('.dk-quiet-row')?.textContent ?? '',
     groups: [...sec.querySelectorAll('.dk-cg')].map((g) => ({
-      area: g.querySelector('.dk-tsec-k')?.textContent ?? '',
+      area: g.querySelector('.dk-fold-t')?.textContent ?? '',
       rows: [...g.querySelectorAll('.dk-crow')].map((r) => r.querySelector('.dk-row-t')?.textContent ?? ''),
     })),
   }
@@ -1016,7 +1039,11 @@ function closedTests() {
       await deskUp(page)
       await t.step('"Sessions" lists the closed, not done sessions under the running ones, by area', async () => {
         await tap(page, '.vl-page[data-active] .dk-list-btn')
-        await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-crow').length > 0, 'the list shows no closed sessions')
+        await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-fold').length > 0, 'the list shows no closed sessions')
+        const folded = await page.eval(() => [...document.querySelectorAll('.dk-list .dk-closed .dk-fold')].map((f) => f.getAttribute('aria-expanded')))
+        t.check(folded.length === 2 && folded.every((x) => x === 'false') && !(await page.eval(() => document.querySelectorAll('.dk-closed .dk-crow').length)),
+          `the closed areas do not open folded: ${JSON.stringify(folded)}`)
+        await unfoldAll(page, '.dk-list .dk-closed')
         const c = await closedList(page)
         t.check(c.n === '3' && c.all === 'Recover all', `the closed head reads ${JSON.stringify({ n: c.n, all: c.all })}`)
         t.check(JSON.stringify(c.groups) === JSON.stringify([
@@ -1040,6 +1067,8 @@ function closedTests() {
       })
       await t.step('Recover all stops at a full pane list and says so', async () => {
         await tap(page, '.vl-page[data-active] .dk-list-btn')
+        await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-fold').length === 2, 'the closed list did not come back')
+        await unfoldAll(page, '.dk-list .dk-closed')
         await until(page, () => document.querySelectorAll('.dk-list .dk-closed .dk-crow').length === 2, 'the resumed session is still listed as closed')
         st.full = st.panes.length + 1
         await tap(page, { sel: '.dk-closed .dk-recover', text: /Recover all/ })

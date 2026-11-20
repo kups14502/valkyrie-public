@@ -218,7 +218,19 @@ router.post('/push/test', async (_req, res) => {
 // "Claude is waiting on you" over a folder name and Claude's own notification
 // text, so none said whether the session had finished or was blocked.
 router.post('/push/session-waiting', requireStrongAuth, async (req, res) => {
-  const b = (req.body ?? {}) as { label?: string; kind?: string; host?: string }
+  const b = (req.body ?? {}) as { label?: string; kind?: string; host?: string; sessionId?: string }
+  // A session Raven drives (watches, opened, or typed into in the last day) does not buzz the phone: Raven relays
+  // its answers into the Raven thread already (lib/raven/tools/owned.ts). ok:true, so thor's hook neither retries
+  // nor falls back to Discord.
+  const sid = typeof b.sessionId === 'string' ? b.sessionId.trim().slice(0, 80) : ''
+  if (sid) {
+    const { ravenOwnsSession } = await import('../lib/raven/tools/owned.js')
+    const why = ravenOwnsSession(sid)
+    if (why) {
+      console.log(`[push] session ${sid.slice(0, 8)} is Raven's (${why}): no alert`)
+      return res.json({ ok: true, skipped: true, detail: `Raven's session (${why}), relayed in the Raven thread` })
+    }
+  }
   const label = String(b.label ?? '').trim().replace(/\s+/g, ' ').slice(0, 80) || 'A session'
   const host = String(b.host ?? '').trim().slice(0, 20)
   // Anything but an explicit 'complete' is a wait, so an older hook that

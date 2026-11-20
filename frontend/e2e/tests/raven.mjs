@@ -104,7 +104,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ],
     messages: [...fill, ...seed(now)],
     nextId: 200, files: new Map(), replyMs, stopped: false,
-    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [],
+    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [], transcribes: [],
     settings: {
       model: 'auto', effort: 'auto',
       rules: { simple: { model: 'sonnet', effort: 'low' }, complex: { model: 'opus', effort: 'high' }, voice: { model: 'sonnet', effort: 'low' }, background: { model: 'sonnet', effort: 'low' } },
@@ -113,7 +113,8 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       { key: 'opus', id: 'claude-opus-5-5', label: 'Opus 5.5' },
       { key: 'sonnet', id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
       { key: 'haiku', id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
-      { key: 'fable', id: 'claude-fable-5-1', label: 'Fable 5.1', unavailable: 'needs usage credits' },
+      { key: 'fable-5-2', id: 'claude-fable-5-2', label: 'Fable 5.2', unavailable: 'needs usage credits', fallback: 'Opus 5.5' },
+      { key: 'fable', id: 'claude-fable-5-1', label: 'Fable 5.1', unavailable: 'needs usage credits', fallback: 'Opus 5.5' },
     ],
   }
   const bump = () => { st.seq++ }
@@ -187,6 +188,10 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       st.files.set(f.id, f)
       st.uploads.push({ name: rawName, type: f.mime, bytes: w.body.length })
       return ok(f)
+    }
+    if (w.method === 'POST' && w.path === '/api/raven/transcribe') {
+      st.transcribes.push({ type: header(w.headers, 'Content-Type') ?? '', bytes: w.body.length })
+      return ok({ text: 'add oat milk to the list' })
     }
     if (w.method === 'POST' && w.path === '/api/raven/settings') {
       st.picks.push(j)
@@ -891,7 +896,7 @@ export function ravenTests() {
         await page.tap({ sel: '.rv .rv-pickb', index: 0 }, { wait: 40_000 })
         await until(page, () => !!document.querySelector('.rv .rv-menu'), 'the model menu did not open')
         s = await snap()
-        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5', 'Fable 5.1(needs usage credits, runs Opus)']) && s.more,
+        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5', 'Fable 5.2(needs usage credits, runs Opus 5.5)', 'Fable 5.1(needs usage credits, runs Opus 5.5)']) && s.more,
           `the model menu reads ${JSON.stringify(s.menu)} (rules link ${s.more})`)
         await page.tap({ sel: '.rv .rv-menu-item', text: 'Opus 5.5' }, { wait: 40_000 })
         await waitFor(() => st.picks.length === 1, 20_000, 'POST /api/raven/settings (model)').catch((e) => t.check(false, e.message))
@@ -901,11 +906,11 @@ export function ravenTests() {
         await page.tap({ sel: '.rv .rv-pickb', index: 1 }, { wait: 40_000 })
         await until(page, () => !!document.querySelector('.rv .rv-menu'), 'the effort menu did not open')
         s = await snap()
-        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Low', 'Medium', 'High']), `the effort menu reads ${JSON.stringify(s.menu)}`)
-        await page.tap({ sel: '.rv .rv-menu-item', text: 'High' }, { wait: 40_000 })
+        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Low', 'Medium', 'High', 'XHigh', 'Max']), `the effort menu reads ${JSON.stringify(s.menu)}`)
+        await page.tap({ sel: '.rv .rv-menu-item', text: 'XHigh' }, { wait: 40_000 })
         await waitFor(() => st.picks.length === 2, 20_000, 'POST /api/raven/settings (effort)').catch((e) => t.check(false, e.message))
-        t.check(st.picks[1]?.effort === 'high', `the effort pick sent ${JSON.stringify(st.picks[1])}`)
-        await until(page, () => document.querySelectorAll('.rv .rv-pickb')[1]?.textContent.trim() === 'high', 'the effort button did not read high')
+        t.check(st.picks[1]?.effort === 'xhigh', `the effort pick sent ${JSON.stringify(st.picks[1])}`)
+        await until(page, () => document.querySelectorAll('.rv .rv-pickb')[1]?.textContent.trim() === 'xhigh', 'the effort button did not read xhigh')
 
         // Automatic rules
         await page.tap({ sel: '.rv .rv-pickb', index: 1 }, { wait: 40_000 })
@@ -917,11 +922,13 @@ export function ravenTests() {
         t.check(/model and effort pick is fixed/.test(fixedNote), `the panel does not say both are fixed: ${JSON.stringify(fixedNote)}`)
         await page.eval(() => {
           const sel = document.querySelector('.rv-rules-row[data-rule="complex"] select')
-          sel.value = 'fable'
+          sel.value = 'fable-5-2'
           sel.dispatchEvent(new Event('change', { bubbles: true }))
-        })
+          const eff = document.querySelectorAll('.rv-rules-row[data-rule="complex"] select')[1]
+          return [...eff.options].map((o) => o.value).join(',')
+        }).then((opts) => t.check(opts === 'low,medium,high,xhigh,max', `a rule's efforts are ${opts}`))
         await waitFor(() => st.picks.length === 3, 20_000, 'POST /api/raven/settings (rule)').catch((e) => t.check(false, e.message))
-        t.check(st.picks[2]?.rules?.complex?.model === 'fable', `the rule change sent ${JSON.stringify(st.picks[2])}`)
+        t.check(st.picks[2]?.rules?.complex?.model === 'fable-5-2', `the rule change sent ${JSON.stringify(st.picks[2])}`)
         await fits(t, page, `${ROUTE} rules @${device}`)
         await t.shot(page, 'rules')
         await page.tap({ sel: '.rv-rules-done' }, { wait: 40_000 })
@@ -936,6 +943,79 @@ export function ravenTests() {
         }, 'a pick changed on another device did not arrive')
         await fits(t, page, `${ROUTE} pick @${device}`)
         await t.shot(page, 'pick')
+      },
+    })
+  }
+
+  // voice input: the mic records (a fake microphone: an oscillator), the clip goes to /api/raven/transcribe raw,
+  // the words land in the box and nothing is sent; push to talk (F8, held) on the desktop; a blocked microphone
+  // says so in plain words
+  const fakeMic = (mode) => page => page.eval((m) => {
+    const md = navigator.mediaDevices ?? {}
+    if (!navigator.mediaDevices) Object.defineProperty(navigator, 'mediaDevices', { value: md, configurable: true })
+    md.getUserMedia = async () => {
+      if (m === 'denied') throw new DOMException('Permission denied', 'NotAllowedError')
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const dst = ctx.createMediaStreamDestination()
+      osc.connect(dst)
+      osc.start()
+      void ctx.resume()
+      return dst.stream
+    }
+    return true
+  }, mode)
+  const voiceSnap = (page) => page.eval(() => ({
+    rec: !!document.querySelector('.rv .rv-compose[data-rec]'),
+    line: document.querySelector('.rv .rv-rec')?.textContent ?? '',
+    mic: document.querySelector('.rv .rv-mic')?.getAttribute('aria-label') ?? '',
+    value: document.querySelector('.rv .rv-compose textarea')?.value ?? '',
+    toast: [...document.querySelectorAll('.vl-toast-msg')].map((t) => t.textContent).join(' | '),
+  }))
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:voice:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page)
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => !!document.querySelector('.rv .rv-mic'), 'no mic button in the composer')
+        await fakeMic('ok')(page)
+        if (device === 'desktop') await typeIn(page, '.rv .rv-compose textarea', 'Note:')
+        await page.tap({ sel: '.rv .rv-mic' }, { wait: 40_000 })
+        await until(page, () => /Recording \d:\d\d/.test(document.querySelector('.rv .rv-rec')?.textContent ?? '') && !!document.querySelector('.rv .rv-compose[data-rec]'), 'the box did not show it is recording')
+        let s = await voiceSnap(page)
+        t.check(s.mic === 'Stop recording' && /tap the square to stop/.test(s.line), `while recording: ${JSON.stringify(s)}`)
+        await t.shot(page, 'recording')
+        await sleep(1600)
+        await page.tap({ sel: '.rv .rv-mic' }, { wait: 40_000 })
+        const want = device === 'desktop' ? 'Note: add oat milk to the list' : 'add oat milk to the list'
+        await until(page, (w) => document.querySelector('.rv .rv-compose textarea')?.value === w && !document.querySelector('.rv .rv-compose[data-rec]'), 'the words did not land in the box', [want])
+        t.check(st.transcribes.length === 1 && /^audio\//.test(st.transcribes[0].type) && st.transcribes[0].bytes > 600, `the clip sent: ${JSON.stringify(st.transcribes)}`)
+        t.check(st.sent.length === 0, `a recording sent the message by itself: ${JSON.stringify(st.sent)}`)
+        if (device === 'desktop') {
+          // push to talk: F8 held, then released; the words join the end of the box
+          const f8 = { key: 'F8', code: 'F8', windowsVirtualKeyCode: 119, nativeVirtualKeyCode: 119 }
+          await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...f8 })
+          await until(page, () => !!document.querySelector('.rv .rv-compose[data-rec]'), 'holding F8 did not start recording')
+          s = await voiceSnap(page)
+          t.check(/release F8 to stop/.test(s.line), `push to talk line: ${JSON.stringify(s.line)}`)
+          await sleep(1600)
+          await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...f8 })
+          await until(page, () => document.querySelector('.rv .rv-compose textarea')?.value === 'Note: add oat milk to the list add oat milk to the list', 'letting go of F8 did not put the words in the box')
+          t.check(st.transcribes.length === 2 && st.sent.length === 0, `push to talk: ${st.transcribes.length} clips, ${st.sent.length} sent`)
+        }
+        // a blocked microphone: one plain line, no recording
+        await fakeMic('denied')(page)
+        await page.tap({ sel: '.rv .rv-mic' }, { wait: 40_000 })
+        await until(page, () => /Microphone access is blocked/.test([...document.querySelectorAll('.vl-toast-msg')].map((x) => x.textContent).join(' ')), 'no plain message for a blocked microphone')
+        s = await voiceSnap(page)
+        t.check(!s.rec && s.mic === 'Record a voice message', `after a blocked microphone: ${JSON.stringify(s)}`)
+        await fits(t, page, `${ROUTE} voice @${device}`)
       },
     })
   }

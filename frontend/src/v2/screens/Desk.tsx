@@ -30,8 +30,8 @@ import './desk.css'
 // accent, idle the pause circle) and its title, which also lights when the
 // session finished while it was out of view (kit/desk.ts), so a glance tells
 // still working, finished, and finished with a question for him. "Sessions"
-// at the strip's start lists them all by area and project; "+" starts one.
-// Under the running ones it lists the sessions closed and not marked done
+// at the strip's start lists them all by area and project, each area folded
+// until he opens it; "+" starts one. Under the running ones it lists the sessions closed and not marked done
 // (AI > Sessions' Recent, thor's only): a pick resumes one in the focused pane,
 // and "Recover all" resumes every one of them as a tab.
 //
@@ -1070,6 +1070,30 @@ function SessionList({
   onRecoverAll: () => void
   onClose: () => void
 }) {
+  // every area starts folded each time the list opens; a press on its name opens it
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set())
+  const fold = (key: string, label: string, count: number) => {
+    const open = unfolded.has(key)
+    return {
+      open,
+      head: (
+        <Press
+          className="dk-fold"
+          aria-expanded={open}
+          onPress={() => setUnfolded((u) => {
+            const next = new Set(u)
+            if (open) next.delete(key)
+            else next.add(key)
+            return next
+          })}
+        >
+          <Icon name={ChevronDown} size={11} tone="dim" className="dk-fold-i" />
+          <span className="dk-fold-t">{label}</span>
+          <span className="dk-n">{count}</span>
+        </Press>
+      ),
+    }
+  }
   const closedPart = (
     <section className="dk-closed" aria-label="Closed, not done">
       <div className="dk-closed-head">
@@ -1088,24 +1112,29 @@ function SessionList({
       </div>
       {!closedReady && <p className="dk-quiet-row">Reading the closed sessions</p>}
       {closedReady && !closedN && <p className="dk-quiet-row">Every closed session is marked done.</p>}
-      {closed.map((g) => (
-        <div key={g.area || '-'} className="dk-cg">
-          <div className="dk-tsec-k">{areaName(g.area)}</div>
-          <div className="dk-rows">
-            {g.rows.map((s) => {
-              const busy = opening.has(s.id)
-              return (
-                <Press key={s.id} className="dk-row dk-crow" disabled={busy || !!recover} title={s.cwd ?? undefined} onPress={() => onReopen(s)}>
-                  <StateIcon a="closed" size={14} />
-                  <span className="dk-row-t">{s.title || 'Untitled session'}</span>
-                  {s.cwd && <span className="dk-row-f">{shortFolder(s.cwd)}</span>}
-                  <span className="dk-row-s">{busy ? 'opening' : s.last ? ago(s.last, now) : ''}</span>
-                </Press>
-              )
-            })}
+      {closed.map((g) => {
+        const f = fold(`closed:${g.area}`, areaName(g.area), g.rows.length)
+        return (
+          <div key={g.area || '-'} className="dk-cg">
+            <div className="dk-tsec-k">{f.head}</div>
+            {f.open && (
+              <div className="dk-rows">
+                {g.rows.map((s) => {
+                  const busy = opening.has(s.id)
+                  return (
+                    <Press key={s.id} className="dk-row dk-crow" disabled={busy || !!recover} title={s.cwd ?? undefined} onPress={() => onReopen(s)}>
+                      <StateIcon a="closed" size={14} />
+                      <span className="dk-row-t">{s.title || 'Untitled session'}</span>
+                      {s.cwd && <span className="dk-row-f">{shortFolder(s.cwd)}</span>}
+                      <span className="dk-row-s">{busy ? 'opening' : s.last ? ago(s.last, now) : ''}</span>
+                    </Press>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </section>
   )
   return (
@@ -1113,32 +1142,35 @@ function SessionList({
       <div className="dk-scrim" onPointerDown={onClose} />
       <div className="dk-list" role="dialog" aria-label="All sessions">
         {!groups.length && <p className="dk-quiet-row">No session is open.</p>}
-        {groups.map((g) => (
-          <section key={g.area || '-'} className="dk-lg">
-            <h3 className="dk-k">{areaName(g.area)}</h3>
-            {g.projects.map((p) => (
-              <div key={p.project || '-'} className="dk-lp">
-                {p.project && <div className="dk-tsec-k">{p.project}</div>}
-                <div className="dk-rows">
-                  {p.rows.map((s) => {
-                    const m = meta(s)
-                    const st = paneState(s)
-                    const mark = markOf(st)
-                    const where = s.name === focus ? 'here' : view.includes(s.name) ? 'in view' : off.includes(s.name) ? 'off the desk' : ''
-                    return (
-                      <Press key={s.name} className="dk-row" data-on={view.includes(s.name) || undefined} title={m.where} onPress={() => onPick(s.name)}>
-                        {mark ? <StateIcon a={mark} size={14} /> : <span className="dk-row-nomark" aria-hidden />}
-                        <span className={cx('dk-row-t', st === 'dead' && 'dk-row-dead')}>{m.title}</span>
-                        {m.folder && <span className="dk-row-f">{m.folder}</span>}
-                        <span className="dk-row-s">{where || WORD[st]}</span>
-                      </Press>
-                    )
-                  })}
+        {groups.map((g) => {
+          const f = fold(`run:${g.area}`, areaName(g.area), g.projects.reduce((k, p) => k + p.rows.length, 0))
+          return (
+            <section key={g.area || '-'} className="dk-lg">
+              <h3 className="dk-k">{f.head}</h3>
+              {f.open && g.projects.map((p) => (
+                <div key={p.project || '-'} className="dk-lp">
+                  {p.project && <div className="dk-tsec-k">{p.project}</div>}
+                  <div className="dk-rows">
+                    {p.rows.map((s) => {
+                      const m = meta(s)
+                      const st = paneState(s)
+                      const mark = markOf(st)
+                      const where = s.name === focus ? 'here' : view.includes(s.name) ? 'in view' : off.includes(s.name) ? 'off the desk' : ''
+                      return (
+                        <Press key={s.name} className="dk-row" data-on={view.includes(s.name) || undefined} title={m.where} onPress={() => onPick(s.name)}>
+                          {mark ? <StateIcon a={mark} size={14} /> : <span className="dk-row-nomark" aria-hidden />}
+                          <span className={cx('dk-row-t', st === 'dead' && 'dk-row-dead')}>{m.title}</span>
+                          {m.folder && <span className="dk-row-f">{m.folder}</span>}
+                          <span className="dk-row-s">{where || WORD[st]}</span>
+                        </Press>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </section>
-        ))}
+              ))}
+            </section>
+          )
+        })}
         {closedPart}
       </div>
     </>

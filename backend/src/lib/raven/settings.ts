@@ -1,5 +1,5 @@
 import { AgentError, bump, getKv, setKv } from '../agentsStore.js'
-import { ravenModels, routeMessage, TIERS, type RavenModelInfo } from './models.js'
+import { isModelKey, modelKeys, ravenModels, routeMessage, type RavenModelInfo } from './models.js'
 import type { RavenEffort, RavenPickEffort, RavenRule, RavenRuleKey, RavenSettings, RavenTier } from './types.js'
 
 // Brendon's model and effort pick for Raven, set in the Raven tab on any
@@ -11,7 +11,7 @@ import type { RavenEffort, RavenPickEffort, RavenRule, RavenRuleKey, RavenSettin
 
 const KEY = 'raven:settings'
 
-export const PICK_EFFORTS: RavenPickEffort[] = ['low', 'medium', 'high']
+export const PICK_EFFORTS: RavenPickEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 export const RULE_KEYS: RavenRuleKey[] = ['simple', 'complex', 'voice', 'background']
 
 export const DEFAULT_RAVEN_SETTINGS: RavenSettings = {
@@ -27,7 +27,7 @@ export const DEFAULT_RAVEN_SETTINGS: RavenSettings = {
   },
 }
 
-const isTier = (v: unknown): v is RavenTier => TIERS.includes(v as RavenTier)
+const isTier = (v: unknown): v is RavenTier => isModelKey(v)
 const isPickEffort = (v: unknown): v is RavenPickEffort => PICK_EFFORTS.includes(v as RavenPickEffort)
 const clone = (s: RavenSettings): RavenSettings => ({ ...s, rules: Object.fromEntries(RULE_KEYS.map((k) => [k, { ...s.rules[k] }])) as RavenSettings['rules'] })
 
@@ -57,7 +57,7 @@ export function setRavenSettings(input: unknown): RavenSettings {
   const next = ravenSettings()
   if (b.reset === true) next.rules = clone(DEFAULT_RAVEN_SETTINGS).rules
   if (b.model !== undefined) {
-    if (b.model !== 'auto' && !isTier(b.model)) throw new AgentError(400, `model must be auto or one of ${TIERS.join(', ')}`)
+    if (b.model !== 'auto' && !isTier(b.model)) throw new AgentError(400, `model must be auto or one of ${modelKeys().join(', ')}`)
     next.model = b.model
   }
   if (b.effort !== undefined) {
@@ -69,7 +69,7 @@ export function setRavenSettings(input: unknown): RavenSettings {
     for (const [k, v] of Object.entries(b.rules as Record<string, unknown>)) {
       if (!RULE_KEYS.includes(k as RavenRuleKey)) throw new AgentError(400, `no rule called ${k.slice(0, 40)}`)
       const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
-      if (r.model !== undefined && !isTier(r.model)) throw new AgentError(400, `the ${k} rule's model must be one of ${TIERS.join(', ')}`)
+      if (r.model !== undefined && !isTier(r.model)) throw new AgentError(400, `the ${k} rule's model must be one of ${modelKeys().join(', ')}`)
       if (r.effort !== undefined && !isPickEffort(r.effort)) throw new AgentError(400, `the ${k} rule's effort must be one of ${PICK_EFFORTS.join(', ')}`)
       if (isTier(r.model)) next.rules[k as RavenRuleKey].model = r.model
       if (isPickEffort(r.effort)) next.rules[k as RavenRuleKey].effort = r.effort

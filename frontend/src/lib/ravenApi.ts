@@ -6,17 +6,18 @@ import { api } from './api'
 // Proposals the agents make are decided here too (routes/msg.ts), and the
 // thread updates through the Messages long-poll (/api/msg/changes).
 
-export type RavenTier = 'haiku' | 'sonnet' | 'opus' | 'fable'
+/** A model's key in Raven's catalog (backend lib/raven/models.ts); the list itself comes with the page (`models`). */
+export type RavenTier = string
 export type RavenEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 /** The efforts he picks from. */
-export type RavenPickEffort = 'low' | 'medium' | 'high'
+export type RavenPickEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 /** The automatic rules: his message sorted simple or complex, a voice (Siri) message, a run he did not start. */
 export type RavenRuleKey = 'simple' | 'complex' | 'voice' | 'background'
 export type RavenRule = { model: RavenTier; effort: RavenPickEffort }
 /** His model and effort pick (backend lib/raven/settings.ts), the same on every device. */
 export type RavenSettings = { model: RavenTier | 'auto'; effort: RavenPickEffort | 'auto'; rules: Record<RavenRuleKey, RavenRule> }
-/** One model in the picker; `unavailable` says why odin's accounts refused it lately ("needs usage credits"). */
-export type RavenModelInfo = { key: RavenTier; id: string; label: string; unavailable?: string }
+/** One model in the picker; `unavailable` says why odin's accounts refused it lately ("needs usage credits"), `fallback` what runs instead. */
+export type RavenModelInfo = { key: RavenTier; id: string; label: string; unavailable?: string; fallback?: string }
 /** A change to the pick: either part, any rule's model or effort, or reset (the rules' defaults). */
 export type RavenSettingsPatch = {
   model?: RavenSettings['model']; effort?: RavenSettings['effort']; rules?: Partial<Record<RavenRuleKey, Partial<RavenRule>>>; reset?: boolean
@@ -126,6 +127,10 @@ export const sendRaven = async (body: { text: string; files?: string[]; source?:
 export const markRavenRead = async (upTo?: number) => (await api.post<{ ok: true }>('/raven/read', upTo ? { upTo } : {})).data
 
 export const stopRaven = async () => (await api.post<{ ok: true }>('/raven/stop', {})).data
+
+/** A voice clip (as the browser recorded it) to odin's transcriber; answers the words. */
+export const transcribeRaven = async (clip: Blob): Promise<string> =>
+  String((await api.post<{ text: string }>('/raven/transcribe', clip, { headers: { 'Content-Type': clip.type || 'audio/webm' }, timeout: 150_000 })).data.text ?? '')
 
 export const saveRavenSettings = async (patch: RavenSettingsPatch) =>
   (await api.post<{ settings: RavenSettings; models: RavenModelInfo[] }>('/raven/settings', patch)).data
