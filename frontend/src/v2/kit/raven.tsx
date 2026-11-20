@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type
 import { createPortal, flushSync } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bird, FileText, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Bird, FileText, Paperclip, X } from 'lucide-react'
 import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { useProfile } from '../../lib/deviceMode'
@@ -15,12 +15,12 @@ import {
 } from './ravenStore'
 import { requestIntent } from './shell'
 import { Icon } from './icons'
-import { Button, Press, cx, toast } from './ui'
+import { Press, cx, toast } from './ui'
 import './raven.css'
 
 // Raven everywhere in v2: the composer the Raven screen and the quick sheet
 // share, a message's attachments, the floating button in the bottom-right
-// corner (the lights button has the left), the quick sheet it opens (also
+// corner, the quick sheet it opens (also
 // Ctrl+Shift+Space and the palette's "Message Raven"), and the unread badge on
 // the Raven tab. The state behind them is kit/ravenStore.ts. The Dashboard has
 // its own Raven block (screens/Dashboard.tsx RavenBlock), so the corner button
@@ -34,9 +34,10 @@ const ACCEPT = 'image/*,video/*,application/pdf,text/*,*/*'
 // ---------------------------------------------------------------- composer ---
 
 /**
- * The box he writes in: the attachments picked so far (each uploading as soon
- * as it is picked, with its percent, Retry and remove), an attach button (on
- * the phone it offers the camera and the photo library), the text and Send.
+ * The box he writes in, one rounded box: the attachments picked so far (each
+ * uploading as soon as it is picked, with its percent, Retry and remove), an
+ * attach button (on the phone it offers the camera and the photo library), the
+ * text and a round Send arrow, lit when there is something to send.
  * Enter sends with a keyboard and mouse, Shift+Enter is a new line; a pasted
  * or dropped file attaches.
  */
@@ -140,9 +141,17 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
           aria-label={placeholder}
           enterKeyHint="send"
         />
-        <Button kind="line" lit={draft.ready} type="button" className="rv-send" disabled={!draft.ready || sending} onPress={submit}>
-          {draft.uploading ? 'Wait' : 'Send'}
-        </Button>
+        <Press
+          type="button"
+          className="rv-send"
+          data-ready={(draft.ready && !sending) || undefined}
+          disabled={!draft.ready || sending}
+          aria-label={draft.uploading ? 'Wait for the upload' : 'Send'}
+          title={draft.uploading ? 'Wait for the upload' : 'Send'}
+          onPress={submit}
+        >
+          <ArrowUp size={17} strokeWidth={2.2} aria-hidden />
+        </Press>
       </div>
     </form>
   )

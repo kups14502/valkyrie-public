@@ -68,10 +68,11 @@ const BASE_SCREENS: ScreenDef[] = [
     Component: DashboardTab,
     floor: (sub) => (sub === 'today' || sub === 'hotkeys' ? 'faint' : false),
   },
-  // the one conversation with Raven, his assistant (lib/raven on the backend); the badge counts Raven's unread
-  { id: 'raven', label: 'Raven', Component: Messages, floor: 'faint', badge: RavenBadge },
+  // the one conversation with Raven, his assistant (lib/raven on the backend); the badge counts Raven's unread.
+  // No dot floor: dots behind the text made it hard to read. No bottom room either: the composer is pinned to the bottom edge.
+  { id: 'raven', label: 'Raven', Component: Messages, floor: false, foot: false, badge: RavenBadge },
   // his Claude sessions in tabs, like Windows Terminal: one to three columns, each a strip of tabs over the active
-  // session's terminal, filling the screen (no lights button under it); the badge counts tabs done and not opened
+  // session's terminal, filling the screen (no corner button over it); the badge counts tabs done and not opened
   { id: 'desk', label: 'Desk', Component: Desk, floor: 'faint', foot: false, badge: DeskBadge },
   // list screens keep the floor faint so rows never sit on bright dots; AI > Usage holds every account's 5h and week windows
   { id: 'ai', label: 'AI', subs: [{ id: 'sessions', label: 'Sessions' }, { id: 'projects', label: 'Projects' }, { id: 'usage', label: 'Usage' }], Component: Claude, floor: 'faint' },

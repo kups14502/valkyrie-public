@@ -74,7 +74,7 @@
 .vc-new { flex: none; min-height: 44px; gap: 8px; padding: 0 18px; }
 .vc-new-row { display: flex; }
 .vc-new-row .vc-new { flex: 1; }
-/* phone: pinned bottom-right, in thumb reach (the page keeps room for the lights button below) */
+/* phone: pinned bottom-right, in thumb reach (the page keeps room at its bottom) */
 .vc-fab {
   position: absolute;
   right: 12px;

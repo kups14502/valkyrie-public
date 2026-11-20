@@ -2,6 +2,7 @@ import type { RavenToolGroup } from '../types.js'
 import { registerAgentTools } from './agents.js'
 import { registerMediaTools } from './media.js'
 import { registerSessionTools, sessionsSnapshot, sessionsState, type RavenMain, type RavenWatch } from './sessions.js'
+import { registerThorFileTools } from './thorfiles.js'
 import { registerVaultTools } from './vault.js'
 import { startWatcher } from './watch.js'
 import { registerWorkTools } from './work.js'
@@ -15,7 +16,8 @@ import { registerWorkTools } from './work.js'
 //   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, watch, stop
 //   watch.ts     the relay watcher: a watched session's answers come back into the DM
 //   media.ts     Plex requests: search, request, live status
-//   vault.ts     the Obsidian vault: search, read, recent notes, a new note on thor
+//   vault.ts     the Obsidian vault, live on thor (odin's nightly copy when thor is off): search, read, list, recent, a new note
+//   thorfiles.ts his own files on thor, live and read-only: list, read, search
 //   work.ts      tasks, projects, tickets per work area, inbox, calendar, the morning brief
 
 export type { RavenMain, RavenWatch }
@@ -26,6 +28,7 @@ export const registerRavenTools: RavenToolGroup = (server, ctx) => {
   registerSessionTools(server, ctx)
   registerMediaTools(server, ctx)
   registerVaultTools(server, ctx)
+  registerThorFileTools(server, ctx)
   registerWorkTools(server, ctx)
 }
 

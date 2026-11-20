@@ -1,8 +1,9 @@
 /* Messages (Messages.tsx): the one conversation with Raven. Plain CSS on top of v2.css and
-   kit/raven.css; colors are the mode variables. Rows, not bubbles: a small label over each run
-   of lines, hairlines between days, relays labeled by their source in the accent. The thread
-   scrolls on its own and the composer stays at the bottom; a wide screen keeps the Connected
-   column on the right. */
+   kit/raven.css; colors are the mode variables. Laid out like a chat app on Valkyrie's black: one
+   centered reading column (--rv-col), his lines as bubbles on the right, Raven's replies as plain
+   text, relays labeled by their source in the accent, hairlines between days. No dot floor behind
+   it (App.tsx). The thread scrolls on its own and the rounded composer stays pinned at the bottom
+   of the column; a wide screen keeps the Connected column on the right. */
 
 .rv {
   position: absolute;
@@ -14,6 +15,8 @@
   padding: 4px calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left));
   font-size: 13px;
   color: var(--text);
+  /* the reading column: about 90 characters of the mono font */
+  --rv-col: 760px;
 }
 .rv-quiet { margin: 10px 2px; font-size: 12.5px; line-height: 17px; color: var(--dim); }
 .rv-top { margin: 4px 2px 10px; text-align: center; font-size: 11px; }
@@ -27,9 +30,11 @@
   display: flex;
   align-items: center;
   gap: 4px 12px;
+  width: 100%;
+  max-width: var(--rv-col);
   min-height: 40px;
-  padding: 2px 0;
-  border-bottom: 1px solid var(--line);
+  margin: 0 auto;
+  padding: 2px 4px;
 }
 .rv-head h2 {
   margin: 0;
@@ -67,25 +72,52 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 2px 12px;
+  padding: 4px 0 18px;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--fg) 30%, transparent) transparent;
 }
-.rv-item { max-width: 860px; }
-.rv-day { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+/* the scroller spans the screen (its bar at the edge); the thread reads down the centered column */
+.rv-col { max-width: var(--rv-col); margin: 0 auto; padding: 0 4px; }
+.rv-empty { margin-top: 18vh; text-align: center; }
+.rv-day { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
 .rv-day::before, .rv-day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
-.rv-msg { padding: 8px 0 2px; }
-.rv-msg[data-grouped] { padding-top: 4px; }
-.rv-msg-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 2px; }
+.rv-msg { position: relative; padding: 12px 0 2px; }
+.rv-msg[data-grouped] { padding-top: 6px; }
+.rv-msg-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 3px; }
+/* You and Raven: the bubble and the plain reply say who; the label stays for screen readers */
+.rv-msg-head[data-sr] { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .rv-msg-head b { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-.rv-msg-head time, .rv-via { font-size: 11px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
-/* his own lines: brighter text under a quiet "You" */
-.rv-msg[data-kind='me'] .rv-md { color: var(--ink-hi); }
-/* Raven: its name lit */
-.rv-msg[data-kind='raven'] .rv-msg-head b { color: var(--fg); text-shadow: var(--text-glow); }
+.rv-msg-head time, .rv-foot, .rv-via { font-size: 11px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
+.rv-foot { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 4px 0 0; line-height: 15px; }
+
+/* his own lines: a bubble on the right, a tint of the accent with a hairline edge */
+.rv-msg[data-kind='me'] { display: flex; flex-direction: column; align-items: flex-end; padding-top: 18px; }
+.rv-msg[data-kind='me'][data-grouped] { padding-top: 6px; }
+.rv-bubble {
+  max-width: min(82%, 600px);
+  min-width: 0;
+  padding: 9px 15px;
+  background: color-mix(in srgb, var(--fg) calc(var(--fill-a) + 6%), #050505);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.rv-msg[data-kind='me'] .rv-md { font-size: 14px; line-height: 21px; color: var(--text); }
+.rv-msg[data-kind='me'] .rv-files, .rv-msg[data-kind='me'] .rv-refs { justify-content: flex-end; }
+.rv-msg[data-kind='me'] .rv-files { margin: 0 0 6px; }
+.rv-msg[data-kind='me'] .rv-foot { padding-right: 8px; }
+
+/* Raven: plain text on the column, a reading size, room between paragraphs */
+.rv-msg[data-kind='raven'] { padding-top: 16px; }
+.rv-msg[data-kind='raven'][data-grouped] { padding-top: 10px; }
+.rv-msg[data-kind='raven'] .rv-md { font-size: 14px; line-height: 23px; }
+.rv-msg[data-kind='raven'] .rv-md p { margin-bottom: 12px; }
+.rv-msg[data-kind='raven'] .rv-md p:last-child { margin-bottom: 0; }
+.rv-msg[data-kind='raven'] .rv-meta { margin-top: 6px; }
+
 /* a relay: the source in the accent, the text a step quieter, a hairline on the left */
-.rv-msg[data-kind='relay'] { padding-left: 10px; border-left: 1px solid color-mix(in srgb, var(--fg) 30%, transparent); margin-top: 4px; }
+.rv-msg[data-kind='relay'] { padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--fg) 30%, transparent); margin-top: 10px; padding-top: 4px; }
+.rv-msg[data-kind='relay'][data-grouped] { margin-top: 0; }
 .rv-msg[data-kind='relay'] .rv-msg-head b { color: var(--fg); }
 .rv-msg[data-kind='relay'] .rv-md { font-size: 13px; line-height: 19px; }
 .rv-msg[data-kind='system'] .rv-md { font-size: 12px; color: var(--dim); }
@@ -115,7 +147,10 @@
 }
 
 /* Raven at work: one live line at the end of the thread */
-.rv-working { display: flex; align-items: center; gap: 8px; padding: 10px 0 2px; font-size: 12px; color: var(--fg); }
+.rv-working { display: flex; align-items: center; gap: 8px; padding: 16px 0 2px; font-size: 12px; color: var(--fg); }
+
+/* the composer: pinned under the thread, as wide as the column */
+.rv-conv > .rv-compose { width: 100%; max-width: var(--rv-col); margin: 4px auto 10px; }
 .rv-pulse { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); box-shadow: var(--glow); animation: rv-blink 1.4s ease-in-out infinite; }
 html[data-motion='reduced'] .rv-pulse { animation: none; }
 

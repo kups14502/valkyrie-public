@@ -110,34 +110,6 @@ const visible = (sel) => `(() => { const e = document.querySelector(${JSON.strin
 
 export function writeTests() {
   return [
-    // ---- the lights button (bottom-left, every tab) ----
-    ...writeTest({
-      id: 'lamp',
-      route: '/m/dashboard',
-      fail: [500, 403],
-      ready: (page) => page.waitFor(() => document.querySelector('.vl-lamp')?.getAttribute('aria-pressed') === 'true', { timeout: 10_000, message: 'the lights button never read the lit bulb' }),
-      act: (t, page) => page.tap('.vl-lamp'),
-      want: (w, t) => {
-        if (w.method !== 'POST' || w.path !== '/api/lights/turn') return false
-        t.check(w.json?.state === 'off', `lights button sent state ${w.json?.state}, want off`)
-        t.check(sameSet(w.json?.entity_id, ['light.e2e_desk', 'light.e2e_lamp']), `lights button sent entity_id ${JSON.stringify(w.json?.entity_id)}, want the two reachable bulbs`)
-      },
-      respond: (w, st) => { applyLight(st.lights, w.json); return { status: 200, body: { ok: true } } },
-      okThen: async (t, page, st, since) => {
-        await page.waitToast(/All lights off/, { since })
-        await page.waitFor(() => document.querySelector('.vl-lamp')?.getAttribute('aria-pressed') === 'false', { message: 'the lights button did not go dark' })
-        await sleep(2500)
-        const lit = await page.eval(() => document.querySelector('.vl-lamp')?.getAttribute('aria-pressed'))
-        t.check(lit === 'false', 'the lights button lit again after the write landed')
-        const bad = (await page.toasts(since)).filter((x) => /not switched/i.test(x))
-        t.check(!bad.length, `an error toast showed on success: ${bad.join(', ')}`)
-      },
-      failThen: async (t, page, st, since, status) => {
-        await page.waitToast(new RegExp(`Lights not switched: ${status}`), { since })
-        await page.waitFor(() => document.querySelector('.vl-lamp')?.getAttribute('aria-pressed') === 'true', { timeout: 4000, message: 'the lights button did not fall back to lit' })
-      },
-    }),
-
     // ---- a bulb on Lights ----
     ...writeTest({
       id: 'bulb',

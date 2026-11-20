@@ -2,8 +2,8 @@
 // every write is answered in the browser): the iPhone upright and on its side,
 // the iPad both ways, a 1600x900 window, and 1920x1080 and 2560x1440 monitors
 // at the app zoom Brendon uses (1.2). Each route must render without console
-// errors, keep the page inside the viewport, show the tabs at the top and the
-// lights button bottom-left, and have live data on screen 8 s after it opened.
+// errors, keep the page inside the viewport, show the tabs at the top and no
+// lights button, and have live data on screen 8 s after it opened.
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -109,20 +109,8 @@ export function shellChecks(t, r, route) {
     }
   }
   t.check(r.gear, `${tag}: the Settings gear is missing from the status strip`)
-  // a full page outside the tabs carries no lights button
-  if (route.page) return
-  // a screen that reaches the bottom edge (kit/shell.tsx ScreenDef foot: false) hides it
-  if (route.foot === false) {
-    t.check(!r.lampShown, `${tag}: the lights button shows on a screen that hides it`)
-    return
-  }
-  // the lights button: bottom-left, on top of everything
-  t.check(r.lamp && r.lampShown, `${tag}: the lights button is missing`)
-  if (r.lamp) {
-    t.check(r.lamp.l <= 32 && r.lamp.r <= r.W * 0.25, `${tag}: the lights button is not at the left (left ${Math.round(r.lamp.l)})`)
-    t.check(r.lamp.b >= r.H - 40 && r.lamp.b <= r.H + 0.5, `${tag}: the lights button is not at the bottom (bottom ${Math.round(r.lamp.b)} of ${r.H})`)
-    t.check(r.lampHit === 'self', `${tag}: the lights button is covered by ${r.lampHit}`)
-  }
+  // the round lights button in the bottom-left is gone from every screen (2026-11-20, he never used it)
+  t.check(!r.lampShown, `${tag}: a lights button shows in the bottom-left`)
 }
 
 /** Brendon's notes, on the screens they are about. */

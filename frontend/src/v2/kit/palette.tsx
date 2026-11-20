@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { BASE, SETTINGS_ID, playerActions, requestIntent, usePlayerNow, type ScreenDef } from './shell'
+import { BASE, SETTINGS_ID, playerActions, usePlayerNow, type ScreenDef } from './shell'
 import { useSessionIndex } from './data'
 import { Icon, isIconName, type IconName, type IconRef } from './icons'
-import { PALETTE_EVENT, paletteState, toast } from './ui'
+import { PALETTE_EVENT, paletteState } from './ui'
 import { openRavenQuick } from './ravenStore'
 import { getMotionSetting, setMotionSetting } from './motion'
 import { fetchTermSessions, termLabel, type TermSession } from '../../lib/api'
@@ -195,18 +195,6 @@ function PaletteBox({ screens, onClose }: { screens: ScreenDef[]; onClose: () =>
     // Raven's quick sheet (kit/raven.tsx); on the Raven tab it focuses the conversation's box instead
     out.push({ id: 'act:raven', label: 'Message Raven', group: 'Actions', icon: 'raven', hint: 'Ctrl+Shift+Space', keys: 'raven assistant ask send note quick', run: openRavenQuick })
     out.push({ id: 'act:new', label: 'New AI session', group: 'Actions', icon: 'newSession', keys: 'start claude launch', run: () => navigate(`${BASE}/ai/sessions?new=1`, { replace: onTab }) })
-    // the shell's round lights button does the switching (and its Undo); no button, no row
-    if (document.querySelector('.vl-lamp')) {
-      const lit = document.querySelector('.vl-lamp[data-lit]') !== null
-      out.push({
-        id: 'act:lights',
-        label: lit ? 'All lights off' : 'All lights on',
-        group: 'Actions',
-        icon: lit ? 'bulbOff' : 'bulb',
-        keys: 'lamp bulbs toggle switch',
-        run: () => { if (!requestIntent('lights:toggle')) toast('Lights: not ready yet') },
-      })
-    }
     if (player.item) {
       out.push({ id: 'act:play', label: player.playing ? 'Pause music' : 'Play music', group: 'Actions', icon: 'play', hint: player.item.title, keys: 'player resume', run: playerActions.toggle })
       out.push({ id: 'act:next', label: 'Next track', group: 'Actions', icon: 'tracks', keys: 'skip music player', run: playerActions.next })

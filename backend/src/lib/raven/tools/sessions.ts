@@ -249,7 +249,8 @@ async function typeInto(pane: string, label: string, text: string): Promise<void
 async function openMain(t: { key: string; label: string }): Promise<{ pane: string; label: string; sessionId: string }> {
   const old = mainsMap()[t.key]
   if (old && (await io.paneState(old.pane)) === 'dead') await io.killPane(old.pane).catch(() => false)
-  const label = `${paneLabel(t.label, t.key).slice(0, 53)} (main)`
+  // the target's own name, the one Quick Start and the terminal lists show ("Personal", not "Personal (main)")
+  const label = paneLabel(t.label, t.key)
   const sessionId = randomUUID()
   const pane = await newPane({ mode: 'new', host: 'thor', target: t.key, newId: sessionId, label, cols: 120, rows: 40 })
   setMain(t.key, { pane, label, sessionId, at: new Date(io.now()).toISOString() })

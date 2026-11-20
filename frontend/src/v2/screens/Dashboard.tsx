@@ -213,7 +213,7 @@ export default function Dashboard({ active }: ScreenProps) {
   const device = useThisDevice()
 
   // Phone: the column wrappers dissolve, so the blocks read top to bottom in
-  // the order above (the stage, Quick Start, Upload right under it, then Lights).
+  // the order above (the stage, Upload, Quick Start right under it, then Lights).
   // Two columns: the stage across both; the doing column left; trade, AI, media
   // and the hosts right. Three: see the header; each column has one elastic
   // part, so the three end at the bottom of the page together.
@@ -252,8 +252,8 @@ export default function Dashboard({ active }: ScreenProps) {
             <DeviceStage id={device} active={active} i={1} compact />
             <RavenBlock active={active} i={2} />
             <div className="hm-col hm-a">
-              <QuickStart />
               <UploadBlock wide={false} />
+              <QuickStart />
               <LightsBox i={3} variant="chips" />
               <Tracker />
               <Calendar onOpen={setCal} />
@@ -269,8 +269,8 @@ export default function Dashboard({ active }: ScreenProps) {
             <DeviceStage id={device} active={active} i={0} compact />
             <RavenBlock active={active} i={1} />
             <div className="hm-col hm-a">
-              <QuickStart />
               <UploadBlock wide={false} />
+              <QuickStart />
               <LightsBox i={3} variant="rows" />
               <Tracker />
               <Calendar onOpen={setCal} />
@@ -285,9 +285,9 @@ export default function Dashboard({ active }: ScreenProps) {
         ) : (
           <>
             <div className="hm-col hm-a">
-              <QuickStart />
-              <RavenBlock active={active} i={2} />
               <UploadBlock wide />
+              <RavenBlock active={active} i={2} />
+              <QuickStart />
               <Tracker />
               <Calendar onOpen={setCal} fit={fill} />
             </div>

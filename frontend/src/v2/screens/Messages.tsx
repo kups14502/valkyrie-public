@@ -235,17 +235,19 @@ export default function Messages({ active }: ScreenProps) {
         </header>
         {!wide && showConn && connected && <div className="rv-conn rv-conn-drop">{connected}</div>}
         <div className="rv-msgs" ref={listRef} onScroll={onScroll}>
-          {failed && <p className="rv-quiet">Raven is not answering: {apiErrorText(q.error, 'no reply from Valkyrie')}</p>}
-          {!page && !failed && <p className="rv-quiet">Reading Raven</p>}
-          {page && !messages.length && <p className="rv-quiet">Nothing yet. Write Raven anything: a question, a task, a file, a session to start.</p>}
-          {page && noMore && messages.length > 0 && <p className="rv-quiet rv-top">The start of the conversation.</p>}
-          <Thread messages={messages} names={names} />
-          {busy && (
-            <div className="rv-working" aria-live="polite">
-              <span className="rv-pulse" aria-hidden />
-              <span>{status}</span>
-            </div>
-          )}
+          <div className="rv-col">
+            {failed && <p className="rv-quiet">Raven is not answering: {apiErrorText(q.error, 'no reply from Valkyrie')}</p>}
+            {!page && !failed && <p className="rv-quiet">Reading Raven</p>}
+            {page && !messages.length && <p className="rv-quiet rv-empty">Nothing yet. Write Raven anything: a question, a task, a file, a session to start.</p>}
+            {page && noMore && messages.length > 0 && <p className="rv-quiet rv-top">The start of the conversation.</p>}
+            <Thread messages={messages} names={names} />
+            {busy && (
+              <div className="rv-working" aria-live="polite">
+                <span className="rv-pulse" aria-hidden />
+                <span>{status}</span>
+              </div>
+            )}
+          </div>
         </div>
         <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} />
       </section>
@@ -262,13 +264,15 @@ function Thread({ messages, names }: { messages: RavenMsg[]; names: Map<string, 
     <>
       {messages.map((m, i) => {
         const prev = messages[i - 1]
+        const next = messages[i + 1]
         const t = Date.parse(m.createdAt)
         const newDay = !prev || NY_KEY.format(Date.parse(prev.createdAt)) !== NY_KEY.format(t)
-        const grouped = !newDay && !!prev && who(prev) === who(m) && t - Date.parse(prev.createdAt) < 10 * 60_000 && !m.proposal
+        const grouped = !!prev && joins(prev, m)
+        const last = !next || !joins(m, next)
         return (
           <div key={m.id} className="rv-item">
             {newDay && <div className="rv-day"><span>{dayLabel(t, now)}</span></div>}
-            <Row m={m} grouped={grouped} names={names} />
+            <Row m={m} grouped={grouped} last={last} names={names} />
           </div>
         )
       })}
@@ -279,6 +283,13 @@ function Thread({ messages, names }: { messages: RavenMsg[]; names: Map<string, 
 /** Who a row is from, for grouping: the author, and a relay's source. */
 const who = (m: RavenMsg) => `${m.author}|${m.meta.relay?.kind ?? ''}|${m.meta.relay?.from ?? ''}`
 
+/** `m` continues `prev`'s run: the same day, the same source, within 10 minutes, not a proposal. */
+function joins(prev: RavenMsg, m: RavenMsg): boolean {
+  const a = Date.parse(prev.createdAt)
+  const b = Date.parse(m.createdAt)
+  return NY_KEY.format(a) === NY_KEY.format(b) && who(prev) === who(m) && b - a < 10 * 60_000 && !m.proposal
+}
+
 function kindOf(m: RavenMsg): 'me' | 'raven' | 'relay' | 'system' {
   if (m.meta.relay) return 'relay'
   if (m.author === 'brendon') return 'me'
@@ -287,7 +298,14 @@ function kindOf(m: RavenMsg): 'me' | 'raven' | 'relay' | 'system' {
   return 'relay'
 }
 
-function Row({ m, grouped, names }: { m: RavenMsg; grouped: boolean; names: Map<string, string> }) {
+/**
+ * One line of the thread. His own lines are bubbles on the right, with the time
+ * (and "via Siri") under the last of a run. Raven's replies are plain text on
+ * the column, the model, effort and time under each. Relays and Valkyrie's own
+ * lines keep a visible label over each run. The You and Raven labels stay for
+ * screen readers.
+ */
+function Row({ m, grouped, last, names }: { m: RavenMsg; grouped: boolean; last: boolean; names: Map<string, string> }) {
   const navigate = useNavigate()
   const kind = kindOf(m)
   const relay = m.meta.relay
@@ -300,10 +318,14 @@ function Row({ m, grouped, names }: { m: RavenMsg; grouped: boolean; names: Map<
     : null
   // a session relay's ref link to its pane is the Open link already
   const refs = termPath ? m.refs.filter((r) => !(r.type === 'link' && r.url === termPath)) : m.refs
+  const files = m.meta.files && m.meta.files.length > 0 ? <RavenFiles files={m.meta.files} /> : null
+  const time = <time title={NY_DAY.format(Date.parse(m.createdAt))}>{etTime(m.createdAt)}</time>
+  // You and Raven: the label is for screen readers; the time goes under the line
+  const quiet = kind === 'me' || kind === 'raven'
   return (
     <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-error={m.meta.error ? '' : undefined}>
       {!grouped && (
-        <div className="rv-msg-head">
+        <div className="rv-msg-head" data-sr={quiet || undefined}>
           <b>{label}</b>
           {termPath && (
             <a
@@ -312,15 +334,26 @@ function Row({ m, grouped, names }: { m: RavenMsg; grouped: boolean; names: Map<
               onClick={(e) => { e.preventDefault(); navigate(termPath) }}
             >Open</a>
           )}
-          {!meta && <time title={NY_DAY.format(Date.parse(m.createdAt))}>{etTime(m.createdAt)}</time>}
-          {via && <span className="rv-via">via {via}</span>}
+          {!quiet && time}
         </div>
       )}
-      {m.text && <Markdown className="rv-md">{m.text}</Markdown>}
-      {m.meta.files && m.meta.files.length > 0 && <RavenFiles files={m.meta.files} />}
-      {refs.length > 0 && <Refs refs={refs} />}
-      {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
-      {meta && <p className="rv-meta" title={m.meta.why || undefined}>{meta}</p>}
+      {kind === 'me' ? (
+        <>
+          {files}
+          {m.text && <div className="rv-bubble"><Markdown className="rv-md">{m.text}</Markdown></div>}
+          {refs.length > 0 && <Refs refs={refs} />}
+          {(last || via) && <p className="rv-foot">{time}{via && <span className="rv-via">via {via}</span>}</p>}
+        </>
+      ) : (
+        <>
+          {m.text && <Markdown className="rv-md">{m.text}</Markdown>}
+          {files}
+          {refs.length > 0 && <Refs refs={refs} />}
+          {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
+          {meta && <p className="rv-meta" title={m.meta.why || undefined}>{meta}</p>}
+          {kind === 'raven' && !meta && <p className="rv-foot">{time}</p>}
+        </>
+      )}
     </article>
   )
 }

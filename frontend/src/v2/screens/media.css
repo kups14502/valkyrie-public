@@ -940,7 +940,7 @@ html[data-motion='reduced'] .vm-tile[data-wait] .vm-art { animation: none; }
 .vm-lib-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .vm-az-col { align-self: stretch; position: relative; min-height: 100%; }
 
-/* the strip: sticky in the page, as tall as the visible page above the shell's foot room (lights button, player bar) */
+/* the strip: sticky in the page, as tall as the visible page above the shell's foot room (corner button, player bar) */
 .vm-az {
   position: sticky;
   top: 4px;

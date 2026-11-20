@@ -7,13 +7,12 @@ import { applyPalette, saveMode, storedMode, useFont, useStoredMode, type Mode }
 import {
   animateSpring, getMotionSetting, isReducedMotion, setMotionSetting, useMotionSetting, usePager, type MotionSetting,
 } from './motion'
-import { useHosts, useInboxCount, useLights, useTick, type HostVM, type MediaVM } from './data'
+import { useHosts, useInboxCount, useTick, type HostVM, type MediaVM } from './data'
 import { Search } from 'lucide-react'
-import { DotFloor, Glyph, Press, ToastHost, cx, dismissToast, openPalette, paletteOpen, toast, type DotFloorHandle, type ToastOptions } from './ui'
+import { DotFloor, Glyph, Press, ToastHost, cx, openPalette, paletteOpen, toast, type DotFloorHandle, type ToastOptions } from './ui'
 import { Icon, hostIcon, iconKey, isIconName, type IconRef } from './icons'
 import { musicImg, type MusicTrack } from '../../lib/api'
 import { isTauri, isTauriMobile } from '../../lib/auth'
-import { useLightsControl } from '../../lib/lights'
 import * as libPlayer from '../../lib/player'
 import { WindowControls } from '../../components/TauriTitleBar'
 import { UpdateAlarm } from '../../components/UpdateAlarm'
@@ -23,9 +22,8 @@ import { UpdateAlarm } from '../../components/UpdateAlarm'
 // hairline with a caret notch under the active tab, and the active tab's
 // sub-tabs below that. Then a quiet scroll rail on the left with the active
 // screen's icon and every primary screen mounted side by side in a
-// finger-following pager. The round lights button floats in the bottom-left
-// corner on every tab; while music plays it sits at the left end of a slim
-// player bar. Settings is a full screen at /m/settings over the pager.
+// finger-following pager. While music plays a slim player bar runs along the
+// bottom. Settings is a full screen at /m/settings over the pager.
 // URLs are /m/<screen>/<sub> (BASE below).
 
 /** Where the shell lives in the app's routes (src/App.tsx mounts it at /m/*). */
@@ -56,9 +54,9 @@ export type ScreenDef = {
    */
   floor?: FloorSetting | ((sub: string) => FloorSetting)
   /**
-   * false: no lights button under this screen, and the page keeps no room for
-   * it, so the screen reaches the bottom edge. The player bar still shows
-   * (and the room comes back) while something plays.
+   * false: no corner button over this screen, and the page keeps no room at
+   * its bottom, so the screen reaches the bottom edge. The player bar still
+   * shows (and the room comes back) while something plays.
    */
   foot?: boolean
   /** a small count drawn in the tab after its name (on the phone, on its icon's corner); renders nothing when there is none */
@@ -568,81 +566,22 @@ function MiniPlayer({ item, leaving }: { item: PlayerItem; leaving: boolean }) {
   )
 }
 
-// ---------- the lights button: bottom-left on every tab ----------
-
-/** Why a write failed, short enough for a toast: the backend's own word, else its status. */
-function why(e: unknown): string {
-  const x = (e ?? {}) as { response?: { status?: number; data?: { error?: unknown } }; detail?: unknown; message?: unknown }
-  const msg = [x.response?.data?.error, x.detail, x.message].find((v): v is string => typeof v === 'string' && v.trim() !== '')
-  const status = x.response?.status
-  const text = msg ? (msg.length > 72 ? `${msg.slice(0, 71)}…` : msg) : 'no answer'
-  return status ? `${status} ${text}` : text
-}
+// ---------- the bottom layer ----------
 
 /**
- * All lights on/off: a round button, lit with the glow while any reachable
- * bulb is on. Writes through src/lib/lights.ts useLightsControl, the same
- * desire overlay Dashboard and Lights read, so a switch here shows there at
- * once and a failed one falls back. The toast's Undo puts back what was on.
- */
-function LightsButton() {
-  // the persisted view model paints the first frame; the switch needs the control's own read
-  const cached = useLights()
-  const ctl = useLightsControl()
-  const real = ctl.lights.data ? ctl.all : null
-  const list = real ? real.map((l) => ({ id: l.entity_id, on: l.on, unavailable: l.unavailable })) : cached.data ?? []
-  const bulbs = list.filter((l) => !l.unavailable)
-  const lit = bulbs.filter((l) => l.on).length
-  const anyOn = lit > 0
-  // one switch at a time; the toast's Undo waits for the switch it undoes
-  const inflight = useRef<Promise<boolean> | null>(null)
-  const send = (entity_id: string[], state: 'on' | 'off', msg: string, undo?: () => void) => {
-    if (inflight.current || !entity_id.length) return
-    const shown = toast(msg, undo ? { action: { label: 'Undo', run: undo } } : undefined)
-    const run = ctl.mutation.mutateAsync({ entity_id, state })
-      .then(() => true, (e: unknown) => {
-        dismissToast(shown)
-        toast(`Lights not switched: ${why(e)}`)
-        return false
-      })
-      .finally(() => { inflight.current = null })
-    inflight.current = run
-  }
-  const press = () => {
-    if (!real) { toast(ctl.lights.isError ? 'Lights: Home Assistant is not answering' : 'Lights: still reading Home Assistant'); return }
-    if (!bulbs.length) { toast('Lights: no bulb is reachable'); return }
-    const all = bulbs.map((b) => b.id)
-    const wasOn = bulbs.filter((b) => b.on).map((b) => b.id)
-    const next = anyOn ? 'off' : 'on'
-    // Undo of "all on" switches them all off; of "all off", only the bulbs that were on come back
-    send(all, next, `All lights ${next}`, async () => {
-      if ((await inflight.current) === false) return
-      if (next === 'on') send(all, 'off', 'All lights off')
-      else send(wasOn, 'on', `${wasOn.length} ${wasOn.length === 1 ? 'light' : 'lights'} back on`)
-    })
-  }
-  const label = anyOn ? `Lights: ${lit} of ${bulbs.length} on, turn all off` : 'Lights: all off, turn all on'
-  // the palette's "All lights on/off" is this button
-  useIntent('lights:toggle', press)
-  return (
-    <Press className="vl-lamp" data-lit={anyOn || undefined} aria-pressed={anyOn} aria-label={label} title={label} onPress={press}>
-      <Icon name={anyOn ? 'bulb' : 'bulbOff'} size={20} tone={anyOn ? 'fg' : 'dim'} glow={anyOn} />
-    </Press>
-  )
-}
-
-/**
- * The bottom layer: the round lights button in the corner, and while music
- * plays a slim player bar with the button at its left end. Pages reserve
- * room for it (v2.css --foot-pad), so it never covers the last row.
+ * The bottom layer: while music plays, a slim player bar along the bottom.
+ * Pages reserve room at their bottom (v2.css --foot-pad) for it and for the
+ * corner button, so neither covers the last row. The round lights button that
+ * sat in the bottom-left is gone (2026-11-20, he never used it): lights switch
+ * on the Lights tab and the Dashboard.
  */
 function Foot() {
   const mini = useMiniPresence()
+  if (!mini) return null
   return (
-    <div className="vl-foot" data-bar={mini ? '' : undefined} data-leaving={mini?.leaving || undefined}>
-      {mini && <div className="vl-foot-bg" aria-hidden><MiniProgress /></div>}
-      <LightsButton />
-      {mini && <MiniPlayer item={mini.item} leaving={mini.leaving} />}
+    <div className="vl-foot" data-bar="" data-leaving={mini.leaving || undefined}>
+      <div className="vl-foot-bg" aria-hidden><MiniProgress /></div>
+      <MiniPlayer item={mini.item} leaving={mini.leaving} />
     </div>
   )
 }
@@ -839,7 +778,7 @@ function tabPath(def: ScreenDef, sub: string): string {
 export function V2Shell({ screens, initial, backdrop, settings: SettingsScreen, legacy, corner }: {
   screens: ScreenDef[]
   initial?: string
-  /** a floating button for the bottom-right corner (App passes Raven's); the lights button keeps the left */
+  /** a floating button for the bottom-right corner (App passes Raven's) */
   corner?: ReactNode
   /** extra layer behind the pager (e.g. a shared WireScene); the CSS dot floor is always under it */
   backdrop?: ReactNode

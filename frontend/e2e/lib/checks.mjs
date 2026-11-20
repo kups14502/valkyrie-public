@@ -23,7 +23,7 @@ export function layoutReport() {
     return r.width > 0 && r.right > W + 1 && getComputedStyle(e).position !== 'fixed' && !e.closest('.vl-page:not([data-active])')
   }).slice(0, 5).map((e) => `${tag(e)} right=${Math.round(e.getBoundingClientRect().right)}`)
 
-  // the lights button: where it is, and that nothing covers it
+  // the old lights button (gone since 2026-11-20): routes.mjs checks no screen shows one
   const lamp = document.querySelector('.vl-lamp')
   let lampHit = null
   if (lamp) {

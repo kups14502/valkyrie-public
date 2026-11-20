@@ -73,7 +73,7 @@
 //            that car picked; the monitor still fits without a scroll.
 //   raven    the Raven block (`dash:raven`) over a fake /api/raven: its status and the last
 //            exchange (his last line, Raven's own reply after it, one or two lines each), right
-//            under the stage on the phone and the iPads and under Quick start on a monitor, no
+//            under the stage on the phone and the iPads and under Upload on a monitor, no
 //            corner button beside it, a send carrying the Raven screen's body (source app), Raven
 //            working then the reply in the block (and read there), the heading opening /m/raven,
 //            no scroll on a monitor or the landscape iPad, nothing wider than the screen.
@@ -1565,8 +1565,8 @@ function ravenBlockSnap() {
     ravenLines: lines(text('raven')),
     box: rv?.querySelector('.hm-rv-form input')?.value ?? null,
     focused: document.activeElement === rv?.querySelector('.hm-rv-form input'),
-    // where it sits: right after the stage (phone, iPads) or right under Quick start (monitors)
-    after: prev ? (prev.classList.contains('hm-stage') ? 'stage' : prev.querySelector('.hm-starts, .hm-starts-empty') ? 'quick start' : String(prev.className).slice(0, 40)) : null,
+    // where it sits: right after the stage (phone, iPads) or right under Upload (monitors)
+    after: prev ? (prev.classList.contains('hm-stage') ? 'stage' : prev.classList.contains('hm-up') ? 'upload' : prev.querySelector('.hm-starts, .hm-starts-empty') ? 'quick start' : String(prev.className).slice(0, 40)) : null,
     col: rv?.closest('.hm-col') ? ['hm-a', 'hm-b', 'hm-c'].find((k) => rv.closest('.hm-col').classList.contains(k)) : null,
     cols: lay?.getAttribute('data-cols') ?? null,
     pad: !!lay?.hasAttribute('data-pad'),
@@ -1604,7 +1604,7 @@ function ravenBlockTests() {
         t.check(s.inside, 'the Raven block runs past the screen')
         const desk = device.startsWith('desk')
         if (device === 'desktop' || desk) {
-          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === 'quick start', `on a monitor the block sits in ${s.col} after ${s.after}, want the left column right under Quick start`)
+          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === 'upload', `on a monitor the block sits in ${s.col} after ${s.after}, want the left column right under Upload`)
         } else if (device === 'ipadland') {
           t.check(s.pad && s.col === 'hm-b' && s.after === 'stage', `on the landscape iPad the block sits in ${s.col} after ${s.after}, want right under the stage`)
         } else {

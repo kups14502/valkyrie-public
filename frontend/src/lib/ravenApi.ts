@@ -17,7 +17,7 @@ export type RavenRelay = {
   kind: 'agent' | 'session' | 'feature' | 'system'
   /** agent id, tmux pane name, or source key ('backup') */
   from: string
-  /** display name ("Work triage", "Personal (main)", "Backup") */
+  /** display name ("Work triage", "Personal", "Backup") */
   label: string
   sourceMessageId?: number
   sessionId?: string

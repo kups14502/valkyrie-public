@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react'
 import { createPortal, flushSync } from 'react-dom'
@@ -92,7 +92,28 @@ const ODIN_SLOT = '@odin'
 
 // Area ids and their order come from the data (GET /proj-areas, display order;
 // the client areas are odin's private config), names are the id capitalized.
-const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
+const capArea = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
+
+/**
+ * An area's name as his main terminals are named: thor's launch-targets.json
+ * names the three main targets (the phone ones that are not projects), and an
+ * area matching one by key or by name reads that name; any other area is
+ * capitalized. Provided once by the AI screen, so the rows never fetch.
+ */
+const AreaNames = createContext<ReadonlyMap<string, string>>(new Map())
+function areaNameMap(targets: TargetVM[] | undefined): ReadonlyMap<string, string> {
+  const m = new Map<string, string>()
+  for (const t of targets ?? []) {
+    if (!t.phone || t.project || !t.label) continue
+    m.set(t.key.toLowerCase(), t.label)
+    m.set(t.label.toLowerCase(), t.label)
+  }
+  return m
+}
+function useAreaName(): (a: string) => string {
+  const names = useContext(AreaNames)
+  return useCallback((a: string) => names.get(a.toLowerCase()) ?? capArea(a), [names])
+}
 const areaRank = (a: string, order: readonly string[]) => {
   const i = order.indexOf(a)
   return i < 0 ? 99 : i
@@ -117,7 +138,7 @@ function sessionAreaOrder(present: Iterable<string>): string[] {
 
 type AreaItem = { id: string; label: string; count: number }
 
-function areaItems(values: string[], order: readonly string[]): AreaItem[] {
+function areaItems(values: string[], order: readonly string[], areaName: (a: string) => string): AreaItem[] {
   const counts = new Map<string, number>()
   for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
   const list = [...counts.entries()]
@@ -464,6 +485,10 @@ const readFolded = (): ReadonlySet<string> => {
 const areaFold = (a: string) => `area:${a || 'other'}`
 
 export default function Claude({ active, sub, setSub }: ScreenProps) {
+  // the area names: his main terminals' own names from thor (kit/data's shared read)
+  const launchTargets = useLaunchTargets()
+  const areaNames = useMemo(() => areaNameMap(launchTargets.data), [launchTargets.data])
+  const areaName = useCallback((a: string) => areaNames.get(a.toLowerCase()) ?? capArea(a), [areaNames])
   const sessions = useSessions()
   const index = useSessionIndex()
   const projects = useProjectRows()
@@ -679,8 +704,8 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   // Sessions keep the classic board's area order, so the filter and the groups read the same way down
   const sessOrder = useMemo(() => sessionAreaOrder(openRows.map((s) => s.area)), [openRows])
   const areas = useMemo(
-    () => (tab === 'sessions' ? areaItems(openRows.map((s) => s.area), sessOrder) : areaItems(projList.map((p) => p.area), areaOrder)),
-    [tab, openRows, projList, areaOrder, sessOrder],
+    () => (tab === 'sessions' ? areaItems(openRows.map((s) => s.area), sessOrder, areaName) : areaItems(projList.map((p) => p.area), areaOrder, areaName)),
+    [tab, openRows, projList, areaOrder, sessOrder, areaName],
   )
   // a filter that empties out (the last session of an area marked done) falls back to All
   const shownArea = areas.some((a) => a.id === area) ? area : 'all'
@@ -1286,6 +1311,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
   )
 
   return (
+    <AreaNames.Provider value={areaNames}>
     <div className="vc-root">
       {tab === 'usage' ? <UsageView now={now} /> : (
         <div className="vc" data-detail={inlineDetail || undefined} data-fab={!wide || undefined} data-proj={tab === 'projects' || undefined}>
@@ -1479,6 +1505,7 @@ export default function Claude({ active, sub, setSub }: ScreenProps) {
         <NewProjectFlow area={shownArea} onCreated={projCreated} onLeave={() => setNewProj(false)} />
       </Sheet>
     </div>
+    </AreaNames.Provider>
   )
 }
 
@@ -2025,6 +2052,7 @@ function SessionBoard({
   onTermWindow?: (t: TermSession, label: string) => void
   onTermClosed: () => void
 }) {
+  const areaName = useAreaName()
   const { openRow, setOpenRow, rowEls, busy, hostLabel, where } = ctx
   const { asking, live, recent, areas, done, doneShown } = layout
   // recover my desk: open, not running, on thor, and no write of its own in flight
@@ -2349,6 +2377,7 @@ function PickBox({ on }: { on: boolean }) {
 }
 
 function SessionItem({ s, i, ctx, noArea = false }: { s: Row; i: number; ctx: RowCtx; noArea?: boolean }) {
+  const areaName = useAreaName()
   const liveRow = isLive(s)
   const busy = ctx.busy.get(s.id)
   const locked = busy !== undefined
@@ -2828,6 +2857,7 @@ function ProjectBoard({ list, area, loading, failed, error, now, selected, onOpe
   onOpen: (p: ProjectVM) => void
   onHere?: (p: ProjectVM) => void
 }) {
+  const areaName = useAreaName()
   if (loading) {
     return (
       <div className="vc-empty vl-build" style={iv(4)} data-failed={failed || undefined}>
@@ -2889,6 +2919,7 @@ function ArchivedFold({ on, onToggle, list, loading, error, area, now, selected,
   selected: string | null
   onOpen: (p: ProjectVM) => void
 }) {
+  const areaName = useAreaName()
   const shown = area === 'all' ? list : list.filter((p) => p.area === area)
   return (
     <>
@@ -3043,6 +3074,7 @@ function ProjectDetail({ p, index, lookup, now, hostLabel, acts, onArchived, onW
   /** the sheet already names the area in its header */
   showArea?: boolean
 }) {
+  const areaName = useAreaName()
   const doc = useProjDoc(p.id)
   const targets = useLaunchTargets()
   const [more, setMore] = useState(false)

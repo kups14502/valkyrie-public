@@ -18,7 +18,7 @@ import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/proj
 import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
 import { paneTranscript } from '../terminal/transcriptFeed.js'
 import { paneStateTracker } from '../terminal/paneState.js'
-import { boardNow } from './hostLaunch.js'
+import { boardNow, launchTargets } from './hostLaunch.js'
 
 // The phone terminal. REST here is only bookkeeping — list, open, close; the
 // session itself is tmux (see terminal/tmux.ts) holding an SSH client into
@@ -210,6 +210,9 @@ router.post('/terminal/sessions', async (req, res) => {
       const t = findOdinTarget(target)
       if (!t) return res.status(400).json({ error: `no odin target named '${target}'` })
       fallback = t.label
+    } else if (host === 'thor' && !project && !desk && typeof body.label !== 'string') {
+      // the target's own name from thor's launch-targets.json, not its bare key; the key if thor is slow
+      fallback = (await launchTargets('thor', 3000))?.find((t) => t.key === target)?.label ?? target
     }
     // The conversation id is minted HERE and handed to claude, rather than read
     // back afterwards. A chip opened on a target could otherwise never name the

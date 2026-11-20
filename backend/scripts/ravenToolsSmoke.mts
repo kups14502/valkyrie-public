@@ -96,6 +96,35 @@ api.get('/api/plex/requests', (_q, r) => r.json({ requests: [
 let calendarQuery: Record<string, unknown> = {}
 api.get('/api/calendar/events', (q, r) => { calendarQuery = q.query; r.json({ events: calEvents }) })
 api.post('/vault/note', (q, r) => { notes.push({ auth: q.header('authorization'), body: q.body }); r.json({ path: `C:\\Vault\\00-Inbox\\${q.body.title}.md` }) })
+// thor's live read routes (project-files reader.mjs): off until the live block turns them on, so the vault tests above
+// first see an older service (a bare 404) and read odin's copy
+let thorLive = false
+const thorReads: { route: string; auth: string | undefined; q: Record<string, unknown> }[] = []
+const liveOnly = (route: string, fn: (q: express.Request, r: express.Response) => void) => api.get(route, (q, r, next) => {
+  if (!thorLive) return next()
+  thorReads.push({ route, auth: q.header('authorization'), q: q.query as Record<string, unknown> })
+  fn(q, r)
+})
+liveOnly('/vault/search', (_q, r) => r.json({ hits: [{ file: '00-Inbox/Today.md', line: 3, text: 'written this morning' }] }))
+liveOnly('/vault/read', (q, r) => (q.query.path === 'missing'
+  ? r.status(404).json({ error: 'no note at missing' })
+  : r.json({ path: '00-Inbox/Today.md', size: 70_000, mtime: nowMs, text: 'live text', next: 61_440 })))
+liveOnly('/vault/recent', (_q, r) => r.json({ notes: [{ path: '00-Inbox/Today.md', mtime: nowMs, title: 'Today' }] }))
+liveOnly('/vault/list', (_q, r) => r.json({ rel: '', entries: [{ name: '10-Work', dir: true, size: 0, mtime: nowMs }, { name: 'Vault Home.md', dir: false, size: 30, mtime: nowMs }] }))
+liveOnly('/files/list', (q, r) => (q.query.path
+  ? r.json({ path: 'C:\\Users\\Brendon\\Documents', entries: [{ name: 'Resume', dir: true, size: 0, mtime: nowMs }, { name: 'notes.txt', dir: false, size: 2048, mtime: nowMs }] })
+  : r.json({ roots: [{ label: 'Documents', path: 'C:\\Users\\Brendon\\Documents' }], vault: 'C:\\Vault' })))
+liveOnly('/files/read', (q, r) => {
+  const p = String(q.query.path)
+  if (p.includes('secrets')) return r.status(403).json({ error: 'not served: a place secrets live' })
+  if (p.endsWith('.pdf')) return r.json({ path: p, size: 2_000_000, mtime: nowMs, binary: true, type: 'pdf' })
+  r.json({ path: p, size: 10, mtime: nowMs, offset: 0, next: null, text: 'file text' })
+})
+liveOnly('/files/search', (q, r) => r.json({
+  files: [{ path: 'C:\\Users\\Brendon\\Documents\\Resume\\resume.docx', size: 30_000, mtime: nowMs }],
+  lines: q.query.content === '1' ? [{ file: 'C:\\x.txt', line: 2, text: 'hit' }] : undefined,
+  partial: true,
+}))
 const apiSrv = api.listen(0, '127.0.0.1')
 await new Promise((r) => apiSrv.once('listening', r))
 const apiPort = (apiSrv.address() as { port: number }).port
@@ -284,7 +313,8 @@ ioMod.setRavenToolsIo(fakeIo)
   const listed = (await (await client({ fromBrendon: true })).listTools()).tools.map((t) => t.name)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
     'session_send', 'session_read', 'session_watch', 'session_stop', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
-    'vault_recent', 'vault_note', 'tasks', 'task_add', 'task_done', 'projects', 'project_get', 'tickets', 'inbox', 'calendar', 'brief']
+    'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
+    'project_get', 'tickets', 'inbox', 'calendar', 'brief']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
   check('the core tools are left to the endpoint', !['post', 'notebook_set', 'now', 'attachment', 'attachments'].some((n) => listed.includes(n)), listed)
   check('no extra tools', listed.length === want.length, listed)
@@ -299,6 +329,7 @@ ioMod.setRavenToolsIo(fakeIo)
     ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }],
     ['media_request', { kind: 'movie', title: 'Heat 2', tmdbId: 5000 }], ['vault_note', { title: 'x', text: 'y' }],
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
+    ['thor_files', {}], ['thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\x.txt' }], ['thor_files_search', { query: 'resume' }],
   ]
   const before = acted
   for (const [tool, args] of gated) {
@@ -499,6 +530,51 @@ agents.syncRoster()
   process.env.PROJECT_FILES_URL = `http://127.0.0.1:${apiPort}`
 }
 
+// ------------------------------------------------ the live vault and files on thor ---
+
+{
+  // an older service on thor (no read routes): the files tools say so; the vault above read the copy
+  let r = await call('thor_files')
+  check('thor_files: no route on thor says so', r.isError && /does not have this route/.test(r.text), r)
+  thorLive = true
+  r = await call('vault_search', { query: 'morning' })
+  check('vault_search: live from thor, no copy note', !r.isError && r.json?.hits?.[0]?.file === '00-Inbox/Today.md' && !r.json.source, r)
+  check('vault_search: the token and text mode', thorReads.at(-1)?.auth === 'Bearer files-token' && thorReads.at(-1)?.q.mode === 'text', thorReads.at(-1))
+  r = await call('vault_search', { query: 'charge.*limit' })
+  check('vault_search: a regex goes to thor as one', thorReads.at(-1)?.q.mode === 'regex', thorReads.at(-1))
+  r = await call('vault_read', { path: 'Today' })
+  check('vault_read: live, with the next offset', !r.isError && r.text.startsWith('00-Inbox/Today.md\n\nlive text') && /offset 61440/.test(r.text), r)
+  r = await call('vault_read', { path: 'missing' })
+  check('vault_read: thor\'s refusal is the answer, no fallback', r.isError && /no note at missing/.test(r.text), r)
+  r = await call('vault_recent', {})
+  check('vault_recent: live, times in ET', !r.isError && r.json?.notes?.[0]?.title === 'Today' && / ET$/.test(r.json.notes[0].changed), r)
+  r = await call('vault_list', {})
+  check('vault_list: live top folders', !r.isError && r.json?.entries?.[0] === '10-Work/', r)
+  r = await call('thor_files')
+  check('thor_files: no path lists the roots', !r.isError && r.json?.roots?.[0]?.label === 'Documents', r)
+  r = await call('thor_files', { path: 'Documents' })
+  check('thor_files: a folder with sizes', !r.isError && r.json?.entries?.[0]?.name === 'Resume\\' && r.json.entries[1].size === '2 KB', r)
+  r = await call('thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\notes.txt' })
+  check('thor_file_read: text', !r.isError && r.text.includes('file text'), r)
+  r = await call('thor_file_read', { path: 'C:\\Thor\\secrets\\x.txt' })
+  check('thor_file_read: thor refuses secrets', r.isError && /secrets live/.test(r.text), r)
+  r = await call('thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\scan.pdf' })
+  check('thor_file_read: a PDF says what it is', !r.isError && /\.pdf file/.test(r.text), r)
+  r = await call('thor_files_search', { query: 'resume', content: true })
+  check('thor_files_search: files, lines, partial', !r.isError && r.json?.files?.length === 1 && r.json.lines?.length === 1 && /stopped early/.test(r.json.partial), r)
+  check('thor_files_search: content goes to thor', thorReads.at(-1)?.q.content === '1', thorReads.at(-1))
+  // thor off: the vault reads the copy and says so; the files tools fail plainly
+  process.env.PROJECT_FILES_URL = 'http://127.0.0.1:9'
+  r = await call('vault_search', { query: 'SPOOLER' })
+  check('vault_search: thor off reads the copy and says so', !r.isError && r.json?.hits?.length >= 1 && /nightly copy/.test(r.json.source) && /not answering/.test(r.json.source), r)
+  r = await call('vault_read', { path: '[[Spooler]]' })
+  check('vault_read: thor off reads the copy', !r.isError && r.text.startsWith('10-Work/Runbooks/Spooler.md') && /nightly copy/.test(r.text), r)
+  r = await call('thor_file_read', { path: 'C:\\x.txt' })
+  check('thor_file_read: thor off says so', r.isError && /not answering/.test(r.text), r)
+  process.env.PROJECT_FILES_URL = `http://127.0.0.1:${apiPort}`
+  thorLive = false
+}
+
 // ------------------------------------------------------------- sessions ---
 
 {
@@ -510,7 +586,7 @@ agents.syncRoster()
   const before = acted
   r = await call('session_send', { session: 'personal', text: 'Check the backups.\nThen tell me what failed.' })
   const main = created[0] as { mode: string; host: string; target: string; newId: string; label: string }
-  check('session_send: starts the main terminal', !r.isError && r.json.started === true && main?.mode === 'new' && main.host === 'thor' && main.target === 'personal' && main.label === 'Personal (main)' && /^[0-9a-f-]{36}$/.test(main.newId), { r, main })
+  check('session_send: starts the main terminal', !r.isError && r.json.started === true && main?.mode === 'new' && main.host === 'thor' && main.target === 'personal' && main.label === 'Personal' &&/^[0-9a-f-]{36}$/.test(main.newId), { r, main })
   check('session_send: typed once the prompt showed, as one line', typed.length === 1 && typed[0].text === 'Check the backups. Then tell me what failed.' && typed[0].pane === r.json.pane, typed)
   check('session_send: acted', acted > before)
   const mainPane = r.json.pane as string
@@ -577,7 +653,7 @@ agents.syncRoster()
 
   // reading
   say(mainPane, main.newId, entry('user', 'Check the backups. Then tell me what failed.'), entry('tool'), entry('assistant', 'The 3 AM backup failed: disk full.'))
-  r = await call('session_read', { session: 'Personal (main)', last: 2 })
+  r = await call('session_read', { session: 'Personal', last: 2 })
   check('session_read: prompts and answers only', r.json?.entries?.length === 2 && r.json.entries[1].from === 'claude' && /disk full/.test(r.json.entries[1].text) && / ET$/.test(r.json.entries[1].at), r.json)
   say(`sid:${BOARD_ID}`, BOARD_ID, entry('user', 'upgrade the router'), entry('assistant', 'Firmware 7.2 is installed.'))
   r = await call('session_read', { session: 'router firmware' })

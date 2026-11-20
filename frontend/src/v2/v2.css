@@ -902,7 +902,7 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
 
 /* ===========================================================================
    Shell: the header (status strip, tabs, hairline with the caret, sub-tabs),
-   scroll rail, content pager, the lights button and the player bar
+   scroll rail, content pager and the player bar
    ========================================================================= */
 
 .vl-shell {
@@ -915,20 +915,19 @@ html[data-motion='reduced'] .vl-cursor { animation: none; }
   background: #000;
   -webkit-user-select: none;
   user-select: none;
-  /* room every page keeps at its bottom for the lights button (or the player bar) */
+  /* room every page keeps at its bottom for the corner button (or the player bar) */
   --foot-pad: calc(64px + env(safe-area-inset-bottom));
   /* one column that never grows past the viewport: a wide strip or tab row clips itself instead of widening every row */
   grid-template-columns: minmax(0, 1fr);
 }
-/* a screen with foot: false (kit/shell.tsx) hides the lights button (still mounted, so the palette's
-   lights action keeps working) and reaches the bottom edge */
+/* a screen with foot: false (kit/shell.tsx) has no corner button and reaches the bottom edge */
 .vl-shell[data-nofoot] { --foot-pad: env(safe-area-inset-bottom); }
 .vl-shell[data-nofoot] .vl-foot { display: none; }
 .vl-shell-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 .vl-shell > :not(.vl-shell-backdrop) { position: relative; z-index: 1; }
 .vl-shell > .vl-head { z-index: 3; }
 /* toasts hang under the header, over the page top: never over the last row
-   of a page, never over the lights button or the player bar */
+   of a page, never over the corner button or the player bar */
 .vl-mid > .vl-shell-toasts {
   position: absolute;
   top: 4px;
@@ -1199,7 +1198,7 @@ html[data-v2win] { --strip-h: 32px; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* the rail ends above the lights button in the corner */
+  /* the rail ends above the player bar's room */
   padding: 4px 0 var(--foot-pad) env(safe-area-inset-left);
   min-height: 0;
 }
@@ -1296,7 +1295,7 @@ html[data-v2win] { --strip-h: 32px; }
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   scrollbar-width: none;
-  /* the last row scrolls clear of the lights button (or the player bar) */
+  /* the last row scrolls clear of the corner button (or the player bar) */
   padding-bottom: var(--foot-pad);
   /* no will-change: five full-page layers held forever cost memory on the
      phone; the pager's translate3d promotes a page while it moves */
@@ -1400,7 +1399,6 @@ html[data-v2win] { --strip-h: 32px; }
   .vl-setbar-back:hover { color: var(--text); }
   .vl-rail-btn:not([data-off]):hover { color: var(--fg); }
   .vl-rail-icon:hover .vl-icon { transform: scale(1.08); }
-  .vl-lamp:hover { border-color: color-mix(in srgb, var(--fg) 70%, transparent); }
   .vl-mini-btn:hover { color: var(--fg); }
 }
 /* keyboard focus on the tabs: the label lights, the ring hugs the text */
@@ -1531,57 +1529,23 @@ html[data-motion='reduced'] .vl-notch svg { animation: vl-fade .12s linear both;
   .vl-notch svg { animation: vl-fade .12s linear both; }
 }
 
-/* ---- the lights button: bottom-left on every tab; with music, the left end of the player bar ---- */
+/* ---- the player bar along the bottom, only while something plays ---- */
 .vl-shell > .vl-foot {
   position: absolute;
   z-index: 4;
-  left: calc(10px + env(safe-area-inset-left));
-  bottom: calc(8px + env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  transition: opacity .2s, visibility 0s;
-}
-.vl-shell > .vl-foot[data-bar] {
   left: 0;
   right: 0;
   bottom: 0;
   height: calc(60px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
   gap: 12px;
+  min-width: 0;
   padding: 0 calc(4px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(10px + env(safe-area-inset-left));
+  transition: opacity .2s, visibility 0s;
 }
 /* a sheet or dialog open inside the shell has the bottom to itself (Claude's sheets portal above everything anyway) */
 .vl-shell:has([aria-modal='true']) > .vl-foot { opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s; }
-
-.vl-lamp {
-  position: relative;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--fg) 14%, transparent), transparent 72%),
-    #000;
-  border: 1px solid color-mix(in srgb, var(--fg) calc(var(--panel-a) + 6%), transparent);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, .85);
-  transition: transform .12s var(--ease), border-color .3s, box-shadow .3s;
-}
-.vl-lamp::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
-.vl-lamp .vl-icon { vertical-align: 0; transition: color .3s, filter .3s; }
-.vl-lamp[data-lit] {
-  border-color: color-mix(in srgb, var(--fg) 92%, transparent);
-  background:
-    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--fg) 30%, transparent), color-mix(in srgb, var(--fg) 6%, transparent) 70%),
-    #000;
-  box-shadow:
-    0 0 18px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent),
-    0 0 3px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent),
-    inset 0 0 10px color-mix(in srgb, var(--fg) 22%, transparent);
-}
-.vl-lamp[data-pressed] { transform: scale(.92); }
-.vl-lamp[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
 
 /* ---- player bar: only while something plays ---- */
 .vl-foot-bg {

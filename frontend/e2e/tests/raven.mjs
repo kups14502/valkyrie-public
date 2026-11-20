@@ -342,7 +342,7 @@ export function ravenTests() {
         t.check(/\/api\/raven\/files\/f1\?token=e2e-img$/.test(s.img?.src ?? '') && s.img.w > 0, `the thumbnail is ${JSON.stringify(s.img)}`)
         t.check(/notes\.pdf/.test(s.file?.text ?? '') && /\/api\/raven\/files\/f2/.test(s.file?.href ?? ''), `the file chip is ${JSON.stringify(s.file)}`)
         t.check(JSON.stringify(s.props) === JSON.stringify(['Reply to Pat Example|Send,Save to Outlook drafts,Decline', 'Note on T20261119.0002|Approve,Decline']), `the proposal cards read ${JSON.stringify(s.props)}`)
-        t.check(s.gap >= 0 && s.gap < 4, `the thread did not open at its end (${s.gap} px left below)`)
+        t.check(s.gap > -1 && s.gap < 4, `the thread did not open at its end (${s.gap} px left below)`)
         t.check(s.select === 'text', `the thread's text cannot be selected (user-select ${s.select})`)
         t.check(!s.fab, 'the corner button shows on Raven')
         t.check(!s.dash, 'an em dash on Raven')
@@ -642,15 +642,15 @@ export function ravenTests() {
         const page = await t.page()
         const st = ravenBackend(page, { replyMs: 25_000 })
         await page.goto('/m/settings')
-        await until(page, () => !!document.querySelector('.vl-shell > .rv-fab') && !!document.querySelector('.vl-lamp'), 'no corner button on Settings', [], UP_MS)
+        await until(page, () => !!document.querySelector('.vl-shell > .rv-fab'), 'no corner button on Settings', [], UP_MS)
         const place = await page.eval(() => {
           const f = document.querySelector('.vl-shell > .rv-fab').getBoundingClientRect()
-          const l = document.querySelector('.vl-lamp').getBoundingClientRect()
           const W = document.documentElement.clientWidth
           const H = window.innerHeight
-          return { right: W - f.right, bottom: H - f.bottom, w: f.width, h: f.height, lw: l.width, lh: l.height, lb: H - l.bottom, open: !document.querySelector('.rv-q')?.hidden }
+          return { right: W - f.right, bottom: H - f.bottom, w: f.width, h: f.height, lamp: !!document.querySelector('.vl-lamp'), open: !document.querySelector('.rv-q')?.hidden }
         })
-        t.check(place.right >= 6 && place.right <= 24 && Math.abs(place.bottom - place.lb) < 2 && place.w === place.lw && place.h === place.lh, `the corner button is not the lights button's twin in the bottom-right: ${JSON.stringify(place)}`)
+        t.check(place.right >= 6 && place.right <= 24 && place.bottom >= 4 && place.bottom <= 44 && place.w >= 40 && place.w <= 60 && Math.abs(place.w - place.h) < 1, `the corner button is not a round button in the bottom-right: ${JSON.stringify(place)}`)
+        t.check(!place.lamp, 'a lights button shows beside the corner button')
         t.check(!place.open, 'the sheet is open before the tap')
         await page.tap({ sel: '.vl-shell > .rv-fab' }, { wait: 40_000 })
         await until(page, () => !document.querySelector('.rv-q')?.hidden, 'the tap did not open the sheet')

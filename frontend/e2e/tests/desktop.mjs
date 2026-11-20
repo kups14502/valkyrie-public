@@ -331,14 +331,12 @@ function zoomTests() {
           const tab = document.querySelector('.vl-nav .vl-tab-prim[aria-current="page"]')
           const sub = document.querySelector('.vl-nav .vl-tab-sub[aria-current="page"]')
           const shell = document.querySelector('.vl-shell').getBoundingClientRect()
-          const lamp = document.querySelector('.vl-lamp').getBoundingClientRect()
           const sb = sub ? sub.getBoundingClientRect() : null
-          return { notch: notch ? c(notch) : null, tab: tab ? c(tab) : null, sub: sb ? { left: sb.left, right: sb.right } : null, shell: { w: shell.width, h: shell.height }, W: innerWidth, H: innerHeight, lampB: lamp.bottom, lampL: lamp.left }
+          return { notch: notch ? c(notch) : null, tab: tab ? c(tab) : null, sub: sb ? { left: sb.left, right: sb.right } : null, shell: { w: shell.width, h: shell.height }, W: innerWidth, H: innerHeight }
         })
         if (r.notch != null && r.tab != null) t.check(Math.abs(r.notch - r.tab) <= 3, `${how}: the caret is ${Math.round(r.notch - r.tab)} px off the lit tab`)
         t.check(Math.abs(r.shell.w - r.W) <= 2 && Math.abs(r.shell.h - r.H) <= 2, `${how}: the shell is ${Math.round(r.shell.w)}x${Math.round(r.shell.h)} in a ${r.W}x${r.H} window`)
         t.check(r.sub && r.sub.right <= r.W + 0.5 && r.sub.left >= -0.5, `${how}: the lit sub-tab is off screen`)
-        t.check(r.lampB <= r.H + 0.5 && r.lampB >= r.H - 48 && r.lampL <= 40, `${how}: the lights button left the bottom-left corner (bottom ${Math.round(r.lampB)} of ${r.H})`)
       }
       await want(1, 'at start')
       await page.key('=', { ctrl: true })

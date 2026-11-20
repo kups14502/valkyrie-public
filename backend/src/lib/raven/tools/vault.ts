@@ -5,20 +5,22 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { nyToday } from '../../tasksStore.js'
 import type { RavenToolCtx } from '../types.js'
-import { clip, needBrendon, RavenToolError, toolRun } from './util.js'
+import { filesUrl, thorGet } from './thorfiles.js'
+import { clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
-// Brendon's Obsidian vault. The vault itself is on thor; odin holds a
-// read-only copy refreshed nightly (VAULT_DIR), which is what search, read
-// and recent look at, so today's notes can be missing. A new note is written
-// on thor by thor's project-files service (POST /vault/note); when thor does
-// not answer, nothing is written and nothing is queued.
+// Brendon's Obsidian vault. The vault itself is on thor, and search, read,
+// recent and list ask thor first (project-files GET /vault/*), so today's
+// notes are there. When thor does not answer (off, asleep), they read odin's
+// read-only copy instead (refreshed nightly, VAULT_DIR) and say so. A new note
+// is written on thor (POST /vault/note); when thor does not answer, nothing is
+// written and nothing is queued.
 //
-// The area folders are read from the copy at run time, never named here.
+// The area folders are read at run time, never named here.
 
 const vaultDir = () => process.env.RAVEN_VAULT_DIR || '/home/brendon/vault'
 const rgBin = () => process.env.RAVEN_RG_BIN || '/usr/bin/rg'
-const filesUrl = () => process.env.PROJECT_FILES_URL
-  || `http://${process.env.THOR_LAUNCHER_HOST || '100.118.7.57'}:8767`
+/** The words a fallback answer carries. */
+const copyNote = (why: string) => `odin's nightly copy: ${why}, so today's notes can be missing`
 
 const MAX_HITS = 40
 const READ_MAX = 60 * 1024
@@ -161,24 +163,38 @@ async function titleOf(file: string, fallback: string): Promise<string> {
 
 export function registerVaultTools(server: McpServer, ctx: RavenToolCtx): void {
   server.registerTool('vault_search', {
-    description: "Search Brendon's Obsidian vault (odin's nightly copy; today's notes can be missing). Case-insensitive; plain text unless the "
-      + 'query is clearly a regex. area narrows it to one top folder ("work", "daily", or the folder name). Newest notes first, up to 40 hits.',
+    description: "Search Brendon's Obsidian vault, live on thor (odin's nightly copy only when thor does not answer, and the answer says so). "
+      + 'Case-insensitive; plain text unless the query is clearly a regex. area narrows it to one top folder ("work", "daily", or the folder '
+      + 'name). Newest notes first, up to 40 hits. For his other files on thor use thor_files_search.',
     inputSchema: { query: z.string().min(2).max(200), area: z.string().max(40).optional(), limit: z.number().int().min(1).max(MAX_HITS).optional() },
   }, (a) => toolRun(async () => {
+    const live = await thorGet<{ hits: Hit[]; more?: boolean; area?: string }>('/vault/search', {
+      q: a.query, area: a.area, limit: a.limit, mode: looksLikeRegex(a.query) ? 'regex' : 'text',
+    })
+    if (live.ok) {
+      if (!live.body.hits.length) return `No note in the vault${a.area ? ` (${live.body.area ?? a.area})` : ''} has "${a.query}".`
+      return { hits: live.body.hits, more: live.body.more }
+    }
     const r = await root()
     const where = a.area ? await areaDir(r, a.area) : '.'
     const regex = looksLikeRegex(a.query)
     let res = await rg(r, a.query, where, !regex)
     if (res.bad) res = await rg(r, a.query, where, true)
     const hits = res.hits.slice(0, a.limit ?? MAX_HITS)
-    if (!hits.length) return `No note in the vault${a.area ? ` (${where})` : ''} has "${a.query}".`
-    return { hits, more: res.more || hits.length < res.hits.length || undefined }
+    if (!hits.length) return `No note in the vault${a.area ? ` (${where})` : ''} has "${a.query}" (${copyNote(live.why)}).`
+    return { hits, more: res.more || hits.length < res.hits.length || undefined, source: copyNote(live.why) }
   }))
 
   server.registerTool('vault_read', {
-    description: 'Read one vault note by its path from vault_search or vault_recent (a [[wiki link]] or a bare note name works too), up to 60 KB.',
-    inputSchema: { path: z.string().min(1).max(400) },
+    description: 'Read one vault note, live on thor, by its path from vault_search, vault_recent or vault_list (a [[wiki link]] or a bare note '
+      + "name works too), 60 KB a call (offset reads on). Falls back to odin's nightly copy when thor does not answer.",
+    inputSchema: { path: z.string().min(1).max(400), offset: z.number().int().min(0).optional() },
   }, (a) => toolRun(async () => {
+    const live = await thorGet<{ path: string; text: string; next?: number | null; size: number }>('/vault/read', { path: a.path, offset: a.offset })
+    if (live.ok) {
+      const b = live.body
+      return `${b.path}\n\n${b.text}${b.next != null ? `\n\n[more: call again with offset ${b.next} of ${b.size} bytes]` : ''}`
+    }
     const r = await root()
     const file = await findNote(r, a.path)
     const st = await fsp.stat(file)
@@ -194,13 +210,39 @@ export function registerVaultTools(server: McpServer, ctx: RavenToolCtx): void {
     }
     if (buf.includes(0)) throw new RavenToolError(`${path.relative(r, file)} is not a text note`)
     const text = buf.toString('utf8')
-    return `${path.relative(r, file)}\n\n${text}${st.size > READ_MAX ? `\n\n[cut at 60 KB of ${Math.round(st.size / 1024)} KB]` : ''}`
+    return `${path.relative(r, file)}\n\n${text}${st.size > READ_MAX ? `\n\n[cut at 60 KB of ${Math.round(st.size / 1024)} KB]` : ''}\n\n[${copyNote(live.why)}]`
+  }))
+
+  server.registerTool('vault_list', {
+    description: 'List one folder of the vault, live on thor (no path: the top folders, the areas). Notes and subfolders, with when each note changed.',
+    inputSchema: { path: z.string().max(400).optional() },
+  }, (a) => toolRun(async () => {
+    const rel = a.path?.trim().replace(/^\/+|\/+$/g, '') ?? ''
+    const live = await thorGet<{ rel: string; entries: { name: string; dir: boolean; size: number; mtime: number }[]; truncated?: boolean }>('/vault/list', { rel })
+    if (live.ok) {
+      return {
+        folder: live.body.rel || '(the vault)',
+        entries: live.body.entries.map((e) => (e.dir ? `${e.name}/` : `${e.name} (changed ${et(e.mtime)})`)),
+        truncated: live.body.truncated,
+      }
+    }
+    const r = await root()
+    const dir = rel ? await inside(r, rel) : r
+    const ents = await fsp.readdir(dir, { withFileTypes: true }).catch(() => { throw new RavenToolError(`no vault folder at ${rel}`) })
+    return {
+      folder: rel || '(the vault)',
+      entries: ents.filter((d) => !d.name.startsWith('.')).map((d) => (d.isDirectory() ? `${d.name}/` : d.name)).sort(),
+      source: copyNote(live.why),
+    }
   }))
 
   server.registerTool('vault_recent', {
-    description: 'The newest session notes and daily notes in the vault from the last few days, newest first (odin\'s nightly copy).',
+    description: 'The vault notes changed in the last few days, newest first, live on thor (session notes, daily notes, anything he edited). '
+      + "Falls back to odin's nightly copy (session and daily notes only) when thor does not answer.",
     inputSchema: { days: z.number().int().min(1).max(30).optional() },
   }, (a) => toolRun(async () => {
+    const live = await thorGet<{ notes: { path: string; mtime: number; title: string }[]; more?: boolean }>('/vault/recent', { days: a.days ?? 3 })
+    if (live.ok) return { notes: live.body.notes.map((n) => ({ path: n.path, title: n.title, changed: et(n.mtime) })), more: live.body.more }
     const r = await root()
     const cutoff = nyToday(Date.now() - (a.days ?? 3) * 86_400_000)
     const notes = (await walk(r)).flatMap((f) => {
@@ -220,7 +262,7 @@ export function registerVaultTools(server: McpServer, ctx: RavenToolCtx): void {
       title: n.daily ? n.date : await titleOf(path.join(r, n.f), path.basename(n.f, '.md').replace(DATE_RE, '').replace(/^-/, '').replace(/-/g, ' ')),
     })))
     const today = nyToday()
-    return { notes: out, more: withTime.length > RECENT_MAX || undefined, note: out.some((n) => n.date === today) ? undefined : "nothing from today yet: the copy on odin is refreshed nightly" }
+    return { notes: out, more: withTime.length > RECENT_MAX || undefined, source: copyNote(live.why), note: out.some((n) => n.date === today) ? undefined : 'nothing from today in the copy' }
   }))
 
   server.registerTool('vault_note', {
@@ -257,6 +299,6 @@ export function registerVaultTools(server: McpServer, ctx: RavenToolCtx): void {
     if (status !== 200 && status !== 201) throw new RavenToolError(`thor did not write the note: ${typeof body?.error === 'string' ? body.error : `answered ${status}`}`)
     if (typeof body?.path !== 'string') throw new RavenToolError('thor answered without a path; the note may not exist')
     ctx.acted()
-    return { written: body.path, note: 'on thor now; the copy on odin gets it tonight' }
+    return { written: body.path, note: 'on thor now (vault_read reads it there at once); the copy on odin gets it tonight' }
   }))
 }

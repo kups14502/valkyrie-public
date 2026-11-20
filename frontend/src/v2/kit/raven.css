@@ -1,6 +1,7 @@
 /* Raven's shared pieces (kit/raven.tsx): the composer, attachment chips, a message's files, the
    floating button, the quick sheet and the Raven tab's badge. Plain CSS on top of v2.css; colors
-   are the mode variables. No boxes: hairlines, text buttons, one row per thing. */
+   are the mode variables. Hairlines and text buttons, one row per thing; the composer is the one
+   rounded box and his own lines are bubbles, like a chat app. */
 
 /* ---------- Markdown in a reply ---------- */
 .rv-md { font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; color: var(--text); }
@@ -12,17 +13,21 @@
 /* quieter than the labels, still readable at 11 px (--faint is about 3.5:1 on black) */
 .rv-meta { margin: 3px 0 0; font-size: 11px; line-height: 15px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
 
-/* ---------- the composer ---------- */
+/* ---------- the composer: one rounded box, attach on the left, a round Send arrow on the right ---------- */
 .rv-compose {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 0 10px;
-  border-top: 1px solid var(--line);
+  gap: 2px;
+  padding: 4px 5px 4px 4px;
+  background: color-mix(in srgb, var(--fg) var(--fill-a), #050505);
+  border: 1px solid color-mix(in srgb, var(--fg) calc(var(--line-a) + 8%), transparent);
+  border-radius: 24px;
+  transition: border-color .2s, box-shadow .2s;
 }
-.rv-compose[data-over] { border-top-color: var(--fg); box-shadow: 0 -8px 16px -14px var(--fg); }
-.rv-compose-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.rv-compose:focus-within { border-color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.rv-compose[data-over] { border-color: var(--fg); box-shadow: var(--glow); }
+.rv-compose-row { display: flex; align-items: flex-end; gap: 4px; min-width: 0; }
 .rv-compose textarea {
   flex: 1;
   min-width: 0;
@@ -32,7 +37,7 @@
   font: inherit;
   font-size: 14px;
   line-height: 20px;
-  color: var(--ink-hi);
+  color: var(--text);
   background: transparent;
   border: 0;
   resize: none;
@@ -49,11 +54,29 @@
   place-items: center;
   width: 38px;
   height: 38px;
+  border-radius: 50%;
 }
 .rv-attach[data-pressed] .vl-icon { color: var(--fg); filter: var(--icon-glow); }
-.rv-send.vl-btn-line { flex: none; min-height: 36px; margin-bottom: 1px; font-size: 12.5px; }
+@media (hover: hover) and (pointer: fine) { .rv-attach:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); } }
+.rv-send {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 0 2px;
+  border-radius: 50%;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--line);
+  transition: background-color .15s, color .15s, border-color .15s, box-shadow .15s, transform .12s var(--ease);
+}
+.rv-send[data-ready] { color: var(--plate-ink); background: var(--fg); border-color: var(--fg); box-shadow: var(--glow); }
+.rv-send[data-pressed] { transform: scale(.9); }
+.rv-send:disabled { cursor: default; }
 
-.rv-chips { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 2px; }
+.rv-chips { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 10px 0; }
 .rv-chip {
   display: inline-flex;
   align-items: center;
@@ -121,7 +144,7 @@
   .vl-tab-prim .rv-badge { position: absolute; top: 5px; left: calc(50% + 5px); margin: 0; }
 }
 
-/* ---------- the floating button: bottom-right, the lights button's twin ---------- */
+/* ---------- the floating button: bottom-right ---------- */
 /* button.: outranks v2.css's `.vl-shell > :not(.vl-shell-backdrop)`, whichever file loads first */
 .vl-shell > button.rv-fab {
   position: absolute;
@@ -199,14 +222,27 @@
   gap: 8px;
   scrollbar-width: thin;
 }
-.rv-q-me { margin: 0; font-size: 13.5px; line-height: 19px; color: var(--ink-hi); white-space: pre-wrap; overflow-wrap: anywhere; }
-.rv-q-me::before { content: 'You  '; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); white-space: pre; }
+/* his line: the same bubble as the Raven tab's */
+.rv-q-me {
+  align-self: flex-end;
+  max-width: 85%;
+  margin: 0;
+  padding: 8px 13px;
+  font-size: 13.5px;
+  line-height: 19px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--fg) calc(var(--fill-a) + 6%), #050505);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.rv-q-thread > .rv-files { align-self: flex-end; justify-content: flex-end; }
 .rv-q-wait { margin: 0; font-size: 12px; color: var(--dim); }
 .rv-q-wait[data-busy] { color: var(--fg); }
 .rv-q-wait[data-busy]::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--fg); box-shadow: var(--glow); vertical-align: 1px; animation: rv-blink 1.4s ease-in-out infinite; }
-.rv-q-reply { padding-top: 6px; border-top: 1px solid var(--line); }
-.rv-q-compose { border-top: 0; padding-top: 4px; }
-.rv-q[data-sent] .rv-q-compose { border-top: 1px solid var(--line); }
+.rv-q-reply { padding-top: 2px; }
+.rv-q-compose { margin: 6px 0 12px; }
 .rv-q-sheet .rv-chip-name { max-width: 10rem; }
 .rv-q-sheet, .rv-q-sheet :is(p, .rv-md) { -webkit-user-select: text; user-select: text; }
 @keyframes rv-blink { 50% { opacity: .3; } }
@@ -230,6 +266,7 @@ html[data-motion='reduced'] .rv-q-sheet, html[data-motion='reduced'] .rv-q-back 
 /* a finger: at least a 44 px target, drawn the same */
 @media (pointer: coarse) {
   .rv-attach::after { content: ''; position: absolute; inset: -3px; }
+  .rv-send::after { content: ''; position: absolute; inset: -5px; }
   .rv-file { position: relative; }
   .rv-file::after { content: ''; position: absolute; inset: -8px 0; }
   .rv-q-x::after { content: ''; position: absolute; inset: -4px -7px; }
