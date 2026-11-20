@@ -104,12 +104,23 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ],
     messages: [...fill, ...seed(now)],
     nextId: 200, files: new Map(), replyMs, stopped: false,
-    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [],
+    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [],
+    settings: {
+      model: 'auto', effort: 'auto',
+      rules: { simple: { model: 'sonnet', effort: 'low' }, complex: { model: 'opus', effort: 'high' }, voice: { model: 'sonnet', effort: 'low' }, background: { model: 'sonnet', effort: 'low' } },
+    },
+    models: [
+      { key: 'opus', id: 'claude-opus-5-5', label: 'Opus 5.5' },
+      { key: 'sonnet', id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+      { key: 'haiku', id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
+      { key: 'fable', id: 'claude-fable-5-1', label: 'Fable 5.1', unavailable: 'needs usage credits' },
+    ],
   }
   const bump = () => { st.seq++ }
   const body = () => ({
     seq: st.seq, status: st.status, statusNote: st.statusNote, tier: st.tier, model: st.model, effort: st.effort, unread: st.unread,
     mains: st.mains, watching: st.watching, agents: st.agents, paused: st.paused, messages: st.messages.slice(-60),
+    settings: st.settings, models: st.models,
   })
   page.mock('/api/raven', () => (down ? { status: 503, body: { error: 'Raven is restarting' } } : ok(body())))
   page.mock('/api/raven/messages', ({ query }) => {
@@ -176,6 +187,16 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       st.files.set(f.id, f)
       st.uploads.push({ name: rawName, type: f.mime, bytes: w.body.length })
       return ok(f)
+    }
+    if (w.method === 'POST' && w.path === '/api/raven/settings') {
+      st.picks.push(j)
+      const next = { ...st.settings, rules: { ...st.settings.rules } }
+      if (j.model) next.model = j.model
+      if (j.effort) next.effort = j.effort
+      for (const [k, v] of Object.entries(j.rules ?? {})) next.rules[k] = { ...next.rules[k], ...v }
+      st.settings = next
+      bump()
+      return ok({ settings: st.settings, models: st.models })
     }
     if (w.method === 'POST' && w.path === '/api/raven/stop') {
       st.stops++
@@ -802,6 +823,95 @@ export function ravenTests() {
             await t.shot(page, path.replace(/^\/m\//, '').replace(/\//g, '-'))
           })
         }
+      },
+    })
+  }
+
+  // the model and effort pick in the composer: two small buttons, their menus, Automatic rules, a change from
+  // another device arriving through the long-poll, and a reply's line naming the rule and a stand-in model
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:pick:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page)
+        st.messages.push({ id: 150, author: 'raven', text: 'Summed up.', createdAt: iso(Date.now() - MIN), refs: [],
+          meta: { tier: 'fable', model: 'claude-opus-5-5', asked: 'claude-fable-5-1', effort: 'medium', rule: 'complex', why: 'a write-up' }, proposal: null })
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => document.querySelectorAll('.rv .rv-compose .rv-pickb').length === 2, 'the two pick buttons did not show in the composer')
+        const snap = () => page.eval(() => {
+          const qa = (sel) => [...document.querySelectorAll(sel)]
+          const ta = document.querySelector('.rv .rv-compose textarea')?.getBoundingClientRect()
+          const row = document.querySelector('.rv .rv-compose-row')?.getBoundingClientRect()
+          const send = document.querySelector('.rv .rv-send')?.getBoundingClientRect()
+          const pick = document.querySelector('.rv .rv-pick-wrap')?.getBoundingClientRect()
+          return {
+            buttons: qa('.rv .rv-compose .rv-pickb').map((b) => b.textContent.trim()),
+            menu: qa('.rv .rv-menu [role="menuitemradio"]').map((i) => `${i.querySelector('.rv-menu-label')?.textContent}${i.getAttribute('aria-checked') === 'true' ? '*' : ''}${i.querySelector('.rv-menu-note') ? `(${i.querySelector('.rv-menu-note').textContent})` : ''}`),
+            more: !!document.querySelector('.rv .rv-menu .rv-menu-more'),
+            rules: qa('.rv-rules .rv-rules-row[data-rule]').map((r) => `${r.dataset.rule}:${[...r.querySelectorAll('select')].map((x) => x.value).join('/')}`),
+            ta: ta ? Math.round(ta.width) : 0,
+            inRow: !!(row && send && pick && pick.right <= send.left + 1 && pick.left >= (ta?.right ?? 0) - 1 && send.right <= row.right + 1),
+            meta: qa('.rv .rv-msg[data-kind="raven"] .rv-meta').map((p) => p.textContent).pop() ?? '',
+          }
+        })
+        let s = await snap()
+        t.check(JSON.stringify(s.buttons) === JSON.stringify(['Auto', 'auto']), `the pick buttons read ${JSON.stringify(s.buttons)}`)
+        t.check(s.inRow && s.ta >= 150, `the pick does not sit between the text and Send, or squeezes the text (${s.ta} px): ${JSON.stringify(s)}`)
+        t.check(/^Opus 5\.5 \(Fable 5\.1 unavailable\) · medium · complex · \d{1,2}:\d{2} [AP]M ET$/.test(s.meta), `the reply's line reads ${JSON.stringify(s.meta)}`)
+
+        await page.tap({ sel: '.rv .rv-pickb', index: 0 }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.rv .rv-menu'), 'the model menu did not open')
+        s = await snap()
+        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5', 'Fable 5.1(needs usage credits, runs Opus)']) && s.more,
+          `the model menu reads ${JSON.stringify(s.menu)} (rules link ${s.more})`)
+        await page.tap({ sel: '.rv .rv-menu-item', text: 'Opus 5.5' }, { wait: 40_000 })
+        await waitFor(() => st.picks.length === 1, 20_000, 'POST /api/raven/settings (model)').catch((e) => t.check(false, e.message))
+        t.check(st.picks[0]?.model === 'opus', `the model pick sent ${JSON.stringify(st.picks[0])}`)
+        await until(page, () => !document.querySelector('.rv .rv-menu') && document.querySelector('.rv .rv-pickb')?.textContent.trim() === 'Opus 5.5', 'the model button did not read Opus 5.5 with the menu shut')
+
+        await page.tap({ sel: '.rv .rv-pickb', index: 1 }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.rv .rv-menu'), 'the effort menu did not open')
+        s = await snap()
+        t.check(JSON.stringify(s.menu) === JSON.stringify(['Automatic*(per message)', 'Low', 'Medium', 'High']), `the effort menu reads ${JSON.stringify(s.menu)}`)
+        await page.tap({ sel: '.rv .rv-menu-item', text: 'High' }, { wait: 40_000 })
+        await waitFor(() => st.picks.length === 2, 20_000, 'POST /api/raven/settings (effort)').catch((e) => t.check(false, e.message))
+        t.check(st.picks[1]?.effort === 'high', `the effort pick sent ${JSON.stringify(st.picks[1])}`)
+        await until(page, () => document.querySelectorAll('.rv .rv-pickb')[1]?.textContent.trim() === 'high', 'the effort button did not read high')
+
+        // Automatic rules
+        await page.tap({ sel: '.rv .rv-pickb', index: 1 }, { wait: 40_000 })
+        await page.tap({ sel: '.rv .rv-menu-more' }, { wait: 40_000 })
+        await until(page, () => document.querySelectorAll('.rv-rules .rv-rules-row[data-rule]').length === 4, 'Automatic rules did not open with four rows')
+        s = await snap()
+        t.check(JSON.stringify(s.rules) === JSON.stringify(['simple:sonnet/low', 'complex:opus/high', 'voice:sonnet/low', 'background:sonnet/low']), `the rules read ${JSON.stringify(s.rules)}`)
+        const fixedNote = await page.eval(() => document.querySelector('.rv-rules-fixed')?.textContent ?? '')
+        t.check(/model and effort pick is fixed/.test(fixedNote), `the panel does not say both are fixed: ${JSON.stringify(fixedNote)}`)
+        await page.eval(() => {
+          const sel = document.querySelector('.rv-rules-row[data-rule="complex"] select')
+          sel.value = 'fable'
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+        })
+        await waitFor(() => st.picks.length === 3, 20_000, 'POST /api/raven/settings (rule)').catch((e) => t.check(false, e.message))
+        t.check(st.picks[2]?.rules?.complex?.model === 'fable', `the rule change sent ${JSON.stringify(st.picks[2])}`)
+        await fits(t, page, `${ROUTE} rules @${device}`)
+        await t.shot(page, 'rules')
+        await page.tap({ sel: '.rv-rules-done' }, { wait: 40_000 })
+        await until(page, () => !document.querySelector('.rv-rules'), 'Done did not close Automatic rules')
+
+        // another device changed the pick: this one follows through the long-poll
+        st.settings = { ...st.settings, model: 'haiku', effort: 'auto' }
+        st.seq++
+        await until(page, () => {
+          const b = [...document.querySelectorAll('.rv .rv-pickb')].map((x) => x.textContent.trim())
+          return b[0] === 'Haiku 5.5' && b[1] === 'auto'
+        }, 'a pick changed on another device did not arrive')
+        await fits(t, page, `${ROUTE} pick @${device}`)
+        await t.shot(page, 'pick')
       },
     })
   }

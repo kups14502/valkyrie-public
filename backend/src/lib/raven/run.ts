@@ -18,9 +18,9 @@ import { ensureRavenChannel } from './channel.js'
 import { ravenBrief } from './brief.js'
 import { humanSize, pruneRavenFiles, ravenFilesFor } from './files.js'
 import {
-  effortFor, effortRefused, errorText, fallbackFor, isEffortError, isUnknownModelError, markBadModel, modelFor, modelLabel, RELAY_ROUTE, routeMessage,
-  type Route,
+  effortFor, effortRefused, errorText, fallbackFor, isEffortError, isUnknownModelError, markBadModel, modelFor, modelLabel, wantedModel,
 } from './models.js'
+import { chooseRoute, needsRouter, ravenSettings, type Route } from './settings.js'
 import { ravenPush } from './push.js'
 import { ravenSnapshot, startRavenTools } from './tools/index.js'
 import { RAVEN_CHANNEL, RAVEN_ID, RAVEN_NAME, type RavenEffort, type RavenMeta, type RavenNotice, type RavenTier, type RavenToolCtx, type RavenToolGroup } from './types.js'
@@ -355,15 +355,20 @@ async function runOnce(): Promise<boolean> {
   }
   current = run
   const t0 = Date.now()
-  let route: Route = RELAY_ROUTE
+  // his pick as it stands when the run starts (the Raven tab's model and effort, kv raven:settings)
+  const settings = ravenSettings()
+  const bg = settings.rules.background
+  let route: Route = { tier: bg.model, effort: bg.effort, why: 'relay', routed: false, rule: 'background' }
   let used: { model: string | null; effort: RavenEffort | null } = { model: null, effort: null }
   try {
     if (fromBrendon) {
-      setState({ status: 'routing', statusNote: 'Choosing a model', tier: null, model: null, effort: null })
       const asked = events.filter(isBrendonEvent)
       const text = asked.map((e) => String(e.payload.text ?? '')).join('\n\n')
       const nFiles = asked.reduce((n, e) => n + (Array.isArray(e.payload.files) ? e.payload.files.length : 0), 0)
-      route = await routeMessage(text, { files: nFiles, signal: run.ac.signal })
+      // Siri waits on the spoken answer: a run with a voice message in it follows the voice rule, with no router call
+      const voice = asked.some((e) => e.payload.source === 'siri')
+      if (needsRouter(settings, voice)) setState({ status: 'routing', statusNote: 'Choosing a model', tier: null, model: null, effort: null })
+      route = await chooseRoute(settings, { fromBrendon, voice, text, files: nFiles, signal: run.ac.signal })
       if (run.ac.signal.aborted) throw new ClaudeCliError('stopped')
     }
     let result = await runModel(run, route, events, (u) => { used = u })
@@ -380,7 +385,7 @@ async function runOnce(): Promise<boolean> {
     let reply = result.text.trim()
     if (fromBrendon && isSilent(reply)) reply = 'I have no answer for that. Ask me again in other words.'
     if (reply && !NO_REPLY_RE.test(reply)) {
-      const meta: RavenMeta = { tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, why: route.why }
+      const meta: RavenMeta = { tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, why: route.why, ...pickMeta(route, used.model) }
       if (replyTo) meta.replyTo = replyTo
       const msg = ravenMessage(reply, { meta, push: true, force: fromBrendon })
       settle(ids, { reply: msg.text, done: true })
@@ -396,7 +401,7 @@ async function runOnce(): Promise<boolean> {
       settle(ids, { reply: 'Stopped.', done: true })
     } else {
       const line = `That failed: ${errorLine(e).replace(/[.\s]+$/, '')}.`
-      const meta: RavenMeta = { error: clip(raw, 500), tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined }
+      const meta: RavenMeta = { error: clip(raw, 500), tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, ...pickMeta(route, used.model) }
       if (replyTo) meta.replyTo = replyTo
       ravenMessage(line, { meta, push: fromBrendon, force: true })
       settle(ids, { reply: line, done: true, error: true })
@@ -407,6 +412,15 @@ async function runOnce(): Promise<boolean> {
     setState({ status: 'idle', statusNote: '', tier: null, model: null, effort: null, lastRunAt: nowIso() })
   }
   return openEvents(RAVEN_ID).length > 0
+}
+
+/** A reply's rule (what Automatic chose it by) and the model wanted when another ran in its place. */
+function pickMeta(route: Route, model: string | null): Pick<RavenMeta, 'rule' | 'asked'> {
+  const out: Pick<RavenMeta, 'rule' | 'asked'> = {}
+  if (route.rule) out.rule = route.rule
+  const wanted = wantedModel(route.tier)
+  if (model && model !== wanted) out.asked = wanted
+  return out
 }
 
 /** The CLI run itself, with one retry on the fallback model and one on a refused effort. */
@@ -452,7 +466,7 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
         if (isUnknownModelError(msg)) {
           const next = fallbackFor(route.tier, model)
           if (next) {
-            markBadModel(model)
+            markBadModel(model, msg)
             model = next
             continue
           }

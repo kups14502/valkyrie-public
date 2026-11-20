@@ -1,17 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Bird, FileText, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Bird, Check, FileText, Gauge, Paperclip, X } from 'lucide-react'
 import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { useProfile } from '../../lib/deviceMode'
 import {
-  etTime, fmtSize, isImageFile, markRavenRead, modelLabel, ravenBusy, ravenStatusText, sendRaven, type RavenFile, type RavenMsg,
+  RULE_NAME, fmtSize, isImageFile, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine, replyMetaTitle, sendRaven,
+  type RavenFile, type RavenModelInfo, type RavenMsg, type RavenPage, type RavenPickEffort, type RavenRuleKey, type RavenSettings,
+  type RavenSettingsPatch, type RavenTier,
 } from '../../lib/ravenApi'
 import {
   addToThread, openRavenQuick, refreshRavenUnread, setQuickOpen, setQuickOpener, useKeyboardInset, useQuickOpen, useRaven,
-  useRavenDraft, useRavenFileUrl, useRavenUnread, type RavenDraft,
+  useRavenDraft, useRavenFileUrl, useRavenUnread, useSaveRavenSettings, type RavenDraft,
 } from './ravenStore'
 import { requestIntent } from './shell'
 import { Icon } from './icons'
@@ -41,7 +43,7 @@ const ACCEPT = 'image/*,video/*,application/pdf,text/*,*/*'
  * Enter sends with a keyboard and mouse, Shift+Enter is a new line; a pasted
  * or dropped file attaches.
  */
-export function RavenComposer({ draft, onSend, sending, placeholder, taRef, className, maxHeight = 180 }: {
+export function RavenComposer({ draft, onSend, sending, placeholder, taRef, className, maxHeight = 180, tools }: {
   draft: RavenDraft
   onSend: () => void
   sending: boolean
@@ -50,6 +52,8 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
   taRef: RefObject<HTMLTextAreaElement | null>
   className?: string
   maxHeight?: number
+  /** small controls between the text and Send (the model and effort pick) */
+  tools?: ReactNode
 }) {
   const pick = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
@@ -141,6 +145,7 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
           aria-label={placeholder}
           enterKeyHint="send"
         />
+        {tools}
         <Press
           type="button"
           className="rv-send"
@@ -154,6 +159,175 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
         </Press>
       </div>
     </form>
+  )
+}
+
+// ------------------------------------------------- the model and effort pick ---
+
+const EFFORT_NAME: Record<RavenPickEffort, string> = { low: 'Low', medium: 'Medium', high: 'High' }
+const PICK_EFFORTS: RavenPickEffort[] = ['low', 'medium', 'high']
+const RULE_NOTE: Record<RavenRuleKey, string> = {
+  simple: 'Quick lookups, grocery adds, one quick action',
+  complex: 'Several steps, work tickets, client mail, planning',
+  voice: 'Siri. Not sorted first, so the spoken answer is quick',
+  background: 'Relays and follow-ups you did not start',
+}
+const RULE_ORDER: RavenRuleKey[] = ['simple', 'complex', 'voice', 'background']
+
+/**
+ * Two small text buttons in the composer, left of Send: the model Raven runs on and the effort, each Automatic or
+ * fixed. Each opens a short menu upward; both menus end with Automatic rules, the panel where he sets what
+ * Automatic uses. The pick lives on odin (every device shows the same one) and comes with the Raven page.
+ */
+export function RavenPick({ page }: { page: RavenPage | undefined }) {
+  const [menu, setMenu] = useState<null | 'model' | 'effort'>(null)
+  const [rules, setRules] = useState(false)
+  const wrap = useRef<HTMLDivElement>(null)
+  const save = useSaveRavenSettings()
+
+  useEffect(() => {
+    if (!menu) return
+    const away = (e: PointerEvent) => { if (!wrap.current?.contains(e.target as Node)) setMenu(null) }
+    const esc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // the menu closes, not the quick sheet around it
+      e.preventDefault()
+      e.stopPropagation()
+      setMenu(null)
+    }
+    document.addEventListener('pointerdown', away, true)
+    window.addEventListener('keydown', esc, true)
+    return () => { document.removeEventListener('pointerdown', away, true); window.removeEventListener('keydown', esc, true) }
+  }, [menu])
+
+  const s = page?.settings
+  if (!s) return null
+  const models = page?.models ?? []
+  const nameOf = (k: RavenTier) => models.find((m) => m.key === k)?.label ?? k
+  const modelText = s.model === 'auto' ? 'Auto' : nameOf(s.model)
+  const effortText = s.effort === 'auto' ? 'auto' : s.effort
+  const pick = (patch: RavenSettingsPatch) => { setMenu(null); save.mutate(patch) }
+  const openRules = () => { setMenu(null); setRules(true) }
+  const item = (on: boolean, label: string, onPress: () => void, note?: string) => (
+    <Press key={label} role="menuitemradio" aria-checked={on} className="rv-menu-item" data-on={on || undefined} onPress={onPress}>
+      <Check size={13} strokeWidth={2} className="rv-menu-check" aria-hidden />
+      <span className="rv-menu-label">{label}</span>
+      {note && <span className="rv-menu-note">{note}</span>}
+    </Press>
+  )
+
+  return (
+    <div className="rv-pick-wrap" ref={wrap}>
+      <Press
+        className="rv-pickb"
+        data-on={menu === 'model' || undefined}
+        data-fixed={s.model !== 'auto' || undefined}
+        aria-haspopup="menu"
+        aria-expanded={menu === 'model'}
+        aria-label={`Model: ${s.model === 'auto' ? 'Automatic' : modelText}`}
+        title="The model Raven runs on"
+        onPress={() => setMenu((m) => (m === 'model' ? null : 'model'))}
+      >
+        <span>{modelText}</span>
+      </Press>
+      <Press
+        className="rv-pickb"
+        data-on={menu === 'effort' || undefined}
+        data-fixed={s.effort !== 'auto' || undefined}
+        aria-haspopup="menu"
+        aria-expanded={menu === 'effort'}
+        aria-label={`Effort: ${s.effort === 'auto' ? 'Automatic' : EFFORT_NAME[s.effort]}`}
+        title="How hard Raven thinks"
+        onPress={() => setMenu((m) => (m === 'effort' ? null : 'effort'))}
+      >
+        <Gauge size={13} strokeWidth={1.7} className="vl-icon" aria-hidden />
+        <span>{effortText}</span>
+      </Press>
+      {menu === 'model' && (
+        <div className="rv-menu" role="menu" aria-label="Model">
+          {item(s.model === 'auto', 'Automatic', () => pick({ model: 'auto' }), 'per message')}
+          {models.map((m) => item(s.model === m.key, m.label, () => pick({ model: m.key }), m.unavailable ? `${m.unavailable}, runs Opus` : undefined))}
+          <Press role="menuitem" className="rv-menu-item rv-menu-more" onPress={openRules}>Automatic rules</Press>
+        </div>
+      )}
+      {menu === 'effort' && (
+        <div className="rv-menu" role="menu" aria-label="Effort">
+          {item(s.effort === 'auto', 'Automatic', () => pick({ effort: 'auto' }), 'per message')}
+          {PICK_EFFORTS.map((e) => item(s.effort === e, EFFORT_NAME[e], () => pick({ effort: e })))}
+          <Press role="menuitem" className="rv-menu-item rv-menu-more" onPress={openRules}>Automatic rules</Press>
+        </div>
+      )}
+      {rules && <RavenRules settings={s} models={models} onClose={() => setRules(false)} />}
+    </div>
+  )
+}
+
+/**
+ * Automatic rules: what Automatic uses for each kind of run, a model and an effort per row. Each change saves at
+ * once. A dialog over everything (the quick sheet too); Escape, Done or a tap outside closes it.
+ */
+function RavenRules({ settings, models, onClose }: { settings: RavenSettings; models: RavenModelInfo[]; onClose: () => void }) {
+  const save = useSaveRavenSettings()
+  const box = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const esc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', esc, true)
+    box.current?.focus({ preventScroll: true })
+    return () => window.removeEventListener('keydown', esc, true)
+  }, [onClose])
+  const fixed = [settings.model !== 'auto' && 'model', settings.effort !== 'auto' && 'effort'].filter(Boolean)
+  return createPortal(
+    <div className="rv-rules">
+      <div className="rv-rules-back" onPointerDown={onClose} aria-hidden />
+      <section className="rv-rules-box" role="dialog" aria-modal="true" aria-label="Automatic rules" tabIndex={-1} ref={box}>
+        <header className="rv-rules-head">
+          <b>Automatic rules</b>
+          <Press className="rv-q-x" aria-label="Close" onPress={onClose}><X size={15} strokeWidth={1.6} className="vl-icon vl-icon-dim" aria-hidden /></Press>
+        </header>
+        <p className="rv-rules-lead">
+          What Raven uses when the model or the effort is set to Automatic. Raven sorts each message you type as simple or complex. The same on every device.
+        </p>
+        {fixed.length > 0 && <p className="rv-rules-lead rv-rules-fixed">Your {fixed.join(' and ')} pick is fixed now, so the rules give only the rest.</p>}
+        <div className="rv-rules-grid" role="table" aria-label="Rules">
+          <div role="row" className="rv-rules-row rv-rules-cols">
+            <span role="columnheader" />
+            <span role="columnheader">Model</span>
+            <span role="columnheader">Effort</span>
+          </div>
+          {RULE_ORDER.map((k) => {
+            const r = settings.rules[k]
+            return (
+              <div key={k} role="row" className="rv-rules-row" data-rule={k}>
+                <span role="rowheader" className="rv-rules-name">
+                  <b>{RULE_NAME[k]}</b>
+                  <i>{RULE_NOTE[k]}</i>
+                </span>
+                <span role="cell">
+                  <select aria-label={`${RULE_NAME[k]}: model`} value={r.model} onChange={(e) => save.mutate({ rules: { [k]: { model: e.target.value as RavenTier } } })}>
+                    {models.map((m) => <option key={m.key} value={m.key}>{m.label}{m.unavailable ? ` (${m.unavailable})` : ''}</option>)}
+                  </select>
+                </span>
+                <span role="cell">
+                  <select aria-label={`${RULE_NAME[k]}: effort`} value={r.effort} onChange={(e) => save.mutate({ rules: { [k]: { effort: e.target.value as RavenPickEffort } } })}>
+                    {PICK_EFFORTS.map((x) => <option key={x} value={x}>{EFFORT_NAME[x]}</option>)}
+                  </select>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        <footer className="rv-rules-foot">
+          <Press className="rv-rules-reset" onPress={() => save.mutate({ reset: true })}>Reset to defaults</Press>
+          <Press className="rv-rules-done" onPress={onClose}>Done</Press>
+        </footer>
+      </section>
+    </div>,
+    document.body,
   )
 }
 
@@ -369,7 +543,7 @@ export function RavenQuick() {
               ? (
                 <div className="rv-q-reply">
                   <Markdown className="rv-md">{reply.text}</Markdown>
-                  <p className="rv-meta">{[modelLabel(reply.meta.model, reply.meta.tier), reply.meta.effort, etTime(reply.createdAt)].filter(Boolean).join(' · ')}</p>
+                  <p className="rv-meta" title={replyMetaTitle(reply.meta)}>{replyMetaLine(reply.meta, reply.createdAt)}</p>
                 </div>
               )
               : <p className="rv-q-wait" data-busy={busy || undefined}>{busy ? status : 'Sent. Raven answers here and in the Raven tab.'}</p>}
@@ -383,6 +557,7 @@ export function RavenQuick() {
           taRef={ta}
           className="rv-q-compose"
           maxHeight={140}
+          tools={<RavenPick page={page} />}
         />
       </section>
     </div>,

@@ -60,7 +60,7 @@ app.use('/api', (await import('../src/routes/ravenMcp.ts')).default)
 
 // ------------------------------------------------------- which ids work ---
 
-const tiers = ['haiku', 'sonnet', 'opus'] as const
+const tiers = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const configured = Object.fromEntries(tiers.map((t) => [t, models.modelFor(t)]))
 const ids = [...new Set([...Object.values(configured), 'claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5-5'])]
 console.log('configured tiers:', JSON.stringify(configured))

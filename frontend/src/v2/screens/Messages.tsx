@@ -4,14 +4,14 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
-import { RavenComposer, RavenFiles } from '../kit/raven'
+import { RavenComposer, RavenFiles, RavenPick } from '../kit/raven'
 import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft } from '../kit/ravenStore'
 import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
-  RAVEN_OLDER, approveProposal, declineProposal, etTime, fetchRavenOlder, markRavenRead, modelLabel, ravenBusy, ravenStatusText,
-  sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type Ref,
+  RAVEN_OLDER, approveProposal, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
+  replyMetaTitle, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -249,7 +249,7 @@ export default function Messages({ active }: ScreenProps) {
             )}
           </div>
         </div>
-        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} />
+        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} />
       </section>
       {wide && connected && <aside className="rv-conn rv-side" aria-label="Connected">{connected}</aside>}
     </div>
@@ -313,9 +313,7 @@ function Row({ m, grouped, last, names }: { m: RavenMsg; grouped: boolean; last:
   const termPath = pane ? v2TermPath(pane) : null
   const label = kind === 'me' ? 'You' : kind === 'raven' ? 'Raven' : kind === 'system' ? 'Valkyrie' : relay?.label || names.get(m.author) || m.author
   const via = kind === 'me' && m.meta.source ? SOURCE_WORD[m.meta.source] : undefined
-  const meta = kind === 'raven' && !m.meta.error
-    ? [modelLabel(m.meta.model, m.meta.tier), m.meta.effort, etTime(m.createdAt)].filter(Boolean).join(' · ')
-    : null
+  const meta = kind === 'raven' && !m.meta.error && (m.meta.model || m.meta.tier) ? replyMetaLine(m.meta, m.createdAt) : null
   // a session relay's ref link to its pane is the Open link already
   const refs = termPath ? m.refs.filter((r) => !(r.type === 'link' && r.url === termPath)) : m.refs
   const files = m.meta.files && m.meta.files.length > 0 ? <RavenFiles files={m.meta.files} /> : null
@@ -350,7 +348,7 @@ function Row({ m, grouped, last, names }: { m: RavenMsg; grouped: boolean; last:
           {files}
           {refs.length > 0 && <Refs refs={refs} />}
           {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
-          {meta && <p className="rv-meta" title={m.meta.why || undefined}>{meta}</p>}
+          {meta && <p className="rv-meta" title={replyMetaTitle(m.meta)}>{meta}</p>}
           {kind === 'raven' && !meta && <p className="rv-foot">{time}</p>}
         </>
       )}

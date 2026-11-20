@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchImgToken, imgTrusted } from '../../lib/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiErrorText, fetchImgToken, imgTrusted } from '../../lib/api'
 import {
-  RAVEN_FILE_MAX, fetchMsgCount, fetchRaven, ravenFileUrl, uploadRavenFile, waitMsgChange, type RavenFile, type RavenPage,
+  RAVEN_FILE_MAX, fetchMsgCount, fetchRaven, patchSettings, ravenFileUrl, saveRavenSettings, uploadRavenFile, waitMsgChange,
+  type RavenFile, type RavenPage, type RavenSettingsPatch,
 } from '../../lib/ravenApi'
+import { toast } from './ui'
 import { useLive, type Live } from './data'
 
 // Raven's state for the Raven screen, the Dashboard's Raven block and the quick sheet (kit/raven.tsx):
@@ -81,6 +83,31 @@ export function addToThread(qc: ReturnType<typeof useQueryClient>, page: Partial
     const have = new Set(cur.messages.map((m) => m.id))
     const add = (page.messages ?? []).filter((m) => !have.has(m.id))
     return { ...cur, ...page, messages: [...cur.messages, ...add] }
+  })
+}
+
+// ---------- the model and effort pick ----------
+
+/**
+ * Save a change to his pick: shown at once in the cached page, then POST /api/raven/settings. Every other device
+ * re-reads it through the long-poll (the backend bumps Messages). A refusal puts the page back and says why.
+ */
+export function useSaveRavenSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: saveRavenSettings,
+    onMutate: (patch: RavenSettingsPatch) => {
+      const before = qc.getQueryData<RavenPage>(RAVEN_KEY)
+      if (before?.settings) qc.setQueryData<RavenPage>(RAVEN_KEY, { ...before, settings: patchSettings(before.settings, patch) })
+      return { before }
+    },
+    onSuccess: (r) => {
+      qc.setQueryData<RavenPage>(RAVEN_KEY, (cur) => (cur ? { ...cur, settings: r.settings, models: r.models } : cur))
+    },
+    onError: (e, _p, ctx) => {
+      if (ctx?.before) qc.setQueryData(RAVEN_KEY, ctx.before)
+      toast(apiErrorText(e, 'Raven did not save that'), { ms: 4000 })
+    },
   })
 }
 

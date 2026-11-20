@@ -6,8 +6,21 @@ import { api } from './api'
 // Proposals the agents make are decided here too (routes/msg.ts), and the
 // thread updates through the Messages long-poll (/api/msg/changes).
 
-export type RavenTier = 'haiku' | 'sonnet' | 'opus'
+export type RavenTier = 'haiku' | 'sonnet' | 'opus' | 'fable'
 export type RavenEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/** The efforts he picks from. */
+export type RavenPickEffort = 'low' | 'medium' | 'high'
+/** The automatic rules: his message sorted simple or complex, a voice (Siri) message, a run he did not start. */
+export type RavenRuleKey = 'simple' | 'complex' | 'voice' | 'background'
+export type RavenRule = { model: RavenTier; effort: RavenPickEffort }
+/** His model and effort pick (backend lib/raven/settings.ts), the same on every device. */
+export type RavenSettings = { model: RavenTier | 'auto'; effort: RavenPickEffort | 'auto'; rules: Record<RavenRuleKey, RavenRule> }
+/** One model in the picker; `unavailable` says why odin's accounts refused it lately ("needs usage credits"). */
+export type RavenModelInfo = { key: RavenTier; id: string; label: string; unavailable?: string }
+/** A change to the pick: either part, any rule's model or effort, or reset (the rules' defaults). */
+export type RavenSettingsPatch = {
+  model?: RavenSettings['model']; effort?: RavenSettings['effort']; rules?: Partial<Record<RavenRuleKey, Partial<RavenRule>>>; reset?: boolean
+}
 export type RavenStatus = 'idle' | 'routing' | 'working' | 'error'
 
 /** A file Brendon attached (stored on odin). */
@@ -29,6 +42,10 @@ export type RavenMeta = {
   model?: string
   effort?: RavenEffort
   why?: string
+  /** the automatic rule that chose the model or the effort; absent when he fixed both */
+  rule?: RavenRuleKey
+  /** the model id wanted when another ran in its place */
+  asked?: string
   replyTo?: number
   files?: RavenFile[]
   relay?: RavenRelay
@@ -81,6 +98,9 @@ export type RavenState = {
   agents: RavenAgent[]
   /** the agents' global pause */
   paused: boolean
+  /** his model and effort pick and the models it offers (absent from a backend before the picker) */
+  settings?: RavenSettings
+  models?: RavenModelInfo[]
 }
 
 export type RavenPage = RavenState & { messages: RavenMsg[] }
@@ -103,6 +123,24 @@ export const sendRaven = async (body: { text: string; files?: string[]; source?:
 export const markRavenRead = async (upTo?: number) => (await api.post<{ ok: true }>('/raven/read', upTo ? { upTo } : {})).data
 
 export const stopRaven = async () => (await api.post<{ ok: true }>('/raven/stop', {})).data
+
+export const saveRavenSettings = async (patch: RavenSettingsPatch) =>
+  (await api.post<{ settings: RavenSettings; models: RavenModelInfo[] }>('/raven/settings', patch)).data
+
+/** The rules Automatic starts with (the backend's DEFAULT_RAVEN_SETTINGS), for Reset before the answer comes. */
+export const DEFAULT_RAVEN_RULES: RavenSettings['rules'] = {
+  simple: { model: 'sonnet', effort: 'low' },
+  complex: { model: 'opus', effort: 'high' },
+  voice: { model: 'sonnet', effort: 'low' },
+  background: { model: 'sonnet', effort: 'low' },
+}
+
+/** The pick with a change applied, as the backend will save it. */
+export function patchSettings(s: RavenSettings, p: RavenSettingsPatch): RavenSettings {
+  const rules = { ...(p.reset ? DEFAULT_RAVEN_RULES : s.rules) }
+  for (const [k, v] of Object.entries(p.rules ?? {}) as [RavenRuleKey, Partial<RavenRule>][]) rules[k] = { ...rules[k], ...v }
+  return { model: p.model ?? s.model, effort: p.effort ?? s.effort, rules }
+}
 
 /** Resolves when anything in Messages changed after `since` (or after about 25 s). */
 export const waitMsgChange = async (since: number, signal: AbortSignal): Promise<number> =>
@@ -172,16 +210,34 @@ function normalize(p: RavenPage): RavenPage {
 
 // ---------- words ----------
 
-const TIER_NAME: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
+const TIER_NAME: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus', fable: 'Fable' }
 
 /** "claude-sonnet-5-5" -> "Sonnet 5.5", "claude-haiku-4-5-20251001" -> "Haiku 4.5"; anything else as it came. */
 export function modelLabel(model: string | null | undefined, tier?: string | null): string {
   if (model) {
-    const m = /^claude-(haiku|sonnet|opus)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model)
+    const m = /^claude-(haiku|sonnet|opus|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model)
     if (m) return `${TIER_NAME[m[1]]} ${m[2]}${m[3] ? `.${m[3]}` : ''}`
     return model
   }
   return tier ? TIER_NAME[tier] ?? tier : ''
+}
+
+export const RULE_NAME: Record<RavenRuleKey, string> = { simple: 'Simple', complex: 'Complex', voice: 'Voice', background: 'Background' }
+
+/**
+ * A reply's line under it: the model that ran (and the one wanted, when another ran in its place), the effort, the
+ * automatic rule that chose it, the time. "Sonnet 5.5 · low · simple · 3:04 PM ET".
+ */
+export function replyMetaLine(meta: RavenMeta, createdAt: string): string {
+  const ran = modelLabel(meta.model, meta.tier)
+  const model = ran && meta.asked ? `${ran} (${modelLabel(meta.asked)} unavailable)` : ran
+  return [model, meta.effort, meta.rule ? meta.rule : null, etTime(createdAt)].filter(Boolean).join(' · ')
+}
+
+/** The reply line's tooltip: how it was chosen. */
+export function replyMetaTitle(meta: RavenMeta): string | undefined {
+  const how = meta.rule ? `Automatic, ${meta.rule === 'background' ? 'a run you did not start' : `${meta.rule} message`}` : meta.model ? 'Your pick' : ''
+  return [how, meta.why && meta.why !== 'your pick' ? meta.why : ''].filter(Boolean).join(': ') || undefined
 }
 
 /** The header's live line: "idle", "thinking · Sonnet 5.5 · high", "relaying", or the error. */

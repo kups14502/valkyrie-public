@@ -10,9 +10,26 @@ export const RAVEN_ID = 'raven'
 export const RAVEN_CHANNEL = 'raven'
 export const RAVEN_NAME = 'Raven'
 
-/** The tiers Raven's router picks from; the model id for each comes from RAVEN_MODELS (lib/raven/models.ts). */
-export type RavenTier = 'haiku' | 'sonnet' | 'opus'
+/** The models Raven runs on, by family; the model id for each comes from RAVEN_MODELS (lib/raven/models.ts). */
+export type RavenTier = 'haiku' | 'sonnet' | 'opus' | 'fable'
 export type RavenEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/** The efforts Brendon picks from in the app. */
+export type RavenPickEffort = 'low' | 'medium' | 'high'
+
+/**
+ * Which automatic rule chose a run's model and effort: the router sorted his message as simple or complex, it came
+ * by voice (Siri), or he did not write at all (a relay, an agent's answer, a follow-up).
+ */
+export type RavenRuleKey = 'simple' | 'complex' | 'voice' | 'background'
+export type RavenRule = { model: RavenTier; effort: RavenPickEffort }
+
+/** Brendon's pick in the Raven tab (kv `raven:settings`, so every device shares it): a model and an effort, each fixed or automatic. */
+export type RavenSettings = {
+  model: RavenTier | 'auto'
+  effort: RavenPickEffort | 'auto'
+  /** what Automatic uses for each kind of run */
+  rules: Record<RavenRuleKey, RavenRule>
+}
 
 /** A file Brendon attached (stored on odin under the data dir, raven-files/). */
 export type RavenFile = { id: string; name: string; mime: string; size: number; createdAt: string }
@@ -24,6 +41,10 @@ export type RavenMeta = {
   model?: string
   effort?: RavenEffort
   why?: string
+  /** the automatic rule that chose the model or the effort; absent when he fixed both */
+  rule?: RavenRuleKey
+  /** the model id that was wanted, when another ran in its place (unknown to the CLI, or it needs usage credits) */
+  asked?: string
   /** the message Brendon wrote that this answers */
   replyTo?: number
   /** files on a message (Brendon's attachments) */

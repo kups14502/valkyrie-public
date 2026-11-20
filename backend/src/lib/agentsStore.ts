@@ -297,6 +297,55 @@ export function patchAgent(id: string, patch: Partial<Pick<Agent, 'enabled' | 'm
   return getAgent(id)!
 }
 
+const REMOVED_PROJECTS = 'agents:removed-projects'
+
+/** Projects whose agent was removed for good: the roster never makes one for them again. */
+export function removedAgentProjects(): Set<string> {
+  return new Set(parse<string[]>(getKv(REMOVED_PROJECTS), []))
+}
+
+/**
+ * Removes a project agent for good, in one transaction: its row, its home and DM channels with
+ * their messages and read marks, its runs, events and proposals with their actions. Its project
+ * goes on the removed list and stays itself. Posts it made in shared channels (team, raven) stay.
+ * Returns every removed row, for an archive file.
+ */
+export function removeAgent(id: string): Record<string, unknown> {
+  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | undefined
+  if (!agent) throw new AgentError(404, `no agent ${id}`)
+  if (agent.kind !== 'project' || !agent.projectId) throw new AgentError(400, `${id} is a ${agent.kind} agent; switch it off instead`)
+  const projectId = agent.projectId
+  const out = db.transaction(() => {
+    const channels = (db.prepare("SELECT * FROM channels WHERE kind IN ('home', 'dm')").all() as ChannelRow[])
+      .filter((c) => parse<string[]>(c.agentIds, []).includes(id))
+    const ch = channels.map((c) => c.id)
+    const marks = ch.map(() => '?').join(', ') || "''"
+    const proposals = db.prepare('SELECT * FROM proposals WHERE agentId = ?').all(id) as { id: number }[]
+    const pIds = proposals.map((p) => p.id)
+    const pMarks = pIds.map(() => '?').join(', ') || '-1'
+    const removed = {
+      agent, channels, proposals,
+      messages: db.prepare(`SELECT * FROM messages WHERE channelId IN (${marks}) ORDER BY id`).all(...ch),
+      reads: db.prepare(`SELECT * FROM reads WHERE channelId IN (${marks})`).all(...ch),
+      runs: db.prepare('SELECT * FROM runs WHERE agentId = ? ORDER BY startedAt').all(id),
+      events: db.prepare('SELECT * FROM events WHERE agentId = ? ORDER BY id').all(id),
+      actions: db.prepare(`SELECT * FROM actions WHERE proposalId IN (${pMarks})`).all(...pIds),
+    }
+    db.prepare(`DELETE FROM actions WHERE proposalId IN (${pMarks})`).run(...pIds)
+    db.prepare('DELETE FROM proposals WHERE agentId = ?').run(id)
+    db.prepare('DELETE FROM events WHERE agentId = ?').run(id)
+    db.prepare('DELETE FROM runs WHERE agentId = ?').run(id)
+    db.prepare(`DELETE FROM messages WHERE channelId IN (${marks})`).run(...ch)
+    db.prepare(`DELETE FROM reads WHERE channelId IN (${marks})`).run(...ch)
+    db.prepare(`DELETE FROM channels WHERE id IN (${marks})`).run(...ch)
+    db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    setKv(REMOVED_PROJECTS, JSON.stringify([...new Set([...removedAgentProjects(), projectId])]))
+    return removed
+  })()
+  bump()
+  return out
+}
+
 // ----------------------------------------------------------- channels ----
 
 type ChannelRow = {

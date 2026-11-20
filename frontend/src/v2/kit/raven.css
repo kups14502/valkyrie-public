@@ -279,3 +279,118 @@ html[data-motion='reduced'] .rv-q-sheet, html[data-motion='reduced'] .rv-q-back 
 @media (pointer: coarse) {
   .rv-compose textarea { font-size: 16px; line-height: 22px; }
 }
+
+/* ---------- the model and effort pick: two small text buttons left of Send, each a menu upward ---------- */
+.rv-pick-wrap { position: relative; flex: none; display: flex; align-items: center; height: 34px; margin: 0 0 2px; }
+.rv-pickb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 14px;
+  font-size: 11.5px;
+  line-height: 1;
+  color: var(--dim);
+  white-space: nowrap;
+  transition: color .15s, background-color .15s;
+}
+.rv-pickb .vl-icon { color: inherit; vertical-align: 0; }
+.rv-pickb[data-fixed] { color: var(--fg); }
+.rv-pickb[data-on] { color: var(--fg); background: color-mix(in srgb, var(--fg) 11%, transparent); }
+@media (hover: hover) and (pointer: fine) { .rv-pickb:hover { color: var(--text); background: color-mix(in srgb, var(--fg) 8%, transparent); } }
+.rv-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  min-width: 196px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 4px 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 6%, transparent), transparent 50%), #000;
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .9), var(--glow);
+  animation: rv-pop .14s var(--ease) both;
+}
+.rv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px 0 9px;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  white-space: nowrap;
+}
+.rv-menu-check { flex: none; color: var(--fg); opacity: 0; }
+.rv-menu-item[data-on] .rv-menu-check { opacity: 1; filter: var(--icon-glow); }
+.rv-menu-item[data-on] .rv-menu-label { color: var(--fg); }
+.rv-menu-note { margin-left: auto; padding-left: 14px; font-size: 11px; color: var(--dim); }
+.rv-menu-more { margin-top: 4px; padding-left: 30px; border-top: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--fg); }
+.rv-menu-item[data-pressed] { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+@media (hover: hover) and (pointer: fine) { .rv-menu-item:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); } }
+html[data-motion='reduced'] .rv-menu { animation: none; }
+
+/* ---------- Automatic rules: a dialog over everything (a bottom sheet on the phone) ---------- */
+.rv-rules { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; font-family: var(--font); font-size: 13px; color: var(--text); }
+.rv-rules-back { position: absolute; inset: 0; background: rgba(0, 0, 0, .6); animation: vl-fade .14s linear both; }
+.rv-rules-box {
+  position: relative;
+  width: min(580px, calc(100% - 24px));
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 18px 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 40%), #000;
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .9), var(--glow);
+  animation: rv-pop .16s var(--ease) both;
+  outline: none;
+}
+.rv-rules-head { display: flex; align-items: center; gap: 10px; min-height: 42px; border-bottom: 1px solid var(--line); }
+.rv-rules-head b { flex: 1; font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); }
+.rv-rules-lead { margin: 10px 0 2px; font-size: 12px; line-height: 17px; color: var(--dim); }
+.rv-rules-fixed { color: var(--fg); }
+.rv-rules-grid { margin-top: 8px; }
+.rv-rules-row { display: grid; grid-template-columns: minmax(0, 1fr) 10rem 6.5rem; gap: 6px 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.rv-rules-cols { padding: 2px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+.rv-rules-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rv-rules-name b { font-size: 13px; font-weight: 600; color: var(--text); }
+.rv-rules-name i { font-style: normal; font-size: 11px; line-height: 15px; color: var(--dim); }
+.rv-rules select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: #050505;
+  border: 1px solid color-mix(in srgb, var(--fg) calc(var(--line-a) + 8%), transparent);
+  border-radius: 6px;
+}
+.rv-rules select:focus { outline: none; border-color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.rv-rules-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.rv-rules-reset { position: relative; font-size: 12px; color: var(--dim); }
+.rv-rules-done { position: relative; font-size: 12.5px; font-weight: 600; color: var(--fg); }
+.rv-rules-reset::after, .rv-rules-done::after { content: ''; position: absolute; inset: -12px -6px; }
+html[data-motion='reduced'] .rv-rules-box, html[data-motion='reduced'] .rv-rules-back { animation: none; }
+@media (max-width: 639px) {
+  .rv-rules { place-items: end stretch; }
+  .rv-rules-box {
+    width: auto;
+    max-height: 85%;
+    padding: 2px calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+    border-width: 1px 0 0;
+    animation-name: rv-rise;
+  }
+  .rv-rules-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .rv-rules-name { grid-column: 1 / -1; }
+  .rv-rules-cols { display: none; }
+}
+@media (pointer: coarse) {
+  .rv-pickb::after { content: ''; position: absolute; inset: -8px -1px; }
+  .rv-menu-item { min-height: 42px; font-size: 14px; }
+  .rv-rules select { height: 40px; font-size: 16px; }
+}

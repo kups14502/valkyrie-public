@@ -7,6 +7,7 @@ import {
 import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
 import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenState, stopRaven, waitForReply, withTimeout } from '../lib/raven/run.js'
+import { ravenPickView, setRavenSettings } from '../lib/raven/settings.js'
 import { ravenSessionsState } from '../lib/raven/tools/index.js'
 import { RAVEN_CHANNEL, type RavenNotice } from '../lib/raven/types.js'
 
@@ -87,6 +88,8 @@ async function stateView(req: Request) {
     agents: listAgents().filter((a) => a.enabled && !hidden.has(a.area))
       .map((a) => ({ id: a.id, name: a.name, area: a.area, status: a.status, pending: pending.filter((p) => p.agentId === a.id).length })),
     paused: isPaused(),
+    // his model and effort pick and the models it offers (lib/raven/settings.ts), the same on every device
+    ...ravenPickView(),
   }
 }
 
@@ -116,6 +119,16 @@ router.post('/raven/read', h((req, res) => {
 
 router.post('/raven/stop', h((_req, res) => {
   res.json({ ok: true, stopped: stopRaven() })
+}))
+
+// The model and effort pick: { model?, effort?, rules?: { simple?: { model?, effort? }, ... }, reset? }
+router.get('/raven/settings', h((_req, res) => {
+  res.json(ravenPickView())
+}))
+
+router.post('/raven/settings', h((req, res) => {
+  setRavenSettings(req.body)
+  res.json(ravenPickView())
 }))
 
 // -------------------------------------------------------------- files ----

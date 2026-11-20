@@ -5,7 +5,7 @@ import path from 'node:path'
 import {
   addEvent, addMessage, agentsWithOpenEvents, archiveChannel, bump, claimEvents, dmChannel, endRun, failStaleRuns, getAgent, getChannel,
   getKv, listAgents, listChannels, listMessages, listRuns, nowIso, openEvents, patchAgent, pruneEvents, pruneMail, pruneMessages,
-  pruneTracked, releaseEvents, runsSince, setKv, startRun, trackerCounts, updateMessage, upsertAgent, upsertChannel,
+  pruneTracked, releaseEvents, removedAgentProjects, runsSince, setKv, startRun, trackerCounts, updateMessage, upsertAgent, upsertChannel,
   type Agent, type AgentEvent, type Channel, type Message, type Ref, AgentError,
 } from './agentsStore.js'
 import { runClaude, nyNowLine } from './claudeCli.js'
@@ -79,7 +79,7 @@ function projectAgentId(targetKey: string, projectId: string, taken: Set<string>
   return taken.has(base) ? projectId.slice(0, 40) : base
 }
 
-/** Makes the roster match the projects: one agent and channel each, the team channel holding all. Idempotent. */
+/** Makes the roster match the projects: one agent and channel each (none for a project whose agent was removed), the team channel holding all. Idempotent. */
 export function syncRoster(): void {
   const have = new Map(listAgents().map((a) => [a.id, a]))
   const fixed = fixedAgents()
@@ -91,8 +91,9 @@ export function syncRoster(): void {
   }
   const taken = new Set(fixed.map((f) => f.id))
   const live = new Set<string>()
+  const removed = removedAgentProjects()
   for (const p of listProjects({ includeArchived: false })) {
-    if (p.id === 'vk-smoke') continue
+    if (p.id === 'vk-smoke' || removed.has(p.id)) continue
     const existing = [...have.values()].find((a) => a.projectId === p.id)
     const id = existing?.id ?? projectAgentId(p.targetKey, p.id, new Set([...taken, ...have.keys()]))
     taken.add(id)

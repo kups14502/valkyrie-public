@@ -75,6 +75,10 @@ const cfg = cfgArg ? JSON.parse(fs.readFileSync(cfgArg.slice('--mcp-config='.len
 const kind = !cfg ? (prompt.startsWith("Write Brendon's brief") ? 'brief' : 'ask') : cfg.raven ? 'raven' : 'agent'
 fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, effort, at: Date.now(), flags: args.filter((a) => a !== prompt && a !== sys) }) + '\\n')
 ;(async () => {
+  if (readJson('credit-models.json', []).includes(model)) {
+    out({ type: 'result', is_error: true, result: 'Fable 5.1 requires usage credits. Switch to another model to continue.' })
+    process.exit(1)
+  }
   if (readJson('bad-models.json', []).includes(model)) {
     out({ type: 'result', is_error: true, result: "There's an issue with the selected model (" + model + "). It may not exist or you may not have access to it." })
     process.exit(1)
@@ -88,7 +92,7 @@ fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, e
     const r = readJson('router.json', {})
     if (r.sleep) await sleep(r.sleep)
     if (r.exit) { process.stdout.write('router boom'); process.exit(r.exit) }
-    out({ type: 'result', is_error: false, result: r.answer || '{"tier":"sonnet","effort":"medium","why":"a normal task"}' })
+    out({ type: 'result', is_error: false, result: r.answer || '{"kind":"simple","why":"a normal task"}' })
     return
   }
   const server = cfg.raven || cfg.valkyrie
@@ -164,6 +168,7 @@ const store = await import('../src/lib/agentsStore.ts')
 const agents = await import('../src/lib/agents.ts')
 const raven = await import('../src/lib/raven/run.ts')
 const models = await import('../src/lib/raven/models.ts')
+const pickMod = await import('../src/lib/raven/settings.ts')
 const files = await import('../src/lib/raven/files.ts')
 const hooks = await import('../src/lib/raven/hooks.ts')
 const push = await import('../src/lib/raven/push.ts')
@@ -251,17 +256,17 @@ let [, ov] = await j('GET', '/msg/overview')
 check('tailnet: overview lists the raven thread', ov.channels.some((c: any) => c.id === 'raven'), ov.channels.map((c: any) => c.id))
 check('no raven message posted by the cloudflare tries', !thread().length, thread())
 
-// ---------------------------------------------------- router picks opus ---
+// ------------------------------------------- router sorts it as complex ---
 
-router({ answer: '{"tier":"opus","effort":"high","why":"planning a migration"}' })
+router({ answer: '{"kind":"complex","why":"planning a migration"}' })
 queue({ steps: [{ tool: 'probe_gate' }, { tool: 'gated_write' }, { tool: 'now' }], result: 'Plan: three steps.' })
 let [pst, posted] = await j('POST', '/raven/messages', { text: 'plan the move to the new NAS' })
 check('post returns the message', pst === 200 && posted.message.author === 'brendon' && posted.message.text === 'plan the move to the new NAS', posted)
 await ravenIdle()
 let reply = lastRavenMsg()
 check('reply posted', reply?.text === 'Plan: three steps.', thread())
-check('reply meta: tier, model, effort, why, replyTo', reply?.meta.tier === 'opus' && reply.meta.model === 'claude-opus-5-5' && reply.meta.effort === 'high'
-  && reply.meta.why === 'planning a migration' && reply.meta.replyTo === posted.message.id, reply?.meta)
+check('reply meta: tier, model, effort, why, rule, replyTo', reply?.meta.tier === 'opus' && reply.meta.model === 'claude-opus-5-5' && reply.meta.effort === 'high'
+  && reply.meta.why === 'planning a migration' && reply.meta.rule === 'complex' && reply.meta.asked === undefined && reply.meta.replyTo === posted.message.id, reply?.meta)
 let cs = calls()
 const ask1 = cs.filter((c) => c.kind === 'ask').pop()
 const run1 = cs.filter((c) => c.kind === 'raven').pop()
@@ -291,7 +296,7 @@ queue({ result: 'fine' })
 await j('POST', '/raven/messages', { text: 'what is on today' })
 await ravenIdle()
 reply = lastRavenMsg()
-check('router failure: sonnet/medium', reply?.meta.tier === 'sonnet' && reply.meta.effort === 'medium' && reply.meta.model === 'claude-sonnet-5-5' && reply.meta.why === 'router failed', reply?.meta)
+check('router failure: the complex rule (opus/high)', reply?.meta.tier === 'opus' && reply.meta.effort === 'high' && reply.meta.model === 'claude-opus-5-5' && reply.meta.why === 'router failed' && reply.meta.rule === 'complex', reply?.meta)
 
 router({ sleep: 15000 })
 queue({ result: 'fine again' })
@@ -299,16 +304,19 @@ const tRoute = Date.now()
 await j('POST', '/raven/messages', { text: 'and tomorrow' })
 await ravenIdle()
 reply = lastRavenMsg()
-check('router timeout: sonnet/medium within the limit', reply?.meta.why === 'router timed out' && reply.meta.tier === 'sonnet' && Date.now() - tRoute < 15000, { meta: reply?.meta, ms: Date.now() - tRoute })
+check('router timeout: the complex rule within the limit', reply?.meta.why === 'router timed out' && reply.meta.tier === 'opus' && Date.now() - tRoute < 15000, { meta: reply?.meta, ms: Date.now() - tRoute })
 
 router({ answer: 'I think sonnet would be best' })
 queue({ result: 'ok' })
 await j('POST', '/raven/messages', { text: 'hello' })
 await ravenIdle()
-check('router nonsense: sonnet/medium', lastRavenMsg()?.meta.why === 'router answer unreadable', lastRavenMsg()?.meta)
+check('router nonsense: the complex rule', lastRavenMsg()?.meta.why === 'router answer unreadable' && lastRavenMsg()?.meta.rule === 'complex', lastRavenMsg()?.meta)
+check('router: an old tier answer is not a sort', models.parseRoute('{"tier":"opus","effort":"high"}') === null && models.parseRoute('{"kind":"Simple","why":"hi"}')?.kind === 'simple')
 
 w('bad-models.json', JSON.stringify(['claude-haiku-5-5']))
-router({ answer: '{"tier":"haiku","effort":"low","why":"chit-chat"}' })
+let [kst, sv] = await j('POST', '/raven/settings', { rules: { simple: { model: 'haiku' } } })
+check('settings: a rule changed alone', kst === 200 && sv.settings.rules.simple.model === 'haiku' && sv.settings.rules.simple.effort === 'low' && sv.settings.model === 'auto', sv)
+router({ answer: '{"kind":"simple","why":"chit-chat"}' })
 queue({ result: 'hi' })
 let before = calls().length
 await j('POST', '/raven/messages', { text: 'hey' })
@@ -316,18 +324,21 @@ await ravenIdle()
 cs = calls().slice(before)
 check('router: unknown haiku id retried on the fallback', cs.filter((c) => c.kind === 'ask').map((c) => c.model).join(',') === 'claude-haiku-5-5,claude-haiku-4-5-20251001', cs)
 reply = lastRavenMsg()
-check('haiku run on the fallback id', reply?.meta.tier === 'haiku' && reply.meta.model === 'claude-haiku-4-5-20251001' && reply.meta.effort === 'low', reply?.meta)
+check('haiku run on the fallback id, the wanted id kept', reply?.meta.tier === 'haiku' && reply.meta.model === 'claude-haiku-4-5-20251001' && reply.meta.effort === 'low'
+  && reply.meta.rule === 'simple' && reply.meta.asked === 'claude-haiku-5-5', reply?.meta)
 before = calls().length
 queue({ result: 'hi again' })
 await j('POST', '/raven/messages', { text: 'hey again' })
 await ravenIdle()
 cs = calls().slice(before)
 check('bad id remembered: no second try on it', !cs.some((c) => c.model === 'claude-haiku-5-5') && cs.filter((c) => c.kind === 'ask').length === 1, cs)
+;[kst, sv] = await j('POST', '/raven/settings', { reset: true })
+check('settings: reset puts the rules back', kst === 200 && sv.settings.rules.simple.model === 'sonnet' && sv.settings.rules.complex.model === 'opus', sv.settings)
 
 // --------------------------------------------------- model fallback, run ---
 
 w('bad-models.json', JSON.stringify(['claude-haiku-5-5', 'claude-sonnet-5-5']))
-router({ answer: '{"tier":"sonnet","effort":"medium","why":"a task"}' })
+router({ answer: '{"kind":"simple","why":"a task"}' })
 queue({ result: 'done on the fallback' })
 before = calls().length
 await j('POST', '/raven/messages', { text: 'add milk to groceries' })
@@ -340,14 +351,15 @@ check('fallback remembered', models.modelFor('sonnet') === 'claude-sonnet-5' && 
 
 // -------------------------------------------------- effort refused by CLI ---
 
-w('bad-efforts.json', JSON.stringify(['xhigh']))
-router({ answer: '{"tier":"opus","effort":"xhigh","why":"big plan"}' })
+w('bad-efforts.json', JSON.stringify(['high']))
+router({ answer: '{"kind":"complex","why":"big plan"}' })
 queue({ result: 'planned at high' })
 before = calls().length
 await j('POST', '/raven/messages', { text: 'plan the whole quarter' })
 await ravenIdle()
 cs = calls().slice(before).filter((c) => c.kind === 'raven')
-check('refused effort level retried one lower', cs.map((c) => c.effort).join(',') === 'xhigh,high' && lastRavenMsg()?.meta.effort === 'high', cs)
+check('refused effort level retried one lower', cs.map((c) => c.effort).join(',') === 'high,medium' && lastRavenMsg()?.meta.effort === 'medium', cs)
+w('bad-efforts.json', '[]')
 
 // ------------------------------------------------------------ failures ---
 
@@ -362,7 +374,7 @@ check('error line reads a CLI envelope', raven.errorLine(Object.assign(new Error
 
 // a CLI that dies with only stderr: his own words in the prompt must never be read as the CLI's error
 process.env.RAVEN_MODELS = JSON.stringify({ opus: 'claude-opus-smoke' })
-router({ answer: '{"tier":"opus","effort":"high","why":"debugging"}' })
+router({ answer: '{"kind":"complex","why":"debugging"}' })
 queue({ stderrOnly: 'segfault in the renderer' })
 before = calls().length
 await j('POST', '/raven/messages', { text: 'the selected model is invalid, rate limit reached, it timed out: why?' })
@@ -376,7 +388,7 @@ check('the error kept never carries the prompt', !/Command failed|Brendon wrote/
 delete process.env.RAVEN_MODELS
 
 // "No reply." is an answer; only "(no reply)" means post nothing
-router({ answer: '{"tier":"sonnet","effort":"low","why":"a status"}' })
+router({ answer: '{"kind":"simple","why":"a status"}' })
 queue({ result: 'No reply.' })
 await j('POST', '/raven/messages', { text: 'did the landlord answer my mail?' })
 await ravenIdle()
@@ -396,13 +408,95 @@ await ravenIdle()
 check('two silent tries still answer him', thread().length === msgsNow + 2 && /no answer/i.test(lastRavenMsg()?.text ?? ''), thread().slice(msgsNow).map((m) => m.text))
 router({})
 
+// --------------------------------------------------- the model and effort pick ---
+
+;[, rv] = await j('GET', '/raven')
+check('GET /raven carries the pick: Automatic, the default rules', rv.settings?.model === 'auto' && rv.settings.effort === 'auto'
+  && rv.settings.rules.simple.model === 'sonnet' && rv.settings.rules.simple.effort === 'low' && rv.settings.rules.complex.model === 'opus'
+  && rv.settings.rules.complex.effort === 'high' && rv.settings.rules.voice.model === 'sonnet' && rv.settings.rules.background.effort === 'low', rv.settings)
+check('GET /raven lists the four models in order', rv.models?.map((m: any) => `${m.key}:${m.label}`).join(',') === 'opus:Opus 5.5,sonnet:Sonnet 5.5,haiku:Haiku 5.5,fable:Fable 5.1', rv.models)
+check('a refused model says why', rv.models.find((m: any) => m.key === 'sonnet')?.unavailable === 'not available' && !rv.models.find((m: any) => m.key === 'opus')?.unavailable, rv.models)
+const seq0 = store.currentSeq()
+const refusedPicks = [
+  { model: 'gpt' }, { effort: 'xhigh' }, { rules: { nightly: { model: 'opus' } } }, { rules: { simple: { effort: 'max' } } }, { rules: 'opus' },
+]
+const codes: number[] = []
+for (const b of refusedPicks) codes.push((await j('POST', '/raven/settings', b))[0])
+;[, sv] = await j('GET', '/raven/settings')
+check('settings: bad values refused with 400, nothing changed', codes.every((c) => c === 400) && sv.settings.model === 'auto' && sv.settings.effort === 'auto' && store.currentSeq() === seq0, { codes, sv })
+
+;[kst, sv] = await j('POST', '/raven/settings', { model: 'opus', effort: 'medium' })
+check('settings: saved, every open app told (seq moved)', kst === 200 && sv.settings.model === 'opus' && sv.settings.effort === 'medium' && store.currentSeq() > seq0, sv)
+check('settings: kept in kv for every device', JSON.parse(store.getKv('raven:settings') ?? '{}').model === 'opus', store.getKv('raven:settings'))
+router({ answer: '{"kind":"simple","why":"never asked"}' })
+queue({ result: 'fixed pick' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'plan my week' })
+await ravenIdle()
+cs = calls().slice(before)
+let pickRun = cs.find((c) => c.kind === 'raven')
+reply = lastRavenMsg()
+check('both fixed: no router call, the run on his pick', !cs.some((c) => c.kind === 'ask') && pickRun?.model === 'claude-opus-5-5' && pickRun.effort === 'medium', cs)
+check('both fixed: the reply carries it, no rule', reply?.text === 'fixed pick' && reply.meta.model === 'claude-opus-5-5' && reply.meta.effort === 'medium'
+  && reply.meta.rule === undefined && reply.meta.why === 'your pick', reply?.meta)
+
+await j('POST', '/raven/settings', { effort: 'auto' })
+router({ answer: '{"kind":"simple","why":"a lookup"}' })
+queue({ result: 'mixed pick' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'what time is it in Tokyo' })
+await ravenIdle()
+cs = calls().slice(before)
+pickRun = cs.find((c) => c.kind === 'raven')
+reply = lastRavenMsg()
+check('fixed model, automatic effort: the router ran, the model his, the effort the simple rule', cs.filter((c) => c.kind === 'ask').length === 1
+  && pickRun?.model === 'claude-opus-5-5' && pickRun.effort === 'low' && reply?.meta.rule === 'simple', { cs, meta: reply?.meta })
+
+await j('POST', '/raven/settings', { model: 'auto', rules: { voice: { model: 'opus', effort: 'low' } } })
+queue({ result: 'Spoken answer.' })
+before = calls().length
+const [vst, vs] = await j('POST', '/raven/say', { text: 'what is next on my calendar', wait: true, source: 'siri' })
+cs = calls().slice(before)
+pickRun = cs.find((c) => c.kind === 'raven')
+check('voice: no router call, the voice rule', vst === 200 && vs.reply === 'Spoken answer.' && !cs.some((c) => c.kind === 'ask')
+  && pickRun?.model === 'claude-opus-5-5' && pickRun.effort === 'low' && lastRavenMsg()?.meta.rule === 'voice', { vs, cs, meta: lastRavenMsg()?.meta })
+
+// Fable on an account without usage credits: the run goes to Opus, the reply names both, the picker marks Fable
+w('credit-models.json', JSON.stringify(['claude-fable-5-1']))
+await j('POST', '/raven/settings', { model: 'fable', effort: 'medium', reset: true })
+queue({ result: 'on opus instead' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'write the summary' })
+await ravenIdle()
+cs = calls().slice(before).filter((c) => c.kind === 'raven')
+reply = lastRavenMsg()
+check('fable refused for credits: retried once on opus', cs.map((c) => c.model).join(',') === 'claude-fable-5-1,claude-opus-5-5', cs)
+check('the reply names the model that ran and the one wanted', reply?.meta.tier === 'fable' && reply.meta.model === 'claude-opus-5-5'
+  && reply.meta.asked === 'claude-fable-5-1' && reply.meta.effort === 'medium', reply?.meta)
+;[, sv] = await j('GET', '/raven/settings')
+check('the picker marks fable: needs usage credits', sv.models.find((m: any) => m.key === 'fable')?.unavailable === 'needs usage credits'
+  && sv.models.find((m: any) => m.key === 'fable')?.label === 'Fable 5.1', sv.models)
+queue({ result: 'straight to opus' })
+before = calls().length
+await j('POST', '/raven/messages', { text: 'and the next one' })
+await ravenIdle()
+cs = calls().slice(before).filter((c) => c.kind === 'raven')
+check('fable remembered: the next run goes straight to opus', cs.map((c) => c.model).join(',') === 'claude-opus-5-5' && lastRavenMsg()?.meta.asked === 'claude-fable-5-1', cs)
+
+const bgRoute = await pickMod.chooseRoute({ ...pickMod.ravenSettings(), rules: { ...pickMod.ravenSettings().rules, background: { model: 'opus', effort: 'medium' } } },
+  { fromBrendon: false, voice: false, text: '', files: 0 })
+check('a run he did not start follows the background rule', bgRoute.tier === 'opus' && bgRoute.effort === 'medium' && bgRoute.rule === 'background', bgRoute)
+;[kst, sv] = await j('POST', '/raven/settings', { model: 'auto', effort: 'auto', reset: true })
+check('settings: back to Automatic with the default rules', kst === 200 && sv.settings.model === 'auto' && sv.settings.effort === 'auto' && sv.settings.rules.voice.model === 'sonnet', sv.settings)
+router({})
+
 // ------------------------------------------------------------ queueing ---
 
 queue({ steps: [{ sleep: 1500 }], result: 'first' }, { result: 'second' })
 const runsBefore = runsOf()
 const [, q1] = await j('POST', '/raven/messages', { text: 'first ask' })
 await until(() => raven.ravenState().status === 'working')
-check('working while it runs, with the model and effort', raven.ravenState().statusNote.startsWith('Thinking · Sonnet 5') && raven.ravenState().effort === 'medium', raven.ravenState())
+check('working while it runs, with the model and effort', raven.ravenState().statusNote.startsWith('Thinking · Sonnet 5') && raven.ravenState().effort === 'low', raven.ravenState())
 ;[, rv] = await j('GET', '/raven')
 check('GET /raven shows working', rv.status === 'working' && rv.tier === 'sonnet' && rv.model === 'claude-sonnet-5', rv)
 const [, q2] = await j('POST', '/raven/messages', { text: 'second ask' })
