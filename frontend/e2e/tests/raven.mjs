@@ -104,7 +104,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ],
     messages: [...fill, ...seed(now)],
     nextId: 200, files: new Map(), replyMs, stopped: false,
-    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [], transcribes: [],
+    sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [], transcribes: [], declineAlls: [],
     settings: {
       model: 'auto', effort: 'auto',
       rules: { simple: { model: 'sonnet', effort: 'low' }, complex: { model: 'opus', effort: 'high' }, voice: { model: 'sonnet', effort: 'low' }, background: { model: 'sonnet', effort: 'low' } },
@@ -188,6 +188,19 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       st.files.set(f.id, f)
       st.uploads.push({ name: rawName, type: f.mime, bytes: w.body.length })
       return ok(f)
+    }
+    if (w.method === 'POST' && w.path === '/api/msg/proposals/decline-all') {
+      st.declineAlls.push(j)
+      const ids = []
+      for (const m of st.messages) {
+        if (m.proposal?.status === 'pending' && ids.length < (j.count ?? 0) && (!j.agentId || m.author === j.agentId || m.meta.relay?.from === j.agentId)) {
+          m.proposal = { ...m.proposal, status: 'declined', result: 'Declined with Decline all', decidedAt: iso(Date.now()) }
+          ids.push(m.proposal.id)
+        }
+      }
+      st.agents = st.agents.map((a) => (!j.agentId || a.id === j.agentId ? { ...a, pending: Math.max(0, a.pending - ids.length) } : a))
+      bump()
+      return ok({ ok: true, declined: ids.length, ids })
     }
     if (w.method === 'POST' && w.path === '/api/raven/transcribe') {
       st.transcribes.push({ type: header(w.headers, 'Content-Type') ?? '', bytes: w.body.length })
@@ -333,6 +346,12 @@ function threadSnap() {
       .map((r) => `${r.querySelector('.rv-crow-name')?.textContent}|${r.querySelector('.rv-crow-line')?.textContent ?? ''}`)),
     watchOpen: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-open')].map((a) => a.getAttribute('href'))),
     triage: crow(/Triage agent/)?.querySelector('.rv-n')?.textContent ?? null,
+    triageBadge: (() => {
+      const n = crow(/Triage agent/)?.querySelector('.rv-n')
+      if (!n) return null
+      const cs = getComputedStyle(n)
+      return { title: n.getAttribute('title'), label: n.getAttribute('aria-label'), px: parseFloat(cs.fontSize), h: Math.round(n.getBoundingClientRect().height), shadow: cs.textShadow }
+    })(),
     feed: crow(/Watcher/)?.innerText.replace(/\s+/g, ' ') ?? null,
     dash: /—/.test(q('.rv')?.innerText ?? ''),
   }
@@ -408,6 +427,9 @@ export function ravenTests() {
         t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor has none)`)
         t.check(JSON.stringify(conn.watchRows) === JSON.stringify(['Printer migration plan|Work area one (main)', 'Area two (window)|']), `Watching reads ${JSON.stringify(conn.watchRows)} (the title first, the target under it)`)
         t.check(conn.triage === '2', `the triage agent's pending count reads ${conn.triage}`)
+        const tb = conn.triageBadge
+        t.check(tb?.title === '2 proposals waiting' && tb.label === '2 proposals waiting' && tb.px >= 12 && tb.h >= 18 && tb.shadow === 'none',
+          `the pending badge is not a large, crisp, labeled pill: ${JSON.stringify(tb)}`)
         t.check(/Sync stalled/.test(conn.feed ?? ''), `the feed line reads ${conn.feed}`)
         await fits(t, page, `${ROUTE} @${device}`)
         await t.shot(page, 'thread')
@@ -1016,6 +1038,45 @@ export function ravenTests() {
         s = await voiceSnap(page)
         t.check(!s.rec && s.mic === 'Record a voice message', `after a blocked microphone: ${JSON.stringify(s)}`)
         await fits(t, page, `${ROUTE} voice @${device}`)
+      },
+    })
+  }
+
+  // Decline all in Connected: asked first (Keep backs out with nothing sent), then the agent's waiting proposals
+  // are declined in one call with the count he saw; the badge and the overall button go away
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:decline-all:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page)
+        await page.goto(ROUTE)
+        await threadUp(page)
+        if (device === 'phone') {
+          await page.tap({ sel: '.rv-conn-toggle' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-conn-drop .rv-crow'), 'the Connected toggle did not open the list')
+        }
+        await until(page, () => !!document.querySelector('.rv-conn .rv-crow-act') && !!document.querySelector('.rv-conn .rv-h-act'), 'no Decline all on the agent row or by the Agents heading')
+        await page.tap({ sel: '.rv-conn .rv-crow-act' }, { wait: 40_000 })
+        await until(page, () => /Decline all 2 waiting proposals from Triage agent\? Nothing is sent or applied\./.test(document.querySelector('.rv-conn .rv-confirm')?.textContent ?? ''), 'the confirm line did not name the count and the agent')
+        await t.shot(page, 'confirm')
+        await page.tap({ sel: '.rv-conn .rv-confirm .vl-link', text: 'Keep' }, { wait: 40_000 })
+        await until(page, () => !document.querySelector('.rv-conn .rv-confirm'), 'Keep did not close the confirm line')
+        t.check(st.declineAlls.length === 0, `Keep sent something: ${JSON.stringify(st.declineAlls)}`)
+        await page.tap({ sel: '.rv-conn .rv-crow-act' }, { wait: 40_000 })
+        await page.tap({ sel: '.rv-conn .rv-confirm .vl-btn-line', text: 'Decline 2' }, { wait: 40_000 })
+        await waitFor(() => st.declineAlls.length === 1, 20_000, 'POST /api/msg/proposals/decline-all').catch((e) => t.check(false, e.message))
+        t.check(st.declineAlls[0]?.agentId === 'triage' && st.declineAlls[0]?.count === 2, `Decline all sent ${JSON.stringify(st.declineAlls[0])}`)
+        await until(page, () => {
+          const row = [...document.querySelectorAll('.rv-conn .rv-crow')].find((r) => /Triage agent/.test(r.textContent))
+          return row && !row.querySelector('.rv-n') && !document.querySelector('.rv-conn .rv-crow-act') && !document.querySelector('.rv-conn .rv-h-act') && !document.querySelector('.rv-conn .rv-confirm')
+        }, 'the badge, the Decline all buttons and the confirm did not go away')
+        const cards = await page.eval(() => [...document.querySelectorAll('.rv-prop')].map((p) => p.dataset.status))
+        t.check(cards.length === 2 && cards.every((s) => s === 'declined'), `the cards read ${JSON.stringify(cards)}`)
+        await fits(t, page, `${ROUTE} decline all @${device}`)
       },
     })
   }

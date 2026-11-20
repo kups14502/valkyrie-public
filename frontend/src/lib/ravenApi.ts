@@ -161,6 +161,10 @@ export const fetchMsgCount = async (): Promise<{ unread: number; notify?: number
 export const approveProposal = async (id: number, body: { how?: 'send' | 'draft'; body?: string; cc?: string[] } = {}) =>
   (await api.post<{ ok: boolean; proposal: Proposal }>(`/msg/proposals/${id}/approve`, body)).data
 
+/** Decline all: the oldest `count` waiting proposals of one agent, or of every agent; nothing is sent or applied. */
+export const declineAllProposals = async (body: { agentId?: string; count: number; reason?: string }) =>
+  (await api.post<{ ok: boolean; declined: number; ids: number[] }>('/msg/proposals/decline-all', body)).data
+
 export const declineProposal = async (id: number, reason: string) =>
   (await api.post<{ ok: boolean; proposal: Proposal }>(`/msg/proposals/${id}/decline`, { reason })).data
 

@@ -265,7 +265,24 @@ html[data-motion='reduced'] .rv-pulse { animation: none; }
 .rv-crow[data-state='working'] .rv-crow-note { color: var(--fg); }
 .rv-crow[data-state='error'] .rv-crow-note { color: var(--hot); }
 .rv-crow-line { flex: 1 0 100%; padding-left: 15px; font-size: 11.5px; line-height: 16px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rv-n { flex: none; min-width: 16px; font-size: 10.5px; font-weight: 700; text-align: center; color: #000; background: var(--fg); border-radius: 8px; padding: 0 4px; line-height: 15px; }
+/* an agent's waiting proposals: a solid pill, black on the accent, no inherited glow (text-shadow inherits and blurred
+   the digits), a size up so "87" reads at a glance */
+.rv-n {
+  flex: none;
+  align-self: center;
+  min-width: 26px;
+  padding: 0 7px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #000;
+  background: var(--fg);
+  border-radius: 10px;
+  text-shadow: none;
+  -webkit-font-smoothing: antialiased;
+}
 .rv-dot { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
 .rv-dot[data-state='working'], .rv-dot[data-state='queued'] { background: var(--fg); box-shadow: var(--glow); animation: rv-blink 1.4s ease-in-out infinite; }
 .rv-dot[data-state='watch'] { background: color-mix(in srgb, var(--fg) 55%, transparent); }
@@ -290,3 +307,19 @@ html[data-motion='reduced'] .rv-dot { animation: none; }
 @media (pointer: coarse) {
   .rv-prop-edit, .rv-prop-decline input { font-size: 16px; }
 }
+
+/* ---------- Decline all: per agent (a text button on its row) and for every agent (by the heading), asked first ---------- */
+.rv-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rv-group-head h3 { flex: 1; min-width: 0; }
+.rv-group-head + .rv-crow-wrap > .rv-crow, .rv-group-head + .rv-confirm + .rv-crow-wrap > .rv-crow { border-top: 0; }
+.rv-h-act, .rv-crow-act { position: relative; flex: none; font-size: 11px; font-weight: 600; color: var(--dim); }
+.rv-h-act { margin-top: 12px; }
+.rv-h-act[aria-expanded='true'], .rv-crow-act[aria-expanded='true'] { color: var(--hot); }
+@media (hover: hover) and (pointer: fine) { .rv-h-act:hover, .rv-crow-act:hover { color: var(--hot); } }
+.rv-h-act::after, .rv-crow-act::after { content: ''; position: absolute; inset: -10px -4px; }
+.rv-confirm { margin: 2px 0 8px; padding: 8px 10px 8px 12px; border-left: 2px solid var(--hot); background: color-mix(in srgb, var(--hot) 7%, transparent); }
+.rv-confirm p { margin: 0 0 8px; font-size: 12px; line-height: 17px; color: var(--text); }
+.rv-confirm-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.rv-confirm-acts .vl-btn-line { min-height: 30px; font-size: 12px; border-color: var(--hot); color: var(--hot); }
+.rv-confirm-acts .vl-link { font-size: 12px; }
+@media (pointer: coarse) { .rv-h-act::after, .rv-crow-act::after { inset: -14px -6px; } }

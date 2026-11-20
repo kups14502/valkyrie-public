@@ -1,5 +1,5 @@
 import {
-  addEvent, addMessage, addProposal, AgentError, finishAction, getAgent, getMail, getProposal, markSelfTouch, moveProposal,
+  addEvent, addMessage, addProposal, AgentError, finishAction, getAgent, getMail, getProposal, markSelfTouch, moveProposal, pendingProposals,
   queueAction, setMailState, setProposalMessage, trackedTicket, type Agent, type Proposal, type ProposalKind, type Ref,
 } from './agentsStore.js'
 import { addInternalNote, createTicket, franchiseLabel, PsaError, ticketUrl, updateTicket, type Franchise, type TicketPatch } from './psa.js'
@@ -184,6 +184,33 @@ export function declineProposal(id: number, reason?: string): Proposal {
   if (why) addMessage({ channelId: p.channelId, author: 'brendon', text: `Declined #${p.id}: ${why}` })
   tellAgent(p, 'declined', '', why || undefined, Boolean(why))
   return p
+}
+
+/**
+ * Decline all: the oldest `count` pending proposals of one agent, or of every enabled agent, declined at once with
+ * nothing sent or applied. `count` is the number Brendon confirmed, so a proposal that arrives after the confirm
+ * stays waiting. Each agent gets ONE note in its next run (not one event per card) and is not woken for it.
+ */
+export function declineAllProposals(opts: { agentId?: string; count: number; reason?: string }): Proposal[] {
+  const why = (opts.reason ?? '').trim().slice(0, 600)
+  const n = Math.floor(Number(opts.count))
+  if (!Number.isFinite(n) || n < 1) throw new AgentError(400, 'say how many proposals to decline (the count you confirmed)')
+  if (opts.agentId && !getAgent(opts.agentId)) throw new AgentError(404, 'no such agent')
+  const list = pendingProposals(opts.agentId).slice(0, n)
+  const done: Proposal[] = []
+  for (const p of list) {
+    const d = moveProposal(p.id, ['pending'], 'declined', { result: why || 'Declined with Decline all' })
+    if (d) done.push(d)
+  }
+  const byAgent = new Map<string, Proposal[]>()
+  for (const p of done) byAgent.set(p.agentId, [...(byAgent.get(p.agentId) ?? []), p])
+  for (const [agentId, ps] of byAgent) {
+    addEvent(agentId, 'proposals_declined', {
+      count: ps.length, ids: ps.map((p) => p.id).slice(0, 200), reason: why || undefined,
+      note: 'Brendon cleared these with Decline all: nothing was sent or applied. Do not propose them again unless something new happens on the ticket or the mail.',
+    })
+  }
+  return done
 }
 
 // ------------------------------------------------------- thor results ----

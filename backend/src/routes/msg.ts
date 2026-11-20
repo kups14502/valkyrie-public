@@ -6,7 +6,7 @@ import {
   type Agent, type Channel, type Message,
 } from '../lib/agentsStore.js'
 import { brendonPost, checkNow, hiddenAreas, isPaused, setPaused, AGENT_MODEL } from '../lib/agents.js'
-import { actionResult, approveProposal, declineProposal } from '../lib/agentActions.js'
+import { actionResult, approveProposal, declineAllProposals, declineProposal } from '../lib/agentActions.js'
 import { feedStatus, ingestMail, ingestTeams } from '../lib/workFeeds.js'
 import { PsaError, type Franchise } from '../lib/psa.js'
 import { franchiseConf } from '../lib/workConfig.js'
@@ -147,6 +147,22 @@ router.post('/msg/proposals/:id/approve', h(async (req, res) => {
     cc: Array.isArray(b.cc) ? b.cc.map(String) : undefined,
   })
   res.json({ ok: true, proposal: done })
+}))
+
+// Decline all: { agentId?, count, reason? }. Declines the oldest `count` pending proposals of that agent (or of every
+// enabled agent), nothing sent or applied. Through Cloudflare an agent in a hidden area answers 404, and "every agent"
+// leaves hidden areas out.
+router.post('/msg/proposals/decline-all', h((req, res) => {
+  const b = req.body ?? {}
+  const agentId = typeof b.agentId === 'string' && b.agentId.trim() ? b.agentId.trim() : undefined
+  if (agentId) {
+    const a = getAgent(agentId)
+    if (!a || hiddenArea(req, a.area)) throw new AgentError(404, 'no such agent')
+  } else if (viaCloudflare(req) && hiddenAreas().size) {
+    throw new AgentError(403, 'decline all for every agent works on the tailnet only')
+  }
+  const done = declineAllProposals({ agentId, count: Number(b.count), reason: typeof b.reason === 'string' ? b.reason : '' })
+  res.json({ ok: true, declined: done.length, ids: done.map((p) => p.id) })
 }))
 
 router.post('/msg/proposals/:id/decline', h((req, res) => {

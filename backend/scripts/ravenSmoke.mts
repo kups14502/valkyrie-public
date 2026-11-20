@@ -743,6 +743,30 @@ await j('POST', `/msg/proposals/${card.proposal.id}/decline`, { reason: '' })
 ;[, rv] = await j('GET', '/raven')
 check('the card follows the decision', rv.messages.find((m: any) => m.proposal?.id === card.proposal.id)?.proposal.status === 'declined', rv.messages.find((m: any) => m.proposal?.id === card.proposal.id))
 
+// Decline all: the oldest N waiting proposals of one agent, nothing sent or applied, one note to the agent, no wake
+{
+  const ch = card.proposal ? store.getProposal(card.proposal.id)!.channelId : 'east'
+  const made = [1, 2, 3, 4].map((i) => store.addProposal({ agentId: 'east-triage', channelId: ch, kind: 'ticket_note', title: `Bulk ${i}`, payload: { ticketId: 900 + i, title: `n${i}`, text: 'x' } }))
+  const eventsBefore = store.openEvents('east-triage').length
+  const runsBefore = store.listRuns('east-triage', 50).length
+  let [dst, dr] = await j('POST', '/msg/proposals/decline-all', { agentId: 'east-triage' })
+  check('decline all: a missing count is refused', dst === 400, dr)
+  ;[dst, dr] = await j('POST', '/msg/proposals/decline-all', { agentId: 'nobody', count: 3 })
+  check('decline all: an unknown agent is a 404', dst === 404, dr)
+  ;[dst, dr] = await j('POST', '/msg/proposals/decline-all', { agentId: 'east-triage', count: 3 })
+  check('decline all: the oldest 3 declined, the newest left waiting', dst === 200 && dr.declined === 3 && JSON.stringify(dr.ids) === JSON.stringify(made.slice(0, 3).map((p) => p.id))
+    && store.getProposal(made[3].id)?.status === 'pending', dr)
+  check('decline all: declined, with nothing sent or applied', made.slice(0, 3).every((p) => store.getProposal(p.id)?.status === 'declined' && store.getProposal(p.id)?.result === 'Declined with Decline all')
+    , made.map((p) => store.getProposal(p.id)?.status))
+  const ev = store.openEvents('east-triage').slice(eventsBefore)
+  check('decline all: one note to the agent, not one per card', ev.length === 1 && ev[0].kind === 'proposals_declined' && ev[0].payload.count === 3, ev)
+  await new Promise((r) => setTimeout(r, 300))
+  check('decline all: the agent is not woken for it', store.listRuns('east-triage', 50).length === runsBefore, store.listRuns('east-triage', 3))
+  ;[dst, dr] = await j('POST', '/msg/proposals/decline-all', { count: 50 })
+  check('decline all for every agent: the rest declined', dst === 200 && dr.ids.includes(made[3].id) && store.pendingProposals().length === 0, dr)
+  store.claimEvents('east-triage', 'smoke-clear', store.openEvents('east-triage').map((e: any) => e.id))
+}
+
 // an agent posting in #raven wakes Raven (relay run: no router, sonnet/low, not fromBrendon)
 agentScript('groceries', [{ tool: 'post', args: { channel: 'raven', text: 'For Raven: the cart is ready.' } }, { tool: 'read_channel', args: { channel: 'raven' } }])
 queue({ steps: [{ tool: 'probe_gate' }, { tool: 'gated_write' }], result: '(no reply)' })

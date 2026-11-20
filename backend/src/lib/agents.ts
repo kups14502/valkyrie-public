@@ -448,6 +448,12 @@ function renderEvent(e: AgentEvent): string {
       return `- In #${s('channelId')}, ${s('from') === 'brendon' ? 'Brendon' : `@${s('from')}`} wrote (message ${s('messageId')}): ${s('text')}${retry}`
     case 'proposal':
       return `- Your proposal #${s('id')} "${s('title')}" is ${s('status')}${p.result ? `: ${s('result')}` : ''}${p.reason ? `. Brendon's reason: ${s('reason')}` : ''}.`
+    case 'proposals_declined': {
+      const ids = Array.isArray(p.ids) ? (p.ids as number[]) : []
+      const span = ids.length ? ` (#${Math.min(...ids)} to #${Math.max(...ids)})` : ''
+      return `- Brendon declined ${s('count')} of your waiting proposals at once with Decline all${span}. Nothing was sent or applied.`
+        + `${p.reason ? ` His reason: ${s('reason')}.` : ''} Do not propose them again unless something new happens on that ticket or mail.`
+    }
     case 'daily_review':
       return '- Weekday morning review: post one message in your channel with what needs Brendon today.'
     case 'daily_check':

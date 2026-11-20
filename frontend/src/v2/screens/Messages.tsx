@@ -10,7 +10,7 @@ import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
-  RAVEN_OLDER, approveProposal, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
+  RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
   replyMetaTitle, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
@@ -477,10 +477,43 @@ function feedLines(messages: RavenMsg[]): { label: string; text: string; at: str
   return [...seen.values()]
 }
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * Decline all, asked first: the line under an agent (or under the Agents heading, for every agent) that names the
+ * count and says nothing is sent or applied. Declines the oldest `count` waiting proposals, the ones he saw.
+ */
+function DeclineAll({ agentId, count, who, onDone }: { agentId?: string; count: number; who: string; onDone: () => void }) {
+  const qc = useQueryClient()
+  const go = useMutation({
+    mutationFn: () => declineAllProposals({ agentId, count }),
+    onSuccess: (r) => {
+      toast(`Declined ${plural(r.declined, 'proposal')}${agentId ? ` from ${who}` : ''}`, { ms: 4000 })
+      onDone()
+      void qc.invalidateQueries({ queryKey: RAVEN_KEY })
+      refreshRavenUnread(qc)
+    },
+    onError: (e) => toast(apiErrorText(e, 'Valkyrie did not decline them'), { ms: 5000 }),
+  })
+  return (
+    <div className="rv-confirm" role="alertdialog" aria-label={`Decline all from ${who}`}>
+      <p>Decline all {plural(count, 'waiting proposal')} from {who}? Nothing is sent or applied.</p>
+      <div className="rv-confirm-acts">
+        <Button kind="line" lit disabled={go.isPending} onPress={() => go.mutate()}>{go.isPending ? 'Declining' : `Decline ${count}`}</Button>
+        <Button kind="link" disabled={go.isPending} onPress={onDone}>Keep</Button>
+      </div>
+    </div>
+  )
+}
+
 /** What Raven reaches: his main terminals, the sessions it watches, the agents, the feeds. */
 function Connected({ page, messages, onOpen }: { page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void }) {
   const now = useTick(60_000)
   const feeds = feedLines(messages)
+  // which Decline all is asking: an agent's id, 'all', or none
+  const [asking, setAsking] = useState<string | null>(null)
+  const waiting = page.agents.reduce((n, a) => n + a.pending, 0)
+  const withPending = page.agents.filter((a) => a.pending > 0).length
   const open = (pane: string) => (
     <a className="rv-open" href={v2TermPath(pane)} onClick={(e) => { e.preventDefault(); onOpen(v2TermPath(pane)) }}>Open</a>
   )
@@ -517,13 +550,27 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
       )}
       {page.agents.length > 0 && (
         <div className="rv-group">
-          <h3>Agents{page.paused ? <span className="rv-warn"> · paused</span> : null}</h3>
+          <div className="rv-group-head">
+            <h3>Agents{page.paused ? <span className="rv-warn"> · paused</span> : null}</h3>
+            {waiting > 0 && (
+              <Press className="rv-h-act" aria-expanded={asking === 'all'} onPress={() => setAsking((v) => (v === 'all' ? null : 'all'))}>Decline all</Press>
+            )}
+          </div>
+          {asking === 'all' && <DeclineAll count={waiting} who={plural(withPending, 'agent')} onDone={() => setAsking(null)} />}
           {page.agents.map((a) => (
-            <div key={a.id} className="rv-crow" data-state={a.status}>
-              <span className="rv-dot" data-state={page.paused ? 'off' : a.status} aria-hidden />
-              <span className="rv-crow-name">{a.name}</span>
-              <span className="rv-crow-note">{AGENT_WORD[a.status] ?? a.status}</span>
-              {a.pending > 0 && <span className="rv-n" title={`${a.pending} waiting for you`}>{a.pending}</span>}
+            <div key={a.id} className="rv-crow-wrap">
+              <div className="rv-crow" data-state={a.status}>
+                <span className="rv-dot" data-state={page.paused ? 'off' : a.status} aria-hidden />
+                <span className="rv-crow-name">{a.name}</span>
+                <span className="rv-crow-note">{AGENT_WORD[a.status] ?? a.status}</span>
+                {a.pending > 0 && (
+                  <span className="rv-n" role="img" title={`${plural(a.pending, 'proposal')} waiting`} aria-label={`${plural(a.pending, 'proposal')} waiting`}>{a.pending}</span>
+                )}
+                {a.pending > 0 && (
+                  <Press className="rv-crow-act" aria-expanded={asking === a.id} onPress={() => setAsking((v) => (v === a.id ? null : a.id))}>Decline all</Press>
+                )}
+              </div>
+              {asking === a.id && a.pending > 0 && <DeclineAll agentId={a.id} count={a.pending} who={a.name} onDone={() => setAsking(null)} />}
             </div>
           ))}
         </div>
