@@ -237,3 +237,8 @@ html[data-motion='reduced'] .rv-q-sheet, html[data-motion='reduced'] .rv-q-back 
   .rv-chip-x::after { inset: -10px -11px; }
   .rv-chip-act::after { inset: -10px -8px; }
 }
+
+/* a phone's browser zooms the page into any text field under 16 px when it takes the focus */
+@media (pointer: coarse) {
+  .rv-compose textarea { font-size: 16px; line-height: 22px; }
+}

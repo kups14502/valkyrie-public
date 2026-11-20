@@ -414,6 +414,9 @@ export function ravenTests() {
           await page.key('Enter')
         } else {
           want = 'Start a work session and check the printer'
+          // under 16 px the phone's browser zooms the whole page into the box when it takes the focus
+          const px = await page.eval(() => parseFloat(getComputedStyle(document.querySelector('.rv .rv-compose textarea')).fontSize))
+          t.check(px >= 16, `the message box is ${px} px on the phone, so iOS zooms into it`)
           await page.tap({ sel: '.rv .rv-compose textarea' }, { wait: 40_000 })
           await page.type(want)
           await page.tap({ sel: '.rv .rv-send' }, { wait: 40_000 })
