@@ -1,7 +1,7 @@
 import type { RavenToolGroup } from '../types.js'
 import { registerAgentTools } from './agents.js'
 import { registerMediaTools } from './media.js'
-import { registerSessionTools, sessionsSnapshot, sessionsState, type RavenMain, type RavenWatch } from './sessions.js'
+import { registerSessionTools, sessionsSnapshot, sessionsState, sessionTitles, titleFor, type RavenMain, type RavenWatch } from './sessions.js'
 import { registerThorFileTools } from './thorfiles.js'
 import { registerVaultTools } from './vault.js'
 import { startWatcher } from './watch.js'
@@ -44,6 +44,20 @@ export async function ravenSnapshot(): Promise<string> {
   } catch (e) {
     return `Sessions: could not be read (${(e as Error).message.slice(0, 160)}).`
   }
+}
+
+/**
+ * A session relay's sender as the conversation's own title ("Raven model and effort picker"), when thor's board has
+ * one that says more than the pane label ("Personal"); undefined otherwise. Never waits, never throws.
+ */
+export function ravenRelayTitles(): (sessionId: string | undefined, label: string) => string | undefined {
+  let titles: Map<string, string>
+  try {
+    titles = sessionTitles()
+  } catch {
+    titles = new Map()
+  }
+  return (sessionId, label) => titleFor(titles, sessionId, label)
 }
 
 /** Main terminals and watched sessions for GET /api/raven. Never throws. */

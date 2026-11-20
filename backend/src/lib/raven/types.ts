@@ -62,6 +62,8 @@ export type RavenMeta = {
     proposalIds?: number[]
     /** a pane's conversation id, for a session relay */
     sessionId?: string
+    /** a session relay's conversation title from thor's board, added when the thread is read (never stored) */
+    title?: string
   }
   /** where the message came in from when Brendon did not type it in the app */
   source?: 'app' | 'quick' | 'siri' | 'hotkey' | 'api'

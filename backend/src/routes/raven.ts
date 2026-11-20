@@ -8,7 +8,7 @@ import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
 import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenState, stopRaven, waitForReply, withTimeout } from '../lib/raven/run.js'
 import { ravenPickView, setRavenSettings } from '../lib/raven/settings.js'
-import { ravenSessionsState } from '../lib/raven/tools/index.js'
+import { ravenRelayTitles, ravenSessionsState } from '../lib/raven/tools/index.js'
 import { RAVEN_CHANNEL, type RavenNotice } from '../lib/raven/types.js'
 
 // Raven's thread (lib/raven/run.ts) for the app: the one conversation in the
@@ -54,15 +54,24 @@ export type RavenMsgView = {
 type ProposalView = NonNullable<RavenMsgView['proposal']>
 const proposalIdsOf = (m: Message): number[] => [...(m.proposalId ? [m.proposalId] : []), ...(m.meta.relay?.proposalIds ?? [])]
 
+/** A session relay carries the conversation's own title, so a pane named for its main target still says what it works on. */
+function withTitle(m: Message, title: ReturnType<typeof ravenRelayTitles>): Message['meta'] {
+  const r = m.meta.relay
+  if (r?.kind !== 'session') return m.meta
+  const t = title(r.sessionId, r.label)
+  return t ? { ...m.meta, relay: { ...r, title: t } } : m.meta
+}
+
 function messagesView(msgs: Message[]): RavenMsgView[] {
   const props = proposalsFor(msgs.flatMap(proposalIdsOf))
+  const title = ravenRelayTitles()
   return msgs.map((m) => {
     const list: ProposalView[] = proposalIdsOf(m).flatMap((id) => {
       const p = props.get(id)
       return p ? [{ id: p.id, kind: p.kind, title: p.title, payload: p.payload, status: p.status, result: p.result || null, decidedAt: p.decidedAt }] : []
     })
     return {
-      id: m.id, author: m.author, text: m.text, createdAt: m.createdAt, refs: m.refs, meta: m.meta,
+      id: m.id, author: m.author, text: m.text, createdAt: m.createdAt, refs: m.refs, meta: withTitle(m, title),
       proposal: list[0] ?? null,
       ...(list.length > 1 ? { proposals: list } : {}),
     }

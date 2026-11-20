@@ -34,6 +34,8 @@ export type RavenRelay = {
   label: string
   sourceMessageId?: number
   sessionId?: string
+  /** a session relay: the conversation's own title, when it says more than the label */
+  title?: string
 }
 
 /** What a message carries beyond its text. Every field optional. */
@@ -81,7 +83,8 @@ export type RavenMsg = {
 }
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string }
+/** label: the pane's name (often the main target's); title: the conversation's own title, when it says more */
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string }
 export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number }
 
 export type RavenState = {
@@ -228,10 +231,10 @@ export const RULE_NAME: Record<RavenRuleKey, string> = { simple: 'Simple', compl
  * A reply's line under it: the model that ran (and the one wanted, when another ran in its place), the effort, the
  * automatic rule that chose it, the time. "Sonnet 5.5 · low · simple · 3:04 PM ET".
  */
-export function replyMetaLine(meta: RavenMeta, createdAt: string): string {
+export function replyMetaLine(meta: RavenMeta, createdAt: string, opts: { time?: boolean } = {}): string {
   const ran = modelLabel(meta.model, meta.tier)
   const model = ran && meta.asked ? `${ran} (${modelLabel(meta.asked)} unavailable)` : ran
-  return [model, meta.effort, meta.rule ? meta.rule : null, etTime(createdAt)].filter(Boolean).join(' · ')
+  return [model, meta.effort, meta.rule ? meta.rule : null, opts.time === false ? null : etTime(createdAt)].filter(Boolean).join(' · ')
 }
 
 /** The reply line's tooltip: how it was chosen. */

@@ -36,7 +36,8 @@ const TEXT_MAX = 8_000
 const TARGETS_TTL_MS = 10 * 60_000
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string }
+/** A watched session: `label` is the pane's (often the main target's name), `title` the conversation's own title on thor's board. */
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string }
 
 type MainRec = { pane: string; label: string; sessionId: string; at: string }
 
@@ -283,8 +284,29 @@ async function mainsNow(waitMs: number): Promise<{ known: boolean; mains: RavenM
 /** Main terminals and watched sessions for GET /api/raven. Waits on thor 2.5 s at most, and not at all for a minute after it failed. */
 export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: RavenWatch[] }> {
   const { mains } = await mainsNow(2_500)
-  const watching = listWatches().map((w) => ({ pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since }))
+  const titles = sessionTitles()
+  const watching = listWatches().map((w) => {
+    const title = titleFor(titles, w.sessionId, w.label)
+    return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}) }
+  })
   return { mains, watching }
+}
+
+/** Conversation id to its title, from thor's board as last read (never waits); empty when thor has not answered lately. */
+export function sessionTitles(): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const r of io.boardCached() ?? []) {
+    const id = typeof r.sessionId === 'string' ? r.sessionId : ''
+    const title = typeof r.title === 'string' ? oneLine(r.title).slice(0, 120) : ''
+    if (id && title) out.set(id, title)
+  }
+  return out
+}
+
+/** A session's own title when it says more than its pane label, else undefined. */
+export function titleFor(titles: Map<string, string>, sessionId: string | undefined, label: string): string | undefined {
+  const t = sessionId ? titles.get(sessionId) : undefined
+  return t && t.toLowerCase() !== label.trim().toLowerCase() ? t : undefined
 }
 
 /** Plain lines for Raven's prompt: main terminals, watched sessions, other panes. */

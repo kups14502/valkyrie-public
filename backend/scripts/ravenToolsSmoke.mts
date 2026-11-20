@@ -678,6 +678,18 @@ agents.syncRoster()
   // state for the page and the prompt
   const st = await tools.ravenSessionsState()
   check('ravenSessionsState: mains and watches', st.mains.length === 2 && st.mains[0].pane === mainPane && st.watching.some((w) => w.pane === mainPane), st)
+  const mainWatch = st.watching.find((w) => w.pane === mainPane)
+  check('ravenSessionsState: no board copy, no title', !!mainWatch?.sessionId && mainWatch.title === undefined, mainWatch)
+  ;(fakeIo as any).boardCached = () => [{ sessionId: mainWatch?.sessionId, title: 'Printer migration plan' }, { sessionId: 'other', title: 'Other' }]
+  ioMod.setRavenToolsIo(fakeIo)
+  const titled = (await tools.ravenSessionsState()).watching.find((w) => w.pane === mainPane)
+  check('ravenSessionsState: a watch carries its conversation title, its label kept', titled?.title === 'Printer migration plan' && titled.label === mainWatch?.label, titled)
+  const relayTitle = tools.ravenRelayTitles()
+  check('relay titles: the title when it says more than the label, never the label again',
+    relayTitle(mainWatch?.sessionId, 'Personal') === 'Printer migration plan' && relayTitle(mainWatch?.sessionId, 'printer migration plan') === undefined
+    && relayTitle('nope', 'Personal') === undefined && relayTitle(undefined, 'Personal') === undefined)
+  delete (fakeIo as any).boardCached
+  ioMod.setRavenToolsIo(fakeIo)
   screensBy.set(mainPane, [BUSY])
   check('ravenSessionsState: working while the spinner shows', (await tools.ravenSessionsState()).mains[0].state === 'working')
   screensBy.set(mainPane, [IDLE])

@@ -107,19 +107,32 @@
 .rv-msg[data-kind='me'] .rv-files { margin: 0 0 6px; }
 .rv-msg[data-kind='me'] .rv-foot { padding-right: 8px; }
 
-/* Raven: plain text on the column, a reading size, room between paragraphs */
-.rv-msg[data-kind='raven'] { padding-top: 16px; }
-.rv-msg[data-kind='raven'][data-grouped] { padding-top: 10px; }
+/* Raven: a RAVEN label and the time over each reply, plain text on the column at a reading size,
+   the model line under it; two of Raven's own lines in a row get a hairline and room between them */
+.rv-msg[data-kind='raven'], .rv-msg[data-kind='system'] { padding-top: 18px; }
+.rv-msg[data-split] { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.rv-msg[data-kind='raven'] .rv-msg-head { margin-bottom: 5px; }
+.rv-msg[data-kind='raven'] .rv-msg-head b { color: var(--fg); text-shadow: var(--text-glow); }
 .rv-msg[data-kind='raven'] .rv-md { font-size: 14px; line-height: 23px; }
 .rv-msg[data-kind='raven'] .rv-md p { margin-bottom: 12px; }
 .rv-msg[data-kind='raven'] .rv-md p:last-child { margin-bottom: 0; }
 .rv-msg[data-kind='raven'] .rv-meta { margin-top: 6px; }
 
-/* a relay: the source in the accent, the text a step quieter, a hairline on the left */
-.rv-msg[data-kind='relay'] { padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--fg) 30%, transparent); margin-top: 10px; padding-top: 4px; }
-.rv-msg[data-kind='relay'][data-grouped] { margin-top: 0; }
+/* a relay (an agent, a session, a feed, the brief): a tinted block of its own with a lit left edge,
+   its source and the time on top, the text a step quieter; blocks in a row keep a gap between them */
+.rv-msg[data-kind='relay'] {
+  margin-top: 14px;
+  padding: 9px 14px 10px 13px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--fg) 60%, transparent);
+  border-radius: 0 8px 8px 0;
+}
+.rv-msg[data-kind='relay'] .rv-msg-head { margin-bottom: 4px; }
 .rv-msg[data-kind='relay'] .rv-msg-head b { color: var(--fg); }
+/* a session relay's pane name (a main target) beside the conversation's title */
+.rv-msg-from { font-size: 11px; color: var(--dim); }
 .rv-msg[data-kind='relay'] .rv-md { font-size: 13px; line-height: 19px; }
+.rv-msg[data-kind='relay'] .rv-prop { margin-bottom: 0; }
 .rv-msg[data-kind='system'] .rv-md { font-size: 12px; color: var(--dim); }
 .rv-msg[data-error] .rv-md { color: var(--hot); font-size: 12.5px; }
 .rv-open {

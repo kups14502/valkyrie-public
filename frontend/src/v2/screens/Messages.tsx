@@ -267,12 +267,16 @@ function Thread({ messages, names }: { messages: RavenMsg[]; names: Map<string, 
         const next = messages[i + 1]
         const t = Date.parse(m.createdAt)
         const newDay = !prev || NY_KEY.format(Date.parse(prev.createdAt)) !== NY_KEY.format(t)
-        const grouped = !!prev && joins(prev, m)
+        const kind = kindOf(m)
+        // his bubbles run together; every line from Raven, a relay or Valkyrie stands alone, with its label and time
+        const grouped = !!prev && kind === 'me' && joins(prev, m)
         const last = !next || !joins(m, next)
+        // two plain lines in a row on Raven's side get a hairline between them (a relay is a block of its own)
+        const split = !newDay && !!prev && PLAIN.has(kind) && PLAIN.has(kindOf(prev))
         return (
           <div key={m.id} className="rv-item">
             {newDay && <div className="rv-day"><span>{dayLabel(t, now)}</span></div>}
-            <Row m={m} grouped={grouped} last={last} names={names} />
+            <Row m={m} grouped={grouped} last={last} split={split} names={names} />
           </div>
         )
       })}
@@ -290,7 +294,10 @@ function joins(prev: RavenMsg, m: RavenMsg): boolean {
   return NY_KEY.format(a) === NY_KEY.format(b) && who(prev) === who(m) && b - a < 10 * 60_000 && !m.proposal
 }
 
-function kindOf(m: RavenMsg): 'me' | 'raven' | 'relay' | 'system' {
+type Kind = 'me' | 'raven' | 'relay' | 'system'
+const PLAIN = new Set<Kind>(['raven', 'system'])
+
+function kindOf(m: RavenMsg): Kind {
   if (m.meta.relay) return 'relay'
   if (m.author === 'brendon') return 'me'
   if (m.author === 'raven') return 'raven'
@@ -300,31 +307,35 @@ function kindOf(m: RavenMsg): 'me' | 'raven' | 'relay' | 'system' {
 
 /**
  * One line of the thread. His own lines are bubbles on the right, with the time
- * (and "via Siri") under the last of a run. Raven's replies are plain text on
- * the column, the model, effort and time under each. Relays and Valkyrie's own
- * lines keep a visible label over each run. The You and Raven labels stay for
- * screen readers.
+ * (and "via Siri") under the last of a run; their You label is for screen
+ * readers. Every other line opens with its sender and time: Raven's replies are
+ * plain text under a RAVEN label, the model, effort and rule under each, a
+ * hairline between two in a row; a relay (an agent, a session, a feed, the
+ * brief) is a tinted block of its own with a lit edge and its source's name.
  */
-function Row({ m, grouped, last, names }: { m: RavenMsg; grouped: boolean; last: boolean; names: Map<string, string> }) {
+function Row({ m, grouped, last, split, names }: { m: RavenMsg; grouped: boolean; last: boolean; split: boolean; names: Map<string, string> }) {
   const navigate = useNavigate()
   const kind = kindOf(m)
   const relay = m.meta.relay
   const pane = relay?.kind === 'session' && TERM_NAME_RE.test(relay.from) ? relay.from : null
   const termPath = pane ? v2TermPath(pane) : null
-  const label = kind === 'me' ? 'You' : kind === 'raven' ? 'Raven' : kind === 'system' ? 'Valkyrie' : relay?.label || names.get(m.author) || m.author
+  // a session relay names the conversation by its own title, the pane's name (a main target) beside it
+  const label = kind === 'me' ? 'You' : kind === 'raven' ? 'Raven' : kind === 'system' ? 'Valkyrie' : relay?.title || relay?.label || names.get(m.author) || m.author
+  const from = relay?.title && relay.label ? relay.label : null
   const via = kind === 'me' && m.meta.source ? SOURCE_WORD[m.meta.source] : undefined
-  const meta = kind === 'raven' && !m.meta.error && (m.meta.model || m.meta.tier) ? replyMetaLine(m.meta, m.createdAt) : null
+  const meta = kind === 'raven' && !m.meta.error && (m.meta.model || m.meta.tier) ? replyMetaLine(m.meta, m.createdAt, { time: false }) : null
   // a session relay's ref link to its pane is the Open link already
   const refs = termPath ? m.refs.filter((r) => !(r.type === 'link' && r.url === termPath)) : m.refs
   const files = m.meta.files && m.meta.files.length > 0 ? <RavenFiles files={m.meta.files} /> : null
   const time = <time title={NY_DAY.format(Date.parse(m.createdAt))}>{etTime(m.createdAt)}</time>
-  // You and Raven: the label is for screen readers; the time goes under the line
-  const quiet = kind === 'me' || kind === 'raven'
+  // his own lines: the bubble says who, the label is for screen readers, the time goes under the line
+  const quiet = kind === 'me'
   return (
-    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-error={m.meta.error ? '' : undefined}>
+    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-split={split || undefined} data-error={m.meta.error ? '' : undefined}>
       {!grouped && (
         <div className="rv-msg-head" data-sr={quiet || undefined}>
           <b>{label}</b>
+          {from && <span className="rv-msg-from">{from}</span>}
           {termPath && (
             <a
               className="rv-open"
@@ -349,7 +360,6 @@ function Row({ m, grouped, last, names }: { m: RavenMsg; grouped: boolean; last:
           {refs.length > 0 && <Refs refs={refs} />}
           {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
           {meta && <p className="rv-meta" title={replyMetaTitle(m.meta)}>{meta}</p>}
-          {kind === 'raven' && !meta && <p className="rv-foot">{time}</p>}
         </>
       )}
     </article>
@@ -497,9 +507,10 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
           {page.watching.map((w) => (
             <div key={w.pane || w.sessionId} className="rv-crow">
               <span className="rv-dot" data-state="watch" aria-hidden />
-              <span className="rv-crow-name">{w.label}</span>
+              <span className="rv-crow-name" title={w.title || undefined}>{w.title || w.label}</span>
               <span className="rv-crow-note" title={etTime(w.since)}>{ago(Date.parse(w.since), now)}</span>
               {w.pane && open(w.pane)}
+              {w.title && <span className="rv-crow-line">{w.label}</span>}
             </div>
           ))}
         </div>

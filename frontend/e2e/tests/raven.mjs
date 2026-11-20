@@ -60,7 +60,7 @@ function seed(now) {
     {
       id: 104, author: 'raven', text: 'The personal session finished the refactor and is waiting.', createdAt: t(30),
       refs: [{ type: 'link', url: '/m/ai/term/vk-e2e00000a1', label: 'Open' }],
-      meta: { relay: { kind: 'session', from: 'vk-e2e00000a1', label: 'Personal (main)', sessionId: 'sess-1' } }, proposal: null,
+      meta: { relay: { kind: 'session', from: 'vk-e2e00000a1', label: 'Personal (main)', sessionId: 'sess-1', title: 'Refactor the parser' } }, proposal: null,
     },
     { id: 105, author: 'raven', text: 'Sync stalled for 2 hours.', createdAt: t(20), refs: [], meta: { relay: { kind: 'feature', from: 'watcher', label: 'Watcher' } }, proposal: null },
     {
@@ -94,7 +94,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       { target: 'area2', label: 'Work area two', pane: null, state: 'closed' },
     ],
     watching: [
-      { pane: 'vk-e2e00000b2', label: 'Work area one (main)', sessionId: 'sess-2', since: iso(now - 25 * MIN) },
+      { pane: 'vk-e2e00000b2', label: 'Work area one (main)', sessionId: 'sess-2', since: iso(now - 25 * MIN), title: 'Printer migration plan' },
       // a session in a window on thor: Raven reads it, but there is no pane here to open
       { pane: '', label: 'Area two (window)', sessionId: 'sess-3', since: iso(now - 5 * MIN) },
     ],
@@ -296,8 +296,21 @@ function threadSnap() {
     stop: !!q('.rv-stop'),
     kinds: qa('.rv .rv-msg').map((m) => m.dataset.kind + (m.dataset.relay ? `:${m.dataset.relay}` : '')),
     labels: qa('.rv .rv-msg-head b').map((b) => b.textContent),
+    froms: qa('.rv .rv-msg-head .rv-msg-from').map((x) => x.textContent),
     siri: /via Siri/.test(q('.rv .rv-msg[data-kind="me"]')?.innerText ?? ''),
     metas: qa('.rv .rv-msg[data-kind="raven"] .rv-meta').map((p) => p.textContent),
+    heads: qa('.rv .rv-msg:not([data-kind="me"])').map((m) => {
+      const h = m.querySelector(':scope > .rv-msg-head')
+      return !!h && !h.dataset.sr && h.getBoundingClientRect().height > 8 && /\S/.test(h.querySelector('b')?.textContent ?? '') && /\d{1,2}:\d{2} [AP]M ET/.test(h.textContent)
+    }),
+    blocks: qa('.rv .rv-msg[data-kind="relay"]').map((m) => {
+      const cs = getComputedStyle(m)
+      return { tint: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent', edge: parseFloat(cs.borderLeftWidth) >= 1 }
+    }),
+    gaps: (() => {
+      const rs = qa('.rv .rv-msg[data-kind="relay"]').map((m) => m.getBoundingClientRect())
+      return rs.slice(1).map((r, i) => Math.round(r.top - rs[i].bottom)).filter((g) => g < 200)
+    })(),
     li: !!q('.rv .rv-msg[data-kind="raven"] .rv-md li'),
     open: qa('.rv-msgs .rv-open').map((a) => a.getAttribute('href')),
     days: qa('.rv .rv-day').map((d) => d.textContent),
@@ -311,6 +324,8 @@ function threadSnap() {
     side: side && conv ? { right: side.left >= conv.right - 1, w: Math.round(side.width) } : null,
     toggle: !!q('.rv-conn-toggle'),
     conn: qa('.rv-conn .rv-group').map((g) => `${g.querySelector('h3')?.textContent}:${g.querySelectorAll('.rv-crow').length}`),
+    watchRows: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-crow')]
+      .map((r) => `${r.querySelector('.rv-crow-name')?.textContent}|${r.querySelector('.rv-crow-line')?.textContent ?? ''}`)),
     watchOpen: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-open')].map((a) => a.getAttribute('href'))),
     triage: crow(/Triage agent/)?.querySelector('.rv-n')?.textContent ?? null,
     feed: crow(/Watcher/)?.innerText.replace(/\s+/g, ' ') ?? null,
@@ -353,9 +368,14 @@ export function ravenTests() {
         const s = await page.eval(threadSnap)
         t.check(s.name === 'Raven' && s.status === 'idle' && !s.stop, `the header reads ${JSON.stringify([s.name, s.status, s.stop])}`)
         t.check(JSON.stringify(s.kinds) === JSON.stringify(['relay:system', 'me', 'raven', 'relay:agent', 'relay:session', 'relay:feature', 'me', 'raven', 'relay:agent']), `the rows are ${JSON.stringify(s.kinds)}`)
-        for (const want of ['Morning brief', 'You', 'Raven', 'Triage agent', 'Personal (main)', 'Watcher']) t.check(s.labels.includes(want), `no row is labeled ${want}: ${JSON.stringify(s.labels)}`)
+        for (const want of ['Morning brief', 'You', 'Raven', 'Triage agent', 'Refactor the parser', 'Watcher']) t.check(s.labels.includes(want), `no row is labeled ${want}: ${JSON.stringify(s.labels)}`)
+        // a session relay goes by the conversation's title, its pane's name beside it
+        t.check(JSON.stringify(s.froms) === JSON.stringify(['Personal (main)']), `the session relay's pane name reads ${JSON.stringify(s.froms)}`)
         t.check(s.siri, 'the line from Siri does not say so')
-        t.check(s.metas.length === 2 && /^Sonnet 5\.5 · medium · \d{1,2}:\d{2} [AP]M ET$/.test(s.metas[0]) && /^Opus 5\.5 · high · \d{1,2}:\d{2} [AP]M ET$/.test(s.metas[1]), `Raven's meta lines read ${JSON.stringify(s.metas)}`)
+        t.check(s.metas.length === 2 && /^Sonnet 5\.5 · medium$/.test(s.metas[0]) && /^Opus 5\.5 · high$/.test(s.metas[1]), `Raven's meta lines read ${JSON.stringify(s.metas)}`)
+        // every line on Raven's side opens with its sender and time; each relay is a tinted block apart from the next
+        t.check(s.heads.length === 7 && s.heads.every(Boolean), `a line on Raven's side has no visible sender and time: ${JSON.stringify(s.heads)}`)
+        t.check(s.blocks.length === 5 && s.blocks.every((b) => b.tint && b.edge) && s.gaps.every((g) => g >= 8), `the relays are not blocks of their own: ${JSON.stringify({ blocks: s.blocks, gaps: s.gaps })}`)
         t.check(s.li, 'the reply\'s Markdown list did not render')
         t.check(JSON.stringify(s.open) === JSON.stringify(['/m/ai/term/vk-e2e00000a1']), `the session relay's Open links are ${JSON.stringify(s.open)}`)
         t.check(s.days.length >= 2 && s.days[s.days.length - 1] === 'Today', `the day headings read ${JSON.stringify(s.days)}`)
@@ -381,6 +401,7 @@ export function ravenTests() {
         }
         t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:2', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
         t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor has none)`)
+        t.check(JSON.stringify(conn.watchRows) === JSON.stringify(['Printer migration plan|Work area one (main)', 'Area two (window)|']), `Watching reads ${JSON.stringify(conn.watchRows)} (the title first, the target under it)`)
         t.check(conn.triage === '2', `the triage agent's pending count reads ${conn.triage}`)
         t.check(/Sync stalled/.test(conn.feed ?? ''), `the feed line reads ${conn.feed}`)
         await fits(t, page, `${ROUTE} @${device}`)
@@ -838,6 +859,7 @@ export function ravenTests() {
       async run(t) {
         const page = await t.page()
         const st = ravenBackend(page)
+        st.messages.push({ id: 149, author: 'raven', text: 'Looking at the notes now.', createdAt: iso(Date.now() - 2 * MIN), refs: [], meta: { tier: 'sonnet', model: 'claude-sonnet-5-5', effort: 'low', rule: 'simple' }, proposal: null })
         st.messages.push({ id: 150, author: 'raven', text: 'Summed up.', createdAt: iso(Date.now() - MIN), refs: [],
           meta: { tier: 'fable', model: 'claude-opus-5-5', asked: 'claude-fable-5-1', effort: 'medium', rule: 'complex', why: 'a write-up' }, proposal: null })
         await page.goto(ROUTE)
@@ -857,12 +879,14 @@ export function ravenTests() {
             ta: ta ? Math.round(ta.width) : 0,
             inRow: !!(row && send && pick && pick.right <= send.left + 1 && pick.left >= (ta?.right ?? 0) - 1 && send.right <= row.right + 1),
             meta: qa('.rv .rv-msg[data-kind="raven"] .rv-meta').map((p) => p.textContent).pop() ?? '',
+            split: qa('.rv .rv-msg[data-split]').map((m) => `${m.querySelector('.rv-md')?.textContent}|${getComputedStyle(m).borderTopWidth}`),
           }
         })
         let s = await snap()
         t.check(JSON.stringify(s.buttons) === JSON.stringify(['Auto', 'auto']), `the pick buttons read ${JSON.stringify(s.buttons)}`)
         t.check(s.inRow && s.ta >= 150, `the pick does not sit between the text and Send, or squeezes the text (${s.ta} px): ${JSON.stringify(s)}`)
-        t.check(/^Opus 5\.5 \(Fable 5\.1 unavailable\) · medium · complex · \d{1,2}:\d{2} [AP]M ET$/.test(s.meta), `the reply's line reads ${JSON.stringify(s.meta)}`)
+        t.check(/^Opus 5\.5 \(Fable 5\.1 unavailable\) · medium · complex$/.test(s.meta), `the reply's line reads ${JSON.stringify(s.meta)}`)
+        t.check(JSON.stringify(s.split) === JSON.stringify(['Summed up.|1px']), `two replies in a row are not split by a hairline: ${JSON.stringify(s.split)}`)
 
         await page.tap({ sel: '.rv .rv-pickb', index: 0 }, { wait: 40_000 })
         await until(page, () => !!document.querySelector('.rv .rv-menu'), 'the model menu did not open')
