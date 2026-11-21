@@ -260,6 +260,230 @@ fn open_new_ssh(target: String, host: String, group: Option<String>) -> Result<(
   }
 }
 
+// ------------------------------------------------------------ Raven widget ---
+//
+// A small always-on-top Raven button with a compact chat (the page is
+// /m/w/raven, src/v2/screens/RavenWidget.tsx). Rust owns whether it is on
+// screen: it is on by default, Settings turns it off (the choice is a marker
+// file in the app's config folder), and after five minutes with no mouse or
+// keyboard input anywhere on the machine it is hidden completely, so an OLED
+// panel has no lit pixels under it. The first input brings it back. Idle is
+// the system's own count (GetLastInputInfo), so it hides even while Brendon
+// works in another app and wakes on input in any app.
+//
+// On Windows the show and hide are plain ShowWindow calls with
+// SW_SHOWNOACTIVATE: a widget that comes back on a key press must never take
+// the keyboard from the app he is typing in. Tauri's own show() activates the
+// window, so the widget never goes through it, here or in the page.
+
+#[cfg(desktop)]
+const WIDGET: &str = "raven-widget";
+#[cfg(desktop)]
+const WIDGET_IDLE_MS: u64 = 5 * 60 * 1000;
+
+#[cfg(desktop)]
+#[derive(Default)]
+struct RavenWidget {
+  enabled: std::sync::atomic::AtomicBool,
+  /// the page has placed the window and asked to be shown
+  ready: std::sync::atomic::AtomicBool,
+  shown: std::sync::atomic::AtomicBool,
+}
+
+/// Milliseconds since the last mouse or keyboard input on this machine; None
+/// where the system does not say (then the widget never hides for idle).
+#[cfg(target_os = "windows")]
+fn system_idle_ms() -> Option<u64> {
+  #[repr(C)]
+  struct LastInputInfo {
+    cb_size: u32,
+    dw_time: u32,
+  }
+  #[link(name = "user32")]
+  extern "system" {
+    fn GetLastInputInfo(plii: *mut LastInputInfo) -> i32;
+  }
+  #[link(name = "kernel32")]
+  extern "system" {
+    fn GetTickCount() -> u32;
+  }
+  let mut info = LastInputInfo { cb_size: std::mem::size_of::<LastInputInfo>() as u32, dw_time: 0 };
+  // SAFETY: a plain out-parameter struct of the documented size
+  let ok = unsafe { GetLastInputInfo(&mut info) } != 0;
+  if !ok {
+    return None;
+  }
+  // both are 32-bit tick counts that wrap every 49.7 days; the wrapping difference stays right
+  let now = unsafe { GetTickCount() };
+  Some(now.wrapping_sub(info.dw_time) as u64)
+}
+
+#[cfg(all(desktop, not(target_os = "windows")))]
+fn system_idle_ms() -> Option<u64> {
+  None
+}
+
+/// Show or hide the widget without ever activating it.
+#[cfg(desktop)]
+fn widget_set_shown(win: &tauri::WebviewWindow, show: bool) {
+  #[cfg(target_os = "windows")]
+  {
+    #[link(name = "user32")]
+    extern "system" {
+      fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+    }
+    const SW_HIDE: i32 = 0;
+    const SW_SHOWNOACTIVATE: i32 = 4;
+    if let Ok(h) = win.hwnd() {
+      // SAFETY: the window's own handle, a show command with no other effect
+      unsafe { ShowWindow(h.0 as isize, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+    }
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = if show { win.show() } else { win.hide() };
+  }
+}
+
+#[cfg(desktop)]
+fn widget_flag_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+  app.path().app_config_dir().ok().map(|d| d.join("raven-widget-off"))
+}
+
+/// On unless Brendon turned it off (a marker file, so a fresh install is on).
+#[cfg(desktop)]
+fn widget_saved_enabled(app: &tauri::AppHandle) -> bool {
+  widget_flag_path(app).map(|p| !p.exists()).unwrap_or(true)
+}
+
+#[cfg(desktop)]
+fn widget_save_enabled(app: &tauri::AppHandle, on: bool) {
+  let Some(p) = widget_flag_path(app) else { return };
+  if on {
+    let _ = std::fs::remove_file(&p);
+  } else {
+    if let Some(dir) = p.parent() {
+      let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&p, b"off\n");
+  }
+}
+
+/// Bring the widget's visibility in line with: on, placed, and not idle.
+#[cfg(desktop)]
+fn widget_sync(app: &tauri::AppHandle) {
+  use std::sync::atomic::Ordering::SeqCst;
+  let st = app.state::<RavenWidget>();
+  let Some(win) = app.get_webview_window(WIDGET) else { return };
+  let idle = system_idle_ms().map(|ms| ms >= WIDGET_IDLE_MS).unwrap_or(false);
+  let want = st.enabled.load(SeqCst) && st.ready.load(SeqCst) && !idle;
+  if st.shown.swap(want, SeqCst) != want {
+    widget_set_shown(&win, want);
+  }
+}
+
+#[cfg(desktop)]
+fn widget_create(app: &tauri::AppHandle) {
+  if app.get_webview_window(WIDGET).is_some() {
+    return;
+  }
+  // tiny, hidden, unfocused; the page sizes and places it, then asks to be shown (raven_widget_ready)
+  let built = tauri::WebviewWindowBuilder::new(app, WIDGET, tauri::WebviewUrl::App("m/w/raven".into()))
+    .title("Raven")
+    .inner_size(64.0, 64.0)
+    .resizable(false)
+    .maximizable(false)
+    .minimizable(false)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(false)
+    .focused(false)
+    .disable_drag_drop_handler()
+    .build();
+  match built {
+    Ok(win) => {
+      // a failed first load (the same WebView2 cold start as the main window) gets one retry
+      std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(4000));
+        let ready = win.app_handle().state::<RavenWidget>().ready.load(std::sync::atomic::Ordering::SeqCst);
+        if !ready {
+          let _ = win.eval("location.reload()");
+        }
+      });
+    }
+    Err(e) => log::warn!("raven widget: could not open the window: {e}"),
+  }
+}
+
+/// The widget page is placed and wants to be on screen (when on and not idle).
+#[cfg(desktop)]
+#[tauri::command]
+fn raven_widget_ready(app: tauri::AppHandle) {
+  app.state::<RavenWidget>().ready.store(true, std::sync::atomic::Ordering::SeqCst);
+  widget_sync(&app);
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn raven_widget_enabled(app: tauri::AppHandle) -> bool {
+  app.state::<RavenWidget>().enabled.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Settings' switch. Every window hears `raven-widget:changed` with the new value.
+#[cfg(desktop)]
+#[tauri::command]
+fn set_raven_widget_enabled(app: tauri::AppHandle, enabled: bool) {
+  use tauri::Emitter;
+  app.state::<RavenWidget>().enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
+  widget_save_enabled(&app, enabled);
+  if enabled {
+    widget_create(&app);
+  }
+  widget_sync(&app);
+  let _ = app.emit("raven-widget:changed", enabled);
+}
+
+/// The widget's "Open in Valkyrie", and any link in it: the main window comes
+/// forward and goes to `path`, one of its own pages. Only an app path crosses, never a URL.
+#[cfg(desktop)]
+#[tauri::command]
+fn raven_widget_open_main(app: tauri::AppHandle, path: String) -> Result<(), String> {
+  use tauri::Emitter;
+  let ok = path.len() <= 512
+    && path.starts_with('/')
+    && !path.starts_with("//")
+    && !path.starts_with("/m/w/")
+    && path.bytes().all(|c| c.is_ascii_graphic());
+  if !ok {
+    return Err("not a Valkyrie page".into());
+  }
+  let Some(main) = app.get_webview_window("main") else { return Err("the main window is closed".into()) };
+  let _ = main.unminimize();
+  let _ = main.show();
+  let _ = main.set_focus();
+  app.emit_to("main", "raven-widget:navigate", path).map_err(|e| e.to_string())
+}
+
+#[cfg(desktop)]
+fn widget_setup(app: &tauri::AppHandle) {
+  use std::sync::atomic::Ordering::SeqCst;
+  app.manage(RavenWidget::default());
+  let on = widget_saved_enabled(app);
+  app.state::<RavenWidget>().enabled.store(on, SeqCst);
+  if on {
+    widget_create(app);
+  }
+  // a quarter second: a mouse move brings it back at once, and the check costs nothing
+  let handle = app.clone();
+  std::thread::spawn(move || loop {
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    widget_sync(&handle);
+  });
+}
+
 // Everything about window geometry, visibility and cold-start recovery below is
 // desktop only. On Android (the phone, and the Steam Frame's Android runtime)
 // the activity is the window: there is nothing to remember, hide, or reveal,
@@ -278,6 +502,8 @@ fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder
   builder.plugin(
     tauri_plugin_window_state::Builder::default()
       .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+      // the Raven widget places itself from its own remembered corner (RavenWidget.tsx)
+      .with_denylist(&[WIDGET])
       .map_label(|label| {
         if label.starts_with("session-") {
           "session"
@@ -294,6 +520,25 @@ fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder
 #[cfg(not(desktop))]
 fn desktop_window_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
   builder
+}
+
+#[cfg(desktop)]
+fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+  tauri::generate_handler![
+    open_session_ssh,
+    open_new_ssh,
+    local_hostname,
+    open_external,
+    raven_widget_ready,
+    raven_widget_enabled,
+    set_raven_widget_enabled,
+    raven_widget_open_main
+  ]
+}
+
+#[cfg(not(desktop))]
+fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+  tauri::generate_handler![open_session_ssh, open_new_ssh, local_hostname, open_external]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -336,6 +581,16 @@ pub fn run() {
           }
         });
 
+        // the main window closing closes the widget too, so the app quits as it always did
+        let handle = app.handle().clone();
+        win.on_window_event(move |e| {
+          if let tauri::WindowEvent::Destroyed = e {
+            if let Some(w) = handle.get_webview_window(WIDGET) {
+              let _ = w.destroy();
+            }
+          }
+        });
+
         // Self-heal the stale-service-worker trap from older app builds (which
         // shipped a PWA service worker; new builds ship none — see
         // vite.config.ts). Unregister any leftover SW and clear caches so the
@@ -354,10 +609,11 @@ pub fn run() {
           })();"#,
         );
       }
+      widget_setup(app.handle());
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![open_session_ssh, open_new_ssh, local_hostname, open_external])
+    .invoke_handler(invoke_handler())
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

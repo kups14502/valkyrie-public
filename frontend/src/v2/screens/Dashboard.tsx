@@ -30,7 +30,7 @@ import { UP_ICONS, addUploads, uploadProgress, useUploadPicker, useUploads } fro
 import { clockOf, dueLabel, dueState } from '../../lib/taskDue'
 import { taskKey, type Task } from '../../lib/tasksApi'
 import { CalendarSheet, type CalendarOpen } from './Calendar'
-import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven } from '../kit/ravenStore'
+import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft, type DraftSnap } from '../kit/ravenStore'
 import { markRavenRead, ravenBusy, ravenStatusText, sendRaven, type RavenMsg } from '../../lib/ravenApi'
 import './dashboard.css'
 
@@ -1558,7 +1558,10 @@ function RavenBlock({ active, i, turns = 1 }: { active: boolean; i: number; turn
   const [live, setLive] = useState(false)
   const q = useRaven(active, live)
   const page = q.data
-  const [text, setText] = useState('')
+  // the thread's draft, the same text as the Raven tab's box and kept on the device; this box sends text only,
+  // so files attached on the Raven tab stay there for its own send
+  const draft = useRavenDraft()
+  const text = draft.text
   const [sentId, setSentId] = useState(0)
   const box = useRef<HTMLTextAreaElement>(null)
   const sec = useRef<HTMLElement>(null)
@@ -1566,9 +1569,9 @@ function RavenBlock({ active, i, turns = 1 }: { active: boolean; i: number; turn
   useIntent('raven:compose', () => box.current?.focus(), active)
 
   const send = useMutation({
-    mutationFn: (line: string) => sendRaven({ text: line, source: 'app' }),
-    onSuccess: (m) => {
-      setText('')
+    mutationFn: (snap: DraftSnap) => sendRaven({ text: snap.text.trim(), source: 'app' }),
+    onSuccess: (m, snap) => {
+      draft.markSent(snap)
       setSentId(m.id)
       addToThread(qc, { messages: [m] })
       void qc.invalidateQueries({ queryKey: RAVEN_KEY })
@@ -1577,7 +1580,7 @@ function RavenBlock({ active, i, turns = 1 }: { active: boolean; i: number; turn
   })
   const line = text.trim()
   const submit = () => {
-    if (line && !send.isPending) send.mutate(line)
+    if (line && !send.isPending) send.mutate({ text, ids: [] })
   }
 
   const busy = ravenBusy(page)
@@ -1672,7 +1675,7 @@ function RavenBlock({ active, i, turns = 1 }: { active: boolean; i: number; turn
           className="hm-rv-box"
           rows={turns > 1 ? 2 : 1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => draft.setText(e.target.value)}
           onKeyDown={(e) => {
             // Enter sends, Shift+Enter is a new line
             if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return

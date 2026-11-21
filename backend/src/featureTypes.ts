@@ -1,6 +1,7 @@
 import type { Router } from 'express'
 import type { MailFilter } from './lib/mailStore.js'
 import type { RavenToolGroup } from './lib/raven/types.js'
+import type { FeatureAgentDef } from './lib/featureAgents.js'
 
 // What a feature adds to the API. Features are listed in features.ts and
 // mounted by index.ts, the only file that reads that list, so no shared route
@@ -26,4 +27,6 @@ export type BackendFeature = {
     tools?: RavenToolGroup
     status?: () => string | Promise<string>
   }
+  /** work agents the feature adds (lib/featureAgents.ts): brief, tools and approvable actions; Raven can ask them */
+  agents?: FeatureAgentDef[]
 }

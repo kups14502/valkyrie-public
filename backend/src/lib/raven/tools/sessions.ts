@@ -3,16 +3,17 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { bump, getKv, setKv } from '../../agentsStore.js'
 import { failRunsForTmux } from '../../projectsStore.js'
-import { noteRavenStarted } from '../../sessionOrigin.js'
+import { noteRavenStarted, ravenStartedIds } from '../../sessionOrigin.js'
 import { paneLimitState } from '../../accountSwitchCore.js'
 import type { LaunchTargetInfo } from '../../../routes/hostLaunch.js'
-import { SESSION_NAME_RE, TARGET_RE, UUID_RE, type CreateOpts, type TermSession } from '../../../terminal/tmux.js'
+import { CLAUDE_EFFORTS, SESSION_NAME_RE, TARGET_RE, UUID_RE, type ClaudeEffort, type CreateOpts, type TermSession } from '../../../terminal/tmux.js'
 import { paneBusy } from '../../../terminal/paneState.js'
 import type { TranscriptEntry } from '../../../terminal/transcript.js'
+import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
-import { getWatch, listWatches, removeWatch, startWatch, watchKey } from './watch.js'
+import { closeWatch, fillJob, getWatch, jobOf, listEnded, listWatches, removeWatch, startWatch, typedMark, watchKey, type EndedWatch, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
@@ -31,6 +32,11 @@ import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 // Typing is one line. Claude Code reads a burst of keys as a paste, and a
 // newline inside a paste stays in the prompt, so a multi-line prompt is
 // joined with spaces and the Enter goes on its own a moment later (typeLine).
+// A line over 800 bytes goes as one bracketed paste: typed as keys, Claude
+// kept only its end (terminal/tmux.ts typePlan).
+//
+// A model and an effort are claude's --model and --effort, so they apply to
+// a pane Raven opens and never to one already running.
 
 const MAINS_KEY = 'raven:mains'
 const PROMPT_WAIT_MS = 45_000
@@ -38,8 +44,13 @@ const TEXT_MAX = 8_000
 const TARGETS_TTL_MS = 10 * 60_000
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
-/** A watched session: `label` is the pane's (often the main target's name), `title` the conversation's own title on thor's board. */
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string }
+export type WatchState = 'working' | 'idle' | 'closed'
+/**
+ * A watched session for the Watching card: `label` is the pane's (often the main target's name), `title` the job it is
+ * on now when that says more than the label. `state` is null when thor's board is not answering for a window on thor;
+ * `lastAt` is its last activity (its newest transcript line, or when it closed).
+ */
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; state: WatchState | null; lastAt: string }
 
 type MainRec = { pane: string; label: string; sessionId: string; at: string }
 
@@ -171,6 +182,42 @@ async function resolve(session: string, panes: TermSession[], allowBoard: boolea
   throw new RavenToolError(`no session matches "${s}". sessions lists them.`)
 }
 
+/**
+ * A pane Raven opened with session_start: its conversation is on Raven's record (lib/sessionOrigin.ts) and it is
+ * not one of Brendon's main terminals, now or before. Raven may close these on its own.
+ */
+function ravenLaunched(p: TermSession): boolean {
+  return !mainOf(p.name) && ravenOwnSession(p.sessionId)
+}
+
+/** A conversation Raven started with session_start: on Raven's record and never a main terminal's. */
+function ravenOwnSession(sessionId: string | undefined): boolean {
+  if (!sessionId) return false
+  if (Object.values(mainsMap()).some((r) => r.sessionId === sessionId)) return false
+  return ravenStartedIds().has(sessionId)
+}
+
+type DoneTarget = { sessionId: string; label: string; pane?: TermSession }
+
+/** session_done's session: what resolve finds, then a closed row on thor's board by its title. */
+async function doneTarget(session: string): Promise<DoneTarget> {
+  const panes = await io.listPanes()
+  const r = await resolve(session, panes, true).catch((e: unknown) => e as Error)
+  if (!(r instanceof Error)) {
+    if (r.kind === 'main') throw new RavenToolError(`${r.target.label} has no main terminal open`)
+    if (r.kind === 'board') return { sessionId: r.sessionId, label: r.title }
+    if (!r.pane.sessionId) throw new RavenToolError(`${r.pane.label} (${r.pane.name}) runs no Claude conversation`)
+    return { sessionId: r.pane.sessionId, label: r.pane.label, pane: r.pane }
+  }
+  const frag = session.trim().toLowerCase()
+  if (!frag || !/^no session matches/.test(r.message)) throw r
+  const rows = ((await board()) ?? []).filter((x) => typeof x.sessionId === 'string' && UUID_RE.test(x.sessionId)
+    && x.disposition !== 'done' && boardTitle(x).toLowerCase().includes(frag))
+  if (rows.length === 1) return { sessionId: String(rows[0].sessionId), label: boardTitle(rows[0]) }
+  if (rows.length > 1) throw new RavenToolError(`"${session}" matches ${rows.length} sessions on thor: ${rows.slice(0, 6).map((x) => `${boardTitle(x)} (${x.sessionId})`).join(', ')}. Use the session id.`)
+  throw r
+}
+
 const BOARD_ONLY = 'runs in a window on thor, not in a pane here: Raven can read it (session_read) and relay it (session_watch) but cannot type into it or stop it'
 
 /** One line for typeLine: lines joined with spaces, control characters out. */
@@ -233,6 +280,30 @@ async function attach(ids: string[]): Promise<string[]> {
 // tmux and thor speak in dashes; Raven reads plain words
 const words = (e: unknown): string => String((e as Error)?.message ?? e).replace(/\s*\u2014\s*/g, ', ').slice(0, 300)
 
+type Launch = { model?: string; effort?: ClaudeEffort }
+
+/** session_start's model (a key of Raven's model list, or its id) and effort, as the new pane's claude gets them. */
+export function launchPick(model: string | undefined, effort: ClaudeEffort | undefined): Launch {
+  const out: Launch = {}
+  const want = model?.trim().toLowerCase()
+  if (want) {
+    const hit = ravenModels().find((m) => m.key === want || m.id.toLowerCase() === want)
+    if (!hit) throw new RavenToolError(`no model "${model}". Models: ${modelKeys().join(', ')}. Nothing was started.`)
+    // the fallback while the CLI refuses the configured id (lib/raven/models.ts)
+    out.model = modelFor(hit.key)
+  }
+  if (effort) out.effort = effort
+  return out
+}
+
+const launchShown = (l: Launch) => ({ ...(l.model ? { model: l.model } : {}), ...(l.effort ? { effort: l.effort } : {}) })
+
+function notRunning(l: Launch, label: string): void {
+  if (l.model || l.effort) {
+    throw new RavenToolError(`${label} is already running, and a model or an effort is set only when a session starts. Nothing was typed. Send without them, or start a new session.`)
+  }
+}
+
 async function newPane(o: CreateOpts): Promise<string> {
   try {
     return await io.createPane(o)
@@ -249,7 +320,7 @@ async function typeInto(pane: string, label: string, text: string): Promise<void
   }
 }
 
-async function openMain(t: { key: string; label: string }): Promise<{ pane: string; label: string; sessionId: string }> {
+async function openMain(t: { key: string; label: string }, launch: Launch = {}): Promise<{ pane: string; label: string; sessionId: string }> {
   const old = mainsMap()[t.key]
   if (old && (await io.paneState(old.pane)) === 'dead') await io.killPane(old.pane).catch(() => false)
   // the target's own name, the one Quick Start and the terminal lists show ("Personal", not "Personal (main)")
@@ -257,7 +328,7 @@ async function openMain(t: { key: string; label: string }): Promise<{ pane: stri
   const sessionId = randomUUID()
   // on record before the pane opens, so the Desk's first poll already shows it as Raven's
   noteRavenStarted(sessionId, io.now())
-  const pane = await newPane({ mode: 'new', host: 'thor', target: t.key, newId: sessionId, label, cols: 120, rows: 40 })
+  const pane = await newPane({ mode: 'new', host: 'thor', target: t.key, newId: sessionId, label, cols: 120, rows: 40, ...launch })
   setMain(t.key, { pane, label, sessionId, at: new Date(io.now()).toISOString() })
   return { pane, label, sessionId }
 }
@@ -285,15 +356,64 @@ async function mainsNow(waitMs: number): Promise<{ known: boolean; mains: RavenM
   return { known: targets !== null, mains, panes }
 }
 
-/** Main terminals and watched sessions for GET /api/raven. Waits on thor 2.5 s at most, and not at all for a minute after it failed. */
+// older watches whose job is being read (watch.ts fillJob), so a poll does not start a second read
+const filling = new Set<string>()
+
+function fill(key: string): void {
+  if (filling.has(key)) return
+  filling.add(key)
+  void fillJob(key).finally(() => filling.delete(key))
+}
+
+/** A thor window's state from the board: null when there is no copy of the board, closed when it is off the list. */
+function boardState(rows: BoardRow[] | null, sessionId: string): WatchState | null {
+  if (!rows) return null
+  const r = rows.find((x) => x.sessionId === sessionId)
+  if (!r || r.live !== true) return 'closed'
+  return r.activity === 'working' ? 'working' : 'idle'
+}
+
+const boardAt = (rows: BoardRow[] | null, sessionId: string): number => {
+  const r = rows?.find((x) => x.sessionId === sessionId)
+  const at = r?.lastActivityUtc ? Date.parse(String(r.lastActivityUtc)) : NaN
+  return Number.isFinite(at) ? at : 0
+}
+
+/**
+ * Main terminals and watched sessions for GET /api/raven, the watches with their state, last activity and current
+ * job, then the ones that ended in the last two hours. Waits on thor 2.5 s at most, and not at all for a minute after it failed.
+ */
 export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: RavenWatch[] }> {
-  const { mains } = await mainsNow(2_500)
+  const { mains, panes } = await mainsNow(2_500)
   const titles = sessionTitles()
-  const watching = listWatches().map((w) => {
-    const title = titleFor(titles, w.sessionId, w.label)
-    return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}) }
-  })
-  return { mains, watching }
+  const rows = io.boardCached()
+  const mainState = new Map(mains.filter((m) => m.pane).map((m) => [m.pane!, m.state]))
+  const mainPanes = new Set(Object.values(mainsMap()).map((r) => r.pane))
+  // the job when there is one; a main terminal's or a thor window's label names no job, so Claude's title stands in
+  const titleOf = (w: Watch | EndedWatch): string | undefined => {
+    const t = w.job || (w.pane && !mainPanes.has(w.pane) ? '' : titleFor(titles, w.sessionId, w.label))
+    return t && t.toLowerCase() !== w.label.trim().toLowerCase() ? t : undefined
+  }
+  const card = (w: Watch | EndedWatch, state: WatchState | null, at: number): RavenWatch => {
+    const title = titleOf(w)
+    return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}), state, lastAt: new Date(at).toISOString() }
+  }
+  const live = listWatches()
+  const watching = await Promise.all(live.map(async (w): Promise<RavenWatch> => {
+    if (w.job === undefined && (!w.pane || mainPanes.has(w.pane))) fill(w.key)
+    let state: WatchState | null
+    if (!w.pane) state = boardState(rows, w.sessionId)
+    else {
+      const m = mainState.get(w.pane)
+      const p = panes.find((x) => x.name === w.pane)
+      state = m === 'working' || m === 'idle' ? m : !p || p.dead ? 'closed' : (await busy(p)) ? 'working' : 'idle'
+    }
+    const at = Math.max(w.lastSeenAt || 0, boardAt(rows, w.sessionId)) || Date.parse(w.lastActivityAt)
+    return card(w, state, at)
+  }))
+  const keys = new Set(live.map((w) => w.key))
+  const ended = listEnded().filter((e) => !keys.has(e.key)).map((e) => card(e, 'closed', Date.parse(e.endedAt)))
+  return { mains, watching: [...watching, ...ended] }
 }
 
 /** Conversation id to its title, from thor's board as last read (never waits); empty when thor has not answered lately. */
@@ -329,7 +449,7 @@ export async function sessionsSnapshot(): Promise<string> {
   if (all.length) {
     lines.push('Watched sessions (their answers are relayed into this DM):')
     for (const w of all) {
-      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}`)
+      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: ${w.job ? `on "${clip(w.job, 100)}", ` : ''}since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}`)
     }
   } else {
     lines.push('Watched sessions: none.')
@@ -381,14 +501,19 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
   server.registerTool('session_start', {
     description: 'Start a new Claude session on thor in a launch target and type the prompt into it once its prompt shows (up to 45 s). '
       + 'main: true makes it that target\'s main terminal (if one is open, the prompt goes there instead). Its answers are relayed into this DM '
-      + 'unless watch is false; followUp is what you do with its next answer (you get woken with it). Only when Brendon\'s message asks.',
+      + 'unless watch is false; followUp is what you do with its next answer (you get woken with it). label names the job: the pane\'s name, '
+      + 'and the title on Brendon\'s Watching card. '
+      + `model (${modelKeys().join(', ')}) and effort (${CLAUDE_EFFORTS.join(', ')}) are what its Claude starts with; without them it starts on `
+      + 'Brendon\'s defaults. They apply only to a session this starts: refused when the main terminal is already open. Only when Brendon\'s message asks.',
     inputSchema: {
       target: z.string().max(32), prompt: z.string().min(1).max(TEXT_MAX), label: z.string().max(60).optional(),
       watch: z.boolean().optional(), followUp: z.string().max(1000).optional(), main: z.boolean().optional(),
+      model: z.string().max(80).optional(), effort: z.enum(CLAUDE_EFFORTS).optional(),
     },
   }, (a) => toolRun(async () => {
     needBrendon(ctx, 'Starting a session')
     const text = checkText(a.prompt)
+    const launch = launchPick(a.model, a.effort)
     const key = a.target.trim().toLowerCase()
     const list = await targets()
     const t = list?.find((x) => x.key === key)
@@ -396,67 +521,80 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (!list && !TARGET_RE.test(key)) throw new RavenToolError('target must be a launch-target key')
     if (t && !t.exists) throw new RavenToolError(`the folder for "${key}" does not exist on thor`)
     const watch = a.watch !== false || Boolean(a.followUp)
+    // the job's name on the Watching card: Raven's label, else the prompt itself
+    const job = (a.label ? oneLine(a.label).slice(0, 60) : '') || jobOf(text) || undefined
+    const typed = typedMark(text)
     if (a.main) {
       if (t && !isMainTarget(t)) throw new RavenToolError(`"${key}" is not one of the main terminals`)
       const rec = mainsMap()[key]
       const live = rec ? (await io.listPanes()).find((p) => p.name === rec.pane && !p.dead) : undefined
       if (live) {
+        notRunning(launch, `${live.label}, the main terminal,`)
         await readyToType(live)
-        if (watch) await startWatch({ pane: live.name, label: live.label, sessionId: live.sessionId, followUp: a.followUp })
+        if (watch) await startWatch({ pane: live.name, label: live.label, sessionId: live.sessionId, followUp: a.followUp, job, typed })
         noteRavenTouched(live.sessionId)
         await typeInto(live.name, live.label, text)
         ctx.acted()
         return { pane: live.name, label: live.label, note: 'the main terminal was already open, so the prompt went there', watching: watch, open: `/m/ai/term/${live.name}` }
       }
-      const opened = await openMain({ key, label: t?.label ?? key })
+      const opened = await openMain({ key, label: t?.label ?? key }, launch)
       ctx.acted()
-      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true })
+      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, job, typed })
       await promptOrThrow(opened.pane, opened.label)
       noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, text)
-      return { pane: opened.pane, label: opened.label, sessionId: opened.sessionId, watching: watch, open: `/m/ai/term/${opened.pane}` }
+      return { pane: opened.pane, label: opened.label, sessionId: opened.sessionId, ...launchShown(launch), watching: watch, open: `/m/ai/term/${opened.pane}` }
     }
     const label = paneLabel(a.label, t?.label || key)
     const sessionId = randomUUID()
     noteRavenStarted(sessionId, io.now())
-    const pane = await newPane({ mode: 'new', host: 'thor', target: key, newId: sessionId, label, cols: 120, rows: 40 })
+    const pane = await newPane({ mode: 'new', host: 'thor', target: key, newId: sessionId, label, cols: 120, rows: 40, ...launch })
     ctx.acted()
-    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true })
+    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true, job, typed })
     await promptOrThrow(pane, label)
     noteRavenTouched(sessionId)
     await typeInto(pane, label, text)
-    return { pane, label, sessionId, watching: watch, open: `/m/ai/term/${pane}` }
+    return { pane, label, sessionId, ...launchShown(launch), watching: watch, open: `/m/ai/term/${pane}` }
   }))
 
   server.registerTool('session_send', {
     description: 'Type a message into a Claude session and press Enter. session is a pane name, a main target key (its main terminal, started if '
       + 'none is open), a conversation id, or a unique part of its label. files are DM attachment ids: each is copied to thor first and its path '
       + 'there goes after the text (thor takes pictures, videos and documents). Its answer is relayed here unless watch is false; followUp is what you do with '
-      + 'the next answer. Refused while a question or permission prompt is open in it, or while Brendon has text typed there. Only when Brendon\'s message asks.',
+      + 'the next answer. label names the job on Brendon\'s Watching card: give one whenever the message starts new work, leave it out for a follow-up '
+      + 'in the same job. Refused while a question or permission prompt is open in it, or while Brendon has text typed there. '
+      + 'model and effort (as in session_start) apply only when this starts the main terminal; refused for a session already running. Only when Brendon\'s message asks.',
     inputSchema: {
       session: z.string().max(120), text: z.string().min(1).max(TEXT_MAX), files: z.array(z.string().max(80)).max(8).optional(),
-      watch: z.boolean().optional(), followUp: z.string().max(1000).optional(),
+      watch: z.boolean().optional(), followUp: z.string().max(1000).optional(), label: z.string().max(60).optional(),
+      model: z.string().max(80).optional(), effort: z.enum(CLAUDE_EFFORTS).optional(),
     },
   }, (a) => toolRun(async () => {
     needBrendon(ctx, 'Sending to a session')
     const text = checkText(a.text)
+    const launch = launchPick(a.model, a.effort)
     const r = await resolve(a.session, await io.listPanes(), true)
     if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
+    if (r.kind === 'pane') notRunning(launch, r.pane.label)
     const paths = a.files?.length ? await attach(a.files) : []
     const line = withFiles(text, paths)
     const watch = a.watch !== false || Boolean(a.followUp)
+    const named = a.label ? oneLine(a.label).slice(0, 60) : ''
+    const typed = typedMark(text)
     if (r.kind === 'main') {
-      const opened = await openMain(r.target)
+      const opened = await openMain(r.target, launch)
       ctx.acted()
-      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true })
+      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, job: named || jobOf(text) || undefined, typed })
       await promptOrThrow(opened.pane, opened.label)
       noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, line)
-      return { pane: opened.pane, label: opened.label, started: true, attached: paths.length ? paths : undefined, watching: watch, open: `/m/ai/term/${opened.pane}` }
+      return { pane: opened.pane, label: opened.label, started: true, ...launchShown(launch), attached: paths.length ? paths : undefined, watching: watch, open: `/m/ai/term/${opened.pane}` }
     }
     const p = r.pane
     await readyToType(p)
-    if (watch) await startWatch({ pane: p.name, label: p.label, sessionId: p.sessionId, followUp: a.followUp })
+    // no label: a follow-up keeps the job it belongs to; a session with no job yet is named by this prompt
+    const job = named || (getWatch(p.name)?.job ? '' : jobOf(text)) || undefined
+    if (watch) await startWatch({ pane: p.name, label: p.label, sessionId: p.sessionId, followUp: a.followUp, job, typed })
     noteRavenTouched(p.sessionId)
     await typeInto(p.name, p.label, line)
     ctx.acted()
@@ -511,17 +649,38 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     return { watching: true, session: w.label, pane: w.pane || undefined, since: et(w.since) }
   }))
 
-  server.registerTool('session_stop', {
-    description: 'Stop a session in a pane here: closes the pane, which ends its Claude on thor (the conversation stays resumable). Not for windows on thor. Only when Brendon\'s message asks.',
+  server.registerTool('session_done', {
+    description: "Mark a session done on Brendon's Sessions tab and Desk, the same flag as his done checkbox: it leaves the closed list and Recover all "
+      + '(a running one stays under running until it closes). session is a pane name, a conversation id, or part of its label or title, closed ones too. '
+      + 'One you started with session_start you may mark on your own; any other only when Brendon\'s message asks.',
     inputSchema: { session: z.string().max(120) },
   }, (a) => toolRun(async () => {
-    needBrendon(ctx, 'Stopping a session')
-    const r = await resolve(a.session, await io.listPanes(), true)
+    // without Brendon, a name that matches nothing still gets the gate's answer
+    const t = await doneTarget(a.session).catch((e) => { if (ctx.fromBrendon) throw e; return null })
+    if (!t || !ravenOwnSession(t.sessionId) || (t.pane && mainOf(t.pane.name))) needBrendon(ctx, 'Marking a session done other than one Raven started')
+    if (!t) throw new RavenToolError(`no session matches "${a.session}"`)
+    if (!(await io.markDone([t.sessionId]).catch(() => false))) throw new RavenToolError(`thor did not answer, so ${t.label} is not marked done`)
+    ctx.acted()
+    return { done: true, session: t.label, sessionId: t.sessionId, pane: t.pane?.name }
+  }))
+
+  server.registerTool('session_stop', {
+    description: 'Stop a session in a pane here: closes the pane, which ends its Claude on thor (the conversation stays resumable). Not for windows on thor. '
+      + 'A session you started with session_start you may close on your own once its work is done, and closing it marks it done on the Desk. '
+      + 'Any other (a main terminal, one Brendon opened) only when Brendon\'s message asks.',
+    inputSchema: { session: z.string().max(120) },
+  }, (a) => toolRun(async () => {
+    // without Brendon, a name that matches nothing still gets the gate's answer, never a hint of what is open
+    const r = await resolve(a.session, await io.listPanes(), true).catch((e) => { if (ctx.fromBrendon) throw e; return null })
+    const own = r?.kind === 'pane' && ravenLaunched(r.pane)
+    if (!own) needBrendon(ctx, 'Stopping a session other than one Raven started')
+    if (!r) throw new RavenToolError(`no session matches "${a.session}"`)
     if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
     if (r.kind === 'main') return `${r.target.label} has no main terminal open.`
     const p = r.pane
-    // stopped on purpose: no "ended" line for it
-    removeWatch(p.name)
+    // stopped on purpose: no "ended" line for it; its Watching card shows it closed, whichever way it was watched
+    closeWatch(p.name)
+    if (p.sessionId) closeWatch(watchKey('', p.sessionId))
     const killed = await io.killPane(p.name)
     // a project run in that pane never reports now, as when the page stops it (routes/terminal.ts)
     if (killed) {
@@ -531,6 +690,10 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (main) setMain(main, null)
     if (!killed) throw new RavenToolError(`${p.label} (${p.name}) could not be stopped; it may have ended already`)
     ctx.acted()
-    return { stopped: p.name, label: p.label }
+    // Raven's own session is finished work: done on the board, so the Desk's closed list and Recover all skip it.
+    // One of Brendon's stays open there, to resume when he wants it.
+    if (!own || !p.sessionId) return { stopped: p.name, label: p.label }
+    const done = await io.markDone([p.sessionId]).catch(() => false)
+    return { stopped: p.name, label: p.label, markedDone: done, ...(done ? {} : { note: 'thor did not answer, so it is not marked done on the Desk yet' }) }
   }))
 }

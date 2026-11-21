@@ -87,6 +87,21 @@ export const MODES: TermMode[] = ['new', 'resume', 'shell']
 // here is one thor will at least look up.
 export const TARGET_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+// A new Claude's --model and --effort. They ride on thor's ssh line, which
+// PowerShell parses there, so a model is a plain id or alias (no brackets, no
+// spaces) and an effort one of the CLI's own levels.
+export const CLAUDE_MODEL_RE = /^[a-z0-9][a-z0-9.-]{1,80}$/i
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type ClaudeEffort = typeof CLAUDE_EFFORTS[number]
+
+/** The --model/--effort a new session starts with; throws a 400 for a value that may not reach the ssh line. */
+export function launchFlags(o: Pick<CreateOpts, 'mode' | 'model' | 'effort'>): { model?: string; effort?: ClaudeEffort } {
+  if (!o.model && !o.effort) return {}
+  if (o.mode !== 'new') throw Object.assign(new Error('a model or an effort is set when a new session starts'), { status: 400 })
+  if (o.model && !CLAUDE_MODEL_RE.test(o.model)) throw Object.assign(new Error('model must be a model id or alias'), { status: 400 })
+  if (o.effort && !CLAUDE_EFFORTS.includes(o.effort)) throw Object.assign(new Error(`effort must be one of ${CLAUDE_EFFORTS.join(', ')}`), { status: 400 })
+  return { ...(o.model ? { model: o.model } : {}), ...(o.effort ? { effort: o.effort } : {}) }
+}
 
 // Where a pane's program runs. 'thor' is the pane's ssh into thor, as it has
 // always been. 'odin' runs the program on this box itself.
@@ -244,12 +259,13 @@ function loginShell(): string {
 // narrower scope: a new Claude or a shell in an odin target. Projects, agent
 // runs and the desk stay on thor, where their files and MCP wiring live, and a
 // resume would need the transcript's own folder, which only thor tracks.
-export function odinCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk'>): { dir: string; argv: string[] } {
+export function odinCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk' | 'model' | 'effort'>): { dir: string; argv: string[] } {
   if (o.mode === 'resume' || o.resumeId) throw Object.assign(new Error('odin opens new sessions and shells, not resumes'), { status: 400 })
   if (o.projectId || o.runId || o.desk) throw Object.assign(new Error('projects, agent runs and new-project sessions start on thor'), { status: 400 })
   if (!o.target || !TARGET_RE.test(o.target)) throw Object.assign(new Error('target must be an odin target key'), { status: 400 })
   const t = findOdinTarget(o.target)
   if (!t) throw Object.assign(new Error(`no odin target named '${o.target}'`), { status: 400 })
+  const flags = launchFlags(o)
   let program: string[]
   if (o.mode === 'shell') {
     program = [loginShell(), '-l']
@@ -257,6 +273,8 @@ export function odinCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' |
     if (!odinClaudeReady()) throw Object.assign(new Error(`claude is not installed at ${ODIN_CLAUDE}`), { status: 503 })
     program = [ODIN_CLAUDE]
     if (o.newId && UUID_RE.test(o.newId)) program.push('--session-id', o.newId)
+    if (flags.model) program.push('--model', flags.model)
+    if (flags.effort) program.push('--effort', flags.effort)
   }
   return { dir: t.dir, argv: [SH_BIN, '-c', ODIN_WRAP, 'valkyrie-odin', t.dir, ...program] }
 }
@@ -622,6 +640,42 @@ export async function paneInMode(name: string): Promise<boolean> {
   }
 }
 
+// tmux reads an argument that ends in ';' as the end of a command and drops
+// the ';'. A '\' before it keeps the ';' (and only the ';') in the text.
+export const tmuxLiteral = (s: string): string => (s.endsWith(';') ? `${s.slice(0, -1)}\\;` : s)
+
+// How typeLine sends a line. Claude Code reads its input 1024 bytes at a time
+// and takes a read longer than 800 characters as a paste. A longer line came
+// in as two reads, a pasted one and a typed one, and the typed one replaced
+// the paste: only the end of the prompt reached Claude ("ed.", measured
+// 2026-11-20 on 2.1.322: a 1509-character line kept its last 484, also with
+// 5 s of wait after the prompt showed). So a line that fits in one typed read
+// goes as keys, and a longer one as ONE bracketed paste, which Claude collects
+// whole however it is read. A pane that has not asked for bracketed paste gets
+// it in short pieces with a pause between, each read well under 800.
+export const TYPE_MAX_BYTES = 800
+export const PIECE_CHARS = 200
+const PIECE_GAP_MS = 60
+
+export type TypePlan = { how: 'keys' | 'paste' | 'pieces'; parts: string[] }
+
+export function typePlan(text: string, bracketPaste: boolean): TypePlan {
+  if (Buffer.byteLength(text, 'utf8') <= TYPE_MAX_BYTES) return { how: 'keys', parts: [text] }
+  if (bracketPaste) return { how: 'paste', parts: [text] }
+  const parts: string[] = []
+  const chars = Array.from(text)
+  for (let i = 0; i < chars.length; i += PIECE_CHARS) parts.push(chars.slice(i, i + PIECE_CHARS).join(''))
+  return { how: 'pieces', parts }
+}
+
+async function bracketPasteOn(name: string): Promise<boolean> {
+  try {
+    return (await tmux(['display-message', '-p', '-t', name, '#{bracket_paste_flag}'], 5_000)).trim() === '1'
+  } catch {
+    return false
+  }
+}
+
 // One line of text, then Enter as its own key a moment later, so the Enter
 // is read as a key press rather than as the end of the typed burst.
 export async function typeLine(name: string, text: string): Promise<void> {
@@ -629,7 +683,23 @@ export async function typeLine(name: string, text: string): Promise<void> {
   // eslint-disable-next-line no-control-regex
   const clean = text.replace(/[\x00-\x1f\x7f]/g, ' ').trim()
   if (!clean) throw new Error('nothing to type')
-  await tmux(['send-keys', '-t', name, '-l', '--', clean], 5_000)
+  const plan = typePlan(clean, Buffer.byteLength(clean, 'utf8') > TYPE_MAX_BYTES && (await bracketPasteOn(name)))
+  if (plan.how === 'paste') {
+    // -p adds the paste markers, -d drops the buffer once pasted
+    const buf = `vk-type-${randomBytes(5).toString('hex')}`
+    await tmux(['set-buffer', '-b', buf, '--', tmuxLiteral(clean)], 5_000)
+    try {
+      await tmux(['paste-buffer', '-p', '-d', '-b', buf, '-t', name], 5_000)
+    } catch (err) {
+      await tmux(['delete-buffer', '-b', buf], 5_000).catch(() => {})
+      throw err
+    }
+  } else {
+    for (const [i, part] of plan.parts.entries()) {
+      if (i) await new Promise((r) => setTimeout(r, PIECE_GAP_MS))
+      await tmux(['send-keys', '-t', name, '-l', '--', tmuxLiteral(part)], 5_000)
+    }
+  }
   await new Promise((r) => setTimeout(r, 400))
   await tmux(['send-keys', '-t', name, 'Enter'], 5_000)
 }
@@ -695,6 +765,10 @@ export type CreateOpts = {
   // A session started from the Projects list to set up a new project. It gets
   // the unbound MCP endpoint instead of a project's, and its brief by -Run.
   desk?: boolean
+  // claude --model and --effort for a new session (launchFlags checks both).
+  // Raven's session_start passes them; nothing else does yet.
+  model?: string
+  effort?: ClaudeEffort
 }
 
 async function setOpt(name: string, option: string, value: string): Promise<void> {
@@ -723,7 +797,7 @@ export async function tagProject(name: string, projectId: string): Promise<void>
 // the same string, byte for byte, that thor has always been sent. A thor
 // script that predates -Project would fail parameter binding on it, which is
 // why thor is updated first.
-export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk'>): string {
+export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId' | 'newId' | 'projectId' | 'runId' | 'desk' | 'model' | 'effort'>): string {
   const parts = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', REMOTE_SCRIPT, '-Mode', o.mode]
   if (o.mode === 'resume') {
     if (!o.resumeId || !UUID_RE.test(o.resumeId)) throw Object.assign(new Error('resume needs a session id'), { status: 400 })
@@ -757,6 +831,12 @@ export function remoteCommand(o: Pick<CreateOpts, 'mode' | 'target' | 'resumeId'
     }
     parts.push('-Run', o.runId)
   }
+  // After everything else, like -Project: a launch without them is the line
+  // thor has always been sent. A thor script older than -Model and -Effort
+  // takes them as unknown arguments, names them and opens the session anyway.
+  const flags = launchFlags(o)
+  if (flags.model) parts.push('-Model', flags.model)
+  if (flags.effort) parts.push('-Effort', flags.effort)
   return parts.join(' ')
 }
 

@@ -11,6 +11,7 @@ import { UpdateAlarm } from './components/UpdateAlarm'
 import { CommandPalette, openCommandPalette } from './components/CommandPalette'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthGate } from './components/AuthGate'
+import { useRavenWidgetBridge } from './lib/ravenWidget'
 import { clearToken, setAuthSkipped, isTauri, isTauriMobile } from './lib/auth'
 import { setTabUi, tabWantsV2, useProfile } from './lib/deviceMode'
 import { TERM_NAME_RE, v2TermPath } from './lib/term'
@@ -499,6 +500,12 @@ function V2Route() {
   )
 }
 
+/** The desktop Raven widget's "Open in Valkyrie" and its links land in this window (lib/ravenWidget). */
+function RavenWidgetBridge() {
+  useRavenWidgetBridge()
+  return null
+}
+
 function logout() {
   setAuthSkipped(false)
   clearToken()
@@ -517,6 +524,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthGate>
         <BrowserRouter>
+          <RavenWidgetBridge />
           <Routes>
             <Route path="/m/*" element={<V2Route />} />
             <Route path="*" element={<Shell />} />

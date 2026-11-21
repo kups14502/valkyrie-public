@@ -1,0 +1,61 @@
+/* The desktop app's Raven widget (RavenWidget.tsx). The window is see-through:
+   only the round button or the rounded chat draws, so the corner of the
+   screen around it stays dark. */
+html[data-rwidget], html[data-rwidget] body, html[data-rwidget] #root {
+  background: transparent !important;
+  overflow: hidden;
+}
+html[data-rwidget] { --titlebar-h: 0px; }
+html[data-rwidget] body::before, html[data-rwidget] body::after { content: none !important; display: none !important; }
+
+/* the button: the in-app corner button's twin, centered in its 64 px window */
+.rw-btn-wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+.rw-btn { position: relative; width: 48px; height: 48px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .7); }
+.rw-btn[data-unread] {
+  box-shadow:
+    0 0 10px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 50%), transparent),
+    0 0 3px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 70%), transparent);
+}
+.rw-btn:active { transform: scale(.94); }
+@media (hover: hover) and (pointer: fine) { .rw-btn:hover { border-color: color-mix(in srgb, var(--fg) 70%, transparent); } }
+
+/* the chat: the quick sheet's panel, rounded like the Raven tab */
+.rw-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 10px;
+  border-radius: 16px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 40%), #000;
+  border: 1px solid var(--panel-line);
+  animation: rv-pop .16s var(--ease) both;
+  --rv-col: 100%;
+}
+html[data-motion='reduced'] .rw-panel { animation: none; }
+.rw-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 2px 0 4px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rw-head b { font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); }
+.rw-status { flex: 1; min-width: 0; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rw-status[data-busy] { color: var(--fg); }
+.rw-status[data-state='error'] { color: var(--hot); }
+.rw-act { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .rw-act:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); } }
+.rw-msgs { padding: 0 2px 8px; }
+.rw-msgs .rv-col { padding: 0 2px; }
+.rw-panel .rw-compose { width: 100%; margin: 4px 0 10px; }
+.rw-panel .rv-chip-name { max-width: 9rem; }

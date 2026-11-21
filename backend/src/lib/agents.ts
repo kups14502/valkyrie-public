@@ -16,8 +16,9 @@ import type { Franchise } from './psa.js'
 import { franchiseConf, workConf } from './workConfig.js'
 import { AREAS } from './projectAreas.js'
 import { MIXABLE_AREAS } from './projectTypes.js'
-import { RAVEN_CHANNEL } from './raven/types.js'
-import { wakeRavenWith } from './raven/hooks.js'
+import { RAVEN_CHANNEL, type RavenNotice } from './raven/types.js'
+import { notifyRaven, wakeRavenWith } from './raven/hooks.js'
+import { featureAgent, featureAgents } from './featureAgents.js'
 import { ravenPush } from './raven/push.js'
 import { ensureRavenChannel } from './raven/channel.js'
 
@@ -29,6 +30,8 @@ import { ensureRavenChannel } from './raven/channel.js'
 //                                   messages that belong to it
 //   one agent per project           keeps its project page moving
 //   Groceries                       Whole Foods carts on odin's Chromium
+//   a feature's agents              brief, tools and actions from the feature
+//                                   (lib/featureAgents.ts)
 //
 // An agent is not a process. It is a row, a channel and a notebook; when
 // something wakes it (new mail, a ticket that moved, a message for it) a
@@ -54,8 +57,10 @@ const DELAY_SCALE = Number(process.env.AGENTS_DELAY_SCALE || 1)
 
 /** The areas that are separate client businesses (odin's project-areas.json), never mixed with another. */
 export const clientAreas = (): string[] => AREAS.filter((a) => !MIXABLE_AREAS.includes(a))
-/** Areas whose channels stay on the tailnet: every client area, plus team, two-area DMs and Raven's thread (it relays every area). */
-export const hiddenAreas = (): Set<string> => new Set([...clientAreas(), 'team', 'raven'])
+/** Areas whose channels stay on the tailnet: every client area, plus team, two-area DMs, Raven's thread (it relays every area) and tailnet-only feature agents. */
+export const hiddenAreas = (): Set<string> => new Set([
+  ...clientAreas(), 'team', 'raven', ...featureAgents().filter((d) => d.tailnetOnly).map((d) => d.area),
+])
 
 // ------------------------------------------------------------- roster ----
 
@@ -90,6 +95,19 @@ export function syncRoster(): void {
     if (was && !was.enabled && was.statusNote.startsWith('franchise removed')) patchAgent(f.id, { enabled: true, statusNote: '' })
   }
   const taken = new Set(fixed.map((f) => f.id))
+  const features = new Set<string>()
+  for (const d of featureAgents()) {
+    const was = have.get(d.id)
+    if (taken.has(d.id) || (was && was.kind !== 'feature')) {
+      console.warn(`[agents] feature ${d.feature}: agent id ${d.id} is taken by another agent; left out`)
+      continue
+    }
+    upsertAgent({ id: d.id, name: d.name, role: d.role, kind: 'feature', area: d.area, franchise: null, projectId: null, channelId: d.id })
+    upsertChannel({ id: d.id, name: d.name, kind: 'home', area: d.area, topic: d.topic.slice(0, 200), agentIds: [d.id], sortOrder: d.sortOrder ?? 40 })
+    if (was && !was.enabled && was.statusNote.startsWith('feature removed')) patchAgent(d.id, { enabled: true, statusNote: '' })
+    taken.add(d.id)
+    features.add(d.id)
+  }
   const live = new Set<string>()
   const removed = removedAgentProjects()
   for (const p of listProjects({ includeArchived: false })) {
@@ -108,6 +126,7 @@ export function syncRoster(): void {
   // a project archived or removed: its agent stops, its history stays
   for (const a of have.values()) {
     if (a.kind === 'triage' && !taken.has(a.id) && a.enabled) patchAgent(a.id, { enabled: false, statusNote: 'franchise removed from work-agents.json' })
+    if (a.kind === 'feature' && !features.has(a.id) && a.enabled) patchAgent(a.id, { enabled: false, statusNote: 'feature removed from this build' })
     if (a.kind === 'project' && !live.has(a.id)) {
       if (a.enabled) patchAgent(a.id, { enabled: false, statusNote: 'project archived' })
       if (getChannel(a.channelId) && !getChannel(a.channelId)!.archivedAt) archiveChannel(a.channelId)
@@ -337,6 +356,7 @@ const TRIGGER_WORDS: Record<string, [string, string]> = {
   daily_review: ['morning review', 'morning review'],
   daily_check: ['morning check', 'morning check'],
   check: ['a check you asked for', 'a check you asked for'],
+  notice: ['a problem notice', 'problem notices'],
 }
 
 function triggerLine(events: AgentEvent[]): string {
@@ -383,7 +403,7 @@ async function runAgent(agentId: string): Promise<void> {
     }
     const mcpFile = path.join(dir, 'mcp.json')
     await writeFile(mcpFile, JSON.stringify({ mcpServers: servers }), { mode: 0o600 })
-    const { system, prompt } = buildPrompt(agent, events)
+    const { system, prompt } = await buildPrompt(agent, events)
     const result = await runClaude([
       '-p', prompt,
       '--model', agent.model || AGENT_MODEL,
@@ -399,10 +419,14 @@ async function runAgent(agentId: string): Promise<void> {
     ], { cwd: work, scratch: dir, timeoutMs: RUN_TIMEOUT_MS, retryable: () => ctx.acted === 0 })
     endRun(runId, { status: 'done', summary: result.text.trim(), cred: result.cred, costUsd: result.costUsd, turns: result.turns, durationMs: Date.now() - t0 })
     patchAgent(agentId, { status: 'idle', statusNote: '', lastRunAt: nowIso() })
+    // a problem it took must reach Brendon: when its run said nothing in his thread, the notices go there as they came
+    if (events.some(isNotice) && !postedToRavenSince(agentId, t0)) noticesToThread(events)
   } catch (e) {
     const msg = (e as Error).message.slice(0, 400)
     endRun(runId, { status: 'failed', error: msg, durationMs: Date.now() - t0 })
     const back = ctx.acted === 0 ? releaseEvents(runId) : 0
+    // the notices that will not come back for a retry go to Brendon's thread now
+    noticesToThread(back ? events.filter((e) => e.kind.startsWith('retry:')) : events)
     const prev = listRuns(agentId, 2)[1]
     patchAgent(agentId, { status: 'error', statusNote: clip(msg, 160), lastRunAt: nowIso() })
     // the first failure in a row is worth a line; a streak is not
@@ -460,6 +484,9 @@ function renderEvent(e: AgentEvent): string {
       return `- Morning check. Due or overdue on your project: ${s('tasks')}`
     case 'check':
       return '- Brendon pressed "Check now": look over your area and report anything new, or say all clear in one line.'
+    case 'notice':
+      return `- Problem notice from ${s('label') || s('source')} (${s('level')}), ${etLabel(s('at'))}: ${s('title')}${p.body ? `. ${s('body')}` : ''}${p.url ? ` Link: ${s('url')}` : ''}. `
+        + `Brendon hears about it only through you: find the cause with your tools, then post him one message (your channel, notify true) or a proposal.${retry}`
     default:
       return `- ${kind}: ${clip(JSON.stringify(p), 400)}`
   }
@@ -479,9 +506,20 @@ function renderChannel(ch: Channel, limit: number): string {
   return `#${ch.id} (${ch.name}), oldest first:\n` + msgs.map((m) => `[${m.id} · ${etLabel(m.createdAt)}] ${who(m)}: ${clip(m.text, 700)}${m.proposalId ? ` [proposal #${m.proposalId}]` : ''}`).join('\n')
 }
 
-function buildPrompt(agent: Agent, events: AgentEvent[]): { system: string; prompt: string } {
+async function featureStatus(agent: Agent): Promise<string> {
+  const d = agent.kind === 'feature' ? featureAgent(agent.id) : null
+  if (!d?.status) return ''
+  try {
+    return clip(String(await d.status()).trim(), 4000)
+  } catch (e) {
+    return `(the status did not load: ${clip((e as Error).message, 160)})`
+  }
+}
+
+async function buildPrompt(agent: Agent, events: AgentEvent[]): Promise<{ system: string; prompt: string }> {
   const project = agent.projectId ? getProject(agent.projectId) : null
   const system = briefFor(agent, project)
+  const status = await featureStatus(agent)
   const channels = new Set<string>([agent.channelId])
   for (const e of events) {
     const c = (e.payload as { channelId?: unknown }).channelId
@@ -494,6 +532,7 @@ function buildPrompt(agent: Agent, events: AgentEvent[]): { system: string; prom
   const prompt = [
     `Now: ${nyNowLine()}.`,
     counts ? `Tracker: ${counts.open} open tickets, ${counts.mine} assigned to Brendon, ${counts.needsBrendon} marked as needing him.` : '',
+    status ? `## Your area now\n\n${status}` : '',
     '## What woke you',
     events.map(renderEvent).join('\n'),
     '## Your notebook',
@@ -507,6 +546,51 @@ function buildPrompt(agent: Agent, events: AgentEvent[]): { system: string; prom
       + 'grouped into one message where you can. Finish with one plain line for your own log: what you did.',
   ].filter(Boolean).join('\n\n')
   return { system, prompt }
+}
+
+// ------------------------------------------------------------ notices ----
+// A Raven notice that a feature agent takes (featureAgents.ts takesNotice)
+// wakes that agent instead of going into the thread (lib/raven/run.ts
+// postNotice asks here first). It goes to the thread as it came whenever the
+// agent cannot run now, its run failed for good, or its run posted nothing
+// in the thread: a problem never gets lost behind an agent.
+
+/** Hands a notice to the feature agent that takes it, and answers its id; null when none takes it now. */
+export function takeNotice(n: RavenNotice): string | null {
+  if (!started || isPaused()) return null
+  for (const d of featureAgents()) {
+    let takes = false
+    try { takes = Boolean(d.takesNotice?.(n)) } catch (e) { console.error(`[agents] ${d.id} takesNotice:`, (e as Error).message) }
+    if (!takes) continue
+    const a = getAgent(d.id)
+    if (!a?.enabled || a.kind !== 'feature' || capWait(a.id)) return null
+    addEvent(a.id, 'notice', {
+      source: n.source, label: n.label ?? '', level: n.level, title: n.title, body: n.body ?? '', url: n.url ?? '', tag: n.tag ?? '', at: nowIso(),
+    })
+    // the notices of one pass arrive together: one run takes them all
+    wake(a.id, 20_000, 'a problem notice')
+    return a.id
+  }
+  return null
+}
+
+const isNotice = (e: AgentEvent) => e.kind.replace(/^retry:/, '') === 'notice'
+
+function noticesToThread(events: AgentEvent[]): void {
+  for (const e of events) {
+    if (!isNotice(e)) continue
+    const p = e.payload as Record<string, unknown>
+    const s = (k: string) => (typeof p[k] === 'string' && p[k] ? String(p[k]) : undefined)
+    notifyRaven({
+      source: s('source') ?? 'valkyrie', level: (s('level') as RavenNotice['level']) ?? 'warn', title: s('title') ?? 'A problem notice',
+      body: s('body'), url: s('url'), tag: s('tag'), label: s('label'),
+    }, { direct: true })
+  }
+}
+
+/** True when the agent wrote in Raven's thread (an answer, a mirrored post or proposal) since t0. */
+function postedToRavenSince(agentId: string, t0: number): boolean {
+  return listMessages(RAVEN_CHANNEL, { limit: 30 }).some((m) => m.author === agentId && Date.parse(m.createdAt) >= t0)
 }
 
 // ------------------------------------------------------------ schedule ---

@@ -8,10 +8,10 @@ import type { RavenMeta } from './raven/types.js'
 // bring in. One file, agents.sqlite. lib/agents.ts runs them; this file only
 // keeps the rows and tells waiters that something changed.
 
-export type AgentKind = 'triage' | 'project' | 'shopping'
+export type AgentKind = 'triage' | 'project' | 'shopping' | 'feature'
 export type AgentStatus = 'idle' | 'queued' | 'working' | 'resting' | 'error'
 export type ChannelKind = 'home' | 'team' | 'dm'
-export type ProposalKind = 'mail_reply' | 'ticket_note' | 'ticket_update' | 'ticket_create'
+export type ProposalKind = 'mail_reply' | 'ticket_note' | 'ticket_update' | 'ticket_create' | 'feature'
 export type ProposalStatus = 'pending' | 'running' | 'done' | 'failed' | 'declined'
 export type MailState = 'new' | 'handled' | 'ignored' | 'needs-brendon'
 
@@ -20,7 +20,7 @@ const db = openDb('agents', `
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     role       TEXT NOT NULL DEFAULT '',
-    kind       TEXT NOT NULL CHECK (kind IN ('triage','project','shopping')),
+    kind       TEXT NOT NULL CHECK (kind IN ('triage','project','shopping','feature')),
     area       TEXT NOT NULL,
     franchise  TEXT,
     projectId  TEXT,
@@ -201,6 +201,32 @@ export function ensureMessageMeta(): boolean {
   return true
 }
 ensureMessageMeta()
+
+// Added with feature agents (lib/featureAgents.ts): kind 'feature'. SQLite
+// cannot change a CHECK in place, so an older agents table is copied into one
+// with the wider CHECK (same columns, same order), in one transaction. The
+// guard makes a second start a no-op.
+const OLD_KIND_CHECK = "CHECK (kind IN ('triage','project','shopping'))"
+const NEW_KIND_CHECK = "CHECK (kind IN ('triage','project','shopping','feature'))"
+
+export function ensureAgentKinds(): boolean {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agents'").get() as { sql: string } | undefined
+  if (!row || row.sql.includes(NEW_KIND_CHECK)) return false
+  if (!row.sql.includes(OLD_KIND_CHECK)) {
+    console.warn('[agents] the agents table has an unknown kind CHECK; feature agents cannot be stored')
+    return false
+  }
+  const create = row.sql.replace(OLD_KIND_CHECK, NEW_KIND_CHECK).replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?"?agents"?/i, 'CREATE TABLE agents_wide')
+  db.transaction(() => {
+    db.exec('DROP TABLE IF EXISTS agents_wide')
+    db.exec(create)
+    db.exec('INSERT INTO agents_wide SELECT * FROM agents')
+    db.exec('DROP TABLE agents')
+    db.exec('ALTER TABLE agents_wide RENAME TO agents')
+  })()
+  return true
+}
+ensureAgentKinds()
 
 export const nowIso = () => new Date().toISOString()
 const parse = <T>(s: string | null | undefined, fallback: T): T => {

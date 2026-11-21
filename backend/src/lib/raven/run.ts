@@ -8,12 +8,12 @@ import {
   type AgentEvent, type Message, type Ref,
 } from '../agentsStore.js'
 import { ClaudeCliError, nyNowLine, runClaude, type CliRun } from '../claudeCli.js'
-import { etLabel, isPaused, mentionsIn, wake as wakeAgent } from '../agents.js'
+import { etLabel, isPaused, mentionsIn, takeNotice, wake as wakeAgent } from '../agents.js'
 import { onBriefWritten } from '../brief.js'
 import { listInbox } from '../inboxStore.js'
 import { listTasks, nyToday } from '../tasksStore.js'
 import { workConf } from '../workConfig.js'
-import { setRavenNoticeHandler, setRavenPoster, setRavenWaker } from './hooks.js'
+import { setRavenNoticeHandler, setRavenPoster, setRavenWaker, type NoticeOpts } from './hooks.js'
 import { ensureRavenChannel } from './channel.js'
 import { ravenBrief } from './brief.js'
 import { humanSize, pruneRavenFiles, ravenFilesFor } from './files.js'
@@ -137,13 +137,16 @@ export function brendonToRaven(input: { text?: unknown; files?: unknown; source?
 // ------------------------------------------------------------ notices ----
 // A line from outside a run: an odin process over POST /api/raven/notify,
 // a feature through notifyRaven(). A repeat (same source and tag) within 30
-// minutes of the last one posted is dropped. warn and alert push.
+// minutes of the last one posted is dropped. warn and alert push. A notice a
+// feature agent takes (lib/agents.ts takeNotice) wakes that agent instead,
+// and the agent tells Brendon itself; direct (that agent's own fallback)
+// skips both steps.
 
 const NOTICE_FOLD_MS = 30 * 60_000
 const noticeSeen = new Map<string, number>()
 const SOURCE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-export function postNotice(n: RavenNotice): { posted: boolean; message: Message | null } {
+export function postNotice(n: RavenNotice, opts: NoticeOpts = {}): { posted: boolean; message: Message | null; handedTo?: string } {
   const source = String(n?.source ?? '').trim().toLowerCase()
   if (!SOURCE_RE.test(source)) throw new AgentError(400, 'source must be a short key like backup')
   const level = n.level ?? 'info'
@@ -153,7 +156,7 @@ export function postNotice(n: RavenNotice): { posted: boolean; message: Message 
   const body = typeof n.body === 'string' ? n.body.trim() : ''
   const url = typeof n.url === 'string' && (/^https:\/\//.test(n.url) || /^\/m\//.test(n.url)) ? n.url.slice(0, 2000) : null
   const tag = typeof n.tag === 'string' ? n.tag.trim().slice(0, 120) : ''
-  if (tag) {
+  if (tag && !opts.direct) {
     const key = `${source}\n${tag}`
     const at = noticeSeen.get(key)
     if (at !== undefined && Date.now() - at < NOTICE_FOLD_MS) return { posted: false, message: null }
@@ -161,6 +164,10 @@ export function postNotice(n: RavenNotice): { posted: boolean; message: Message 
     if (noticeSeen.size > 500) for (const [k, v] of noticeSeen) if (Date.now() - v > NOTICE_FOLD_MS) noticeSeen.delete(k)
   }
   const label = (typeof n.label === 'string' && n.label.trim()) ? n.label.trim().slice(0, 40) : source.charAt(0).toUpperCase() + source.slice(1)
+  if (!opts.direct) {
+    const agent = takeNotice({ source, level, title: title.slice(0, 300), body: body ? clip(body, 3000) : undefined, url: url ?? undefined, tag: tag || undefined, label })
+    if (agent) return { posted: false, message: null, handedTo: agent }
+  }
   const kind = source === 'valkyrie' || source === 'system' ? 'system' : 'feature'
   ensureRavenChannel()
   const loud = level !== 'info'
@@ -642,7 +649,7 @@ export function startRaven(feats: RavenFeature[] = []): void {
   const old = openEvents(RAVEN_ID).filter((e) => Date.now() - Date.parse(e.createdAt) > STALE_EVENT_MS)
   if (old.length) claimEvents(RAVEN_ID, 'expired', old.map((e) => e.id))
 
-  setRavenNoticeHandler((n) => { postNotice(n) })
+  setRavenNoticeHandler((n, o) => { postNotice(n, o) })
   setRavenPoster((text, opts) => { ensureRavenChannel(); ravenMessage(text, { refs: opts?.refs, meta: opts?.meta, push: opts?.push }) })
   setRavenWaker((kind, payload) => queueRavenEvent(kind, payload, Number(payload.hop) || 0))
   onBriefWritten(postBrief)

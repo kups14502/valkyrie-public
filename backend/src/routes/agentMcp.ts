@@ -10,7 +10,8 @@ import {
   patchAgent, routeMail, setMailState, trackedTicket, trackNote, type Agent, type Channel, type Ref,
 } from '../lib/agentsStore.js'
 import { agentPost, canPost, dmChannel, etLabel, runForToken, type RunCtx } from '../lib/agents.js'
-import { proposeMailReply, proposeTicketCreate, proposeTicketNote, proposeTicketUpdate } from '../lib/agentActions.js'
+import { proposeFeature, proposeMailReply, proposeTicketCreate, proposeTicketNote, proposeTicketUpdate } from '../lib/agentActions.js'
+import { featureAgent } from '../lib/featureAgents.js'
 import {
   contactsByEmail, findCompanies, franchiseLabel, getTicket, labels, PsaError, searchTickets, ticketNotes, type Franchise,
 } from '../lib/psa.js'
@@ -157,7 +158,7 @@ function register(server: McpServer, loc: Loc): void {
     inputSchema: { text: z.string().max(20_000) },
   }, (a) => toolRun(() => { patchAgent(agent.id, { notebook: a.text }); return acted({ ok: true, chars: a.text.length }) }))
 
-  server.registerTool('task_add', {
+  if (agent.kind !== 'feature') server.registerTool('task_add', {
     description: "Add a task to Brendon's task list. due is New York time, YYYY-MM-DD or YYYY-MM-DDTHH:mm."
       + (agent.projectId ? ' It goes on your project.' : ` It goes under the ${agent.area} area.`),
     inputSchema: { text: z.string().min(1).max(300), due: z.string().max(16).optional() },
@@ -377,6 +378,17 @@ function register(server: McpServer, loc: Loc): void {
       const text = buf.subarray(0, 80_000).toString('utf8')
       return buf.length > 80_000 ? `${text}\n\n[cut at 80 KB of ${Math.round(buf.length / 1024)} KB]` : text
     }))
+  }
+
+  // -------------------------------------------------------- feature ---
+  // a feature's agent gets the feature's own tools; what it proposes is an action the feature runs once Brendon approves
+
+  const feature = agent.kind === 'feature' ? featureAgent(agent.id) : null
+  if (feature?.tools) {
+    feature.tools(server, {
+      agentId: agent.id, runId: run.runId, hop: run.hop, acted: () => { run.acted++ },
+      propose: (p) => acted({ proposal: proposeFeature(agent, p, run.hop).id }),
+    })
   }
 
   // ------------------------------------------------------ groceries ---

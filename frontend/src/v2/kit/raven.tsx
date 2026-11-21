@@ -14,9 +14,10 @@ import {
 import {
   addToThread, openRavenQuick, refreshRavenUnread, setQuickOpen, setQuickOpener, useKeyboardInset, useQuickOpen, useRaven,
   useRavenDraft, useRavenFileUrl, useRavenUnread, useRavenVoice, useSaveRavenSettings, useVoiceSink, usePttKey, pttAllowed, pttLabel,
-  pttMatches, voiceStart, voiceStop, voiceToggle, type PttKey, type RavenDraft,
+  pttMatches, voiceStart, voiceStop, voiceToggle, type DraftSnap, type PttKey, type RavenDraft,
 } from './ravenStore'
 import { useTick } from './data'
+import { setRavenWidgetOn, useRavenWidgetOn } from '../../lib/ravenWidget'
 import { requestIntent } from './shell'
 import { Icon } from './icons'
 import { Press, cx, toast } from './ui'
@@ -61,12 +62,10 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
 }) {
   const pick = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
+  const fileUrl = useRavenFileUrl()
   // the words from a recording join the end of what is there, for him to read and edit; never sent by themselves
-  const textRef = useRef(draft.text)
-  useEffect(() => { textRef.current = draft.text })
   const voiceId = useVoiceSink(voiceOn, (words) => {
-    const cur = textRef.current.replace(/\s+$/, '')
-    draft.setText(cur ? `${cur} ${words}` : words)
+    draft.append(words)
     const el = taRef.current
     if (el) requestAnimationFrame(() => { el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length) })
   })
@@ -74,12 +73,14 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
   const mine = voice.phase !== 'idle' && (voice.owner === voiceId || (voice.owner === null && voiceOn))
   const recording = mine && (voice.phase === 'recording' || voice.phase === 'starting')
   const writing = mine && voice.phase === 'writing'
+  // the draft is shared, so the text can change while this box is hidden (the closed quick sheet): measure again
+  // once it shows, and never pin a hidden box to 0 px
   useLayoutEffect(() => {
     const el = taRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(maxHeight, el.scrollHeight)}px`
-  }, [draft.text, maxHeight, taRef])
+    if (el.scrollHeight) el.style.height = `${Math.min(maxHeight, el.scrollHeight)}px`
+  }, [draft.text, maxHeight, taRef, voiceOn])
 
   const submit = () => {
     if (draft.ready && !sending) onSend()
@@ -118,21 +119,25 @@ export function RavenComposer({ draft, onSend, sending, placeholder, taRef, clas
       {(recording || writing) && <VoiceLine phase={voice.phase} since={voice.since} ptt={voice.ptt} />}
       {draft.files.length > 0 && (
         <div className="rv-chips" aria-label="Attachments">
-          {draft.files.map((f) => (
+          {draft.files.map((f) => {
+            // a picture kept from before a reload draws from odin, where it landed
+            const src = f.preview ?? (f.state === 'done' && f.file && isImageFile(f.file) ? fileUrl(f.file.id) : null)
+            return (
             <span key={f.key} className="rv-chip" data-state={f.state}>
-              {f.preview ? <img src={f.preview} alt="" draggable={false} /> : <FileText size={14} strokeWidth={1.6} className="vl-icon vl-icon-dim" aria-hidden />}
+              {src ? <img src={src} alt="" draggable={false} /> : <FileText size={14} strokeWidth={1.6} className="vl-icon vl-icon-dim" aria-hidden />}
               <span className="rv-chip-name">{f.name}</span>
               <span className="rv-chip-state">
                 {f.state === 'up' ? `${f.size ? Math.min(99, Math.floor((f.sent / f.size) * 100)) : 0}%` : f.state === 'err' ? f.error ?? 'failed' : fmtSize(f.size)}
               </span>
-              {f.state === 'err' && f.error !== 'over 50 MB' && f.error !== 'empty' && (
+              {f.state === 'err' && !f.lost && f.error !== 'over 50 MB' && f.error !== 'empty' && (
                 <Press className="rv-chip-act" onPress={() => draft.retry(f.key)}>Retry</Press>
               )}
               <Press className="rv-chip-x" aria-label={`Remove ${f.name}`} onPress={() => draft.remove(f.key)}>
                 <X size={12} strokeWidth={1.8} className="vl-icon vl-icon-dim" aria-hidden />
               </Press>
             </span>
-          ))}
+            )
+          })}
         </div>
       )}
       <div className="rv-compose-row">
@@ -413,6 +418,27 @@ export function PushToTalkRow() {
   )
 }
 
+/** Settings, desktop app only: the always-on-top Raven widget on or off (it is on unless turned off). */
+export function RavenWidgetRow() {
+  const on = useRavenWidgetOn()
+  const [busy, setBusy] = useState(false)
+  if (on === null) return null
+  const flip = () => {
+    setBusy(true)
+    void setRavenWidgetOn(!on)
+      .catch((e) => toast(`Could not change the widget: ${String(e)}`, { ms: 4000 }))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="st-row">
+      <span className="st-row-icon st-row-glyph" aria-hidden><Bird size={14} strokeWidth={1.7} className="vl-icon vl-icon-dim" /></span>
+      <span className="st-row-label">Raven widget</span>
+      <span className="st-row-value vl-ellipsis">{on ? 'On top of every app, hides after 5 minutes idle' : 'Off'}</span>
+      <Press className="vl-link vl-hit st-row-act" disabled={busy} onPress={flip}>{on ? 'Turn off' : 'Turn on'}</Press>
+    </div>
+  )
+}
+
 // ------------------------------------------------------------ attachments ---
 
 /** A message's files: pictures as thumbnails, anything else as a name chip; each opens the file. */
@@ -465,7 +491,9 @@ export function RavenFab() {
   const vr = useProfile().resolved === 'vr'
   const open = useQuickOpen()
   const unread = useRavenUnread().data?.unread ?? 0
-  if (vr || NO_FAB.test(pathname)) return null
+  // the desktop app's own Raven widget is on screen: one Raven button, not two
+  const widget = useRavenWidgetOn()
+  if (vr || widget || NO_FAB.test(pathname)) return null
   const label = unread ? `Message Raven (${unread} unread)` : 'Message Raven'
   return (
     <Press
@@ -496,7 +524,8 @@ function replyTo(messages: RavenMsg[], id: number): RavenMsg | null {
  * Send. On the phone it is a bottom sheet over the keyboard; on a wider
  * screen a small popover in the bottom-right corner. After a send it shows
  * the line, Raven's status, then the reply, with Open conversation. Escape or
- * a tap outside closes it; what he typed stays for the next time. Mounted
+ * a tap outside closes it; what he typed stays for the next time (the thread's draft, kept on the device and shown
+ * in the Raven tab too). Mounted
  * once by v2/App.tsx.
  */
 export function RavenQuick() {
@@ -587,10 +616,10 @@ export function RavenQuick() {
   }, [open])
 
   const send = useMutation({
-    mutationFn: () => sendRaven({ text: draft.text.trim(), files: draft.ids.length ? draft.ids : undefined, source: 'quick' }),
-    onSuccess: (m) => {
+    mutationFn: (snap: DraftSnap) => sendRaven({ text: snap.text.trim(), files: snap.ids.length ? snap.ids : undefined, source: 'quick' }),
+    onSuccess: (m, snap) => {
       setSent(m)
-      draft.clear()
+      draft.markSent(snap)
       addToThread(qc, { messages: [m] })
       void qc.invalidateQueries({ queryKey: ['raven'] })
     },
@@ -666,7 +695,7 @@ export function RavenQuick() {
         <RavenComposer
           draft={draft}
           sending={send.isPending}
-          onSend={() => send.mutate()}
+          onSend={() => send.mutate(draft.snapshot())}
           placeholder={sent ? 'Reply to Raven' : 'Message Raven'}
           taRef={ta}
           className="rv-q-compose"

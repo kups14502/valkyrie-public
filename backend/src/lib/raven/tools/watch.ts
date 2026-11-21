@@ -16,8 +16,20 @@ import { clip } from './util.js'
 //
 // Watches live in agents.sqlite's kv (raven:watches), cursor included, so a
 // restart picks up where it left off without relaying anything twice.
+//
+// Each watch keeps the job it is on now, for the Watching card. Claude's own
+// title (thor's board, the pane title) is picked once from the first prompt,
+// so a main terminal on its fifth job still wore its first one. The job is the
+// name Raven gave it when it typed the work in, or else the newest prompt of
+// four words or more; a short reply ("yes, do it") keeps the job it answers.
+// A watch whose pane ends stays on the card as closed for two hours
+// (raven:watches-ended), then goes.
 
 const KEY = 'raven:watches'
+const ENDED_KEY = 'raven:watches-ended'
+export const ENDED_KEEP_MS = 2 * 3_600_000
+const ENDED_MAX = 12
+const JOB_MAX = 120
 export const TICK_MS = 8_000
 export const QUIET_MS = 12_000
 export const STALE_MS = 24 * 3_600_000
@@ -48,9 +60,43 @@ export type Watch = {
   lastRelayedId: string
   /** what Raven does with the next answer (once) */
   followUp: string
+  /** the job it is on now; '' when none is known, absent on a watch from before jobs were kept */
+  job?: string
+  /** the start of the line Raven last typed, until the transcript shows it: Raven's own prompt keeps Raven's name for the job */
+  typed?: string
 }
 
+/** A watch that ended (its pane closed), kept for the card a while. */
+export type EndedWatch = Pick<Watch, 'key' | 'pane' | 'label' | 'sessionId' | 'since' | 'lastSeenAt' | 'lastActivityAt'> & { job: string; endedAt: string }
+
 const meaningful = (e: TranscriptEntry) => e.kind === 'user' || e.kind === 'assistant' || e.kind === 'tool' || e.kind === 'result'
+
+const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
+// what a prompt Raven typed often opens with: "Brendon's request:", "Request from Brendon (via Raven):", "Bug from Brendon, must fix:"
+const ASKED_BY = /^[^:]{0,40}\bBrendon\b[^:]{0,30}:\s*/i
+
+/** A prompt as the name of a job: one line, without a "Brendon's request:" lead. '' for a reply under four words, a slash command or a shell line. */
+export function jobOf(text: string): string {
+  const line = flat(text)
+  if (!line || line.startsWith('/') || line.startsWith('!')) return ''
+  const body = line.replace(ASKED_BY, '')
+  if (body.split(' ').length < 4) return ''
+  return clip(body.charAt(0).toUpperCase() + body.slice(1), JOB_MAX)
+}
+
+/** The start of a line Raven types, as the transcript will show it. */
+export const typedMark = (line: string): string => flat(line).slice(0, 80)
+
+/** The newest prompt in a page that names a job, or ''. */
+function lastJob(entries: TranscriptEntry[]): string {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]
+    if (e.kind !== 'user' || !e.text) continue
+    const j = jobOf(e.text)
+    if (j) return j
+  }
+  return ''
+}
 
 export function listWatches(): Watch[] {
   try {
@@ -82,7 +128,7 @@ async function readPage(w: Pick<Watch, 'pane' | 'sessionId'>, cursor: string): P
  * before anything is typed into it, so what it said before is never relayed
  * and an answer that comes back within seconds still is.
  */
-export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean }): Promise<Watch> {
+export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; job?: string; typed?: string }): Promise<Watch> {
   const key = watchKey(w.pane, w.sessionId)
   const nowMs = io.now()
   const now = new Date(nowMs).toISOString()
@@ -93,6 +139,8 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
     x.label = w.label || x.label
     if (w.sessionId) x.sessionId = w.sessionId
     if (w.followUp !== undefined) x.followUp = w.followUp
+    if (w.job) x.job = w.job
+    if (w.typed !== undefined) x.typed = w.typed
     x.lastActivityAt = now
     saveWatches(list)
     return x
@@ -100,6 +148,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   const next: Watch = {
     key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: now, lastActivityAt: now,
     cursor: '', baselined: Boolean(w.fresh), lastNewAt: nowMs, lastSeenAt: 0, tail: [], lastRelayedId: '', followUp: w.followUp ?? '',
+    job: w.job ?? '', typed: w.typed ?? '',
   }
   if (!w.fresh) {
     try {
@@ -109,6 +158,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
         next.cursor = page.cursor
         next.sessionId = page.sessionId
         next.lastSeenAt = Math.max(0, ...page.entries.map((e) => e.at || 0))
+        if (!next.job) next.job = lastJob(page.entries)
       }
     } catch (e) {
       // the first tick reads it instead, keeping only entries newer than the watch
@@ -117,8 +167,67 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   }
   const list = listWatches().filter((y) => y.key !== key)
   list.push(next)
+  dropEnded(key)
   saveWatches(list)
   return next
+}
+
+/**
+ * A watch from before jobs were kept: its job from the newest page of its transcript, once. Only for a main terminal
+ * or a window on thor, whose label names no job; a pane Raven started is named for its job already.
+ */
+export async function fillJob(key: string): Promise<void> {
+  const w = getWatch(key)
+  if (!w || w.job !== undefined) return
+  let job = ''
+  try {
+    const page = await readPage(w, '')
+    if (page?.sessionId) job = lastJob(page.entries)
+  } catch (e) {
+    console.error(`[raven-watch] ${w.label} job:`, (e as Error).message)
+    return
+  }
+  const list = listWatches()
+  const x = list.find((y) => y.key === key && y.since === w.since)
+  if (!x || x.job !== undefined) return
+  x.job = job
+  saveWatches(list, Boolean(job))
+}
+
+// ------------------------------------------------------------- ended ----
+
+export function listEnded(now = io.now()): EndedWatch[] {
+  try {
+    const v = JSON.parse(getKv(ENDED_KEY) ?? '[]') as EndedWatch[]
+    return Array.isArray(v) ? v.filter((e) => e && typeof e.key === 'string' && now - Date.parse(e.endedAt) <= ENDED_KEEP_MS) : []
+  } catch {
+    return []
+  }
+}
+
+function noteEnded(w: Watch, now: number): void {
+  const e: EndedWatch = {
+    key: w.key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, lastSeenAt: w.lastSeenAt,
+    lastActivityAt: w.lastActivityAt, job: w.job ?? '', endedAt: new Date(now).toISOString(),
+  }
+  setKv(ENDED_KEY, JSON.stringify([...listEnded(now).filter((x) => x.key !== w.key), e].slice(-ENDED_MAX)))
+}
+
+/** Watched again, or turned off on purpose: off the card. */
+export function dropEnded(key: string): void {
+  const list = listEnded()
+  if (list.some((e) => e.key === key)) {
+    setKv(ENDED_KEY, JSON.stringify(list.filter((e) => e.key !== key)))
+    bump()
+  }
+}
+
+/** A watched session closed on purpose (session_stop): its card shows it closed, with no "ended" line in the DM. */
+export function closeWatch(key: string): boolean {
+  const w = getWatch(key)
+  if (!w) return false
+  noteEnded(w, io.now())
+  return removeWatch(key)
 }
 
 export function removeWatch(key: string): boolean {
@@ -136,6 +245,13 @@ function take(w: Watch, entries: TranscriptEntry[]): boolean {
     if (e.at) w.lastSeenAt = Math.max(w.lastSeenAt, e.at)
     if (!meaningful(e)) continue
     any = true
+    if (e.kind === 'user' && e.text) {
+      if (w.typed && flat(e.text).startsWith(w.typed)) w.typed = ''
+      else {
+        const job = jobOf(e.text)
+        if (job) w.job = job
+      }
+    }
     if (e.kind === 'assistant' && e.text?.trim()) {
       if (!w.tail.some((t) => t.id === e.id)) w.tail.push({ id: e.id, text: e.text.trim() })
     } else {
@@ -200,6 +316,7 @@ async function tickOne(w: Watch, now: number): Promise<boolean> {
       if (!stillWatched(w)) return false
       if (unrelayed) relay(w, answerOf(w))
       ravenPost(`${w.label} ended`, { meta: { relay: { kind: 'session', from: w.pane, label: w.label, sessionId: w.sessionId || undefined } } })
+      noteEnded(w, now)
       return false
     }
   }

@@ -109,7 +109,12 @@ void resolveApiBase().finally(() => {
 if (isTauri()) {
   requestAnimationFrame(() => {
     void import('@tauri-apps/api/webviewWindow')
-      .then(({ getCurrentWebviewWindow }) => getCurrentWebviewWindow().show())
+      .then(({ getCurrentWebviewWindow }) => {
+        const w = getCurrentWebviewWindow()
+        // the Raven widget is shown by Rust, without taking the focus (src-tauri/src/lib.rs)
+        if (w.label === 'raven-widget') return
+        return w.show()
+      })
       .catch(() => {})
   })
 }

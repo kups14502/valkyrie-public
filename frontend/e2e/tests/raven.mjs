@@ -24,6 +24,16 @@
 //              (phone, ipad, desktop); Ctrl+Shift+Space and the palette open it on the desktop
 //   corner     the corner button on every tab and page (but Raven and Dashboard > Overview, whose Raven
 //              block takes its place), never over content at the bottom of a scrolled page (phone)
+//   draft      the unsent draft kept on the device: typed text, an attached picture and dictated words through
+//              a tab switch, a page outside the tabs, words landing with no composer on screen and a reload;
+//              the Dashboard's box and the quick sheet show it; the send clears it for good (phone, desktop)
+//   scroll     at the bottom the thread stays pinned (a new line, a card that grows, the window shrinking
+//              and growing, the composer growing); scrolled up by hand it holds his place and the chip shows,
+//              counts the unread line, sits above the composer and glides back down (phone, desktop)
+//   unread     the New line above the first unread line (from the backend's read mark), the count on the chip
+//              and on the Raven tab, his own lines never counted, read on reaching the bottom with the tab in
+//              front (not while on another tab), no New line for a line read as it arrives, another device's
+//              read clearing it here (phone, desktop)
 //   down       /api/raven not answering: one plain line, no crash
 
 import { sleep } from '../lib/cdp.mjs'
@@ -78,7 +88,7 @@ const header = (h, name) => {
 }
 
 /** The fake Raven: the GET mocks and the write handler. Returns its state. */
-export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, unread = 2, quiet = true } = {}) {
+export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, unread = 2, quiet = true, lastRead } = {}) {
   // thor's reads (the 390 KB board and the rest) stand in, so the browser's connections stay free for these
   if (quiet) quietThor(page)
   const now = Date.now()
@@ -94,9 +104,11 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       { target: 'area2', label: 'Work area two', pane: null, state: 'closed' },
     ],
     watching: [
-      { pane: 'vk-e2e00000b2', label: 'Work area one (main)', sessionId: 'sess-2', since: iso(now - 25 * MIN), title: 'Printer migration plan' },
+      { pane: 'vk-e2e00000b2', label: 'Work area one (main)', sessionId: 'sess-2', since: iso(now - 25 * MIN), title: 'Printer migration plan', state: 'working', lastAt: iso(now - 2 * MIN) },
       // a session in a window on thor: Raven reads it, but there is no pane here to open
-      { pane: '', label: 'Area two (window)', sessionId: 'sess-3', since: iso(now - 5 * MIN) },
+      { pane: '', label: 'Area two (window)', sessionId: 'sess-3', since: iso(now - 5 * MIN), state: 'idle', lastAt: iso(now - 14 * MIN) },
+      // a pane that ended: the card stays, closed, with no Open
+      { pane: 'vk-e2e00000c3', label: 'Old pane', sessionId: 'sess-4', since: iso(now - 90 * MIN), title: 'Rotate the nginx certificates', state: 'closed', lastAt: iso(now - 40 * MIN) },
     ],
     agents: [
       { id: 'triage', name: 'Triage agent', area: 'area1', status: 'idle', pending: 2 },
@@ -104,6 +116,8 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ],
     messages: [...fill, ...seed(now)],
     nextId: 200, files: new Map(), replyMs, stopped: false,
+    // set: the backend's read mark, the unread count follows it (never his own lines); unset: the fixed count above
+    lastRead,
     sent: [], reads: [], uploads: [], stops: 0, decisions: [], olderGets: [], fileGets: [], picks: [], transcribes: [], declineAlls: [],
     settings: {
       model: 'auto', effort: 'auto',
@@ -118,8 +132,10 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ],
   }
   const bump = () => { st.seq++ }
+  const unreadNow = () => (st.lastRead === undefined ? st.unread : st.messages.filter((m) => m.id > st.lastRead && m.author !== 'brendon').length)
   const body = () => ({
-    seq: st.seq, status: st.status, statusNote: st.statusNote, tier: st.tier, model: st.model, effort: st.effort, unread: st.unread,
+    seq: st.seq, status: st.status, statusNote: st.statusNote, tier: st.tier, model: st.model, effort: st.effort, unread: unreadNow(),
+    ...(st.lastRead === undefined ? {} : { lastRead: st.lastRead }),
     mains: st.mains, watching: st.watching, agents: st.agents, paused: st.paused, messages: st.messages.slice(-60),
     settings: st.settings, models: st.models,
   })
@@ -136,7 +152,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     while (st.seq <= since && Date.now() - t0 < 6000) await sleep(80)
     return ok({ seq: st.seq })
   })
-  page.mock('/api/msg/count', () => ok({ unread: st.unread, notify: 0, pending: 0 }))
+  page.mock('/api/msg/count', () => ok({ unread: unreadNow(), notify: 0, pending: 0 }))
   page.mock('/api/plex/img-token', () => ok({ token: 'e2e-img', expiresAt: Date.now() + 12 * 3600_000 }))
   page.mock(/^\/api\/raven\/files\/[^/]+$/, ({ path, query }) => {
     st.fileGets.push({ path, token: query.token ?? null })
@@ -177,6 +193,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     if (w.method === 'POST' && w.path === '/api/raven/read') {
       st.reads.push(j.upTo ?? null)
       st.unread = 0
+      if (st.lastRead !== undefined) st.lastRead = Math.max(st.lastRead, j.upTo ?? Math.max(...st.messages.map((m) => m.id)))
       bump()
       return ok({ ok: true })
     }
@@ -341,9 +358,16 @@ function threadSnap() {
     wide: !!q('.rv[data-wide]'),
     side: side && conv ? { right: side.left >= conv.right - 1, w: Math.round(side.width) } : null,
     toggle: !!q('.rv-conn-toggle'),
-    conn: qa('.rv-conn .rv-group').map((g) => `${g.querySelector('h3')?.textContent}:${g.querySelectorAll('.rv-crow').length}`),
-    watchRows: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-crow')]
-      .map((r) => `${r.querySelector('.rv-crow-name')?.textContent}|${r.querySelector('.rv-crow-line')?.textContent ?? ''}`)),
+    conn: qa('.rv-conn .rv-group').map((g) => `${g.querySelector('h3')?.textContent}:${g.querySelectorAll('.rv-crow, .rv-wcard').length}`),
+    watchRows: qa('.rv-conn .rv-wcard').map((r) => `${r.querySelector('.rv-wcard-name')?.textContent}|${r.querySelector('.rv-wcard-meta')?.textContent ?? ''}`),
+    watchCard: (() => {
+      const c = q('.rv-conn .rv-wcard')
+      if (!c) return null
+      const cs = getComputedStyle(c)
+      const box = c.getBoundingClientRect()
+      const name = c.querySelector('.rv-wcard-name')?.getBoundingClientRect()
+      return { radius: parseFloat(cs.borderTopLeftRadius), fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)', inside: !!name && name.left >= box.left && name.right <= box.right + 0.5, closedFill: getComputedStyle(qa('.rv-conn .rv-wcard')[2] ?? c).backgroundColor }
+    })(),
     watchOpen: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-open')].map((a) => a.getAttribute('href'))),
     triage: crow(/Triage agent/)?.querySelector('.rv-n')?.textContent ?? null,
     triageBadge: (() => {
@@ -423,9 +447,14 @@ export function ravenTests() {
         } else {
           t.check(s.side?.right && s.side.w < 360 && !s.toggle, `the Connected column is not a narrow column on the right: ${JSON.stringify(s.side)}`)
         }
-        t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:2', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
-        t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor has none)`)
-        t.check(JSON.stringify(conn.watchRows) === JSON.stringify(['Printer migration plan|Work area one (main)', 'Area two (window)|']), `Watching reads ${JSON.stringify(conn.watchRows)} (the title first, the target under it)`)
+        t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:3', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
+        t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor and a closed pane have none)`)
+        // the fixture's times are set once, minutes before this test runs: only the order of the words is fixed
+        const rows = [/^Printer migration plan\|Working\d+m agoWork area one \(main\)$/, /^Area two \(window\)\|Idle\d+m ago$/, /^Rotate the nginx certificates\|Closed\d+m agoOld pane$/]
+        t.check(conn.watchRows.length === rows.length && rows.every((re, i) => re.test(conn.watchRows[i])),
+          `Watching reads ${JSON.stringify(conn.watchRows)} (the job, then its state, last activity and pane)`)
+        const wc = conn.watchCard
+        t.check(wc && wc.radius >= 12 && wc.fill && wc.inside && wc.closedFill === 'rgba(0, 0, 0, 0)', `the Watching card is not a rounded, filled card (a closed one unfilled): ${JSON.stringify(wc)}`)
         t.check(conn.triage === '2', `the triage agent's pending count reads ${conn.triage}`)
         const tb = conn.triageBadge
         t.check(tb?.title === '2 proposals waiting' && tb.label === '2 proposals waiting' && tb.px >= 12 && tb.h >= 18 && tb.shadow === 'none',
@@ -1038,6 +1067,363 @@ export function ravenTests() {
         s = await voiceSnap(page)
         t.check(!s.rec && s.mic === 'Record a voice message', `after a blocked microphone: ${JSON.stringify(s)}`)
         await fits(t, page, `${ROUTE} voice @${device}`)
+      },
+    })
+  }
+
+  // the unsent draft (kit/ravenDraft.ts, kept in this device's localStorage): typed text, an attached picture and
+  // dictated words survive a tab switch, a page outside the tabs (the whole shell goes), words that arrive while no
+  // composer is on screen, and a reload; the Dashboard's Raven box and the quick sheet show the same draft; only
+  // the send clears it, and a reload after the send stays empty
+  const DRAFT_KEY = 'valkyrie-raven-draft:raven'
+  const draftSnap = (page) => page.eval((k) => ({
+    box: document.querySelector('.rv .rv-compose textarea')?.value ?? null,
+    chips: [...document.querySelectorAll('.rv .rv-chip')].map((c) => `${c.querySelector('.rv-chip-name')?.textContent}|${c.dataset.state}|${c.querySelector('img')?.getAttribute('src') ? 'img' : 'icon'}`),
+    stored: (() => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') } catch { return 'broken' } })(),
+  }), DRAFT_KEY)
+  /** an address change inside the app (no reload): React Router follows popstate */
+  const inApp = (page, path) => page.eval((p) => { history.pushState(null, '', p); dispatchEvent(new PopStateEvent('popstate')) }, path)
+  const backInApp = (page) => page.eval(() => history.back())
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:draft:${device}`,
+      group: 'raven',
+      device,
+      timeout: 420_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { replyMs: -1 })
+        // the words from a recording take a while when asked, so the screen can go before they arrive
+        const writes = page.writeHandler
+        let slowWords = 0
+        let heard = 0
+        page.onWrite(async (w) => {
+          if (w.path === '/api/raven/transcribe') {
+            heard++
+            if (slowWords) await sleep(slowWords)
+          }
+          return writes(w)
+        })
+        const fx = fixtures()
+        const pick = await slowChooser(page)
+        await page.goto(ROUTE)
+        await threadUp(page)
+        const typed = 'Half a thought about the printer'
+        await typeIn(page, '.rv .rv-compose textarea', typed)
+        const chosen = pick([fx.sunset]).catch((e) => e)
+        await page.tap({ sel: '.rv .rv-attach' }, { wait: 40_000 })
+        const got = await chosen
+        if (got instanceof Error) t.check(false, got.message)
+        await until(page, () => document.querySelector('.rv .rv-chip')?.dataset.state === 'done', 'the picture did not land')
+        let s = await draftSnap(page)
+        t.check(s.stored?.text === typed && s.stored.files?.length === 1 && s.stored.files[0].file?.id === 'u1', `the draft is not on the device: ${JSON.stringify(s.stored)}`)
+
+        // another tab and back: the Dashboard's Raven box has the same text
+        await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'Dashboard' }, { wait: 40_000 })
+        await page.waitPath(/^\/m\/dashboard/, 60_000).catch((e) => t.check(false, e.message))
+        // the Dashboard lays its blocks out once its reads are in (dash:raven waits as long)
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .hm-rv .hm-rv-box'), 'the Dashboard\'s Raven block did not show', [], 90_000)
+          .catch((e) => t.check(false, e.message))
+        const dash = await page.eval(() => [...document.querySelectorAll('.vl-page[data-active] .hm-rv .hm-rv-box')].map((b) => b.value))
+        t.check(dash.length > 0 && dash.every((v) => v === 'Half a thought about the printer'), `the Dashboard's Raven box reads ${JSON.stringify(dash)}`)
+        // the quick sheet on a tab with the corner button: the same draft, its box sized to the text
+        await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'AI' }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.vl-shell > .rv-fab'), 'no corner button on AI')
+        await page.tap({ sel: '.vl-shell > .rv-fab' }, { wait: 40_000 })
+        await until(page, () => !document.querySelector('.rv-q')?.hidden, 'the corner button did not open the sheet')
+        const sheet = await page.eval(() => {
+          const ta = document.querySelector('.rv-q textarea')
+          return { value: ta?.value, h: Math.round(ta?.getBoundingClientRect().height ?? 0), chips: [...document.querySelectorAll('.rv-q .rv-chip-name')].map((c) => c.textContent) }
+        })
+        t.check(sheet.value === typed && sheet.h >= 16 && JSON.stringify(sheet.chips) === '["sunset.png"]', `the quick sheet shows ${JSON.stringify(sheet)}`)
+        await page.key('Escape')
+        await until(page, () => document.querySelector('.rv-q')?.hidden, 'Escape did not close the sheet')
+        await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'Raven' }, { wait: 40_000 })
+        await page.waitPath(ROUTE, 60_000).catch((e) => t.check(false, e.message))
+        s = await draftSnap(page)
+        t.check(s.box === typed && JSON.stringify(s.chips) === '["sunset.png|done|img"]', `after a tab switch: ${JSON.stringify(s)}`)
+
+        // a page outside the tabs: the whole shell (and the Raven screen) goes, then comes back
+        await inApp(page, '/m/tasks')
+        await until(page, () => !document.querySelector('.rv .rv-compose'), 'the Raven screen did not go with the page change')
+        await backInApp(page)
+        await threadUp(page)
+        s = await draftSnap(page)
+        t.check(s.box === typed && JSON.stringify(s.chips) === '["sunset.png|done|img"]', `after the shell went and came back: ${JSON.stringify(s)}`)
+
+        // dictated words that arrive while no composer is on screen land in the draft
+        await fakeMic('ok')(page)
+        await page.tap({ sel: '.rv .rv-mic' }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.rv .rv-compose[data-rec]'), 'the mic did not start recording')
+        await sleep(1600)
+        slowWords = 6000
+        await page.tap({ sel: '.rv .rv-mic' }, { wait: 40_000 })
+        await waitFor(() => heard === 1, 30_000, 'POST /api/raven/transcribe').catch((e) => t.check(false, e.message))
+        await inApp(page, '/m/tasks')
+        await until(page, () => !document.querySelector('.rv .rv-compose'), 'the Raven screen did not go while the words were on their way')
+        const words = `${typed} add oat milk to the list`
+        await until(page, (k, w) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null')?.text === w } catch { return false } }, 'the words did not reach the draft with no composer on screen', [DRAFT_KEY, words])
+        slowWords = 0
+        await backInApp(page)
+        await threadUp(page)
+        s = await draftSnap(page)
+        t.check(s.box === words, `the dictated words are not in the box: ${JSON.stringify(s.box)}`)
+        t.check(st.sent.length === 0, `a draft went out by itself: ${JSON.stringify(st.sent)}`)
+
+        // a reload (or the app restarting): the text and the picture, drawn from odin now
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, (w) => document.querySelector('.rv .rv-compose textarea')?.value === w && !!document.querySelector('.rv .rv-chip img')?.complete, 'the draft did not come back after the reload', [words])
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await draftSnap(page))}`))
+        const img = await page.eval(() => document.querySelector('.rv .rv-chip img')?.getAttribute('src') ?? '')
+        t.check(/\/api\/raven\/files\/u1(\?|$)/.test(img), `the kept picture draws from ${img}`)
+        await t.shot(page, 'kept')
+
+        // the send carries it all, then the draft is gone, on the screen and on the device
+        if (device === 'desktop') {
+          await page.eval(() => document.querySelector('.rv .rv-compose textarea')?.focus())
+          await page.key('Enter')
+        } else {
+          await page.tap({ sel: '.rv .rv-send' }, { wait: 40_000 })
+        }
+        await waitFor(() => st.sent.length, 60_000, 'POST /api/raven/messages').catch((e) => t.check(false, e.message))
+        t.check(st.sent[0]?.text === words && JSON.stringify(st.sent[0]?.files) === '["u1"]', `the send carried ${JSON.stringify(st.sent[0])}`)
+        await until(page, () => document.querySelector('.rv .rv-compose textarea')?.value === '' && !document.querySelector('.rv .rv-chip'), 'the box or the chip stayed after the send')
+        s = await draftSnap(page)
+        t.check(s.stored === null, `the sent draft is still on the device: ${JSON.stringify(s.stored)}`)
+        await page.goto(ROUTE)
+        await threadUp(page)
+        s = await draftSnap(page)
+        t.check(s.box === '' && !s.chips.length, `a reload after the send brought something back: ${JSON.stringify(s)}`)
+        await fits(t, page, `${ROUTE} draft @${device}`)
+      },
+    })
+  }
+
+  // ---------- the thread's bottom and the unread marker ----------
+  const listSnap = (page) => page.eval(() => {
+    const el = document.querySelector('.rv-msgs')
+    const chip = document.querySelector('.rv .rv-latest')
+    const c = chip?.getBoundingClientRect()
+    const box = document.querySelector('.rv .rv-compose')?.getBoundingClientRect()
+    const nw = document.querySelector('.rv .rv-new')
+    const l = el.getBoundingClientRect()
+    return {
+      gap: Math.round(el.scrollHeight - el.scrollTop - el.clientHeight),
+      top: Math.round(el.scrollTop),
+      chip: chip ? chip.textContent.trim() : null,
+      above: c && box ? c.bottom <= box.top + 1 : null,
+      ta: Math.round(document.querySelector('.rv .rv-compose textarea')?.getBoundingClientRect().height ?? 0),
+      news: document.querySelectorAll('.rv .rv-new').length,
+      newAt: nw ? Math.round(nw.getBoundingClientRect().top - l.top) : null,
+      newBefore: nw?.closest('.rv-item')?.querySelector('.rv-md')?.innerText.split('\n')[0] ?? null,
+      listH: Math.round(l.height),
+      badge: document.querySelector('.vl-nav .vl-tab-prim .rv-badge')?.getAttribute('data-n') ?? null,
+      state: (({ read, new: n, watch }) => ({ read, new: n, watch }))(document.querySelector('.rv-thread')?.dataset ?? {}),
+    }
+  })
+  /** his own scroll: the wheel with a mouse, a finger drag on a touch screen; dir -1 up, 1 down */
+  const byHand = async (page, dir) => {
+    const r = await page.eval(() => { const b = document.querySelector('.rv-msgs').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), h: Math.round(b.height) } })
+    if (page.dev.mobile) {
+      await page.swipe(r.x, Math.round(r.y + dir * r.h * 0.3), r.x, Math.round(r.y - dir * r.h * 0.3), { steps: 14, ms: 300 })
+    } else {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: r.x, y: r.y, deltaX: 0, deltaY: dir * 1400 })
+    }
+  }
+  /** the window's height changed by dh (a keyboard coming up is about -300 on the phone) */
+  const resizeBy = (page, dh) => page.send('Emulation.setDeviceMetricsOverride', { width: page.dev.w, height: page.dev.h + dh, deviceScaleFactor: page.dev.dpr, mobile: page.dev.mobile })
+  const pushLine = (st, text, author = 'raven', extra = {}) => {
+    const m = { id: st.nextId++, author, text, createdAt: iso(Date.now()), refs: [], meta: {}, proposal: null, ...extra }
+    st.messages.push(m)
+    st.seq++
+    return m
+  }
+  const clearBox = (page) => page.eval(() => {
+    const ta = document.querySelector('.rv .rv-compose textarea')
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, '')
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const gapUnder = (page, px, what, timeout = 20_000) => until(page, (n) => { const el = document.querySelector('.rv-msgs'); return el.scrollHeight - el.scrollTop - el.clientHeight < n }, what, [px], timeout)
+
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:scroll:${device}`,
+      group: 'raven',
+      device,
+      timeout: 360_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { filler: 40, replyMs: -1, lastRead: 108 })
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => { const el = document.querySelector('.rv-msgs'); return el.scrollHeight > el.clientHeight * 2 && el.scrollHeight - el.scrollTop - el.clientHeight < 4 && !!document.querySelector('.rv-msgs .rv-thumb img')?.complete }, 'the thread did not open at its end')
+        let s = await listSnap(page)
+        t.check(s.chip === null, `the chip shows at the bottom: ${JSON.stringify(s)}`)
+
+        // pinned at the bottom: a new line; then the last card growing (a decided proposal's result), no new line
+        pushLine(st, 'Pinned line one')
+        await until(page, () => [...document.querySelectorAll('.rv-msgs .rv-md')].some((m) => m.innerText === 'Pinned line one'), 'the new line did not come in')
+        await gapUnder(page, 4, 'a new line at the bottom went out of view').catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        const card = st.messages.find((m) => m.proposal?.id === 8)
+        card.proposal = { ...card.proposal, status: 'done', result: 'Posted the note.\nIt went to the ticket at once.\nThe backup check is closed.\nNothing else is waiting on it.\nThe agent learned from it.' }
+        st.seq++
+        await until(page, () => /Nothing else is waiting/.test(document.querySelector('.rv-prop[data-status="done"]')?.innerText ?? ''), 'the card did not grow')
+        await sleep(400)
+        await gapUnder(page, 4, 'a card that grew pushed the newest line out of view').catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+
+        // the window shrinking (a keyboard, a smaller window) and growing again
+        await resizeBy(page, -280)
+        await sleep(700)
+        await gapUnder(page, 4, 'a smaller window left the newest line out of view').catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await resizeBy(page, 0)
+        await sleep(700)
+        await gapUnder(page, 4, 'a larger window left the thread off its end')
+
+        // the composer growing to five lines, then emptied
+        const ta0 = (await listSnap(page)).ta
+        await typeIn(page, '.rv .rv-compose textarea', 'one\ntwo\nthree\nfour\nfive')
+        await until(page, (h) => document.querySelector('.rv .rv-compose textarea').getBoundingClientRect().height > h * 2, 'the composer did not grow', [ta0])
+        await sleep(400)
+        await gapUnder(page, 4, 'the composer growing covered the newest line').catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await clearBox(page)
+        await sleep(400)
+        await gapUnder(page, 4, 'the composer shrinking left the thread off its end')
+        s = await listSnap(page)
+        t.check(s.chip === null, `the chip showed while pinned: ${JSON.stringify(s)}`)
+
+        // scrolled up by hand: the chip, above the composer; his place holds through a new line and a resize
+        await byHand(page, -1)
+        await sleep(500)
+        await byHand(page, -1)
+        await until(page, () => { const el = document.querySelector('.rv-msgs'); return el.scrollHeight - el.scrollTop - el.clientHeight > 300 && !!document.querySelector('.rv .rv-latest') }, 'scrolling up by hand did not leave the bottom with the chip showing')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await sleep(1800)
+        const held = await listSnap(page)
+        t.check(held.chip === 'Latest' && held.above === true, `scrolled up, the chip reads ${JSON.stringify(held.chip)}, above the composer ${held.above}`)
+        pushLine(st, 'A line while he reads above')
+        await until(page, () => document.querySelector('.rv .rv-latest')?.textContent.trim() === '1 new', 'the chip did not count the new unread line')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        s = await listSnap(page)
+        t.check(Math.abs(s.top - held.top) <= 3 && s.gap > 80, `a new line moved him while he read above: ${held.top} -> ${s.top} (gap ${s.gap})`)
+        await resizeBy(page, -280)
+        await sleep(1000)
+        s = await listSnap(page)
+        t.check(Math.abs(s.top - held.top) <= 3 && s.chip === '1 new', `a smaller window moved him while he read above: ${held.top} -> ${s.top}, chip ${s.chip}`)
+        await resizeBy(page, 0)
+        await sleep(1000)
+        s = await listSnap(page)
+        t.check(Math.abs(s.top - held.top) <= 3, `a larger window moved him while he read above: ${held.top} -> ${s.top}`)
+        t.check(!st.reads.includes(st.nextId - 1), `read while he was above: ${JSON.stringify(st.reads)}`)
+        await t.shot(page, 'away')
+
+        // the chip glides back down, goes, and the bottom holds again
+        await page.tap({ sel: '.rv .rv-latest' }, { wait: 40_000 })
+        await until(page, () => { const el = document.querySelector('.rv-msgs'); return el.scrollHeight - el.scrollTop - el.clientHeight < 4 && !document.querySelector('.rv .rv-latest') }, 'the chip did not take him to the bottom and go')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await waitFor(() => st.reads.includes(st.nextId - 1), 30_000, 'the read once at the bottom').catch((e) => t.check(false, e.message))
+        pushLine(st, 'Pinned line two')
+        await until(page, () => [...document.querySelectorAll('.rv-msgs .rv-md')].some((m) => m.innerText === 'Pinned line two'), 'the last line did not come in')
+        await gapUnder(page, 4, 'after the chip the bottom did not hold')
+        await fits(t, page, `${ROUTE} scroll @${device}`)
+      },
+    })
+  }
+
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:unread:${device}`,
+      group: 'raven',
+      device,
+      timeout: 420_000,
+      async run(t) {
+        const page = await t.page()
+        // read up to the brief (100): everything after it from Raven's side is unread, his own lines (101, 106, 155) never
+        const st = ravenBackend(page, { replyMs: -1, lastRead: 100 })
+        for (let i = 0; i < 14; i++) {
+          st.messages.push({ id: 150 + i, author: i === 5 ? 'brendon' : 'raven', text: `Unread line ${i}\n\nA second paragraph, so the unread run is taller than the screen.`, createdAt: iso(Date.now() - (14 - i) * 1000), refs: [], meta: {}, proposal: null })
+        }
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => !!document.querySelector('.rv .rv-new') && !!document.querySelector('.rv .rv-latest'), 'no New line, or no chip, with unread lines', [], 60_000)
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await until(page, () => document.querySelector('.vl-nav .vl-tab-prim .rv-badge')?.getAttribute('data-n') === '19', 'the Raven tab does not count 19 unread', [], 60_000)
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        let s = await listSnap(page)
+        t.check(s.news === 1 && /^Three things/.test(s.newBefore ?? ''), `the New line is not above the first unread line (102): ${JSON.stringify(s)}`)
+        t.check(s.chip === '19 new', `the chip reads ${JSON.stringify(s.chip)}, want "19 new" (his own lines never count)`)
+        // the run is taller than the screen: the thread opens at the New line, not at the bottom
+        t.check(s.newAt !== null && s.newAt >= 0 && s.newAt < s.listH * 0.5 && s.gap > 80, `the thread did not open at the New line: ${JSON.stringify(s)}`)
+        await sleep(2000)
+        t.check(st.reads.length === 0, `read before he reached the bottom: ${JSON.stringify(st.reads)}`)
+        await t.shot(page, 'new')
+
+        // a line while he reads above: counted, the New line stays where it was
+        pushLine(st, 'One more from Raven')
+        await until(page, () => document.querySelector('.rv .rv-latest')?.textContent.trim() === '20 new', 'the chip did not count the line that came while he read')
+        s = await listSnap(page)
+        t.check(s.news === 1 && /^Three things/.test(s.newBefore ?? ''), `the New line moved: ${JSON.stringify(s)}`)
+
+        // reaching the bottom by hand reads it all: the New line fades, the chip and the tab's count go
+        for (let i = 0; i < 12; i++) {
+          const g = (await listSnap(page)).gap
+          if (g < 40) break
+          await byHand(page, 1)
+          await sleep(500)
+        }
+        await waitFor(() => st.reads.length, 30_000, 'POST /api/raven/read at the bottom').catch((e) => t.check(false, e.message))
+        t.check(st.reads[0] === st.nextId - 1, `the read went up to ${st.reads[0]}, want ${st.nextId - 1}`)
+        await until(page, () => !document.querySelector('.rv .rv-latest') && !document.querySelector('.vl-nav .vl-tab-prim .rv-badge') && !document.querySelector('.rv .rv-new'), 'the New line, the chip or the tab\'s count stayed after the read')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+
+        // a line that comes while he watches the bottom is read as it arrives, with no New line
+        const reads0 = st.reads.length
+        pushLine(st, 'Seen as it came')
+        let flashed = false
+        for (let i = 0; i < 16; i++) {
+          if ((await listSnap(page)).news) flashed = true
+          await sleep(150)
+        }
+        t.check(!flashed, 'a line read as it arrived drew a New line')
+        await waitFor(() => st.reads.length > reads0, 30_000, 'the read of the line that came at the bottom').catch((e) => t.check(false, e.message))
+
+        // on another tab nothing is read: the Raven tab counts it; back on Raven it reads, the New line shows, then goes
+        await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'Dashboard' }, { wait: 40_000 })
+        await page.waitPath(/^\/m\/dashboard/, 60_000).catch((e) => t.check(false, e.message))
+        // the address changes first; the tab switch renders as a transition, so wait for the page itself
+        await until(page, (id) => !!document.querySelector(`.vl-page[data-screen="${id}"][data-active]`), 'the dashboard page did not come to the front', ['dashboard'])
+        const reads1 = st.reads.length
+        const away = pushLine(st, 'Came while he was on the Dashboard')
+        await until(page, () => document.querySelector('.vl-nav .vl-tab-prim .rv-badge')?.getAttribute('data-n') === '1', 'the Raven tab did not count the line that came while he was away', [], 60_000)
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await sleep(1500)
+        t.check(st.reads.length === reads1, `read while the Raven tab was not in front: ${JSON.stringify(st.reads.slice(reads1))}`)
+        await page.tap({ sel: '.vl-nav .vl-tab-prim', text: 'Raven' }, { wait: 40_000 })
+        await page.waitPath(ROUTE, 60_000).catch((e) => t.check(false, e.message))
+        await until(page, (id) => !!document.querySelector(`.vl-page[data-screen="${id}"][data-active]`), 'the raven page did not come to the front', ['raven'])
+        t.note(`back on Raven: ${JSON.stringify(await listSnap(page))}`)
+        await until(page, (w) => document.querySelector('.rv .rv-new')?.closest('.rv-item')?.querySelector('.rv-md')?.innerText === w, 'no New line above the line that came while he was away', [away.text], 10_000)
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        await waitFor(() => st.reads.includes(away.id), 30_000, 'the read once back on Raven').catch((e) => t.check(false, e.message))
+        await until(page, () => !document.querySelector('.rv .rv-new') && !document.querySelector('.vl-nav .vl-tab-prim .rv-badge'), 'the New line or the tab\'s count stayed after the read')
+
+        // another device reads: the New line and the counts clear here too; his own line never counts
+        await byHand(page, -1)
+        await sleep(400)
+        await byHand(page, -1)
+        await sleep(1600)
+        pushLine(st, 'Read on the iPad')
+        await until(page, () => !!document.querySelector('.rv .rv-new') && document.querySelector('.rv .rv-latest')?.textContent.trim() === '1 new', 'no New line or count for a line that came while he read above')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        st.lastRead = st.nextId - 1
+        st.seq++
+        await until(page, () => !document.querySelector('.rv .rv-new') && document.querySelector('.rv .rv-latest')?.textContent.trim() === 'Latest' && !document.querySelector('.vl-nav .vl-tab-prim .rv-badge'), 'a read on another device did not clear the New line and the counts here')
+          .catch(async (e) => t.check(false, `${e.message}: ${JSON.stringify(await listSnap(page))}`))
+        pushLine(st, 'My own line from the phone', 'brendon', { meta: { source: 'app' } })
+        await sleep(2000)
+        s = await listSnap(page)
+        t.check(s.chip === 'Latest' && s.news === 0 && s.badge === null, `his own line counted as unread: ${JSON.stringify(s)}`)
+        await fits(t, page, `${ROUTE} unread @${device}`)
       },
     })
   }

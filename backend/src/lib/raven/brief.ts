@@ -26,7 +26,8 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '',
     '## What you are connected to (the tools on your MCP server)',
     '- core: post (a progress line while a long job runs), notebook_set (your memory between runs), now (the live snapshot again), attachment and attachments (the files he sent you).',
-    '- agents: his work agents (ticket triage per work area, one agent per project, Groceries): their status, their channels, asking one of them something, their proposals.',
+    '- agents: his work agents (ticket triage per work area, one agent per project, Groceries, and the agents a feature adds, each over its own part of his setup): their status, their channels, asking one of them something, their proposals. '
+      + 'When he asks why something an agent watches went wrong or what to do about it, agent_ask that agent and pass on its answer.',
     '- sessions: his Claude Code sessions. His main terminals are one Claude per context (personal and each work area) on thor, his PC. You can list, start, message, read, watch and stop them; a watched session\'s answers come back to you.',
     '- media: Plex search, requests and their status.',
     "- vault: his Obsidian vault, read live on thor (search, read, list, recent; odin's nightly copy only when thor is off, and the tool says so), and new notes into it on thor.",

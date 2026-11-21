@@ -5,6 +5,7 @@ import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
 import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef, type ScreenProps } from './kit/shell'
 import { Palette } from './kit/palette'
 import { RavenBadge, RavenFab, RavenQuick } from './kit/raven'
+import { isWidgetPage } from '../lib/ravenWidget'
 import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
@@ -37,6 +38,8 @@ const Term = lazy(() => import('./screens/Term'))
 // a window of its own, no tab bar, the status strip as its title bar. The
 // session one is the terminal above in its standalone mode.
 const ProjectWindow = lazy(() => import('./screens/ProjectWindow'))
+// The desktop app's always-on-top Raven widget (lib.rs opens it as raven-widget).
+const RavenWidget = lazy(() => import('./screens/RavenWidget'))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside
 // the classic Shell (no classic header, menu or player bar). URLs are
@@ -205,6 +208,7 @@ function OpenFromAlert() {
 export default function V2App() {
   useV2Document()
   const screens = useScreens()
+  const widget = isWidgetPage()
   return (
     <>
       <Routes>
@@ -216,6 +220,7 @@ export default function V2App() {
         <Route path="ai/open" element={<OpenFromAlert />} />
         <Route path="w/project/:id" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><ProjectWindow /></Suspense>} />
         <Route path="w/term/:name" element={<Suspense fallback={<div className="fixed inset-0 bg-black" />}><Term standalone /></Suspense>} />
+        <Route path="w/raven" element={<Suspense fallback={null}><RavenWidget /></Suspense>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="meals" element={<MealsPage />} />
         <Route path="inbox" element={<InboxPage />} />
@@ -223,10 +228,10 @@ export default function V2App() {
         {FEATURE_ROUTES.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
         <Route path=":screen/:sub?" element={<V2 screens={screens} />} />
       </Routes>
-      {/* Ctrl+K on every v2 screen: the tabs, Settings and a session */}
-      <Palette screens={screens} />
+      {/* Ctrl+K on every v2 screen: the tabs, Settings and a session. The Raven widget is Raven alone. */}
+      {!widget && <Palette screens={screens} />}
       {/* Raven's quick sheet: the corner button, Ctrl+Shift+Space and the palette open it on every v2 screen */}
-      <RavenQuick />
+      {!widget && <RavenQuick />}
     </>
   )
 }

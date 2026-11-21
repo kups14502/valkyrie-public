@@ -2,7 +2,7 @@ import path from 'node:path'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { isLoopbackReq, requireStrongAuth, viaCloudflare } from '../middleware/auth.js'
 import {
-  AgentError, currentSeq, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, unreadCounts, type Message,
+  AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, unreadCounts, type Message,
 } from '../lib/agentsStore.js'
 import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
@@ -95,6 +95,8 @@ async function stateView(req: Request) {
     statusNote: on ? st.statusNote : 'Raven is off on this server',
     tier: st.tier, model: st.model, effort: st.effort,
     unread: unreadCounts().get(RAVEN_CHANNEL)?.unread ?? 0,
+    // his read mark, the same on every device: the app draws its New line above the first line past it
+    lastRead: lastReadId(RAVEN_CHANNEL),
     mains: sessions.mains,
     watching: sessions.watching,
     agents: listAgents().filter((a) => a.enabled && !hidden.has(a.area))

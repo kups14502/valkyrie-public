@@ -8,7 +8,9 @@ import type { RavenMeta, RavenNotice } from './types.js'
 // runs OUTSIDE the API (a feature's own process, odin scripts) posts a RavenNotice
 // to POST /api/raven/notify on 127.0.0.1 instead.
 
-type NoticeHandler = (n: RavenNotice) => void
+/** direct: straight into the thread, never handed to an agent (an agent's own fallback) */
+export type NoticeOpts = { direct?: boolean }
+type NoticeHandler = (n: RavenNotice, opts: NoticeOpts) => void
 type Poster = (text: string, opts?: { refs?: Ref[]; meta?: RavenMeta; push?: boolean }) => void
 type Waker = (kind: string, payload: Record<string, unknown>) => void
 
@@ -28,9 +30,9 @@ function safe(what: string, fn: () => void): void {
   }
 }
 
-/** Hand a notice to Raven's DM. Never throws. */
-export function notifyRaven(n: RavenNotice): void {
-  safe('notice', () => noticeHandler?.(n))
+/** Hand a notice to Raven's DM (or to the feature agent that takes it). Never throws. */
+export function notifyRaven(n: RavenNotice, opts: NoticeOpts = {}): void {
+  safe('notice', () => noticeHandler?.(n, opts))
 }
 
 /** A message in the DM authored by Raven (a relay, a watcher line). push sends it to the phone. Never throws. */

@@ -76,11 +76,46 @@
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--fg) 30%, transparent) transparent;
 }
+/* the thread and the Latest chip over its foot */
+.rv-thread { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* scrolled up: back to the newest line, with how many came since */
+.rv-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: rgba(0, 0, 0, .9);
+  border: 1px solid var(--panel-line);
+  animation: rv-latest-in .18s var(--ease) both;
+}
+/* a finger-sized target around the pill */
+.rv-latest::after { content: ''; position: absolute; inset: -6px -4px; }
+.rv-latest[data-n] { color: var(--fg); border-color: var(--line-strong); box-shadow: var(--glow); text-shadow: var(--text-glow); }
+.rv-latest[data-pressed] { filter: brightness(1.25); }
+@keyframes rv-latest-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+html[data-motion='reduced'] .rv-latest { animation: none; }
+@media (prefers-reduced-motion: reduce) { .rv-latest { animation: none; } }
 /* the scroller spans the screen (its bar at the edge); the thread reads down the centered column */
 .rv-col { max-width: var(--rv-col); margin: 0 auto; padding: 0 4px; }
 .rv-empty { margin-top: 18vh; text-align: center; }
 .rv-day { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
 .rv-day::before, .rv-day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+/* the first line he has not read: a lit hairline labeled New, faded out once the read lands */
+.rv-new { display: flex; align-items: center; gap: 10px; margin: 16px 0 0; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); transition: opacity .6s var(--ease); }
+.rv-new::before, .rv-new::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--fg) 55%, transparent); }
+.rv-new[data-fading] { opacity: 0; transition-delay: 1.6s; }
 
 .rv-msg { position: relative; padding: 12px 0 2px; }
 .rv-msg[data-grouped] { padding-top: 6px; }
@@ -290,6 +325,46 @@ html[data-motion='reduced'] .rv-pulse { animation: none; }
 .rv-dot[data-state='resting'] { background: color-mix(in srgb, var(--fg) 35%, transparent); }
 .rv-dot[data-state='off'] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dim) 50%, transparent); opacity: .5; }
 html[data-motion='reduced'] .rv-dot { animation: none; }
+
+/* Watching: one rounded card per session in his bubble's fill, the job it is on now over its state (working, idle,
+   closed), when it last moved, and the pane it runs in. A closed card drops the fill. */
+.rv-wcards { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px; }
+.rv-wcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 12px 8px 11px;
+  background: color-mix(in srgb, var(--fg) calc(var(--fill-a) + 6%), #050505);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  transition: border-color .2s, background-color .2s;
+}
+.rv-wcard[data-state='working'] { border-color: color-mix(in srgb, var(--fg) calc(var(--line-a) + 14%), transparent); }
+.rv-wcard[data-state='closed'] { background: transparent; }
+.rv-wcard-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rv-wcard-top .rv-dot { align-self: flex-start; margin-top: 5px; }
+.rv-wcard-name {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 17px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.rv-wcard[data-state='closed'] .rv-wcard-name { color: var(--dim); }
+.rv-wcard-top .rv-open { align-self: flex-start; line-height: 17px; }
+.rv-wcard-meta { display: flex; align-items: baseline; gap: 0 6px; min-width: 0; padding-left: 15px; font-size: 11px; line-height: 15px; color: var(--dim); white-space: nowrap; }
+.rv-wcard-meta > * + *::before { content: '\00b7'; margin-right: 6px; }
+.rv-wcard-state { flex: none; font-weight: 600; }
+.rv-wcard[data-state='working'] .rv-wcard-state { color: var(--fg); }
+.rv-wcard-at { flex: none; }
+.rv-wcard-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* the shell turns selection off; what he reads and types here can be copied */
 .rv-msgs, .rv-conn, .rv :is(input, textarea) { -webkit-user-select: text; user-select: text; }

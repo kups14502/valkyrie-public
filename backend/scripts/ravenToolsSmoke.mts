@@ -265,6 +265,8 @@ const board = [
   { sessionId: '99999999-2222-4333-8444-555555555555', title: 'Closed one', area: 'personal', live: false, activity: 'closed' },
 ]
 let boardUp = true
+const doneMarks: string[] = []
+let doneFails = false
 let targetsUp = true
 async function fakeCapture(p: string): Promise<string | null> {
   const list = screensBy.get(p) ?? [IDLE]
@@ -303,6 +305,7 @@ const fakeIo = {
   },
   ravenFile: (id: string) => (id === 'f1' ? { file: { id: 'f1', name: 'photo.jpg', mime: 'image/jpeg', size: 4, createdAt: new Date().toISOString() }, path: '/fake/f1.jpg' } : null),
   readFile: async () => Buffer.from('jpeg'),
+  markDone: async (ids: string[]) => { if (doneFails) return false; doneMarks.push(...ids); return true },
   sleep: async (ms: number) => { clock += ms },
   now: () => clock,
 }
@@ -313,7 +316,7 @@ ioMod.setRavenToolsIo(fakeIo)
 {
   const listed = (await (await client({ fromBrendon: true })).listTools()).tools.map((t) => t.name)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
-    'session_send', 'session_read', 'session_watch', 'session_stop', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
+    'session_send', 'session_read', 'session_watch', 'session_stop', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
     'project_get', 'tickets', 'inbox', 'calendar', 'brief']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
@@ -327,7 +330,7 @@ ioMod.setRavenToolsIo(fakeIo)
   const gated: [string, Record<string, unknown>][] = [
     ['agents_pause', { paused: true }], ['agent_check', { agent: 'east-triage' }],
     ['session_start', { target: 'work', prompt: 'hi' }], ['session_send', { session: 'personal', text: 'hi' }],
-    ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }],
+    ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }], ['session_done', { session: 'personal' }],
     ['media_request', { kind: 'movie', title: 'Heat 2', tmdbId: 5000 }], ['vault_note', { title: 'x', text: 'y' }],
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
     ['thor_files', {}], ['thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\x.txt' }], ['thor_files_search', { query: 'resume' }],
@@ -660,7 +663,42 @@ agents.syncRoster()
   r = await call('session_start', { target: 'work', prompt: 'label test', label: 'Fake\nvk-0000000001\u001fodin\u001fshell', watch: false })
   const odd = created[created.length - 1] as { label: string }
   check('session_start: a label loses its line breaks and field separators', !r.isError && odd.label === 'Fake vk-0000000001 odin shell', odd)
+  check('session_start: no model or effort asked, none passed', !('model' in odd) && !('effort' in odd) && r.json.model === undefined && r.json.effort === undefined, { odd, r })
   states.set(r.json.pane, 'gone')
+
+  // model and effort: a key or id from Raven's model list, onto the new pane's claude
+  r = await call('session_start', { target: 'work', prompt: 'model test', model: 'Sonnet', effort: 'low', watch: false })
+  const picked = created[created.length - 1] as { model?: string; effort?: string }
+  check('session_start: a model key becomes its id, with the effort', !r.isError && picked.model === 'claude-sonnet-5-5' && picked.effort === 'low'
+    && r.json.model === 'claude-sonnet-5-5' && r.json.effort === 'low', { r, picked })
+  states.set(r.json.pane, 'gone')
+  r = await call('session_start', { target: 'work', prompt: 'model id test', model: 'claude-opus-5-5', watch: false })
+  const byId = created[created.length - 1] as { model?: string; effort?: string }
+  check('session_start: a model id from the list is taken as is, no effort', !r.isError && byId.model === 'claude-opus-5-5' && !('effort' in byId), { r, byId })
+  states.set(r.json.pane, 'gone')
+  const c0 = created.length
+  const t1 = typed.length
+  r = await call('session_start', { target: 'work', prompt: 'x', model: 'gpt-5' })
+  check('session_start: a model off the list is refused, nothing started', r.isError && /no model "gpt-5"/.test(r.text) && /opus, sonnet, haiku/.test(r.text) && created.length === c0, r)
+  r = await call('session_start', { target: 'work', prompt: 'x', effort: 'extreme' })
+  check('session_start: an effort off the list fails the schema', r.isError && created.length === c0, r)
+  r = await call('session_start', { target: 'personal', prompt: 'x', main: true, model: 'opus' })
+  check('session_start: no model for a main already open, nothing typed', r.isError && /already running/.test(r.text) && created.length === c0 && typed.length === t1, r)
+  r = await call('session_send', { session: mainPane, text: 'x', effort: 'high' })
+  check('session_send: no effort for a session already running, nothing typed', r.isError && /already running/.test(r.text) && typed.length === t1, r)
+  r = await call('session_send', { session: 'work', text: 'Start the work main', model: 'haiku', effort: 'max', watch: false })
+  const workMain = created[created.length - 1] as { model?: string; effort?: string; target?: string }
+  check('session_send: starting a main passes the model and effort', !r.isError && r.json.started === true && workMain.target === 'work'
+    && workMain.model === 'claude-haiku-5-5' && workMain.effort === 'max' && r.json.model === 'claude-haiku-5-5', { r, workMain })
+  r = await call('session_stop', { session: 'work' })
+  check('session_stop: the work main closed again', !r.isError, r)
+  {
+    const tools = (await (await client({ fromBrendon: true })).listTools()).tools
+    const start = tools.find((t) => t.name === 'session_start')
+    const props = (start?.inputSchema as { properties?: Record<string, { enum?: string[] }> })?.properties ?? {}
+    check('session_start: the schema offers the efforts, the description the models', props.effort?.enum?.join() === 'low,medium,high,xhigh,max'
+      && 'model' in props && /opus, sonnet, haiku, fable-5-2, fable/.test(start?.description ?? ''), { props, d: start?.description })
+  }
 
   // reading
   say(mainPane, main.newId, entry('user', 'Check the backups. Then tell me what failed.'), entry('tool'), entry('assistant', 'The 3 AM backup failed: disk full.'))
@@ -690,11 +728,12 @@ agents.syncRoster()
   const st = await tools.ravenSessionsState()
   check('ravenSessionsState: mains and watches', st.mains.length === 2 && st.mains[0].pane === mainPane && st.watching.some((w) => w.pane === mainPane), st)
   const mainWatch = st.watching.find((w) => w.pane === mainPane)
-  check('ravenSessionsState: no board copy, no title', !!mainWatch?.sessionId && mainWatch.title === undefined, mainWatch)
+  check('ravenSessionsState: a main terminal is titled by the job Raven typed in, idle, no board copy needed',
+    !!mainWatch?.sessionId && mainWatch.title === 'Check the backups. Then tell me what failed.' && mainWatch.state === 'idle' && Number.isFinite(Date.parse(mainWatch.lastAt)), mainWatch)
   ;(fakeIo as any).boardCached = () => [{ sessionId: mainWatch?.sessionId, title: 'Printer migration plan' }, { sessionId: 'other', title: 'Other' }]
   ioMod.setRavenToolsIo(fakeIo)
   const titled = (await tools.ravenSessionsState()).watching.find((w) => w.pane === mainPane)
-  check('ravenSessionsState: a watch carries its conversation title, its label kept', titled?.title === 'Printer migration plan' && titled.label === mainWatch?.label, titled)
+  check('ravenSessionsState: the job wins over Claude\'s first title, its label kept', titled?.title === 'Check the backups. Then tell me what failed.' && titled.label === mainWatch?.label, titled)
   const relayTitle = tools.ravenRelayTitles()
   check('relay titles: the title when it says more than the label, never the label again',
     relayTitle(mainWatch?.sessionId, 'Personal') === 'Printer migration plan' && relayTitle(mainWatch?.sessionId, 'printer migration plan') === undefined
@@ -747,9 +786,67 @@ agents.syncRoster()
   fakeIo.createPane = okCreate
   ioMod.setRavenToolsIo(fakeIo)
 
+  // Raven closes what it started with session_start on its own; his sessions stay gated
+  {
+    const startSid = (await fakeIo.listPanes()).find((p: TermSession) => p.name === startPane)?.sessionId ?? ''
+    const actedBefore = acted
+    r = await call('session_stop', { session: startPane }, false)
+    check('session_stop: Raven closes its own session_start pane without Brendon', !r.isError && killed.includes(startPane) && r.json.markedDone === true && acted > actedBefore, r)
+    check('session_stop: its own pane is marked done on the Desk and leaves the Watching list', doneMarks.includes(startSid) && !watch.getWatch(startPane) && !watch.listWatches().some((w) => w.sessionId === startSid), { doneMarks, w: watch.listWatches() })
+    const card = (await tools.ravenSessionsState()).watching.find((w: { sessionId?: string }) => w.sessionId === startSid) as { state?: string } | undefined
+    check('session_stop: its Watching card shows it closed', card?.state === 'closed', card)
+    const k0 = killed.length
+    r = await call('session_stop', { session: mainPane }, false)
+    check('session_stop: his main terminal stays gated', r.isError && /Brendon's own message/.test(r.text) && killed.length === k0, r)
+    const his = pane('vk-6666666666', 'His own work', 'work', '66666666-2222-4333-8444-555555555555')
+    r = await call('session_stop', { session: his.name }, false)
+    check('session_stop: a pane Brendon opened stays gated', r.isError && /Brendon's own message/.test(r.text) && killed.length === k0, r)
+    r = await call('session_stop', { session: 'router' }, false)
+    check('session_stop: a window on thor stays gated', r.isError && /Brendon's own message/.test(r.text), r)
+    r = await call('session_stop', { session: 'no such thing' }, false)
+    check('session_stop: an unknown name without Brendon gets the gate', r.isError && /Brendon's own message/.test(r.text), r)
+    states.set(his.name, 'gone')
+    r = await call('session_start', { target: 'work', prompt: 'quick job', watch: false })
+    const quick = r.json.pane as string
+    doneFails = true
+    r = await call('session_stop', { session: quick }, false)
+    check('session_stop: thor not answering still closes it, and says it is not marked done', !r.isError && killed.includes(quick) && r.json.markedDone === false && /not marked done/.test(r.json.note), r)
+    doneFails = false
+
+    // session_done: the Sessions tab's done flag; his own sessions only when he asks
+    r = await call('session_start', { target: 'work', prompt: 'another job', watch: false })
+    const job = r.json.pane as string
+    const jobSid = r.json.sessionId as string
+    const m0 = doneMarks.length
+    r = await call('session_done', { session: job }, false)
+    check('session_done: Raven marks its own session done without Brendon, and leaves it running', !r.isError && r.json.done === true && r.json.sessionId === jobSid
+      && doneMarks.at(-1) === jobSid && !killed.includes(job), r)
+    r = await call('session_done', { session: jobSid }, false)
+    check('session_done: by conversation id too', !r.isError && doneMarks.at(-1) === jobSid, r)
+    const m1 = doneMarks.length
+    r = await call('session_done', { session: mainPane }, false)
+    check('session_done: his main terminal stays gated', r.isError && /Brendon's own message/.test(r.text) && doneMarks.length === m1, r)
+    r = await call('session_done', { session: 'router' }, false)
+    check('session_done: a window on thor he runs stays gated', r.isError && /Brendon's own message/.test(r.text) && doneMarks.length === m1, r)
+    r = await call('session_done', { session: 'closed one' })
+    check('session_done: with Brendon, a closed session by its title', !r.isError && r.json.session === 'Closed one' && doneMarks.at(-1) === '99999999-2222-4333-8444-555555555555', r)
+    r = await call('session_done', { session: 'router firmware' })
+    check('session_done: with Brendon, a running window on thor', !r.isError && doneMarks.at(-1) === BOARD_ID, r)
+    r = await call('session_done', { session: 'nothing like it' })
+    check('session_done: no match says so', r.isError && /no session matches/.test(r.text), r)
+    doneFails = true
+    r = await call('session_done', { session: job }, false)
+    check('session_done: thor not answering is an error', r.isError && /not marked done/.test(r.text), r)
+    doneFails = false
+    check('session_done: marks only what was asked', doneMarks.length === m0 + 4, doneMarks.slice(m0))
+    states.set(job, 'gone')
+  }
+
   // stop
+  const marks0 = doneMarks.length
   r = await call('session_stop', { session: 'personal' })
   check('session_stop: the main pane is killed, unwatched, unmapped', !r.isError && killed.includes(mainPane) && !watch.getWatch(mainPane), r)
+  check('session_stop: his main is not marked done (he resumes it)', doneMarks.length === marks0 && r.json.markedDone === undefined, { doneMarks, r })
   r = await call('main_terminals')
   check('main_terminals: closed again', r.json[0].pane === null && r.json[0].state === 'closed', r.json)
   r = await call('session_stop', { session: 'router' })
@@ -985,6 +1082,113 @@ agents.syncRoster()
   // the timer exists and does not hold the process open
   tools.startRavenTools()
   watch.stopWatcher()
+}
+
+// ------------------------------------------------------ the Watching card ---
+
+{
+  const tick = async (ms = 0) => { clock += ms; await watch.tickWatches() }
+  const card = async (key: string) => (await tools.ravenSessionsState()).watching.find((w) => (w.pane || `sid:${w.sessionId}`) === key)
+  const jobNow = (key: string) => watch.getWatch(key)?.job
+  check('jobOf: the "Brendon asks:" lead and the line breaks go', watch.jobOf("Brendon's request: download this video\nand save it") === 'Download this video and save it', watch.jobOf("Brendon's request: download this video\nand save it"))
+  check('jobOf: a short reply, a slash command and a shell line name no job',
+    watch.jobOf('yes, do it') === '' && watch.jobOf('/model opus for this one') === '' && watch.jobOf('! ls -la /tmp now') === '')
+
+  // a pane Raven types a job into: Raven's label, kept when its own prompt shows in the transcript
+  const sid = 'aaaaaaaa-3333-4444-8555-666666666666'
+  const p = pane('vk-1111111111', 'Server work', 'server', sid)
+  screensBy.set(p.name, [IDLE])
+  let r = await call('session_send', { session: p.name, text: 'Brendon asks: rotate the nginx certificates on odin tonight', label: 'Rotate nginx certs' })
+  check('session_send: the label names the job', !r.isError && jobNow(p.name) === 'Rotate nginx certs', { r, w: watch.getWatch(p.name) })
+  say(p.name, sid, entry('user', 'Brendon asks: rotate the nginx certificates on odin tonight'), entry('assistant', 'On it.'))
+  const said = clock
+  await tick(1_000)
+  check('watch: Raven\'s own prompt keeps Raven\'s name for the job', jobNow(p.name) === 'Rotate nginx certs' && watch.getWatch(p.name)?.typed === '', watch.getWatch(p.name))
+  let c = await card(p.name)
+  check('card: the job over the pane, idle, last activity its newest transcript line',
+    c?.title === 'Rotate nginx certs' && c.label === 'Server work' && c.state === 'idle' && Date.parse(c.lastAt) === said, c)
+  screensBy.set(p.name, [BUSY])
+  check('card: working while the spinner shows', (await card(p.name))?.state === 'working')
+  screensBy.set(p.name, [IDLE])
+
+  // he types a new job into the pane himself: the card follows it; a short reply does not
+  say(p.name, sid, entry('user', 'now check the disk usage on the backup volume'))
+  await tick(1_000)
+  check('watch: a prompt he typed names the new job', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
+  say(p.name, sid, entry('user', 'yes do it'))
+  await tick(1_000)
+  check('watch: a short reply keeps the job', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
+  // a follow-up from Raven with no label keeps the job, in the tool and in the transcript
+  r = await call('session_send', { session: p.name, text: 'Brendon approved: go ahead and delete the old snapshots' })
+  check('session_send: a follow-up with no label keeps the job', !r.isError && jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
+  say(p.name, sid, entry('user', 'Brendon approved: go ahead and delete the old snapshots'))
+  await tick(1_000)
+  check('watch: and its prompt in the transcript keeps it too', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
+  // a session with no job yet is named by the prompt Raven types
+  const nsid = 'cccccccc-3333-4444-8555-666666666666'
+  const np = pane('vk-3333333333', 'Nameless', 'server', nsid)
+  screensBy.set(np.name, [IDLE])
+  r = await call('session_send', { session: np.name, text: "Brendon's request: list the failed cron jobs from last night" })
+  check('session_send: no label and no job yet, the prompt names it', !r.isError && jobNow(np.name) === 'List the failed cron jobs from last night', jobNow(np.name))
+  watch.removeWatch(np.name)
+  states.set(np.name, 'gone')
+
+  // the pane ends: the card stays, closed, then goes after two hours; watched again, it is off the ended list
+  states.set(p.name, 'dead')
+  await tick(8_000)
+  c = await card(p.name)
+  check('card: an ended pane stays, closed, with its job', !watch.getWatch(p.name) && c?.state === 'closed' && c.title === 'Now check the disk usage on the backup volume' && Date.parse(c.lastAt) === clock, c)
+  states.set(p.name, 'live')
+  await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid })
+  check('card: watched again, off the ended list', !watch.listEnded().some((e) => e.key === p.name) && (await card(p.name))?.state === 'idle', watch.listEnded())
+  states.set(p.name, 'dead')
+  await tick(8_000)
+  check('card: ended again', (await card(p.name))?.state === 'closed')
+  await tick(watch.ENDED_KEEP_MS + 1_000)
+  check('card: gone two hours after it closed', !(await card(p.name)) && !watch.listEnded().some((e) => e.key === p.name), watch.listEnded())
+
+  // a window on thor: its newest prompt names it (Claude's title is the first job's), state and time from the board
+  const bsid = 'bbbbbbbb-3333-4444-8555-666666666666'
+  const row: Record<string, unknown> = { sessionId: bsid, title: 'Quarterly cleanup plan', area: 'work', live: true, activity: 'working', lastActivityUtc: new Date(clock + 5_000).toISOString() }
+  board.push(row)
+  ;(fakeIo as any).boardCached = () => board
+  ioMod.setRavenToolsIo(fakeIo)
+  say(`sid:${bsid}`, bsid, entry('user', 'plan the quarterly cleanup for the shares'), entry('assistant', 'Planned.'), entry('user', 'now draft the email to the client about it'))
+  await watch.startWatch({ pane: '', label: 'Quarterly cleanup plan', sessionId: bsid })
+  c = await card(`sid:${bsid}`)
+  check('card: a window on thor, by its newest prompt, working and its time from the board',
+    c?.title === 'Now draft the email to the client about it' && c.state === 'working' && c.lastAt === row.lastActivityUtc, c)
+  row.activity = 'idle'
+  check('card: idle from the board', (await card(`sid:${bsid}`))?.state === 'idle')
+  row.live = false
+  row.activity = 'closed'
+  check('card: closed when the board says so', (await card(`sid:${bsid}`))?.state === 'closed')
+  delete (fakeIo as any).boardCached
+  ioMod.setRavenToolsIo(fakeIo)
+  check('card: no board copy, no state', (await card(`sid:${bsid}`))?.state === null)
+
+  // a watch from before jobs were kept: a window on thor reads its job once; a pane Raven started keeps its label
+  const raw = JSON.parse(store.getKv('raven:watches') ?? '[]') as Record<string, unknown>[]
+  for (const w of raw) delete w.job
+  store.setKv('raven:watches', JSON.stringify(raw))
+  const osid = 'dddddddd-3333-4444-8555-666666666666'
+  const op = pane('vk-4444444444', 'Raven named this', 'server', osid)
+  screensBy.set(op.name, [IDLE])
+  say(op.name, osid, entry('user', 'some much older prompt about printers'))
+  const raw2 = JSON.parse(store.getKv('raven:watches') ?? '[]') as Record<string, unknown>[]
+  raw2.push({ key: op.name, pane: op.name, label: op.label, sessionId: osid, since: new Date(clock).toISOString(), lastActivityAt: new Date(clock).toISOString(),
+    cursor: '1', baselined: true, lastNewAt: clock, lastSeenAt: 0, tail: [], lastRelayedId: '', followUp: '' })
+  store.setKv('raven:watches', JSON.stringify(raw2))
+  check('fillJob: the older watches have no job', jobNow(`sid:${bsid}`) === undefined && jobNow(op.name) === undefined, watch.listWatches())
+  const first = await card(op.name)
+  await new Promise((res) => setTimeout(res, 50))
+  check('fillJob: a window on thor gets its job from its newest prompt', jobNow(`sid:${bsid}`) === 'Now draft the email to the client about it', watch.getWatch(`sid:${bsid}`))
+  check('fillJob: a pane Raven started is not read, its label stands', jobNow(op.name) === undefined && first?.title === undefined && first?.label === 'Raven named this', { w: watch.getWatch(op.name), first })
+
+  for (const w of watch.listWatches()) watch.removeWatch(w.key)
+  board.pop()
+  states.set(op.name, 'gone')
+  states.set(p.name, 'gone')
 }
 
 // ---------------------------------------------------------------- done ---

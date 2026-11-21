@@ -53,6 +53,7 @@ import { startWorkFeeds } from './lib/workFeeds.js'
 import { resumeCaptures } from './lib/capture.js'
 import { addTrackedRepos } from './lib/trackedRepos.js'
 import { addMailFilters } from './lib/mailStore.js'
+import { setFeatureAgents } from './lib/featureAgents.js'
 import { FEATURES } from './features.js'
 
 // Keep the process alive on stray errors. A single unhandled rejection or
@@ -124,6 +125,7 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }))
 addMediaTokenPaths(FEATURES.flatMap((f) => f.mediaTokenPaths ?? []))
 addTrackedRepos(FEATURES.flatMap((f) => f.repos ?? []))
 addMailFilters(FEATURES.flatMap((f) => f.mailFilters ?? []))
+setFeatureAgents(FEATURES.flatMap((f) => (f.agents ?? []).map((a) => ({ ...a, feature: f.id }))))
 
 // Public endpoints (no token required): auth (login/setup/status) and the
 // desktop app's auto-update mirror.

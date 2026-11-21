@@ -2,6 +2,7 @@ import type { Agent } from './agentsStore.js'
 import { MIXABLE_AREAS, type Project } from './projectTypes.js'
 import { AREAS } from './projectAreas.js'
 import { franchiseConf, workConf } from './workConfig.js'
+import { featureAgent } from './featureAgents.js'
 
 // The standing instructions each agent runs under (appended to Claude Code's
 // own system prompt on every run). The house rules here are condensed from
@@ -110,8 +111,18 @@ How you work:
 - Keep his preferences in your notebook (brands, sizes, dislikes, delivery notes). No payment data, ever.
 - Close tabs you opened when you finish.`
 
+/** A feature agent's role comes from its feature (lib/featureAgents.ts). */
+function featureBrief(agent: Agent): string {
+  const def = featureAgent(agent.id)
+  if (!def) return `You are ${agent.name}. The feature you belong to is not in this build: post nothing, and finish with one log line saying so.`
+  return `${def.brief().trim()}
+
+Proposals: anything you want changed is a proposal (your propose_* tools). Its note is the message Brendon reads above the Approve button: the first line says what it does, then why, in two or three lines. Nothing changes until he approves, and the result comes back to you as an event.`
+}
+
 export function briefFor(agent: Agent, project: Project | null): string {
-  const role = agent.kind === 'triage' ? triageBrief(agent) : agent.kind === 'shopping' ? GROCERIES : projectBrief(agent, project)
+  const role = agent.kind === 'triage' ? triageBrief(agent) : agent.kind === 'shopping' ? GROCERIES
+    : agent.kind === 'feature' ? featureBrief(agent) : projectBrief(agent, project)
   const areas = AREAS.filter((a) => !MIXABLE_AREAS.includes(a)).join(', ') || 'none yet'
   return `${COMMON.replace('{{CLIENT_AREAS}}', areas)}
 

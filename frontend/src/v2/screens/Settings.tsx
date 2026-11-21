@@ -20,7 +20,7 @@ import {
 } from '../../lib/push'
 import { Hero, useHeroId, type HeroId } from '../kit/hero'
 import { classicPages } from '../../features/apply'
-import { PushToTalkRow } from '../kit/raven'
+import { PushToTalkRow, RavenWidgetRow } from '../kit/raven'
 import './settings.css'
 
 // Settings (/m/settings, the strip's gear): glass plates for Valkyrie's own
@@ -929,6 +929,7 @@ function DeviceRows({ i }: { i: number }) {
       </div>
       {/* Raven's voice input: the key held to talk on this device (kit/raven.tsx) */}
       <PushToTalkRow />
+      <RavenWidgetRow />
       {/* temporary, like the classic Settings' section: which link shape opens an item on our Plex server */}
       <div className="st-row">
         <Icon name="watch" size={15} tone={plexOpen ? 'fg' : 'dim'} glow={plexOpen} className="st-row-icon" />

@@ -12,7 +12,9 @@
  *      a fake request, and only on paths that answer before a pane is made.
  *   4. odinCommand: its argv, and the sh wrapper's quoting, run for real with
  *      /bin/sh against a directory named to break a shell ($(...), quotes,
- *      spaces, ;), with printf as the program, never Claude.
+ *      spaces, ;), with printf as the program, never Claude. Its --model and
+ *      --effort, thor's -Model and -Effort (remoteCommand), and how typeLine
+ *      sends a line (typePlan: keys, one bracketed paste, or short pieces).
  *   5. The equity tail parser in routes/tradebot.ts (newestSampleInTail,
  *      readNewestSample, applyNewestSample with newest_sample_at), and the
  *      session series that keeps off-hours samples off the chart axis
@@ -283,8 +285,52 @@ const neu = X.odinCommand({ mode: 'new', target: 'good', newId: UUID })
 assert.deepEqual(neu.argv.slice(4), [good, CLAUDE, '--session-id', UUID])
 assert.deepEqual(X.odinCommand({ mode: 'new', target: 'good', newId: 'not-a-uuid; rm -rf /' }).argv.slice(4), [good, CLAUDE])
 assert.deepEqual(X.odinCommand({ mode: 'new', target: 'good' }).argv.slice(4), [good, CLAUDE])
+assert.deepEqual(X.odinCommand({ mode: 'new', target: 'good', newId: UUID, model: 'claude-sonnet-5-5', effort: 'low' }).argv.slice(4),
+  [good, CLAUDE, '--session-id', UUID, '--model', 'claude-sonnet-5-5', '--effort', 'low'])
+assert.deepEqual(X.odinCommand({ mode: 'new', target: 'good', effort: 'max' }).argv.slice(4), [good, CLAUDE, '--effort', 'max'])
+throwsStatus(400, /model id or alias/, () => X.odinCommand({ mode: 'new', target: 'good', model: 'opus; rm -rf /' }))
+throwsStatus(400, /effort must be one of/, () => X.odinCommand({ mode: 'new', target: 'good', effort: 'huge' as never }))
+throwsStatus(400, /when a new session starts/, () => X.odinCommand({ mode: 'shell', target: 'good', model: 'opus' }))
 fs.rmSync(CLAUDE)
-ok('a new session: claude by absolute path, --session-id only for a real uuid')
+ok('a new session: claude by absolute path, --session-id only for a real uuid, --model and --effort when asked')
+
+// ------------------------------------- 4b. thor's line and typeLine's plan ----
+
+{
+  const base = 'powershell -NoProfile -ExecutionPolicy Bypass -File C:/Thor/tools/session-board/Remote-Session.ps1 -Mode new -Target work'
+  assert.equal(X.remoteCommand({ mode: 'new', target: 'work' }), base, 'a launch without a model is the line thor has always been sent')
+  assert.equal(X.remoteCommand({ mode: 'new', target: 'work', newId: UUID, model: 'claude-opus-5-5', effort: 'xhigh' }),
+    `${base} -SessionId ${UUID} -Model claude-opus-5-5 -Effort xhigh`)
+  assert.equal(X.remoteCommand({ mode: 'new', target: 'work', model: 'sonnet' }), `${base} -Model sonnet`)
+  throwsStatus(400, /model id or alias/, () => X.remoteCommand({ mode: 'new', target: 'work', model: 'claude-opus-5-5[1m]' }))
+  throwsStatus(400, /model id or alias/, () => X.remoteCommand({ mode: 'new', target: 'work', model: 'opus & calc' }))
+  throwsStatus(400, /effort must be one of/, () => X.remoteCommand({ mode: 'new', target: 'work', effort: 'High' as never }))
+  throwsStatus(400, /when a new session starts/, () => X.remoteCommand({ mode: 'resume', resumeId: UUID, model: 'opus' }))
+  ok('remoteCommand: -Model and -Effort last, checked, new sessions only')
+
+  const short = 'Check the backups. '.repeat(40).trim()
+  assert.deepEqual(X.typePlan(short, true), { how: 'keys', parts: [short] }, 'a line that fits one typed read goes as keys')
+  const long = Array.from({ length: 300 }, (_, i) => `w${i}`).join(' ')
+  assert.deepEqual(X.typePlan(long, true), { how: 'paste', parts: [long] }, 'a longer line is one bracketed paste')
+  const pieces = X.typePlan(long, false)
+  assert.equal(pieces.how, 'pieces')
+  assert.equal(pieces.parts.join(''), long, 'the pieces are the whole line, in order')
+  assert.ok(pieces.parts.every((p) => Array.from(p).length <= X.PIECE_CHARS), 'every piece is short')
+  // 300 four-byte characters: 1200 bytes, so not keys, and a piece never splits one
+  const wide = '\u{1F600}'.repeat(300)
+  const w4 = X.typePlan(wide, false)
+  assert.equal(w4.how, 'pieces')
+  assert.ok(w4.parts.every((p) => /^(?:\u{1F600})+$/u.test(p)) && w4.parts.join('') === wide, 'pieces cut between characters')
+  assert.equal(X.typePlan('\u{1F600}'.repeat(200), true).how, 'keys', '800 bytes still goes as keys')
+  assert.equal(X.typePlan('\u{1F600}'.repeat(201), true).how, 'paste', '804 bytes is a paste')
+  ok('typePlan: keys up to 800 bytes, then one bracketed paste, or short pieces without one')
+
+  assert.equal(X.tmuxLiteral('plain text.'), 'plain text.')
+  assert.equal(X.tmuxLiteral('ends in;'), 'ends in\\;')
+  assert.equal(X.tmuxLiteral(';'), '\\;')
+  assert.equal(X.tmuxLiteral('mid;dle'), 'mid;dle')
+  ok('tmuxLiteral: a trailing ; is escaped for tmux, nothing else changes')
+}
 
 /** Runs the wrapper with a stand-in program, never Claude. */
 function wrap(dirArg: string, program: string[], env: Record<string, string> = {}) {

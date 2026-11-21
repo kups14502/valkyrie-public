@@ -84,8 +84,11 @@ export type RavenMsg = {
 }
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
-/** label: the pane's name (often the main target's); title: the conversation's own title, when it says more */
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string }
+/**
+ * label: the pane's name (often the main target's); title: the job it is on now, when that says more. state: null
+ * when thor's board is not answering for a window on thor (absent from an older API); lastAt: its last activity.
+ */
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; state?: 'working' | 'idle' | 'closed' | null; lastAt?: string }
 export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number }
 
 export type RavenState = {
@@ -97,6 +100,8 @@ export type RavenState = {
   model: string | null
   effort: RavenEffort | null
   unread: number
+  /** his read mark (the last line he read), the same on every device; absent from an older backend */
+  lastRead?: number
   mains: RavenMain[]
   watching: RavenWatch[]
   agents: RavenAgent[]

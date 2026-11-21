@@ -9,6 +9,10 @@
 //   device   e2e/device-unit.mjs: src/v2/kit/thisDevice.ts, which device the
 //            Dashboard's "This device" box draws (the desktop app's machine
 //            name when it is a known machine, else the device profile).
+//   draft    e2e/raven-draft-unit.mjs: src/v2/kit/ravenDraft.ts, the unsent
+//            message to Raven kept per thread on the device (text, words and
+//            files through a reload, cleared only by what a send carried, an
+//            upload a reload cut off, another window's write).
 //
 // The backend half of the lights (routes/lights.ts, the engine that holds each
 // bulb to its target) is backend/scripts/lightsEngine.test.mts, run on odin.
@@ -57,6 +61,20 @@ export function unitTests() {
         t.note(`device-unit: ${pass} passed, ${fail} failed`)
         t.check(code === 0, `e2e/device-unit.mjs exited ${code}`)
         t.check(fail === 0 && pass >= 5, `device-unit: ${pass} passed, ${fail} failed`)
+        for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
+      },
+    },
+    {
+      name: 'unit:raven-draft',
+      group: 'unit',
+      timeout: 60_000,
+      async run(t) {
+        const { code, out } = await runNode(resolve(HERE, '..', 'raven-draft-unit.mjs'), 50_000)
+        const pass = Number(/ℹ pass (\d+)/.exec(out)?.[1] ?? NaN)
+        const fail = Number(/ℹ fail (\d+)/.exec(out)?.[1] ?? NaN)
+        t.note(`raven-draft-unit: ${pass} passed, ${fail} failed`)
+        t.check(code === 0, `e2e/raven-draft-unit.mjs exited ${code}`)
+        t.check(fail === 0 && pass >= 13, `raven-draft-unit: ${pass} passed, ${fail} failed`)
         for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
       },
     },

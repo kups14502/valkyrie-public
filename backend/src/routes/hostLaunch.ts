@@ -432,6 +432,22 @@ export async function boardSessions(timeoutMs = 60_000): Promise<BoardRow[] | nu
   }
 }
 
+/**
+ * Marks sessions done on a host's board, as the Desk's checkbox does: a done
+ * row leaves the closed list and Recover all. false when the host cannot say.
+ */
+export async function markSessionsDone(ids: string[], host = 'thor'): Promise<boolean> {
+  const launcher = LAUNCHERS[host]
+  const list = ids.filter((id) => UUID_RE.test(id))
+  if (!launcher?.token || !list.length) return false
+  try {
+    const r = await callHostLauncher(launcher, '/sessions/disposition', { method: 'POST', body: { sessionId: list[0], sessionIds: list, disposition: 'done' } }, 15_000)
+    return r.status === 200
+  } catch {
+    return false
+  }
+}
+
 // One copy of thor's board rows for this whole box. Every read of thor's
 // /sessions here refreshes it: GET /session-board, which the Sessions screens
 // poll, and boardSessions (Raven's tools). boardNow answers from the copy at

@@ -1,11 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowDown } from 'lucide-react'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
 import { RavenComposer, RavenFiles, RavenPick } from '../kit/raven'
-import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft } from '../kit/ravenStore'
+import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft, type DraftSnap } from '../kit/ravenStore'
 import { Markdown } from '../../components/Markdown'
 import { apiErrorText } from '../../lib/api'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
@@ -23,7 +24,9 @@ import './messages.css'
 // updates through the Messages long-poll (/api/msg/changes). A wide screen
 // keeps a narrow "Connected" column on the right (main terminals, watched
 // sessions, agents, feeds); a narrow one opens it from the header. Old links
-// (/m/messages, ?c=<channel>) land here; ?compose=1 focuses the box.
+// (/m/messages, ?c=<channel>) land here; ?compose=1 focuses the box. What he has typed, dictated or attached and
+// not sent is the thread's draft (kit/ravenDraft.ts): kept on this device across tab switches, reloads and
+// restarts, cleared only by the send.
 
 const NY_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
 const NY_KEY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
@@ -63,6 +66,11 @@ function usePageShown(): boolean {
 }
 
 const SOURCE_WORD: Record<string, string> = { siri: 'Siri', hotkey: 'hotkey', api: 'API' }
+
+/** this close to the end counts as at the bottom */
+const STICK_PX = 80
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '])
+const reducedMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export default function Messages({ active }: ScreenProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -115,26 +123,105 @@ export default function Messages({ active }: ScreenProps) {
   useIntent('raven:compose', () => ta.current?.focus(), active)
 
   // ---- the list: stick to the newest, load older at the top ----
+  // At the bottom the thread stays pinned there: new lines, Raven at work, a card or a picture that grows, the
+  // keyboard (the visual viewport), the window, the composer growing, Connected opening. Scrolled up, it holds
+  // where he is, and the chip over the composer counts what he has not read; a tap on it glides back down.
   const listRef = useRef<HTMLDivElement>(null)
+  const colRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
   const lastId = messages.length ? messages[messages.length - 1].id : 0
   const firstId = messages[0]?.id ?? 0
   const busy = ravenBusy(page)
+  const glideUntil = useRef(0)
+  // the list's box and content height at the last look: a scroll that comes with a change of either is the layout's
+  const dims = useRef({ ch: 0, sh: 0 })
+
+  const pin = useCallback(() => {
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+  const measure = useCallback(() => {
+    const el = listRef.current
+    if (!el) return
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
+    const resized = el.clientHeight !== dims.current.ch || el.scrollHeight !== dims.current.sh
+    dims.current = { ch: el.clientHeight, sh: el.scrollHeight }
+    if (!bottom && stick.current) {
+      // the window or the thread changed size under him (a smaller window can scroll before the observer
+      // runs): still pinned, back to the bottom
+      if (resized) {
+        pin()
+        dims.current = { ch: el.clientHeight, sh: el.scrollHeight }
+        return
+      }
+      // the chip's glide on its way down: still bound for the bottom
+      if (Date.now() < glideUntil.current) return
+    }
+    stick.current = bottom
+    setAtBottom(bottom)
+  }, [pin])
 
   useLayoutEffect(() => {
-    const el = listRef.current
-    if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [lastId, busy, active])
+    if (stick.current) pin()
+  }, [lastId, busy, active, pin])
 
-  // the list got shorter (Connected opened, chips or a longer line in the box): the newest line stays in view
+  // anything that changes a height: the list's own box and the thread inside it, the window, the visual viewport
+  useEffect(() => {
+    const el = listRef.current
+    const col = colRef.current
+    if (!el || !col) return
+    const follow = () => {
+      if (stick.current) pin()
+      measure()
+    }
+    const ro = new ResizeObserver(follow)
+    ro.observe(el)
+    ro.observe(col)
+    // the keyboard on a phone: the layout settles a frame after the viewport says so
+    const later = () => requestAnimationFrame(follow)
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', later)
+    window.addEventListener('resize', later)
+    return () => {
+      ro.disconnect()
+      vv?.removeEventListener('resize', later)
+      window.removeEventListener('resize', later)
+    }
+  }, [pin, measure])
+
+  // his own hand on the thread stops the chip's glide where it is
   useEffect(() => {
     const el = listRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight })
-    ro.observe(el)
-    return () => ro.disconnect()
+    const hand = () => { glideUntil.current = 0 }
+    const key = (e: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(e.key) || (e.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      hand()
+    }
+    el.addEventListener('wheel', hand, { passive: true })
+    el.addEventListener('touchstart', hand, { passive: true })
+    el.addEventListener('pointerdown', hand)
+    window.addEventListener('keydown', key)
+    return () => {
+      el.removeEventListener('wheel', hand)
+      el.removeEventListener('touchstart', hand)
+      el.removeEventListener('pointerdown', hand)
+      window.removeEventListener('keydown', key)
+    }
   }, [])
+
+  const toLatest = () => {
+    const el = listRef.current
+    if (!el) return
+    stick.current = true
+    if (reducedMotion()) {
+      pin()
+      return
+    }
+    glideUntil.current = Date.now() + 900
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }
 
   // an older page went in above: hold what was on screen where it was
   const anchor = useRef<{ h: number; top: number } | null>(null)
@@ -170,9 +257,7 @@ export default function Messages({ active }: ScreenProps) {
   const onScroll = () => {
     const el = listRef.current
     if (!el) return
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    stick.current = bottom
-    if (bottom !== atBottom) setAtBottom(bottom)
+    measure()
     if (el.scrollTop < 160) void loadOlder()
   }
 
@@ -181,17 +266,57 @@ export default function Messages({ active }: ScreenProps) {
   const shown = usePageShown()
   useEffect(() => {
     if (!active || !atBottom || !unread || !lastId || !shown) return
+    // the list itself, not the last scroll event: opening at the New line moves it before any event says so
+    const el = listRef.current
+    if (!el || el.scrollHeight - el.scrollTop - el.clientHeight >= STICK_PX) return
     void markRavenRead(lastId).then(() => {
       refreshRavenUnread(qc)
       void qc.invalidateQueries({ queryKey: RAVEN_KEY })
     }, () => { /* the count stays until the next read */ })
   }, [active, atBottom, unread, lastId, shown, qc])
 
+  // ---- unread: the New line ----
+  // His read mark lives on odin, so every device follows it (the long-poll); his own lines never count. The New
+  // line sits above the first unread line and fades out once the read lands. A line that arrives while he watches
+  // the bottom is read on arrival and gets none. Coming in to unread lines that run past the screen, the thread
+  // opens at the New line instead of the bottom.
+  const lastRead = page?.lastRead
+  // since when he has watched the bottom with the tab in front: a line made after that he saw as it came
+  const watching = active && shown && atBottom
+  const [watchSince, setWatchSince] = useState<number | null>(null)
+  useEffect(() => {
+    // a tick later is soon enough: a line made before he looked is older than the stamp either way
+    const t = window.setTimeout(() => setWatchSince(watching ? Date.now() : null), 0)
+    return () => window.clearTimeout(t)
+  }, [watching])
+  const seenLive = (m: RavenMsg) => watchSince !== null && Date.parse(m.createdAt) >= watchSince
+  const firstUnread = lastRead === undefined ? null : messages.find((m) => m.id > lastRead && m.author !== 'brendon' && !seenLive(m))?.id ?? null
+  const [mark, setMark] = useState<{ id: number; fading: boolean } | null>(null)
+  if (firstUnread !== null && (mark?.id !== firstUnread || mark.fading)) setMark({ id: firstUnread, fading: false })
+  else if (firstUnread === null && mark && !mark.fading) setMark({ ...mark, fading: true })
+  useEffect(() => {
+    if (!mark?.fading) return
+    const t = window.setTimeout(() => setMark(null), 2500)
+    return () => window.clearTimeout(t)
+  }, [mark])
+
+  const entered = active && shown && !!page
+  useLayoutEffect(() => {
+    const el = listRef.current
+    const line = el?.querySelector<HTMLElement>('.rv-new:not([data-fading])')
+    if (!entered || !el || !line) return
+    const y = line.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+    // they all fit with the newest at the bottom: stay there (reaching it reads them)
+    if (y - 12 >= el.scrollHeight - el.clientHeight) return
+    stick.current = false
+    el.scrollTop = y - 12
+  }, [entered])
+
   // ---- writes ----
   const send = useMutation({
-    mutationFn: () => sendRaven({ text: draft.text.trim(), files: draft.ids.length ? draft.ids : undefined, source: 'app' }),
-    onSuccess: (m) => {
-      draft.clear()
+    mutationFn: (snap: DraftSnap) => sendRaven({ text: snap.text.trim(), files: snap.ids.length ? snap.ids : undefined, source: 'app' }),
+    onSuccess: (m, snap) => {
+      draft.markSent(snap)
       stick.current = true
       addToThread(qc, { messages: [m] })
       void qc.invalidateQueries({ queryKey: RAVEN_KEY })
@@ -234,13 +359,14 @@ export default function Messages({ active }: ScreenProps) {
           )}
         </header>
         {!wide && showConn && connected && <div className="rv-conn rv-conn-drop">{connected}</div>}
+        <div className="rv-thread" data-read={lastRead} data-new={mark?.id} data-watch={watchSince ?? undefined}>
         <div className="rv-msgs" ref={listRef} onScroll={onScroll}>
-          <div className="rv-col">
+          <div className="rv-col" ref={colRef}>
             {failed && <p className="rv-quiet">Raven is not answering: {apiErrorText(q.error, 'no reply from Valkyrie')}</p>}
             {!page && !failed && <p className="rv-quiet">Reading Raven</p>}
             {page && !messages.length && <p className="rv-quiet rv-empty">Nothing yet. Write Raven anything: a question, a task, a file, a session to start.</p>}
             {page && noMore && messages.length > 0 && <p className="rv-quiet rv-top">The start of the conversation.</p>}
-            <Thread messages={messages} names={names} />
+            <Thread messages={messages} names={names} mark={mark} />
             {busy && (
               <div className="rv-working" aria-live="polite">
                 <span className="rv-pulse" aria-hidden />
@@ -249,7 +375,19 @@ export default function Messages({ active }: ScreenProps) {
             )}
           </div>
         </div>
-        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate()} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} voiceOn={active} />
+        {!atBottom && messages.length > 0 && (
+          <Press
+            className="rv-latest"
+            data-n={unread || undefined}
+            aria-label={unread ? `${unread} unread, go to the newest message` : 'Go to the newest message'}
+            onPress={toLatest}
+          >
+            <ArrowDown size={13} strokeWidth={1.8} aria-hidden />
+            <span>{unread ? `${unread} new` : 'Latest'}</span>
+          </Press>
+        )}
+        </div>
+        <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate(draft.snapshot())} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} voiceOn={active} />
       </section>
       {wide && connected && <aside className="rv-conn rv-side" aria-label="Connected">{connected}</aside>}
     </div>
@@ -258,7 +396,8 @@ export default function Messages({ active }: ScreenProps) {
 
 // ------------------------------------------------------------- the thread ---
 
-function Thread({ messages, names }: { messages: RavenMsg[]; names: Map<string, string> }) {
+/** The thread as the Raven tab draws it; the desktop widget (RavenWidget.tsx) shows the same. */
+export function Thread({ messages, names, mark = null }: { messages: RavenMsg[]; names: Map<string, string>; mark?: { id: number; fading: boolean } | null }) {
   const now = useTick(60_000)
   return (
     <>
@@ -276,6 +415,7 @@ function Thread({ messages, names }: { messages: RavenMsg[]; names: Map<string, 
         return (
           <div key={m.id} className="rv-item">
             {newDay && <div className="rv-day"><span>{dayLabel(t, now)}</span></div>}
+            {mark?.id === m.id && <div className="rv-new" role="separator" aria-label="New messages" data-fading={mark.fading || undefined}><span>New</span></div>}
             <Row m={m} grouped={grouped} last={last} split={split} names={names} />
           </div>
         )
@@ -462,6 +602,9 @@ function ProposalCard({ p }: { p: Proposal }) {
 // -------------------------------------------------------------- connected ---
 
 const MAIN_WORD: Record<string, string> = { working: 'working', idle: 'idle', closed: 'not open', dead: 'ended' }
+const WATCH_WORD: Record<string, string> = { working: 'Working', idle: 'Idle', closed: 'Closed' }
+// the clock ticks once a minute, so under a minute is "just now", never a seconds count already behind
+const lastSeen = (at: number, now: number) => (now - at < 60_000 ? 'just now' : `${ago(at, now)} ago`)
 const AGENT_WORD: Record<string, string> = { idle: 'idle', queued: 'about to start', working: 'working', resting: 'resting', error: 'last run failed' }
 
 /** The feeds that wrote into the thread (a feature's process, an odin script), each with its latest line. */
@@ -537,15 +680,26 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
       {page.watching.length > 0 && (
         <div className="rv-group">
           <h3>Watching</h3>
-          {page.watching.map((w) => (
-            <div key={w.pane || w.sessionId} className="rv-crow">
-              <span className="rv-dot" data-state="watch" aria-hidden />
-              <span className="rv-crow-name" title={w.title || undefined}>{w.title || w.label}</span>
-              <span className="rv-crow-note" title={etTime(w.since)}>{ago(Date.parse(w.since), now)}</span>
-              {w.pane && open(w.pane)}
-              {w.title && <span className="rv-crow-line">{w.label}</span>}
-            </div>
-          ))}
+          <div className="rv-wcards">
+            {page.watching.map((w) => {
+              const state = w.state ?? null
+              const at = w.lastAt || w.since
+              return (
+                <div key={w.pane || w.sessionId} className="rv-wcard" data-state={state ?? 'unknown'}>
+                  <div className="rv-wcard-top">
+                    <span className="rv-dot" data-state={state === 'working' ? 'working' : state === 'idle' ? 'idle' : state === 'closed' ? 'off' : 'watch'} aria-hidden />
+                    <span className="rv-wcard-name" title={w.title || w.label}>{w.title || w.label}</span>
+                    {w.pane && state !== 'closed' && open(w.pane)}
+                  </div>
+                  <div className="rv-wcard-meta">
+                    {state && <span className="rv-wcard-state">{WATCH_WORD[state]}</span>}
+                    <span className="rv-wcard-at" title={etTime(at)}>{w.lastAt ? lastSeen(Date.parse(at), now) : `since ${etTime(at)}`}</span>
+                    {w.title && <span className="rv-wcard-from">{w.label}</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
       {page.agents.length > 0 && (

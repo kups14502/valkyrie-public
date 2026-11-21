@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiErrorText, fetchImgToken, imgTrusted } from '../../lib/api'
 import {
   RAVEN_FILE_MAX, fetchMsgCount, fetchRaven, patchSettings, ravenFileUrl, saveRavenSettings, transcribeRaven, uploadRavenFile, waitMsgChange,
-  type RavenFile, type RavenPage, type RavenSettingsPatch,
+  type RavenPage, type RavenSettingsPatch,
 } from '../../lib/ravenApi'
+import { DRAFT_PREFIX, RAVEN_THREAD, createDraftStore, draftIds, type DraftFile, type DraftSnap } from './ravenDraft'
 import { toast } from './ui'
 import { useLive, type Live } from './data'
 
@@ -129,31 +130,45 @@ export function useRavenFileUrl(): (id: string) => string | null {
 }
 
 // ---------- the draft: text and attachments ----------
+// The store itself is kit/ravenDraft.ts: one draft per thread, kept in this device's localStorage, shared by every
+// composer on the thread, cleared only by a send.
 
-export type DraftFile = {
-  key: number
-  name: string
-  size: number
-  mime: string
-  state: 'up' | 'done' | 'err'
-  sent: number
-  /** the stored file, once it landed */
-  file?: RavenFile
-  error?: string
-  /** an object URL for a picture, drawn on this device */
-  preview?: string
+export type { DraftFile, DraftSnap } from './ravenDraft'
+
+const localStore = (): Storage | null => {
+  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
 }
 
-let draftSeq = 0
+const drafts = createDraftStore({
+  storage: localStore(),
+  upload: (file, onProgress, signal) => uploadRavenFile(file, (sent) => onProgress(sent), signal),
+  maxBytes: RAVEN_FILE_MAX,
+  preview: (f) => (f.type.startsWith('image/') && f.size < 40 * 1024 * 1024 ? URL.createObjectURL(f) : undefined),
+  revoke: (u) => URL.revokeObjectURL(u),
+})
+
+// another window of the app on this device (a pop-out) changed a draft
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === null) drafts.adopt(null, null)
+    else if (e.key.startsWith(DRAFT_PREFIX)) drafts.adopt(e.key.slice(DRAFT_PREFIX.length), e.newValue)
+  })
+}
 
 export type RavenDraft = {
   text: string
   setText: (t: string) => void
+  /** words from a recording, joined to the end of the text */
+  append: (words: string) => void
   files: DraftFile[]
   add: (list: FileList | File[]) => void
-  remove: (key: number) => void
-  retry: (key: number) => void
-  /** clears the text and the files (after a send) */
+  remove: (key: string) => void
+  retry: (key: string) => void
+  /** what a send takes now; hand it back to markSent once the send went */
+  snapshot: () => DraftSnap
+  /** the send went: what it carried leaves the draft, anything added since stays */
+  markSent: (snap: DraftSnap) => void
+  /** clears the text and the landed files now (a send that kept no snapshot); failed and uploading files stay */
   clear: () => void
   /** a file is still on its way */
   uploading: boolean
@@ -163,94 +178,23 @@ export type RavenDraft = {
   ids: string[]
 }
 
-/** The composer's text and attachments; each file goes up to odin as soon as it is picked. */
-export function useRavenDraft(): RavenDraft {
-  const [text, setText] = useState('')
-  const [files, setFiles] = useState<DraftFile[]>([])
-  const raw = useRef(new Map<number, { file: File; ac: AbortController }>())
-
-  const patch = useCallback((key: number, p: Partial<DraftFile>) => {
-    setFiles((cur) => cur.map((f) => (f.key === key ? { ...f, ...p } : f)))
-  }, [])
-
-  const start = useCallback((key: number, file: File) => {
-    const ac = new AbortController()
-    raw.current.set(key, { file, ac })
-    patch(key, { state: 'up', sent: 0, error: undefined })
-    uploadRavenFile(file, (sent) => patch(key, { sent }), ac.signal).then(
-      (rf) => patch(key, { state: 'done', sent: file.size, file: rf }),
-      (e: unknown) => {
-        if (ac.signal.aborted) return
-        const err = e as { response?: { status?: number; data?: { error?: string } }; message?: string }
-        const why = err.response?.data?.error || (err.response?.status ? `${err.response.status}` : err.message) || 'upload failed'
-        patch(key, { state: 'err', error: why })
-      },
-    )
-  }, [patch])
-
-  const add = useCallback((list: FileList | File[]) => {
-    const picked = Array.from(list)
-    if (!picked.length) return
-    const rows: DraftFile[] = []
-    const go: [number, File][] = []
-    for (const f of picked) {
-      const key = ++draftSeq
-      const preview = f.type.startsWith('image/') && f.size < 40 * 1024 * 1024 ? URL.createObjectURL(f) : undefined
-      const tooBig = f.size > RAVEN_FILE_MAX
-      const empty = !f.size
-      rows.push({
-        key, name: f.name || 'file', size: f.size, mime: f.type, sent: 0, preview,
-        state: tooBig || empty ? 'err' : 'up',
-        error: tooBig ? 'over 50 MB' : empty ? 'empty' : undefined,
-      })
-      if (!tooBig && !empty) go.push([key, f])
-    }
-    setFiles((cur) => [...cur, ...rows])
-    for (const [key, f] of go) start(key, f)
-  }, [start])
-
-  const drop = (f: DraftFile) => {
-    raw.current.get(f.key)?.ac.abort()
-    raw.current.delete(f.key)
-    if (f.preview) URL.revokeObjectURL(f.preview)
-  }
-
-  const remove = useCallback((key: number) => {
-    setFiles((cur) => {
-      const f = cur.find((x) => x.key === key)
-      if (f) drop(f)
-      return cur.filter((x) => x.key !== key)
-    })
-  }, [])
-
-  const retry = useCallback((key: number) => {
-    const r = raw.current.get(key)
-    if (r) start(key, r.file)
-  }, [start])
-
-  const clear = useCallback(() => {
-    setText('')
-    setFiles((cur) => {
-      // the sent line shows the stored files, so the previews go; a file that failed stays, with its Retry
-      for (const f of cur) {
-        if (f.state === 'err') continue
-        raw.current.delete(f.key)
-        if (f.preview) URL.revokeObjectURL(f.preview)
-      }
-      return cur.filter((f) => f.state === 'err')
-    })
-  }, [])
-
-  // a draft that goes away (the sheet closes) stops its uploads
-  useEffect(() => {
-    const map = raw.current
-    return () => { for (const r of map.values()) r.ac.abort() }
-  }, [])
-
-  const uploading = files.some((f) => f.state === 'up')
-  const ids = files.filter((f) => f.state === 'done' && f.file).map((f) => (f.file as RavenFile).id)
-  const ready = !uploading && (text.trim() !== '' || ids.length > 0)
-  return { text, setText, files, add, remove, retry, clear, uploading, ready, ids }
+/** The thread's unsent text and attachments, the same in every composer on it; each file goes up to odin as soon as it is picked. */
+export function useRavenDraft(thread: string = RAVEN_THREAD): RavenDraft {
+  const s = useSyncExternalStore(drafts.subscribe, () => drafts.get(thread), () => drafts.get(thread))
+  const api = useMemo(() => ({
+    setText: (t: string) => drafts.setText(thread, t),
+    append: (w: string) => drafts.append(thread, w),
+    add: (list: FileList | File[]) => drafts.add(thread, list),
+    remove: (key: string) => drafts.remove(thread, key),
+    retry: (key: string) => drafts.retry(thread, key),
+    snapshot: () => drafts.snapshot(thread),
+    markSent: (snap: DraftSnap) => drafts.markSent(thread, snap),
+    clear: () => drafts.markSent(thread, drafts.snapshot(thread)),
+  }), [thread])
+  const uploading = s.files.some((f) => f.state === 'up')
+  const ids = draftIds(s)
+  const ready = !uploading && (s.text.trim() !== '' || ids.length > 0)
+  return { ...api, text: s.text, files: s.files, uploading, ready, ids }
 }
 
 // ---------- the quick sheet's switch ----------
@@ -312,8 +256,8 @@ export function useKeyboardInset(on: boolean): number {
 // One recorder for the whole app. The mic button in a composer starts and stops it; the push-to-talk key (held)
 // does the same from anywhere. The clip goes to odin (POST /api/raven/transcribe, whisper on odin) and the words
 // land in a composer's box for him to read and edit: never sent by themselves. Each visible composer registers a
-// sink; the words go to the composer whose mic was tapped, else the one in front (the last to register), else they
-// wait for the next composer to open.
+// sink; the words go to the composer whose mic was tapped, else the one in front (the last to register), else
+// straight into the thread's draft (kept on the device), where the next composer to open shows them.
 
 export type VoicePhase = 'idle' | 'starting' | 'recording' | 'writing'
 export type VoiceState = { phase: VoicePhase; since: number; owner: number | null; ptt: boolean }
@@ -337,7 +281,6 @@ export function useRavenVoice(): VoiceState {
 type Sink = { id: number; put: (text: string) => void }
 const sinks: Sink[] = []
 let sinkSeq = 0
-let pendingWords: string | null = null
 
 /** A composer takes the words while `on` (its screen in front). Answers the id its mic button passes. */
 export function useVoiceSink(on: boolean, put: (text: string) => void): number {
@@ -348,11 +291,6 @@ export function useVoiceSink(on: boolean, put: (text: string) => void): number {
     if (!on) return
     const sink: Sink = { id, put: (t) => ref.current(t) }
     sinks.push(sink)
-    if (pendingWords !== null) {
-      const t = pendingWords
-      pendingWords = null
-      sink.put(t)
-    }
     return () => {
       const i = sinks.indexOf(sink)
       if (i >= 0) sinks.splice(i, 1)
@@ -380,7 +318,7 @@ function micError(e: unknown): string {
 function deliver(text: string, owner: number | null): void {
   const sink = sinks.find((s) => s.id === owner) ?? sinks[sinks.length - 1]
   if (sink) sink.put(text)
-  else pendingWords = text
+  else drafts.append(RAVEN_THREAD, text)
 }
 
 /** Starts recording; owner = the composer whose mic was tapped (null: the one in front). */

@@ -5,6 +5,7 @@ import {
 import { addInternalNote, createTicket, franchiseLabel, PsaError, ticketUrl, updateTicket, type Franchise, type TicketPatch } from './psa.js'
 import { agentPost, etLabel, systemPost, wake } from './agents.js'
 import { franchiseConf, workConf } from './workConfig.js'
+import { featureAgent } from './featureAgents.js'
 
 // Proposals: what an agent wants done in the outside world, waiting on
 // Brendon. Each one is approved by itself (approval of one email is never
@@ -15,6 +16,8 @@ import { franchiseConf, workConf } from './workConfig.js'
 //                                                certificate never leaves thor,
 //                                                and its send ledger refuses a
 //                                                duplicate within 24 hours)
+//   feature                                      the feature agent's own action
+//                                                (lib/featureAgents.ts), in the API
 
 /** The address a reply copies by default: the franchise's support queue. */
 const supportCc = (f: Franchise): string[] => {
@@ -97,6 +100,25 @@ export function proposeTicketCreate(agent: Agent, a: { companyId: number; compan
     a.why?.trim() ? `${a.why.trim()}\n\n${who}` : who, refs, hop)
 }
 
+/** A feature agent's action, for Brendon's approval: nothing runs until he approves it. */
+export function proposeFeature(agent: Agent, a: { action: string; args?: Record<string, unknown>; title: string; note: string; refs?: Ref[] }, hop: number): Proposal {
+  const def = agent.kind === 'feature' ? featureAgent(agent.id) : null
+  if (!def) throw new AgentError(403, 'only a feature agent proposes feature actions')
+  const action = def.actions?.[a.action]
+  if (!action) throw new AgentError(400, `no action ${a.action}; the actions are ${Object.keys(def.actions ?? {}).join(', ') || 'none'}`)
+  const args = a.args ?? {}
+  try {
+    action.check?.(args)
+  } catch (e) {
+    throw new AgentError(400, (e as Error).message.slice(0, 300) || 'the action refused these args')
+  }
+  const title = a.title.trim().slice(0, 250)
+  const note = a.note.trim()
+  if (!title || !note) throw new AgentError(400, 'a proposal needs a title and a note')
+  if (/[\u2014]/.test(note)) throw new AgentError(400, 'the note has an em dash; rewrite it with commas, parentheses or colons')
+  return post(agent, 'feature', title, { feature: def.feature, action: a.action, args }, note.slice(0, 2000), a.refs ?? [], hop)
+}
+
 // ------------------------------------------------------------ decide ----
 
 function tellAgent(p: Proposal, status: string, result: string, reason?: string, wakeIt = false): void {
@@ -131,6 +153,8 @@ export async function approveProposal(id: number, opts: { how?: 'send' | 'draft'
     })
     return getProposal(id)!
   }
+
+  if (p.kind === 'feature') return applyFeature(p)
 
   const f = p.payload.franchise as Franchise
   try {
@@ -168,6 +192,24 @@ export async function approveProposal(id: number, opts: { how?: 'send' | 'draft'
     if (!(e instanceof PsaError || e instanceof AgentError)) console.error('[agents] proposal', id, (e as Error).message)
     return fail(p, msg)
   }
+}
+
+async function applyFeature(p: Proposal): Promise<Proposal> {
+  const def = featureAgent(p.agentId)
+  const action = def?.actions?.[String(p.payload.action ?? '')]
+  if (!action) return fail(p, 'that action is not in this build any more')
+  let result: string
+  try {
+    const args = p.payload.args && typeof p.payload.args === 'object' ? p.payload.args as Record<string, unknown> : {}
+    result = String(await action.apply(args)).trim().slice(0, 600) || 'Done'
+  } catch (e) {
+    // a feature's errors are written for Brendon; anything else still gets one plain line
+    return fail(p, (e as Error).message.slice(0, 300) || 'the action failed')
+  }
+  const done = moveProposal(p.id, ['running'], 'done', { result })!
+  systemPost(p.channelId, result)
+  tellAgent(done, 'done', result)
+  return done
 }
 
 function fail(p: Proposal, msg: string): Proposal {
