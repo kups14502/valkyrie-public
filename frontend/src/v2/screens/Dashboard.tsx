@@ -57,8 +57,10 @@ import './dashboard.css'
 // and the calendar lists as many days as its column has room for, so no box
 // stretches empty. A 2560 px monitor has the newest addition as a banner over
 // the posters.
-// iPad in landscape (the iPad profile only): one screen, no scrolling: [lights,
-// tracker, calendar] [the stage, Raven, AI] [trade, hosts].
+// iPad (the iPad profile, portrait and landscape): the desktop's three columns,
+// whatever its width. Under 1140 px they run tight (a smaller gap, a narrower
+// stage column), and a middle column too narrow for AI and the hosts side by
+// side stacks them, AI first.
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 const bi = (i: number): Vars => ({ '--i': i })
@@ -110,9 +112,9 @@ function useBoxWidth(ref: RefObject<HTMLElement | null>): number {
   return w
 }
 
-// column steps in layout px: two columns from a small tablet or a landscape
-// phone, three from an iPad in landscape or a desktop window; past XL the
-// three columns grow (a 2560 px monitor), centered, never stretched to the edges
+// column steps in layout px: two columns from a landscape phone or a narrow
+// window, three from a desktop window (and on the iPad from TWO_COLS); past XL
+// the three columns grow (a 2560 px monitor), centered, never stretched to the edges
 const TWO_COLS = 600
 const THREE_COLS = 1140
 const XL = 1800
@@ -192,14 +194,12 @@ export default function Dashboard({ active }: ScreenProps) {
 
   const box = useRef<HTMLDivElement>(null)
   const width = useBoxWidth(box)
-  // the iPad in landscape (the one in the stand under the main monitor): its own one-screen
-  // board, no scrolling, whatever its exact width
-  const { resolved } = useProfile()
-  const landscape = useMedia('(orientation: landscape)')
-  const pad = resolved === 'ipad' && landscape && width >= TWO_COLS
-  const cols = pad || width >= THREE_COLS ? 3 : width >= TWO_COLS ? 2 : 1
+  // the iPad gets the desktop's three columns in either orientation, tight under THREE_COLS
+  const tablet = useProfile().resolved === 'ipad'
+  const cols = width >= THREE_COLS || (tablet && width >= TWO_COLS) ? 3 : width >= TWO_COLS ? 2 : 1
   const wide = cols === 3
-  const xl = wide && !pad && width >= XL
+  const tight = wide && width < THREE_COLS
+  const xl = wide && width >= XL
   const fillH = useFillHeight(box, wide)
   const fill = fillH > 0
   // the calendar sheet (src/v2/screens/Calendar.tsx): opened from the Calendar block, closed when the tab is left
@@ -224,29 +224,10 @@ export default function Dashboard({ active }: ScreenProps) {
         data-cols={cols}
         data-xl={xl || undefined}
         data-fill={fill || undefined}
-        data-pad={pad || undefined}
+        data-tight={tight || undefined}
         style={fill ? ({ '--hm-h': `${fillH}px` } as Vars) : undefined}
       >
-        {pad ? (
-          // iPad landscape: what he glances at, one screen. Quick start lives on the Hotkeys
-          // tab; upload and media are a tab away.
-          <>
-            <div className="hm-col hm-a">
-              <LightsBox i={2} variant="rows" />
-              <Tracker />
-              <Calendar onOpen={setCal} fit={fill} />
-            </div>
-            <div className="hm-col hm-b">
-              <DeviceStage id={device} active={active} i={0} fill={fill} />
-              <RavenBlock active={active} i={1} />
-              <AiBlock wide i={4} max={3} />
-            </div>
-            <div className="hm-col hm-c">
-              <TradeBox active={active} i={3} />
-              <Systems i={11} />
-            </div>
-          </>
-        ) : cols === 1 ? (
+        {cols === 1 ? (
           <>
             <TradeTicker active={active} i={0} />
             <DeviceStage id={device} active={active} i={1} compact />
@@ -907,7 +888,7 @@ function Tracker() {
   return (
     <section className="hm-sec hm-tracker">
       <Head
-        label={<><span className="hm-tr-daily">Daily </span>Tracker</>}
+        label={<><span className="hm-tr-daily">Daily </span><span className="hm-tr-word">Tracker</span></>}
         icon="done"
         lit={count === items.length}
         i={4}
@@ -1195,9 +1176,9 @@ function keepLines(view: CalView, tasks: number, n: number): { kept: Set<CalLine
  * title, where it is or a Join link when it is a meeting. The event on now or
  * the next to start leads its day, larger, with "Now" or "in 25 min". Today's
  * due tasks follow today. A day heading opens the calendar on that day; an
- * event opens it there with its details. `fit` (a monitor or the landscape
- * iPad): as many lines as the column has room for (keepLines picks which),
- * then "+N more"; on a monitor the box reaches the bottom of its column.
+ * event opens it there with its details. `fit` (three columns: a monitor or
+ * the iPad): as many lines as the column has room for (keepLines picks which),
+ * then "+N more"; the box reaches the bottom of its column.
  * Otherwise up to `max` events.
  */
 function Calendar({ onOpen, fit, max = 10 }: { onOpen: (o: CalendarOpen) => void; fit?: boolean; max?: number }) {
@@ -1545,8 +1526,8 @@ function lastTurns(messages: RavenMsg[], n: number): Turn[] {
  * Raven on the Dashboard, where the corner button would be (kit/raven.tsx
  * hides it here): the heading with Raven's live status (the Raven screen's
  * words), his last `turns` lines each with Raven's reply (each clipped), and
- * the box. One exchange and a one-line box on the phone and the iPads; a
- * monitor shows the last few in a window that scrolls (newest at the bottom)
+ * the box. One exchange and a one-line box on the phone and in two columns;
+ * three columns (a monitor, the iPad) show the last few in a window that scrolls (newest at the bottom)
  * over a two-line box. A send goes the Raven screen's way (source app) and the
  * reply shows here when it lands. The heading opens the conversation;
  * Ctrl+Shift+Space and the palette's "Message Raven" focus the box.
@@ -2186,8 +2167,8 @@ function readSlots(keyList: string, model: HostModelId | null, pose: string): Re
  * scroll the page), and it eases back. A tap anywhere on the stage opens System >
  * Hosts with this device picked.
  * Monitor (`fill`): the middle column's elastic part, the last hour of CPU and
- * memory along its foot. iPad in landscape: the same, in its middle column.
- * Phone and upright iPad (`compact`): a band across the top of the page.
+ * memory along its foot. The iPad: the same.
+ * Phone and two columns (`compact`): a band across the top of the page.
  * The phone and tablet report two numbers at most: the tablet's stand in the
  * stage's lower corners (`foot`), so the wide slab keeps the whole width.
  */
@@ -3018,24 +2999,25 @@ function Banner({ item, now, onPress }: { item: PlexRichVM; now: number; onPress
 /**
  * How the desktop poster grid fills its box exactly: rows as tall as the box
  * allows, as many across as keep each poster within a few percent of 2:3 (the
- * cover crops the rest), at least four across. Of those, the one whose rows
+ * cover crops the rest), at least four across (three when four never fit). Of those, the one whose rows
  * the posters on hand fill completely, then the one nearest POSTER_W wide, so
  * the box never ends in an empty row. `count`: the posters on hand.
  */
-function posterGrid(w: number, h: number, count: number): { n: number; rows: number; ph: number } | null {
+function posterGrid(w: number, h: number, count: number, minN = 4): { n: number; rows: number; ph: number } | null {
   let best: { n: number; rows: number; ph: number; score: number } | null = null
   for (let rows = 1; rows <= 6; rows++) {
     const ph = (h - (rows - 1) * POSTER_GAP) / rows
     const pw = ph / 1.5
     if (pw < 40) break
     const n = Math.round((w + POSTER_GAP) / (pw + POSTER_GAP))
-    if (n < 4) continue
+    if (n < minN) continue
     const cw = (w - (n - 1) * POSTER_GAP) / n
     const empty = Math.max(0, n * rows - count)
     const score = empty * 50 + Math.abs(cw - POSTER_W) + Math.abs(cw / pw - 1) * 100
     if (!best || score < best.score) best = { n, rows, ph, score }
   }
-  return best
+  // a narrow, tall box (the iPad mini's column) where no row of four fits: rows of three
+  return best ?? (minN > 3 ? posterGrid(w, h, count, 3) : null)
 }
 
 const dlOrder = (a: DownloadVM, b: DownloadVM) => Number(b.stuck) - Number(a.stuck) || b.progress - a.progress

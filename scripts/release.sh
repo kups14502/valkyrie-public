@@ -2,6 +2,8 @@
 set -euo pipefail
 
 VERSION="${1:?usage: scripts/release.sh <version>}"
+# Lowest CPU and disk priority for this shell and every build it starts (cargo, vite, gradle), so odin keeps serving while a release compiles.
+renice -n 19 -p $$ >/dev/null 2>&1 || true; ionice -c 2 -n 7 -p $$ >/dev/null 2>&1 || true
 TAG="app-v${VERSION}"
 REPO="${REPO:-kups14502/valkyrie}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

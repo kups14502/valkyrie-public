@@ -865,8 +865,7 @@ function layoutTests() {
         quietThor(page)
         await page.goto('/m/dashboard')
         await shellUp(page)
-        // the landscape iPad's board has no media block (a tab away)
-        await page.waitFor((pad) => document.querySelector('.vl-page[data-active] .hm-lights') && (pad || document.querySelector('.vl-page[data-active] .hm-media')), { timeout: 12_000, args: [device === 'ipadland'], message: 'the Dashboard did not draw its blocks' })
+        await page.waitFor(() => document.querySelector('.vl-page[data-active] .hm-lights') && document.querySelector('.vl-page[data-active] .hm-media'), { timeout: 12_000, message: 'the Dashboard did not draw its blocks' })
         await sleep(2500)
         const r = await page.eval(() => {
           const root = document.querySelector('.vl-page[data-active]')
@@ -921,11 +920,16 @@ function layoutTests() {
             t.check(r.stage.top >= 0 && r.stage.bottom <= r.H, `the stage is not whole on the first screen (${r.stage.top} to ${r.stage.bottom} of ${r.H})`)
           }
         }
-        if (device === 'ipadland') {
-          t.check(r.pad && r.cols === '3', `the landscape iPad has ${r.cols} columns${r.pad ? '' : ' and not its own board'}`)
-          t.check(r.where.lights === 'hm-a' && r.where.cal === 'hm-a' && r.where.stage === 'hm-b' && r.where.ai === 'hm-b' && r.where.trade === 'hm-c' && r.where.sys === 'hm-c',
-            `blocks sit in ${JSON.stringify(r.where)}, want lights and the calendar left, the stage and AI in the middle, trade and the hosts right`)
-          t.check(r.scrollH <= r.clientH + 2, `the landscape iPad board scrolls (${r.scrollH} > ${r.clientH})`)
+        // the iPad has the desktop's layout in either orientation (2026-11-21): no board of its own
+        if (device.startsWith('ipad')) {
+          t.check(r.cols === '3' && !r.pad, `the ${device} Dashboard has ${r.cols} columns${r.pad ? ' and its own board' : ''}, want the desktop's 3`)
+          t.check(r.where.cal === 'hm-a' && r.where.stage === 'hm-b' && r.where.ai === 'hm-b' && r.where.sys === 'hm-b' && r.where.lights === 'hm-c' && r.where.trade === 'hm-c' && r.where.media === 'hm-c',
+            `blocks sit in ${JSON.stringify(r.where)}, want the desktop's: the calendar left, the stage, AI and the hosts in the middle, lights, trade and media right`)
+          t.check(r.stage?.pair, `AI and the hosts are not under the stage together (${JSON.stringify(r.where)})`)
+          if (device === 'ipadland') {
+            const f = await page.eval(pageFit)
+            t.check(f.ends.every((v) => v == null || v <= r.H + 1), `a column runs past the landscape iPad's screen: they end at ${JSON.stringify(f.ends)} of ${r.H}`)
+          }
         }
         // the trade chart keeps its own short height wherever the box shows (the phone has the ticker only)
         if (r.tradeChart !== null) t.check(r.tradeChart >= 118 && r.tradeChart <= 172, `the equity chart is ${r.tradeChart} layout px tall, want 120 to 170`)
@@ -1358,7 +1362,7 @@ function deviceTests() {
     { name: 'phone', device: 'phone', want: 'phone', label: 'Phone', state: /^Online$/, rows: ['Battery 64%', 'Storage 40%'], sizes: ['', '101 / 256 GB'] },
     // the iPad once it reports: two numbers beside a wide slab stand in the stage's lower corners
     { name: 'ipad-reads', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: ['Battery 81%', 'Storage 25%'], sizes: ['', '64 / 256 GB'], foot: true, tablet: { battery: { percent: 81, status: 'discharging' }, disk: { used: 64e9, total: 256e9, percent: 25 } } },
-    { name: 'ipadland', device: 'ipadland', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/, pad: true },
+    { name: 'ipadland', device: 'ipadland', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/ },
     { name: 'ipad', device: 'ipad', want: 'tablet', label: 'Tablet', state: /^Online$/, rows: [], sizes: [], hint: /No battery reading yet/ },
   ]
   return cases.map((c) => ({
@@ -1420,14 +1424,14 @@ function deviceTests() {
       if (c.tall != null) t.check(r.tall === c.tall, `This device ${r.tall ? 'is' : 'is not'} in its tall layout (${JSON.stringify(r.box)}), want ${c.tall ? 'tall' : 'short'}`)
       if (c.hint) t.check(c.hint.test(r.hint), `no battery hint (got "${r.hint}")`)
       else t.check(!r.hint, `a battery hint where a reading came in: "${r.hint}"`)
-      const desk = c.device.startsWith('desk') || !!c.pad
-      if (c.pad) t.check(r.inCol === 'hm-b' && r.order[0] === 'stage', `the landscape iPad's stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want it at the head of the middle column`)
-      else if (desk) t.check(r.inCol === 'hm-b' && r.order.join('>') === 'stage>ai+sys', `the stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want the middle column as stage > AI and the hosts`)
+      const desk = c.device.startsWith('desk')
+      // the iPad has the desktop's three columns in either orientation
+      if (desk || c.device.startsWith('ipad')) t.check(r.inCol === 'hm-b' && r.order.join('>') === 'stage>ai+sys', `the stage sits in ${r.inCol}, which reads ${r.order.join(' > ')}: want the middle column as stage > AI and the hosts`)
       else t.check(r.inCol === null && /^(ticker>)?stage>raven>col>col$/.test(r.order.join('>')), `the layout reads ${r.order.join(' > ')}, want the stage across the top (under the ticker on the phone), Raven under it, then the columns`)
       checkNoRoom(t, await page.eval(dashboardScenes))
       // a monitor (and the app's window) shows the whole Dashboard: no scroll, the three columns ending together
       // (the left one ends with the calendar's slot: the room the block lists its days in)
-      if (desk && !c.storage && !c.pad) {
+      if (desk && !c.storage) {
         const f = await page.eval(pageFit)
         t.check(f.scrollH <= f.clientH + 2, `the Dashboard scrolls (${f.scrollH} > ${f.clientH}) with This device in the right column`)
         const ends = f.ends.filter((v) => v != null)
@@ -1611,24 +1615,24 @@ function ravenBlockTests() {
         t.check(s.raven === 'Got both. The photo shows the jammed tray.', `Raven's line reads ${JSON.stringify(s.raven)}`)
         const desk = device.startsWith('desk')
         const monitor = device === 'desktop' || desk
-        // a monitor: up to four lines each (the last few exchanges); elsewhere one or two
-        const most = monitor ? 4 : 2
+        // three columns (a monitor, the iPad either way up): the desktop's block
+        const three = monitor || device.startsWith('ipad')
+        // three columns: up to four lines each (the last few exchanges); elsewhere one or two
+        const most = three ? 4 : 2
         t.check(s.meLines >= 1 && s.meLines <= most && s.ravenLines >= 1 && s.ravenLines <= most, `the exchange takes ${s.meLines} and ${s.ravenLines} lines, want 1 to ${most} each`)
         t.check(!s.fab, 'the corner button shows on the Dashboard beside the Raven block')
         t.check(!s.dash, 'an em dash in the Raven block')
         t.check(s.inside, 'the Raven block runs past the screen')
-        if (monitor) {
-          t.check(s.cols === '3' && s.col === 'hm-a' && s.after === null && s.before === 'upload', `on a monitor the block sits in ${s.col} after ${s.after}, before ${s.before}, want the head of the left column with Upload under it`)
+        if (three) {
+          t.check(s.cols === '3' && !s.pad && s.col === 'hm-a' && s.after === null && s.before === 'upload', `on the ${device} the block sits in ${s.col} after ${s.after}, before ${s.before}, want the head of the left column with Upload under it`)
           // both of his lines in the fake (101 and 106) with Raven's replies, the window on the newest, a two-line box
-          t.check(s.mine === 2 && s.atEnd, `on a monitor the block shows ${s.mine} of his lines${s.atEnd ? '' : ', not scrolled to the newest'}, want his last two exchanges ending on the newest`)
-          t.check(s.boxH >= 52, `on a monitor the box is ${s.boxH} px tall, want two lines (52 px or more)`)
-        } else if (device === 'ipadland') {
-          t.check(s.pad && s.col === 'hm-b' && s.after === 'stage', `on the landscape iPad the block sits in ${s.col} after ${s.after}, want right under the stage`)
+          t.check(s.mine === 2 && s.atEnd, `on the ${device} the block shows ${s.mine} of his lines${s.atEnd ? '' : ', not scrolled to the newest'}, want his last two exchanges ending on the newest`)
+          t.check(s.boxH >= 52, `on the ${device} the box is ${s.boxH} px tall, want two lines (52 px or more)`)
         } else {
           t.check(!s.col && s.after === 'stage', `on the ${device} the block sits after ${s.after} (column ${s.col}), want right under the stage`)
         }
-        if (!monitor) t.check(s.mine === 1, `on the ${device} the block shows ${s.mine} of his lines, want the last exchange alone`)
-        if (device !== 'phone' && device !== 'ipad') t.check(s.scrollH <= s.clientH + 2, `the Dashboard scrolls with the Raven block (${s.scrollH} > ${s.clientH})`)
+        if (!three) t.check(s.mine === 1, `on the ${device} the block shows ${s.mine} of his lines, want the last exchange alone`)
+        if (monitor) t.check(s.scrollH <= s.clientH + 2, `the Dashboard scrolls with the Raven block (${s.scrollH} > ${s.clientH})`)
         const lr = await page.eval(layoutReport)
         t.check(lr.docSW <= lr.W + 1, `the Dashboard is wider than the screen (${lr.docSW} > ${lr.W})${lr.wide?.length ? `: ${lr.wide.join(', ')}` : ''}`)
         await t.shot(page, 'idle')
