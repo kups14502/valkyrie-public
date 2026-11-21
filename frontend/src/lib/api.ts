@@ -688,6 +688,9 @@ export type WorkSession = {
   activity: SessionActivity
   done: boolean
   resumeCommand: string | null
+  // Raven started this conversation (its session tools record the id at creation, backend
+  // lib/sessionOrigin.ts); false for his own and on an older API.
+  raven: boolean
 }
 
 export type SessionsResult =
@@ -718,6 +721,7 @@ const parseSession = (raw: unknown): WorkSession | null => {
     activity: (ACTIVITIES as string[]).includes(act ?? '') ? (act as SessionActivity) : 'closed',
     done: wsStr(r.disposition) === 'done',
     resumeCommand: wsStr(r.resumeCommand),
+    raven: r.startedBy === 'raven',
   }
 }
 
@@ -837,6 +841,10 @@ export type TermSession = {
   outputAt?: number
   // While asking: the question or the Next: line itself, one line. Empty otherwise.
   ask?: string
+  // Who opened the conversation in this pane: Raven (session_start, or session_send starting a
+  // main terminal) or Brendon. Recorded when the session starts (backend lib/sessionOrigin.ts),
+  // never guessed; 'brendon' on an older API.
+  startedBy: 'raven' | 'brendon'
 }
 
 export type PaneState = 'working' | 'asking' | 'idle' | 'shell' | 'dead'
@@ -895,6 +903,7 @@ const parseTermSession = (raw: unknown): TermSession | null => {
     stateSince: wsNum(r.stateSince) ?? undefined,
     outputAt: wsNum(r.outputAt) ?? undefined,
     ask: wsStr(r.ask) ?? '',
+    startedBy: r.startedBy === 'raven' ? 'raven' : 'brendon',
   }
 }
 

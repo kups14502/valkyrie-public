@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { bump, getKv, setKv } from '../../agentsStore.js'
 import { failRunsForTmux } from '../../projectsStore.js'
+import { noteRavenStarted } from '../../sessionOrigin.js'
 import { paneLimitState } from '../../accountSwitchCore.js'
 import type { LaunchTargetInfo } from '../../../routes/hostLaunch.js'
 import { SESSION_NAME_RE, TARGET_RE, UUID_RE, type CreateOpts, type TermSession } from '../../../terminal/tmux.js'
@@ -254,6 +255,8 @@ async function openMain(t: { key: string; label: string }): Promise<{ pane: stri
   // the target's own name, the one Quick Start and the terminal lists show ("Personal", not "Personal (main)")
   const label = paneLabel(t.label, t.key)
   const sessionId = randomUUID()
+  // on record before the pane opens, so the Desk's first poll already shows it as Raven's
+  noteRavenStarted(sessionId, io.now())
   const pane = await newPane({ mode: 'new', host: 'thor', target: t.key, newId: sessionId, label, cols: 120, rows: 40 })
   setMain(t.key, { pane, label, sessionId, at: new Date(io.now()).toISOString() })
   return { pane, label, sessionId }
@@ -415,6 +418,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     }
     const label = paneLabel(a.label, t?.label || key)
     const sessionId = randomUUID()
+    noteRavenStarted(sessionId, io.now())
     const pane = await newPane({ mode: 'new', host: 'thor', target: key, newId: sessionId, label, cols: 120, rows: 40 })
     ctx.acted()
     if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true })

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import express, { Router } from 'express'
 import { Agent, fetch as undiciFetch } from 'undici'
 import { sessionArea } from '../lib/projectAreas.js'
+import { originOf, ravenStartedIds } from '../lib/sessionOrigin.js'
 
 // Proxy to thor's session launcher agent.
 //
@@ -282,6 +283,8 @@ type BoardRow = Record<string, unknown> & { host?: string; live?: boolean; lastA
 router.get('/session-board', async (_req, res) => {
   const names = Object.keys(LAUNCHERS)
   const cutoff = Date.now() - MERGE_DAYS * 86_400_000
+  // the conversations Raven started (lib/sessionOrigin.ts): the Desk lists a closed one of those apart from his
+  const raven = ravenStartedIds()
   const results = await Promise.all(names.map(async (name) => {
     const launcher = LAUNCHERS[name]
     if (!launcher.token) return { host: name, ok: false, status: 501, rows: [] as BoardRow[], detail: `${launcher.env} is not set on the api host` }
@@ -294,7 +297,10 @@ router.get('/session-board', async (_req, res) => {
       }
       const rows = (body.sessions as BoardRow[])
         // odin's area table can split one host area into two (lib/projectAreas.ts).
-        .map((row) => ({ ...row, host: name, area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null) }))
+        .map((row) => ({
+          ...row, host: name, area: sessionArea(String(row.area ?? ''), typeof row.cwd === 'string' ? row.cwd : null),
+          startedBy: originOf(raven, typeof row.sessionId === 'string' ? row.sessionId : ''),
+        }))
         // thor is the desk: everything open stays. Elsewhere, recent or running.
         .filter((row) => {
           if (name === 'thor') return true

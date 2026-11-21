@@ -16,6 +16,7 @@ import {
 import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
 import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
+import { originOf, ravenStartedIds } from '../lib/sessionOrigin.js'
 import { paneTranscript } from '../terminal/transcriptFeed.js'
 import { paneStateTracker } from '../terminal/paneState.js'
 import { boardNow, launchTargets } from './hostLaunch.js'
@@ -125,7 +126,8 @@ router.get('/terminal/sessions', async (req, res) => {
     // the unmasked id picks the same rows masking first did.
     const all = await listSessions()
     const rows = project === undefined ? all : all.filter((s) => s.projectId === project)
-    res.json((await paneStates.annotate(rows)).map(maskRow(hidden)))
+    const raven = ravenStartedIds()
+    res.json((await paneStates.annotate(rows)).map(maskRow(hidden)).map((s) => ({ ...s, startedBy: originOf(raven, s.sessionId) })))
   } catch (err) {
     console.error('[terminal] list failed', err)
     res.status(500).json({ error: 'could not list sessions' })
@@ -257,7 +259,7 @@ router.post('/terminal/sessions', async (req, res) => {
     }
     if (desk && newId) noteDeskPane(newId, name)
     const row = (await listSessions()).find((s) => s.name === name)
-    const session = row ? maskRow(hidden)(row) : null
+    const session = row ? { ...maskRow(hidden)(row), startedBy: originOf(ravenStartedIds(), row.sessionId) } : null
     res.status(201).json({ name, session, conversationId: newId ?? resumeId ?? null, runId: run?.id ?? null })
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500
