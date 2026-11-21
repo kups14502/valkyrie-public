@@ -245,13 +245,15 @@ export function setDeskInView(names: string[]): void {
 // row's panes share its width). He changes it by dragging tabs and pane titles
 // (screens/Desk.tsx). off: panes he took off the Desk (the session list and "+"
 // put them back). focus: the pane with the keyboard; a tab picked from the
-// strip opens there. The tab order is not kept here: the Desk sorts the tabs
+// strip opens there. raven: the panes Raven started that he opened; every
+// other pane Raven started stays off the Desk, minimized in Raven's list. The tab order is not kept here: the Desk sorts the tabs
 // by area, then project, every time.
 
 export type DeskLayout = {
   view: string[]
   off: string[]
   focus: string | null
+  raven: string[]
 }
 
 /** The most panes the grid shows (3x3). */
@@ -269,6 +271,7 @@ function loadLayout(): DeskLayout {
   return {
     view: names(raw.view).slice(0, MAX_VIEW),
     off: names(raw.off),
+    raven: names(raw.raven),
     focus: typeof raw.focus === 'string' && TERM_NAME_RE.test(raw.focus) ? raw.focus : null,
   }
 }
@@ -279,7 +282,7 @@ export const deskLayout = (): DeskLayout => layout
 
 /** Changes the layout (a new object, so memos see it), saves it and re-renders the Desk and the badge. */
 export function editLayout(fn: (l: DeskLayout) => DeskLayout | void): void {
-  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off] }
+  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off], raven: [...layout.raven] }
   const next = fn(draft) ?? draft
   next.view = [...new Set(next.view)].slice(0, MAX_VIEW)
   if (JSON.stringify(next) === JSON.stringify(layout)) return
@@ -309,17 +312,23 @@ export function syncLayout(list: TermSession[]): void {
     if (t - at < PLACE_GRACE_MS) open.add(n)
     else placed.delete(n)
   }
-  const gone = layout.view.some((n) => !open.has(n)) || layout.off.some((n) => !open.has(n)) || (!!layout.focus && !open.has(layout.focus))
+  const gone = layout.view.some((n) => !open.has(n)) || layout.off.some((n) => !open.has(n)) || layout.raven.some((n) => !open.has(n))
+    || (!!layout.focus && !open.has(layout.focus))
   if (!gone) return
   editLayout((l) => {
     l.view = l.view.filter((n) => open.has(n))
     l.off = l.off.filter((n) => open.has(n))
+    l.raven = l.raven.filter((n) => open.has(n))
     if (l.focus && !open.has(l.focus)) l.focus = null
   })
 }
 
-/** The panes on the Desk: open, and not taken off it (in the list's order; the Desk sorts them). */
+/**
+ * The panes on the Desk: open, not taken off it, and, for one Raven started,
+ * opened by him (in the list's order; the Desk sorts them).
+ */
 export function onDesk(list: TermSession[]): TermSession[] {
   const off = new Set(layout.off)
-  return list.filter((s) => !off.has(s.name))
+  const raven = new Set(layout.raven)
+  return list.filter((s) => !off.has(s.name) && (s.startedBy !== 'raven' || raven.has(s.name)))
 }

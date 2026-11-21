@@ -107,7 +107,7 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
       { pane: 'vk-e2e00000b2', label: 'Work area one (main)', sessionId: 'sess-2', since: iso(now - 25 * MIN), title: 'Printer migration plan', state: 'working', lastAt: iso(now - 2 * MIN) },
       // a session in a window on thor: Raven reads it, but there is no pane here to open
       { pane: '', label: 'Area two (window)', sessionId: 'sess-3', since: iso(now - 5 * MIN), state: 'idle', lastAt: iso(now - 14 * MIN) },
-      // a pane that ended: the card stays, closed, with no Open
+      // a pane that ended: no card (Watching shows working and idle sessions only)
       { pane: 'vk-e2e00000c3', label: 'Old pane', sessionId: 'sess-4', since: iso(now - 90 * MIN), title: 'Rotate the nginx certificates', state: 'closed', lastAt: iso(now - 40 * MIN) },
     ],
     agents: [
@@ -366,7 +366,7 @@ function threadSnap() {
       const cs = getComputedStyle(c)
       const box = c.getBoundingClientRect()
       const name = c.querySelector('.rv-wcard-name')?.getBoundingClientRect()
-      return { radius: parseFloat(cs.borderTopLeftRadius), fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)', inside: !!name && name.left >= box.left && name.right <= box.right + 0.5, closedFill: getComputedStyle(qa('.rv-conn .rv-wcard')[2] ?? c).backgroundColor }
+      return { radius: parseFloat(cs.borderTopLeftRadius), fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)', inside: !!name && name.left >= box.left && name.right <= box.right + 0.5 }
     })(),
     watchOpen: qa('.rv-conn .rv-group').filter((g) => /Watching/.test(g.querySelector('h3')?.textContent ?? '')).flatMap((g) => [...g.querySelectorAll('.rv-open')].map((a) => a.getAttribute('href'))),
     triage: crow(/Triage agent/)?.querySelector('.rv-n')?.textContent ?? null,
@@ -447,14 +447,14 @@ export function ravenTests() {
         } else {
           t.check(s.side?.right && s.side.w < 360 && !s.toggle, `the Connected column is not a narrow column on the right: ${JSON.stringify(s.side)}`)
         }
-        t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:3', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
-        t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor and a closed pane have none)`)
+        t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:2', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
+        t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor has none, a closed pane no card)`)
         // the fixture's times are set once, minutes before this test runs: only the order of the words is fixed
-        const rows = [/^Printer migration plan\|Working\d+m agoWork area one \(main\)$/, /^Area two \(window\)\|Idle\d+m ago$/, /^Rotate the nginx certificates\|Closed\d+m agoOld pane$/]
+        const rows = [/^Printer migration plan\|Working\d+m agoWork area one \(main\)$/, /^Area two \(window\)\|Idle\d+m ago$/]
         t.check(conn.watchRows.length === rows.length && rows.every((re, i) => re.test(conn.watchRows[i])),
           `Watching reads ${JSON.stringify(conn.watchRows)} (the job, then its state, last activity and pane)`)
         const wc = conn.watchCard
-        t.check(wc && wc.radius >= 12 && wc.fill && wc.inside && wc.closedFill === 'rgba(0, 0, 0, 0)', `the Watching card is not a rounded, filled card (a closed one unfilled): ${JSON.stringify(wc)}`)
+        t.check(wc && wc.radius >= 12 && wc.fill && wc.inside, `the Watching card is not a rounded, filled card: ${JSON.stringify(wc)}`)
         t.check(conn.triage === '2', `the triage agent's pending count reads ${conn.triage}`)
         const tb = conn.triageBadge
         t.check(tb?.title === '2 proposals waiting' && tb.label === '2 proposals waiting' && tb.px >= 12 && tb.h >= 18 && tb.shadow === 'none',

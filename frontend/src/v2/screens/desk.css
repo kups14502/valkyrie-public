@@ -176,7 +176,6 @@
   touch-action: pan-x;
 }
 .dk-tabs::-webkit-scrollbar { display: none; }
-.dk-tabs-quiet { flex: none; padding: 0 6px; font-size: 12px; color: var(--dim); white-space: nowrap; }
 
 /* a crowded strip squeezes its tabs (a mouse), then scrolls; a touch strip keeps them readable and scrolls sideways */
 .dk-tab {

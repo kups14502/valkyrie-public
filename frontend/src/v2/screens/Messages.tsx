@@ -660,7 +660,9 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
   const open = (pane: string) => (
     <a className="rv-open" href={v2TermPath(pane)} onClick={(e) => { e.preventDefault(); onOpen(v2TermPath(pane)) }}>Open</a>
   )
-  const empty = !page.mains.length && !page.watching.length && !page.agents.length && !feeds.length
+  // a closed session leaves Watching at once (the API lists none either)
+  const watching = page.watching.filter((w) => w.state !== 'closed')
+  const empty = !page.mains.length && !watching.length && !page.agents.length && !feeds.length
   return (
     <>
       {empty && <p className="rv-quiet">Nothing connected yet.</p>}
@@ -677,11 +679,11 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
           ))}
         </div>
       )}
-      {page.watching.length > 0 && (
+      {watching.length > 0 && (
         <div className="rv-group">
           <h3>Watching</h3>
           <div className="rv-wcards">
-            {page.watching.map((w) => {
+            {watching.map((w) => {
               const state = w.state ?? null
               const at = w.lastAt || w.since
               return (
@@ -689,7 +691,7 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
                   <div className="rv-wcard-top">
                     <span className="rv-dot" data-state={state === 'working' ? 'working' : state === 'idle' ? 'idle' : state === 'closed' ? 'off' : 'watch'} aria-hidden />
                     <span className="rv-wcard-name" title={w.title || w.label}>{w.title || w.label}</span>
-                    {w.pane && state !== 'closed' && open(w.pane)}
+                    {w.pane && open(w.pane)}
                   </div>
                   <div className="rv-wcard-meta">
                     {state && <span className="rv-wcard-state">{WATCH_WORD[state]}</span>}

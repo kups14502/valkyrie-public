@@ -13,7 +13,7 @@ import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
-import { closeWatch, fillJob, getWatch, jobOf, listEnded, listWatches, removeWatch, startWatch, typedMark, watchKey, type EndedWatch, type Watch } from './watch.js'
+import { fillJob, getWatch, jobOf, listWatches, removeWatch, startWatch, typedMark, watchKey, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
@@ -381,7 +381,7 @@ const boardAt = (rows: BoardRow[] | null, sessionId: string): number => {
 
 /**
  * Main terminals and watched sessions for GET /api/raven, the watches with their state, last activity and current
- * job, then the ones that ended in the last two hours. Waits on thor 2.5 s at most, and not at all for a minute after it failed.
+ * job. A closed session is not listed: Watching shows the working and idle ones only. Waits on thor 2.5 s at most, and not at all for a minute after it failed.
  */
 export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: RavenWatch[] }> {
   const { mains, panes } = await mainsNow(2_500)
@@ -390,11 +390,11 @@ export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: R
   const mainState = new Map(mains.filter((m) => m.pane).map((m) => [m.pane!, m.state]))
   const mainPanes = new Set(Object.values(mainsMap()).map((r) => r.pane))
   // the job when there is one; a main terminal's or a thor window's label names no job, so Claude's title stands in
-  const titleOf = (w: Watch | EndedWatch): string | undefined => {
+  const titleOf = (w: Watch): string | undefined => {
     const t = w.job || (w.pane && !mainPanes.has(w.pane) ? '' : titleFor(titles, w.sessionId, w.label))
     return t && t.toLowerCase() !== w.label.trim().toLowerCase() ? t : undefined
   }
-  const card = (w: Watch | EndedWatch, state: WatchState | null, at: number): RavenWatch => {
+  const card = (w: Watch, state: WatchState | null, at: number): RavenWatch => {
     const title = titleOf(w)
     return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}), state, lastAt: new Date(at).toISOString() }
   }
@@ -411,9 +411,7 @@ export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: R
     const at = Math.max(w.lastSeenAt || 0, boardAt(rows, w.sessionId)) || Date.parse(w.lastActivityAt)
     return card(w, state, at)
   }))
-  const keys = new Set(live.map((w) => w.key))
-  const ended = listEnded().filter((e) => !keys.has(e.key)).map((e) => card(e, 'closed', Date.parse(e.endedAt)))
-  return { mains, watching: [...watching, ...ended] }
+  return { mains, watching: watching.filter((w) => w.state !== 'closed') }
 }
 
 /** Conversation id to its title, from thor's board as last read (never waits); empty when thor has not answered lately. */
@@ -678,9 +676,9 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
     if (r.kind === 'main') return `${r.target.label} has no main terminal open.`
     const p = r.pane
-    // stopped on purpose: no "ended" line for it; its Watching card shows it closed, whichever way it was watched
-    closeWatch(p.name)
-    if (p.sessionId) closeWatch(watchKey('', p.sessionId))
+    // stopped on purpose: no "ended" line for it; it leaves Watching, whichever way it was watched
+    removeWatch(p.name)
+    if (p.sessionId) removeWatch(watchKey('', p.sessionId))
     const killed = await io.killPane(p.name)
     // a project run in that pane never reports now, as when the page stops it (routes/terminal.ts)
     if (killed) {

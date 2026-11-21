@@ -22,13 +22,10 @@ import { clip } from './util.js'
 // so a main terminal on its fifth job still wore its first one. The job is the
 // name Raven gave it when it typed the work in, or else the newest prompt of
 // four words or more; a short reply ("yes, do it") keeps the job it answers.
-// A watch whose pane ends stays on the card as closed for two hours
-// (raven:watches-ended), then goes.
+// A watch whose pane ends leaves the Watching card at once: the card shows
+// only sessions that are working or idle.
 
 const KEY = 'raven:watches'
-const ENDED_KEY = 'raven:watches-ended'
-export const ENDED_KEEP_MS = 2 * 3_600_000
-const ENDED_MAX = 12
 const JOB_MAX = 120
 export const TICK_MS = 8_000
 export const QUIET_MS = 12_000
@@ -65,9 +62,6 @@ export type Watch = {
   /** the start of the line Raven last typed, until the transcript shows it: Raven's own prompt keeps Raven's name for the job */
   typed?: string
 }
-
-/** A watch that ended (its pane closed), kept for the card a while. */
-export type EndedWatch = Pick<Watch, 'key' | 'pane' | 'label' | 'sessionId' | 'since' | 'lastSeenAt' | 'lastActivityAt'> & { job: string; endedAt: string }
 
 const meaningful = (e: TranscriptEntry) => e.kind === 'user' || e.kind === 'assistant' || e.kind === 'tool' || e.kind === 'result'
 
@@ -167,7 +161,6 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   }
   const list = listWatches().filter((y) => y.key !== key)
   list.push(next)
-  dropEnded(key)
   saveWatches(list)
   return next
 }
@@ -192,42 +185,6 @@ export async function fillJob(key: string): Promise<void> {
   if (!x || x.job !== undefined) return
   x.job = job
   saveWatches(list, Boolean(job))
-}
-
-// ------------------------------------------------------------- ended ----
-
-export function listEnded(now = io.now()): EndedWatch[] {
-  try {
-    const v = JSON.parse(getKv(ENDED_KEY) ?? '[]') as EndedWatch[]
-    return Array.isArray(v) ? v.filter((e) => e && typeof e.key === 'string' && now - Date.parse(e.endedAt) <= ENDED_KEEP_MS) : []
-  } catch {
-    return []
-  }
-}
-
-function noteEnded(w: Watch, now: number): void {
-  const e: EndedWatch = {
-    key: w.key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, lastSeenAt: w.lastSeenAt,
-    lastActivityAt: w.lastActivityAt, job: w.job ?? '', endedAt: new Date(now).toISOString(),
-  }
-  setKv(ENDED_KEY, JSON.stringify([...listEnded(now).filter((x) => x.key !== w.key), e].slice(-ENDED_MAX)))
-}
-
-/** Watched again, or turned off on purpose: off the card. */
-export function dropEnded(key: string): void {
-  const list = listEnded()
-  if (list.some((e) => e.key === key)) {
-    setKv(ENDED_KEY, JSON.stringify(list.filter((e) => e.key !== key)))
-    bump()
-  }
-}
-
-/** A watched session closed on purpose (session_stop): its card shows it closed, with no "ended" line in the DM. */
-export function closeWatch(key: string): boolean {
-  const w = getWatch(key)
-  if (!w) return false
-  noteEnded(w, io.now())
-  return removeWatch(key)
 }
 
 export function removeWatch(key: string): boolean {
@@ -316,7 +273,6 @@ async function tickOne(w: Watch, now: number): Promise<boolean> {
       if (!stillWatched(w)) return false
       if (unrelayed) relay(w, answerOf(w))
       ravenPost(`${w.label} ended`, { meta: { relay: { kind: 'session', from: w.pane, label: w.label, sessionId: w.sessionId || undefined } } })
-      noteEnded(w, now)
       return false
     }
   }

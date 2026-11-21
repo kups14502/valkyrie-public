@@ -794,7 +794,7 @@ agents.syncRoster()
     check('session_stop: Raven closes its own session_start pane without Brendon', !r.isError && killed.includes(startPane) && r.json.markedDone === true && acted > actedBefore, r)
     check('session_stop: its own pane is marked done on the Desk and leaves the Watching list', doneMarks.includes(startSid) && !watch.getWatch(startPane) && !watch.listWatches().some((w) => w.sessionId === startSid), { doneMarks, w: watch.listWatches() })
     const card = (await tools.ravenSessionsState()).watching.find((w: { sessionId?: string }) => w.sessionId === startSid) as { state?: string } | undefined
-    check('session_stop: its Watching card shows it closed', card?.state === 'closed', card)
+    check('session_stop: it leaves the Watching card at once', !card, card)
     const k0 = killed.length
     r = await call('session_stop', { session: mainPane }, false)
     check('session_stop: his main terminal stays gated', r.isError && /Brendon's own message/.test(r.text) && killed.length === k0, r)
@@ -1133,19 +1133,18 @@ agents.syncRoster()
   watch.removeWatch(np.name)
   states.set(np.name, 'gone')
 
-  // the pane ends: the card stays, closed, then goes after two hours; watched again, it is off the ended list
+  // the pane ends: its card goes at once; watched again, it is back
   states.set(p.name, 'dead')
-  await tick(8_000)
   c = await card(p.name)
-  check('card: an ended pane stays, closed, with its job', !watch.getWatch(p.name) && c?.state === 'closed' && c.title === 'Now check the disk usage on the backup volume' && Date.parse(c.lastAt) === clock, c)
+  check('card: a dead pane still watched is not listed', !!watch.getWatch(p.name) && !c, c)
+  await tick(8_000)
+  check('card: an ended pane leaves Watching at once', !watch.getWatch(p.name) && !(await card(p.name)))
   states.set(p.name, 'live')
   await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid })
-  check('card: watched again, off the ended list', !watch.listEnded().some((e) => e.key === p.name) && (await card(p.name))?.state === 'idle', watch.listEnded())
+  check('card: watched again, back on the card', (await card(p.name))?.state === 'idle')
   states.set(p.name, 'dead')
   await tick(8_000)
-  check('card: ended again', (await card(p.name))?.state === 'closed')
-  await tick(watch.ENDED_KEEP_MS + 1_000)
-  check('card: gone two hours after it closed', !(await card(p.name)) && !watch.listEnded().some((e) => e.key === p.name), watch.listEnded())
+  check('card: ended again, gone again', !(await card(p.name)))
 
   // a window on thor: its newest prompt names it (Claude's title is the first job's), state and time from the board
   const bsid = 'bbbbbbbb-3333-4444-8555-666666666666'
@@ -1162,7 +1161,7 @@ agents.syncRoster()
   check('card: idle from the board', (await card(`sid:${bsid}`))?.state === 'idle')
   row.live = false
   row.activity = 'closed'
-  check('card: closed when the board says so', (await card(`sid:${bsid}`))?.state === 'closed')
+  check('card: closed on the board, off the card', !(await card(`sid:${bsid}`)))
   delete (fakeIo as any).boardCached
   ioMod.setRavenToolsIo(fakeIo)
   check('card: no board copy, no state', (await card(`sid:${bsid}`))?.state === null)

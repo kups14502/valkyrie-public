@@ -30,6 +30,8 @@
 //            newest first, stops at a full pane list, and sits on the empty Desk too (the phone)
 //   touch    a tap on the focused tab opens its menu (no Open beside), 44 px rows, a press outside closes it
 //   phone    one strip that scrolls sideways, the focused tab kept in view
+//   raven    the panes Raven started are no tab and no pane until he picks one from the Raven chip's
+//            card; then a focused tab, and its x minimizes it into Raven again (still running)
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
@@ -1201,6 +1203,67 @@ function phoneTests() {
   }]
 }
 
+// ---------- Raven's sessions: minimized in Raven until he opens one ----------
+
+const RV = { a: 'vk-e2e00000c1', b: 'vk-e2e00000c2' }
+
+function ravenTests() {
+  return [{
+    name: 'desk:raven:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 150_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      const now = Date.now()
+      const rp = (name, title, age) => ({ ...st.panes[1], name, sessionId: '', title, createdAt: now - age, state: 'idle', startedBy: 'raven' })
+      st.panes = [...st.panes, rp(RV.a, 'Raven job one', 200_000), rp(RV.b, 'Raven job two', 100_000)]
+      await page.goto('/m/desk')
+      await deskUp(page)
+      const snap = () => page.eval(() => {
+        const root = document.querySelector('.vl-page[data-active] .dk')
+        return {
+          tabs: [...root.querySelectorAll('.dk-tab')].map((x) => x.getAttribute('data-name')),
+          frames: [...root.querySelectorAll('.dk-frame')].map((x) => x.getAttribute('data-name')),
+          chip: root.querySelector('.dk-rchip .dk-rchip-n')?.textContent ?? null,
+          card: [...root.querySelectorAll('.dk-raven .dk-rrow')].map((x) => x.querySelector('.rv-crow-name')?.textContent ?? ''),
+        }
+      })
+      await t.step('Raven\'s sessions are no tab and no pane: the folded Raven chip counts them', async () => {
+        await sleep(1500)
+        const d = await snap()
+        t.check(d.tabs.length === N && !d.tabs.some((n) => n === RV.a || n === RV.b), `the strip holds ${JSON.stringify(d.tabs)}`)
+        t.check(!d.frames.includes(RV.a) && !d.frames.includes(RV.b), `a Raven pane is mounted: ${JSON.stringify(d.frames)}`)
+        t.check(d.chip === '2' && !d.card.length, `the chip reads ${d.chip} and the card shows ${JSON.stringify(d.card)} (want 2, folded)`)
+      })
+      await t.step('the chip opens Raven\'s list; a pick puts that one on the Desk as a focused tab', async () => {
+        await tap(page, '.vl-page[data-active] .dk-rchip')
+        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-raven .dk-rrow').length === 2, 'the Raven card did not list both')
+        const d = await snap()
+        t.check(d.card.join('|') === 'Raven job two|Raven job one', `the card lists ${JSON.stringify(d.card)}, newest first`)
+        await tap(page, { sel: '.vl-page[data-active] .dk-raven .dk-rrow', text: /Raven job one/ })
+        await until(page, (n) => !!document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"][data-focus]`), 'the picked Raven session is not a focused tab', [RV.a])
+        await inView(page, [RV.a])
+        const e = await snap()
+        t.check(!e.tabs.includes(RV.b), 'the other Raven session came onto the Desk too')
+        await t.shot(page, 'raven-open')
+      })
+      await t.step('its x minimizes it into Raven again: no tab, still in the card, still running, not under Off the Desk', async () => {
+        await tap(page, `.vl-page[data-active] .dk-tab[data-name="${RV.a}"] .dk-tab-x`)
+        await until(page, (n) => !document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`), 'the Raven tab stayed on the Desk', [RV.a])
+        const d = await snap()
+        t.check(d.card.length === 2 && !st.kills.length, `after the x: card ${JSON.stringify(d.card)}, kills ${st.kills.join(',')}`)
+        await tap(page, '.vl-page[data-active] .dk-add')
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-pick'), '"+" did not open the new session sheet')
+        const rows = await page.eval(() => [...document.querySelectorAll('.dk-pick .dk-row .dk-row-t')].map((e) => e.textContent))
+        t.check(!rows.some((r) => /Raven job/.test(r)), `Off the Desk lists a Raven session: ${JSON.stringify(rows)}`)
+      })
+    },
+  }]
+}
+
 export function deskTests() {
-  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests()]
+  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests(), ...ravenTests()]
 }
