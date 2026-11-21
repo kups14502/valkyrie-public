@@ -13,7 +13,7 @@ import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
-import { fillJob, getWatch, jobOf, listWatches, removeWatch, startWatch, typedMark, watchKey, type Watch } from './watch.js'
+import { getWatch, listWatches, removeWatch, startWatch, watchKey, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
@@ -46,11 +46,11 @@ const TARGETS_TTL_MS = 10 * 60_000
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
 export type WatchState = 'working' | 'idle' | 'closed'
 /**
- * A watched session for the Watching card: `label` is the pane's (often the main target's name), `title` the job it is
- * on now when that says more than the label. `state` is null when thor's board is not answering for a window on thor;
+ * A watched session for the Watching card: `label` is the pane's (often the main target's name), `title` the job's name
+ * from Raven's label when that says more than the pane label, `status` the first sentence of its newest answer when short. `state` is null when thor's board is not answering for a window on thor;
  * `lastAt` is its last activity (its newest transcript line, or when it closed).
  */
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; state: WatchState | null; lastAt: string }
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; status?: string; state: WatchState | null; lastAt: string }
 
 type MainRec = { pane: string; label: string; sessionId: string; at: string }
 
@@ -276,7 +276,7 @@ async function waitForPrompt(pane: string): Promise<'ready' | 'dead' | 'timeout'
   }
 }
 
-/** A pane Brendon's message may type into now: at Claude's prompt, nothing half-typed. */
+/** A pane Raven may type into now: at Claude's prompt, nothing half-typed. */
 async function readyToType(p: TermSession): Promise<void> {
   if (p.dead) throw new RavenToolError(`${p.label} (${p.name}) has ended; start a new one`)
   if (p.mode === 'shell') throw new RavenToolError(`${p.label} (${p.name}) is a shell, not a Claude session; Raven types only into Claude`)
@@ -380,15 +380,6 @@ async function mainsNow(waitMs: number): Promise<{ known: boolean; mains: RavenM
   return { known: targets !== null, mains, panes }
 }
 
-// older watches whose job is being read (watch.ts fillJob), so a poll does not start a second read
-const filling = new Set<string>()
-
-function fill(key: string): void {
-  if (filling.has(key)) return
-  filling.add(key)
-  void fillJob(key).finally(() => filling.delete(key))
-}
-
 /** A thor window's state from the board: null when there is no copy of the board, closed when it is off the list. */
 function boardState(rows: BoardRow[] | null, sessionId: string): WatchState | null {
   if (!rows) return null
@@ -409,22 +400,20 @@ const boardAt = (rows: BoardRow[] | null, sessionId: string): number => {
  */
 export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: RavenWatch[] }> {
   const { mains, panes } = await mainsNow(2_500)
-  const titles = sessionTitles()
   const rows = io.boardCached()
   const mainState = new Map(mains.filter((m) => m.pane).map((m) => [m.pane!, m.state]))
-  const mainPanes = new Set(Object.values(mainsMap()).map((r) => r.pane))
-  // the job when there is one; a main terminal's or a thor window's label names no job, so Claude's title stands in
+  // Raven's label for the job, never a prompt, an answer or Claude's own title (watch.ts)
   const titleOf = (w: Watch): string | undefined => {
-    const t = w.job || (w.pane && !mainPanes.has(w.pane) ? '' : titleFor(titles, w.sessionId, w.label))
+    const t = w.title ?? ''
     return t && t.toLowerCase() !== w.label.trim().toLowerCase() ? t : undefined
   }
   const card = (w: Watch, state: WatchState | null, at: number): RavenWatch => {
     const title = titleOf(w)
-    return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}), state, lastAt: new Date(at).toISOString() }
+    const status = w.status ?? ''
+    return { pane: w.pane, label: w.label, sessionId: w.sessionId, since: w.since, ...(title ? { title } : {}), ...(status ? { status } : {}), state, lastAt: new Date(at).toISOString() }
   }
   const live = listWatches()
   const watching = await Promise.all(live.map(async (w): Promise<RavenWatch> => {
-    if (w.job === undefined && (!w.pane || mainPanes.has(w.pane))) fill(w.key)
     let state: WatchState | null
     if (!w.pane) state = boardState(rows, w.sessionId)
     else {
@@ -471,7 +460,7 @@ export async function sessionsSnapshot(): Promise<string> {
   if (all.length) {
     lines.push('Watched sessions (their answers are relayed into this DM):')
     for (const w of all) {
-      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: ${w.job ? `on "${clip(w.job, 100)}", ` : ''}since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}`)
+      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: ${w.title ? `on "${clip(w.title, 100)}", ` : ''}since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}`)
     }
   } else {
     lines.push('Watched sessions: none.')
@@ -543,9 +532,8 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (!list && !TARGET_RE.test(key)) throw new RavenToolError('target must be a launch-target key')
     if (t && !t.exists) throw new RavenToolError(`the folder for "${key}" does not exist on thor`)
     const watch = a.watch !== false || Boolean(a.followUp)
-    // the job's name on the Watching card: Raven's label, else the prompt itself
-    const job = (a.label ? oneLine(a.label).slice(0, 60) : '') || jobOf(text) || undefined
-    const typed = typedMark(text)
+    // the job's name on the Watching card: Raven's label only, never the prompt
+    const title = a.label ? oneLine(a.label).slice(0, 60) : undefined
     if (a.main) {
       if (t && !isMainTarget(t)) throw new RavenToolError(`"${key}" is not one of the main terminals`)
       const rec = mainsMap()[key]
@@ -553,7 +541,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       if (live) {
         notRunning(launch, `${live.label}, the main terminal,`)
         await readyToType(live)
-        if (watch) await startWatch({ pane: live.name, label: live.label, sessionId: live.sessionId, followUp: a.followUp, job, typed })
+        if (watch) await startWatch({ pane: live.name, label: live.label, sessionId: live.sessionId, followUp: a.followUp, title })
         noteRavenTouched(live.sessionId)
         await typeInto(live.name, live.label, text)
         ctx.acted()
@@ -561,7 +549,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       }
       const opened = await openMain({ key, label: t?.label ?? key }, launch)
       ctx.acted()
-      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, job, typed })
+      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, title })
       await promptOrThrow(opened.pane, opened.label)
       noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, text)
@@ -572,7 +560,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     noteRavenStarted(sessionId, io.now())
     const pane = await newPane({ mode: 'new', host: 'thor', target: key, newId: sessionId, label, cols: 120, rows: 40, ...launch })
     ctx.acted()
-    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true, job, typed })
+    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true, title })
     await promptOrThrow(pane, label)
     noteRavenTouched(sessionId)
     await typeInto(pane, label, text)
@@ -585,14 +573,16 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       + 'there goes after the text (thor takes pictures, videos and documents). Its answer is relayed here unless watch is false; followUp is what you do with '
       + 'the next answer. label names the job on Brendon\'s Watching card: give one whenever the message starts new work, leave it out for a follow-up '
       + 'in the same job. Refused while a question or permission prompt is open in it, or while Brendon has text typed there. '
-      + 'model and effort (as in session_start) apply only when this starts the main terminal; refused for a session already running. Only when Brendon\'s message asks.',
+      + 'model and effort (as in session_start) apply only when this starts the main terminal; refused for a session already running. '
+      + 'You may send on your own, in any run (a relay too): pass one session\'s result or hand-off to the session that needs it.',
     inputSchema: {
       session: z.string().max(120), text: z.string().min(1).max(TEXT_MAX), files: z.array(z.string().max(80)).max(8).optional(),
       watch: z.boolean().optional(), followUp: z.string().max(1000).optional(), label: z.string().max(60).optional(),
       model: z.string().max(80).optional(), effort: z.enum(CLAUDE_EFFORTS).optional(),
     },
   }, (a) => toolRun(async () => {
-    needBrendon(ctx, 'Sending to a session')
+    // no fromBrendon gate: Raven may message any session on its own, relays included;
+    // readyToType still refuses an open question or permission prompt, and text Brendon has typed there
     const text = checkText(a.text)
     const launch = launchPick(a.model, a.effort)
     const r = await resolve(a.session, await io.listPanes(), true)
@@ -601,12 +591,12 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     const paths = a.files?.length ? await attach(a.files) : []
     const line = withFiles(text, paths)
     const watch = a.watch !== false || Boolean(a.followUp)
-    const named = a.label ? oneLine(a.label).slice(0, 60) : ''
-    const typed = typedMark(text)
+    // the job's name on the Watching card: Raven's label; a follow-up with none keeps the name it has
+    const title = a.label ? oneLine(a.label).slice(0, 60) : undefined
     if (r.kind === 'main') {
       const opened = await openMain(r.target, launch)
       ctx.acted()
-      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, job: named || jobOf(text) || undefined, typed })
+      if (watch) await startWatch({ pane: opened.pane, label: opened.label, sessionId: opened.sessionId, followUp: a.followUp, fresh: true, title })
       await promptOrThrow(opened.pane, opened.label)
       noteRavenTouched(opened.sessionId)
       await typeInto(opened.pane, opened.label, line)
@@ -614,9 +604,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     }
     const p = r.pane
     await readyToType(p)
-    // no label: a follow-up keeps the job it belongs to; a session with no job yet is named by this prompt
-    const job = named || (getWatch(p.name)?.job ? '' : jobOf(text)) || undefined
-    if (watch) await startWatch({ pane: p.name, label: p.label, sessionId: p.sessionId, followUp: a.followUp, job, typed })
+    if (watch) await startWatch({ pane: p.name, label: p.label, sessionId: p.sessionId, followUp: a.followUp, title })
     noteRavenTouched(p.sessionId)
     await typeInto(p.name, p.label, line)
     ctx.acted()

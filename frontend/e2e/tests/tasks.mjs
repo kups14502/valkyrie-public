@@ -57,6 +57,8 @@ const keyOf = (r) => (r.kind === 'project' ? `/api/tasks/project/${r.projectId}/
 function tasksBackend(page, { down = false } = {}) {
   const st = { ...fixture(), removed: [], gets: [] }
   const find = (path) => st.tasks.find((t) => keyOf(t.ref) === path)
+  // no main terminals: every area reads by areaLabel alone (personal Thor, server Odin, work Work)
+  page.mock('/api/hosts/thor/launch-targets', () => ok({ targets: [] }))
   page.mock('/api/tasks', ({ query }) => {
     st.gets.push({ ...query })
     if (down) return { status: 503, body: { error: 'down' } }
@@ -159,16 +161,16 @@ export function tasksTests() {
         const hot = await page.eval(() => getComputedStyle(document.querySelector('.tk-group[data-group="overdue"] .tk-ghead')).color === getComputedStyle(document.documentElement).getPropertyValue('--hot').trim() || !!document.querySelector('.tk-group[data-group="overdue"]'))
         t.check(hot, 'no Overdue group')
         const from = await page.eval(() => [...document.querySelectorAll('.tk-row .tk-from')].map((e) => e.textContent))
-        t.check(from[0] === 'Project one' && from[2] === 'personal' && from[5] === 'server', `rows name ${JSON.stringify(from)}`)
+        t.check(from[0] === 'Project one' && from[2] === 'Thor' && from[5] === 'Odin', `rows name ${JSON.stringify(from)}`)
         const chips = await page.eval(() => [...document.querySelectorAll('.tk-chip')].map((c) => c.textContent))
-        t.check(JSON.stringify(chips) === JSON.stringify(['All', 'personal4', 'server1', 'work1']), `area chips read ${JSON.stringify(chips)}`)
+        t.check(JSON.stringify(chips) === JSON.stringify(['All', 'Thor4', 'Odin1', 'Work1']), `area chips read ${JSON.stringify(chips)}`)
         t.check(await page.eval(() => document.querySelector('.tk-tab[data-on] .tk-tab-n')?.textContent === '6'), 'the Open tab does not count 6')
         const txt = await page.eval(() => document.querySelector('.tk')?.innerText ?? '')
         t.check(!/—/.test(txt), 'an em dash on the Tasks page')
         await fits(t, page, `${ROUTE} @${device}`)
         await t.shot(page, 'list')
         // an area chip narrows the list
-        await page.tap({ sel: '.tk-chip', text: /^work/ })
+        await page.tap({ sel: '.tk-chip', text: /^Work/ })
         await rowsUp(page, 1)
         t.check((await page.path()).includes('area=work'), 'the area filter is not in the URL')
       },
@@ -246,7 +248,7 @@ export function tasksTests() {
       await page.type('Order more labels')
       await page.waitFor(() => !!document.querySelector('.tk-add-opts select'), { message: 'the add options did not show with text' })
       const opts = await page.eval(() => [...document.querySelectorAll('.tk-pick optgroup')].map((g) => `${g.label}:${[...g.querySelectorAll('option')].map((o) => o.value).join(',')}`))
-      t.check(JSON.stringify(opts) === JSON.stringify(['personal:a:personal,p:proj-one', 'server:a:server', 'work:a:work,p:proj-two']), `the picker reads ${JSON.stringify(opts)}`)
+      t.check(JSON.stringify(opts) === JSON.stringify(['Thor:a:personal,p:proj-one', 'Odin:a:server', 'Work:a:work,p:proj-two']), `the picker reads ${JSON.stringify(opts)}`)
       t.check(await setField(page, '.tk-pick', 'p:proj-two'), 'no picker')
       t.check(await setField(page, '.tk-add-date', plus(today(), 1)), 'no date field')
       await page.key('Enter')

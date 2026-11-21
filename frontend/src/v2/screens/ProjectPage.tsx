@@ -9,7 +9,7 @@ import { ago, useLaunchTargets, useTick } from '../kit/data'
 import { apiErrorText, fetchSessionList, openTermSession } from '../../lib/api'
 import { copyText } from '../../lib/clipboard'
 import {
-  BASE_AREAS, LIMITS, MIXABLE_AREAS, PROJ_KEYS, addProjReminder, addProjTab, archiveProj, cancelProjReminder, createProj,
+  areaLabel, BASE_AREAS, LIMITS, MIXABLE_AREAS, PROJ_KEYS, addProjReminder, addProjTab, archiveProj, cancelProjReminder, createProj,
   fetchProjDoc, isClientArea, linkProjSession, projAreasQuery, projTabItem, updateProj,
   type Exposure, type LinkItem, type ProjectPatch, type ProjStatus,
 } from '../../lib/projectsApi'
@@ -42,7 +42,8 @@ type Vars = CSSProperties & Record<`--${string}`, string | number>
 const iv = (i: number): Vars => ({ '--i': i })
 
 const errText = (e: unknown) => apiErrorText(e, (e as Error | null)?.message || 'no reply')
-const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
+/** personal reads Thor, server Odin (lib/projectsApi areaLabel) */
+const areaName = (a: string) => areaLabel(a)
 const finePointer = () => typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches
 
 /** The phone terminal's first-frame grid; the page fits the real one once it connects. */

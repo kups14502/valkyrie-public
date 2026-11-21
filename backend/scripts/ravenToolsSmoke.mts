@@ -343,7 +343,7 @@ ioMod.setRavenToolsIo(fakeIo)
 {
   const gated: [string, Record<string, unknown>][] = [
     ['agents_pause', { paused: true }], ['agent_check', { agent: 'east-triage' }],
-    ['session_start', { target: 'work', prompt: 'hi' }], ['session_send', { session: 'personal', text: 'hi' }],
+    ['session_start', { target: 'work', prompt: 'hi' }],
     ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }], ['session_done', { session: 'personal' }],
     ['media_request', { kind: 'movie', title: 'Heat 2', tmdbId: 5000 }], ['vault_note', { title: 'x', text: 'y' }],
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
@@ -633,6 +633,18 @@ agents.syncRoster()
   r = await call('session_send', { session: 'nothing like it', text: 'hello' })
   check('session_send: no match', r.isError && /no session matches/.test(r.text), r)
 
+  // a run Brendon did not start (a session's answer woke Raven) sends too; the same refusals guard his pane
+  screensBy.set(mainPane, [TYPED])
+  r = await call('session_send', { session: mainPane, text: 'The branch is ready for the release.' }, false)
+  check('session_send: without Brendon, still refused while he is typing there', r.isError && /typing there/.test(r.text) && typed.length === 2, r)
+  screensBy.set(mainPane, [DIALOG])
+  r = await call('session_send', { session: mainPane, text: 'The branch is ready for the release.' }, false)
+  check('session_send: without Brendon, still refused at a dialog', r.isError && /not at Claude's prompt/.test(r.text) && typed.length === 2, r)
+  screensBy.set(mainPane, [IDLE])
+  const actedRelay = acted
+  r = await call('session_send', { session: mainPane, text: 'The branch is ready for the release.' }, false)
+  check('session_send: a relay run sends without Brendon', !r.isError && typed.length === 3 && typed[2].pane === mainPane && typed[2].text === 'The branch is ready for the release.' && acted > actedRelay, { r, typed })
+
   // attachments: copied to thor, the path after the text
   r = await call('session_send', { session: mainPane, text: 'What is in this photo?', files: ['f1'] })
   check('session_send: attachment copied to thor', !r.isError && uploads.length === 1 && uploads[0].name === 'photo.jpg', { r, uploads })
@@ -742,12 +754,12 @@ agents.syncRoster()
   const st = await tools.ravenSessionsState()
   check('ravenSessionsState: mains and watches', st.mains.length === 2 && st.mains[0].pane === mainPane && st.watching.some((w) => w.pane === mainPane), st)
   const mainWatch = st.watching.find((w) => w.pane === mainPane)
-  check('ravenSessionsState: a main terminal is titled by the job Raven typed in, idle, no board copy needed',
-    !!mainWatch?.sessionId && mainWatch.title === 'Check the backups. Then tell me what failed.' && mainWatch.state === 'idle' && Number.isFinite(Date.parse(mainWatch.lastAt)), mainWatch)
+  check('ravenSessionsState: a main terminal sent to with no label keeps its own label, idle, no board copy needed',
+    !!mainWatch?.sessionId && mainWatch.title === undefined && mainWatch.label === 'Personal' && mainWatch.state === 'idle' && Number.isFinite(Date.parse(mainWatch.lastAt)), mainWatch)
   ;(fakeIo as any).boardCached = () => [{ sessionId: mainWatch?.sessionId, title: 'Printer migration plan' }, { sessionId: 'other', title: 'Other' }]
   ioMod.setRavenToolsIo(fakeIo)
   const titled = (await tools.ravenSessionsState()).watching.find((w) => w.pane === mainPane)
-  check('ravenSessionsState: the job wins over Claude\'s first title, its label kept', titled?.title === 'Check the backups. Then tell me what failed.' && titled.label === mainWatch?.label, titled)
+  check('ravenSessionsState: Claude\'s own title never names the card', titled?.title === undefined && titled?.label === mainWatch?.label, titled)
   const relayTitle = tools.ravenRelayTitles()
   check('relay titles: the title when it says more than the label, never the label again',
     relayTitle(mainWatch?.sessionId, 'Personal') === 'Printer migration plan' && relayTitle(mainWatch?.sessionId, 'printer migration plan') === undefined
@@ -1103,24 +1115,24 @@ agents.syncRoster()
 {
   const tick = async (ms = 0) => { clock += ms; await watch.tickWatches() }
   const card = async (key: string) => (await tools.ravenSessionsState()).watching.find((w) => (w.pane || `sid:${w.sessionId}`) === key)
-  const jobNow = (key: string) => watch.getWatch(key)?.job
-  check('jobOf: the "Brendon asks:" lead and the line breaks go', watch.jobOf("Brendon's request: download this video\nand save it") === 'Download this video and save it', watch.jobOf("Brendon's request: download this video\nand save it"))
-  check('jobOf: a short reply, a slash command and a shell line name no job',
-    watch.jobOf('yes, do it') === '' && watch.jobOf('/model opus for this one') === '' && watch.jobOf('! ls -la /tmp now') === '')
+  const titleNow = (key: string) => watch.getWatch(key)?.title
+  check('statusOf: the first sentence, its markdown gone', watch.statusOf('**v0.3.209 is out.** It published at 11:40 PM ET.\n\nMore.') === 'v0.3.209 is out.', watch.statusOf('**v0.3.209 is out.** It published at 11:40 PM ET.'))
+  check('statusOf: a list lead and code ticks go, a version number is no sentence end', watch.statusOf('- Built `v0.3.208` on odin. Next.') === 'Built v0.3.208 on odin.', watch.statusOf('- Built `v0.3.208` on odin. Next.'))
+  check('statusOf: a first sentence too long for one line is left out', watch.statusOf(`${'word '.repeat(40)}end.`) === '')
 
-  // a pane Raven types a job into: Raven's label, kept when its own prompt shows in the transcript
+  // a pane Raven types a job into: Raven's label names the card, and nothing in the transcript renames it
   const sid = 'aaaaaaaa-3333-4444-8555-666666666666'
   const p = pane('vk-1111111111', 'Server work', 'server', sid)
   screensBy.set(p.name, [IDLE])
   let r = await call('session_send', { session: p.name, text: 'Brendon asks: rotate the nginx certificates on odin tonight', label: 'Rotate nginx certs' })
-  check('session_send: the label names the job', !r.isError && jobNow(p.name) === 'Rotate nginx certs', { r, w: watch.getWatch(p.name) })
-  say(p.name, sid, entry('user', 'Brendon asks: rotate the nginx certificates on odin tonight'), entry('assistant', 'On it.'))
+  check('session_send: the label names the job', !r.isError && titleNow(p.name) === 'Rotate nginx certs', { r, w: watch.getWatch(p.name) })
+  say(p.name, sid, entry('user', 'Brendon asks: rotate the nginx certificates on odin tonight'), entry('assistant', 'On it. Starting with the cert on odin.'))
   const said = clock
   await tick(1_000)
-  check('watch: Raven\'s own prompt keeps Raven\'s name for the job', jobNow(p.name) === 'Rotate nginx certs' && watch.getWatch(p.name)?.typed === '', watch.getWatch(p.name))
+  check('watch: Raven\'s own prompt keeps Raven\'s name for the job', titleNow(p.name) === 'Rotate nginx certs', watch.getWatch(p.name))
   let c = await card(p.name)
-  check('card: the job over the pane, idle, last activity its newest transcript line',
-    c?.title === 'Rotate nginx certs' && c.label === 'Server work' && c.state === 'idle' && Date.parse(c.lastAt) === said, c)
+  check('card: the label over the pane, its status line under it, idle, last activity its newest transcript line',
+    c?.title === 'Rotate nginx certs' && c.label === 'Server work' && c.status === 'On it.' && c.state === 'idle' && Date.parse(c.lastAt) === said, c)
   screensBy.set(p.name, [BUSY])
   check('card: working while the spinner shows', (await card(p.name))?.state === 'working')
   screensBy.set(p.name, [IDLE])
@@ -1146,25 +1158,29 @@ agents.syncRoster()
   check('Desk tabs: a waiting pane stays idle there', !(await paneStateMod.paneBusy({ name: p.name, dead: false, activityAt: clock, outputAt: clock }, async () => WAITING, clock)))
   screensBy.set(p.name, [IDLE])
 
-  // he types a new job into the pane himself: the card follows it; a short reply does not
+  // prompts and answers never rename it: his own prompt, a Raven follow-up, an answer that reads like a headline
   say(p.name, sid, entry('user', 'now check the disk usage on the backup volume'))
   await tick(1_000)
-  check('watch: a prompt he typed names the new job', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
-  say(p.name, sid, entry('user', 'yes do it'))
+  check('watch: a prompt he typed does not rename the card, and clears the old status', titleNow(p.name) === 'Rotate nginx certs' && !(await card(p.name))?.status, watch.getWatch(p.name))
+  say(p.name, sid, entry('assistant', `"hor" was a typo for "thor", the PC where his sessions run, so I read it as thor and ${'went on with the job '.repeat(6)}.`))
   await tick(1_000)
-  check('watch: a short reply keeps the job', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
-  // a follow-up from Raven with no label keeps the job, in the tool and in the transcript
+  c = await card(p.name)
+  check('card: an answer never names it, and a long first sentence shows no status', c?.title === 'Rotate nginx certs' && c.status === undefined, c)
+  say(p.name, sid, entry('assistant', 'v0.3.208 published at 11:16 PM ET. Odin is free.'))
+  await tick(1_000)
+  c = await card(p.name)
+  check('card: a release headline is a status line, never the title', c?.title === 'Rotate nginx certs' && c.status === 'v0.3.208 published at 11:16 PM ET.', c)
   r = await call('session_send', { session: p.name, text: 'Brendon approved: go ahead and delete the old snapshots' })
-  check('session_send: a follow-up with no label keeps the job', !r.isError && jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
-  say(p.name, sid, entry('user', 'Brendon approved: go ahead and delete the old snapshots'))
-  await tick(1_000)
-  check('watch: and its prompt in the transcript keeps it too', jobNow(p.name) === 'Now check the disk usage on the backup volume', jobNow(p.name))
-  // a session with no job yet is named by the prompt Raven types
+  check('session_send: a follow-up with no label keeps the name', !r.isError && titleNow(p.name) === 'Rotate nginx certs', titleNow(p.name))
+  r = await call('session_send', { session: p.name, text: 'Brendon asks: now recover the sessions list on the Desk', label: 'Desk: recover sessions list' })
+  check('session_send: a new label renames it', !r.isError && (await card(p.name))?.title === 'Desk: recover sessions list', titleNow(p.name))
+  // a session with no label: its pane label, never the prompt Raven types
   const nsid = 'cccccccc-3333-4444-8555-666666666666'
   const np = pane('vk-3333333333', 'Nameless', 'server', nsid)
   screensBy.set(np.name, [IDLE])
   r = await call('session_send', { session: np.name, text: "Brendon's request: list the failed cron jobs from last night" })
-  check('session_send: no label and no job yet, the prompt names it', !r.isError && jobNow(np.name) === 'List the failed cron jobs from last night', jobNow(np.name))
+  const nc = await card(np.name)
+  check('session_send: no label, the card shows the pane label', !r.isError && !titleNow(np.name) && nc?.title === undefined && nc?.label === 'Nameless', { w: watch.getWatch(np.name), nc })
   watch.removeWatch(np.name)
   states.set(np.name, 'gone')
 
@@ -1181,7 +1197,7 @@ agents.syncRoster()
   await tick(8_000)
   check('card: ended again, gone again', !(await card(p.name)))
 
-  // a window on thor: its newest prompt names it (Claude's title is the first job's), state and time from the board
+  // a window on thor: its label (the board title it was watched by) names it, never its prompts; state and time from the board
   const bsid = 'bbbbbbbb-3333-4444-8555-666666666666'
   const row: Record<string, unknown> = { sessionId: bsid, title: 'Quarterly cleanup plan', area: 'work', live: true, activity: 'working', lastActivityUtc: new Date(clock + 5_000).toISOString() }
   board.push(row)
@@ -1190,8 +1206,8 @@ agents.syncRoster()
   say(`sid:${bsid}`, bsid, entry('user', 'plan the quarterly cleanup for the shares'), entry('assistant', 'Planned.'), entry('user', 'now draft the email to the client about it'))
   await watch.startWatch({ pane: '', label: 'Quarterly cleanup plan', sessionId: bsid })
   c = await card(`sid:${bsid}`)
-  check('card: a window on thor, by its newest prompt, working and its time from the board',
-    c?.title === 'Now draft the email to the client about it' && c.state === 'working' && c.lastAt === row.lastActivityUtc, c)
+  check('card: a window on thor, by its label, working and its time from the board',
+    c?.title === undefined && c?.label === 'Quarterly cleanup plan' && c.state === 'working' && c.lastAt === row.lastActivityUtc, c)
   row.activity = 'idle'
   check('card: idle from the board', (await card(`sid:${bsid}`))?.state === 'idle')
   row.live = false
@@ -1201,23 +1217,17 @@ agents.syncRoster()
   ioMod.setRavenToolsIo(fakeIo)
   check('card: no board copy, no state', (await card(`sid:${bsid}`))?.state === null)
 
-  // a watch from before jobs were kept: a window on thor reads its job once; a pane Raven started keeps its label
+  // a watch saved before this change: its old prompt-made job is never shown
   const raw = JSON.parse(store.getKv('raven:watches') ?? '[]') as Record<string, unknown>[]
-  for (const w of raw) delete w.job
+  for (const w of raw) if (w.key === `sid:${bsid}`) w.job = 'Now draft the email to the client about it'
   store.setKv('raven:watches', JSON.stringify(raw))
-  const osid = 'dddddddd-3333-4444-8555-666666666666'
-  const op = pane('vk-4444444444', 'Raven named this', 'server', osid)
-  screensBy.set(op.name, [IDLE])
-  say(op.name, osid, entry('user', 'some much older prompt about printers'))
-  const raw2 = JSON.parse(store.getKv('raven:watches') ?? '[]') as Record<string, unknown>[]
-  raw2.push({ key: op.name, pane: op.name, label: op.label, sessionId: osid, since: new Date(clock).toISOString(), lastActivityAt: new Date(clock).toISOString(),
-    cursor: '1', baselined: true, lastNewAt: clock, lastSeenAt: 0, tail: [], lastRelayedId: '', followUp: '' })
-  store.setKv('raven:watches', JSON.stringify(raw2))
-  check('fillJob: the older watches have no job', jobNow(`sid:${bsid}`) === undefined && jobNow(op.name) === undefined, watch.listWatches())
-  const first = await card(op.name)
-  await new Promise((res) => setTimeout(res, 50))
-  check('fillJob: a window on thor gets its job from its newest prompt', jobNow(`sid:${bsid}`) === 'Now draft the email to the client about it', watch.getWatch(`sid:${bsid}`))
-  check('fillJob: a pane Raven started is not read, its label stands', jobNow(op.name) === undefined && first?.title === undefined && first?.label === 'Raven named this', { w: watch.getWatch(op.name), first })
+  ;(fakeIo as any).boardCached = () => board
+  ioMod.setRavenToolsIo(fakeIo)
+  row.live = true
+  row.activity = 'idle'
+  c = await card(`sid:${bsid}`)
+  check('card: an older watch\'s prompt-made job is not its title', c?.title === undefined && c?.label === 'Quarterly cleanup plan', c)
+  const op = { name: 'vk-4444444444' }
 
   for (const w of watch.listWatches()) watch.removeWatch(w.key)
   board.pop()

@@ -11,7 +11,7 @@ import { Bar, Press, Segmented, cx, toast } from '../kit/ui'
 import { Icon, StateIcon, hostIcon, isIconName, type IconName, type IconTone } from '../kit/icons'
 import { canDetach, openDetached } from '../kit/windows'
 import {
-  ago, onAccount, resetWhen, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
+  ago, areaNamesOf, onAccount, resetWhen, useHosts, useLaunchTargets, useLive, useSessionIndex, useSessions, useSwitchStatus, useTick, useUsage,
   type Live, type ProjectVM, type SessionIndex, type SessionVM, type TargetVM,
 } from '../kit/data'
 import { animateSpring, useReducedMotion } from '../kit/motion'
@@ -21,7 +21,7 @@ import {
   stopSessionOnHost, termLabel, type LaunchTarget, type SessionHost, type TermSession,
 } from '../../lib/api'
 import {
-  BASE_AREAS, LIMITS, PROJ_KEYS, addProjReminder, addProjTab, cancelProjReminder, fetchProjDoc, fetchProjList,
+  BASE_AREAS, LIMITS, PROJ_KEYS, addProjReminder, areaLabel, addProjTab, cancelProjReminder, fetchProjDoc, fetchProjList,
   projAreasQuery, projTabItem, unlinkProjSession, updateProj, type ChecklistItem, type Exposure, type ProjectSummary,
 } from '../../lib/projectsApi'
 import { v2TermPath } from '../../lib/term'
@@ -91,34 +91,20 @@ const ODIN_SLOT = '@odin'
 // ---------- areas ----------
 
 // Area ids and their order come from the data (GET /proj-areas, display order;
-// the client areas are odin's private config), names are the id capitalized.
-const capArea = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
-
-/**
- * An area's name as his main terminals are named: thor's launch-targets.json
- * names the three main targets (the phone ones that are not projects), and an
- * area matching one by key or by name reads that name; any other area is
- * capitalized. Provided once by the AI screen, so the rows never fetch.
- */
+// the client areas are odin's private config), names from lib/projectsApi
+// areaLabel: personal reads Thor, server Odin, a client area its main
+// terminal's name (kit/data areaNamesOf), anything else the id capitalized.
+// The names map is provided once by the AI screen, so the rows never fetch.
 const AreaNames = createContext<ReadonlyMap<string, string>>(new Map())
-function areaNameMap(targets: TargetVM[] | undefined): ReadonlyMap<string, string> {
-  const m = new Map<string, string>()
-  for (const t of targets ?? []) {
-    if (!t.phone || t.project || !t.label) continue
-    m.set(t.key.toLowerCase(), t.label)
-    m.set(t.label.toLowerCase(), t.label)
-  }
-  return m
-}
 function useAreaName(): (a: string) => string {
   const names = useContext(AreaNames)
-  return useCallback((a: string) => names.get(a.toLowerCase()) ?? capArea(a), [names])
+  return useCallback((a: string) => areaLabel(a, names), [names])
 }
 const areaRank = (a: string, order: readonly string[]) => {
   const i = order.indexOf(a)
   return i < 0 ? 99 : i
 }
-/** personal work is home, server work is odin's box, client work is a project folder */
+/** personal work is home (thor), server work is odin's box, client work is a project folder */
 const areaIcon = (a: string): IconName => (a === 'personal' ? 'home' : a === 'server' ? 'odin' : 'projects')
 
 // The classic board's area order for sessions (components/SessionBoard.tsx
@@ -487,8 +473,8 @@ const areaFold = (a: string) => `area:${a || 'other'}`
 export default function Claude({ active, sub, setSub }: ScreenProps) {
   // the area names: his main terminals' own names from thor (kit/data's shared read)
   const launchTargets = useLaunchTargets()
-  const areaNames = useMemo(() => areaNameMap(launchTargets.data), [launchTargets.data])
-  const areaName = useCallback((a: string) => areaNames.get(a.toLowerCase()) ?? capArea(a), [areaNames])
+  const areaNames = useMemo(() => areaNamesOf(launchTargets.data), [launchTargets.data])
+  const areaName = useCallback((a: string) => areaLabel(a, areaNames), [areaNames])
   const sessions = useSessions()
   const index = useSessionIndex()
   const projects = useProjectRows()

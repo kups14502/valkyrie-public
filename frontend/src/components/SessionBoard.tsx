@@ -31,10 +31,11 @@ const SHOWN_BY_DEFAULT = 20
 // only has to order and name them. An area outside these three comes from the
 // host's own config and is shown by its own name, right after work.
 const AREA_ORDER = ['work', 'server', 'personal']
+// server and personal read by their machine (lib/projectsApi FIXED_AREA_NAMES), in this board's lower case
 const AREA_LABEL: Record<string, string> = {
   work: 'work',
-  server: 'server',
-  personal: 'personal',
+  server: 'odin',
+  personal: 'thor',
 }
 
 function groupByArea(rows: WorkSession[]): { area: string; rows: WorkSession[] }[] {

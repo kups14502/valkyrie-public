@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Bell, Plus } from 'lucide-react'
 import { apiErrorText, fetchSessionList, type WorkSession } from '../../lib/api'
-import { BASE_AREAS, PROJ_KEYS, fetchProjList, projAreasQuery, type ProjectSummary } from '../../lib/projectsApi'
+import { BASE_AREAS, PROJ_KEYS, areaLabel, fetchProjList, projAreasQuery, type ProjectSummary } from '../../lib/projectsApi'
 import { NewProjectSheet } from './NewProjectSheet'
 import { NewProjectAiSheet } from './NewProjectAiSheet'
 import { BTN_ACCENT, BTN_GHOST } from './Sheet'
@@ -149,7 +149,7 @@ export function ProjectList() {
           {sections.map((g) => (
             <section key={g.area}>
               <div className="mb-1 flex items-baseline gap-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
-                {g.area}
+                {areaLabel(g.area)}
                 <span className="text-[var(--color-border-strong)]">{g.rows.length}</span>
               </div>
               <div className="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]">

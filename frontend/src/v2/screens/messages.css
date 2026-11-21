@@ -363,6 +363,9 @@ html[data-motion='reduced'] .rv-dot { animation: none; }
 .rv-wcard[data-state='working'] .rv-wcard-state { color: var(--fg); }
 .rv-wcard-at { flex: none; }
 .rv-wcard-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* the session's latest status line: one line, shown only while it fits whole (Messages.tsx FitLine) */
+.rv-wcard-status { min-width: 0; padding-left: 15px; font-size: 11px; line-height: 15px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.rv-wcard-status[data-fit='no'] { height: 0; margin-top: -3px; visibility: hidden; }
 
 /* the shell turns selection off; what he reads and types here can be copied */
 .rv-msgs, .rv-conn, .rv :is(input, textarea) { -webkit-user-select: text; user-select: text; }

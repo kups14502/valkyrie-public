@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Plus, RotateCw } from 'lucide-react'
 import { apiErrorText, fetchLaunchTargets } from '../../lib/api'
 import { copyText } from '../../lib/clipboard'
-import { BASE_AREAS, LIMITS, PROJ_KEYS, createProj, projAreasQuery, type Area } from '../../lib/projectsApi'
+import { BASE_AREAS, LIMITS, PROJ_KEYS, areaLabel, createProj, projAreasQuery, type Area } from '../../lib/projectsApi'
 import { Dropdown } from '../Dropdown'
 import { BTN_ACCENT, BTN_GHOST, BTN_TEXT, FIELD, LABEL, Sheet } from './Sheet'
 
@@ -113,7 +113,7 @@ export function NewProjectSheet({ onClose }: { onClose: () => void }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <span className={LABEL}>area</span>
-            <Dropdown value={area} options={areas.map((a) => ({ value: a, label: a }))} onChange={(v) => setArea(v as Area)} />
+            <Dropdown value={area} options={areas.map((a) => ({ value: a, label: areaLabel(a) }))} onChange={(v) => setArea(v as Area)} />
           </div>
           <div>
             <span className={LABEL}>folder on thor</span>

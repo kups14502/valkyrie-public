@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Press, toast } from '../kit/ui'
 import { Icon } from '../kit/icons'
-import { useTick } from '../kit/data'
+import { useAreaLabel, useTick } from '../kit/data'
 import { apiErrorText } from '../../lib/api'
 import { addDayKey, dueLabel, dueState, nyDayKey, type DueState } from '../../lib/taskDue'
 import {
@@ -70,6 +70,7 @@ function TasksScreen() {
   })
   const all = useMemo(() => q.data?.tasks ?? [], [q.data])
   const areas = useMemo(() => q.data?.areas ?? [], [q.data])
+  const areaName = useAreaLabel()
   const projects = useMemo(() => q.data?.projects ?? [], [q.data])
 
   const setParam = (next: Record<string, string | null>) => {
@@ -159,7 +160,7 @@ function TasksScreen() {
           <Press className="tk-chip" data-on={!area || undefined} onPress={() => setParam({ area: null })}>All</Press>
           {areaChips.map((a) => (
             <Press key={a} className="tk-chip" data-on={a === area || undefined} onPress={() => setParam({ area: a === area ? null : a })}>
-              {a}
+              {areaName(a)}
               {view === 'open' && <span className="tk-chip-n">{all.filter((t) => t.area === a).length}</span>}
             </Press>
           ))}
@@ -168,7 +169,7 @@ function TasksScreen() {
 
       {status && <p className="tk-quiet">{status}</p>}
       {q.data && shown.length === 0 && (
-        <p className="tk-quiet">{view === 'done' ? 'Nothing done in the last 30 days.' : area ? `Nothing open in ${area}.` : 'Nothing to do.'}</p>
+        <p className="tk-quiet">{view === 'done' ? 'Nothing done in the last 30 days.' : area ? `Nothing open in ${areaName(area)}.` : 'Nothing to do.'}</p>
       )}
 
       {groups.map((g) => (
@@ -194,7 +195,7 @@ function TasksScreen() {
                     <Press className="tk-main" aria-expanded={open} onPress={() => setOpenKey(open ? null : k)}>
                       <span className="tk-text">{t.text}</span>
                       <span className="tk-meta">
-                        <span className="tk-from">{t.project?.name ?? t.area}</span>
+                        <span className="tk-from">{t.project?.name ?? areaName(t.area)}</span>
                         {view === 'done' && t.doneAt
                           ? <span className="tk-due">Done {NY_DONE.format(Date.parse(t.doneAt))}</span>
                           : t.due && <span className="tk-due" data-state={st}>{dueLabel(t.due, now)}</span>}
@@ -228,6 +229,7 @@ function Detail({ t, onDue, onProject, onRemove }: {
 }) {
   const day = t.due?.slice(0, 10) ?? ''
   const time = t.due && t.due.length > 10 ? t.due.slice(11, 16) : ''
+  const areaName = useAreaLabel()
   const setDay = (d: string) => onDue(d ? (time ? `${d}T${time}` : d) : null)
   // a time with no date means today
   const setTime = (hm: string) => onDue(hm ? `${day || nyDayKey(Date.now())}T${hm}` : day || null)
@@ -250,7 +252,7 @@ function Detail({ t, onDue, onProject, onRemove }: {
       <div className="tk-acts">
         {t.project && <Button kind="line" icon="projects" onPress={onProject}>Open project</Button>}
         {t.ref.kind === 'loose' && <Button kind="link" onPress={onRemove}>Remove</Button>}
-        <span className="tk-where">{t.project ? `${t.project.name}${t.list ? ` · ${t.list}` : ''}` : `No project · ${t.area}`}</span>
+        <span className="tk-where">{t.project ? `${t.project.name}${t.list ? ` · ${t.list}` : ''}` : `No project · ${areaName(t.area)}`}</span>
       </div>
     </div>
   )
@@ -265,6 +267,7 @@ function AddLine({ areas, projects, onAdded }: {
   const [draft, setDraft] = useState('')
   const [due, setDue] = useState('')
   const [dest, setDest] = useState(storedDest)
+  const areaName = useAreaLabel()
   const valid = dest.startsWith('p:') ? projects.some((p) => `p:${p.id}` === dest) : areas.some((a) => `a:${a}` === dest)
   const where = valid ? dest : 'a:personal'
   const add = useMutation({
@@ -307,8 +310,8 @@ function AddLine({ areas, projects, onAdded }: {
         <div className="tk-add-opts">
           <select className="tk-field tk-pick" value={where} aria-label="Where it goes" onChange={(e) => pick(e.target.value)}>
             {areas.map((a) => (
-              <optgroup key={a} label={a}>
-                <option value={`a:${a}`}>No project ({a})</option>
+              <optgroup key={a} label={areaName(a)}>
+                <option value={`a:${a}`}>No project ({areaName(a)})</option>
                 {projects.filter((p) => p.area === a).map((p) => <option key={p.id} value={`p:${p.id}`}>{p.name}</option>)}
               </optgroup>
             ))}

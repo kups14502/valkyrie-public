@@ -8,7 +8,7 @@ import {
 } from '../../lib/api'
 import { relIso } from '../../lib/term'
 import {
-  PROJ_KEYS, actorLabel, fetchProjDoc, fetchProjTree, undoProjEvent,
+  PROJ_KEYS, actorLabel, areaLabel, fetchProjDoc, fetchProjTree, undoProjEvent,
   type ProjectDoc, type ProjectEvent, type ProjectTabProps,
 } from '../../lib/projectsApi'
 import { ActivityTab } from './ActivityTab'
@@ -420,7 +420,7 @@ export function ProjectPage({ projectId }: { projectId: string }) {
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
           <Link to="/projects" className="transition hover:text-[var(--color-accent)]">projects</Link>
           <span>/</span>
-          <span>{p.area}</span>
+          <span>{areaLabel(p.area)}</span>
           {p.exposure === 'tailnet' && <span>· tailnet only</span>}
           {p.status !== 'active' && <span className="text-[var(--color-warning)]">· {p.status}</span>}
           <span className="ml-auto normal-case tracking-normal">

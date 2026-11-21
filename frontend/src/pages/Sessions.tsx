@@ -8,6 +8,7 @@ import {
   type WorkspaceHealth, type WorkspaceHost, type WorkspaceSession, type WorkspaceState,
 } from '../lib/api'
 import { copyText } from '../lib/clipboard'
+import { areaLabel } from '../lib/projectsApi'
 
 // The Claude session desk: every session on every host in one place. Getting
 // back into one is the whole point of the page, so the two ways of doing that
@@ -167,7 +168,7 @@ function SessionRow({
           <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-faint)]">
             {s.name && <span>[{s.name}]</span>}
             <span>[{s.project}]</span>
-            <span>[{s.area}]</span>
+            <span>[{areaLabel(s.area)}]</span>
             {s.pid != null && <span>[pid {s.pid}]</span>}
           </div>
 

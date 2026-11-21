@@ -650,7 +650,23 @@ function DeclineAll({ agentId, count, who, onDone }: { agentId?: string; count: 
 }
 
 /** What Raven reaches: his main terminals, the sessions it watches, the agents, the feeds. */
-function Connected({ page, messages, onOpen }: { page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void }) {
+/** One line of text that shows only while it fits whole: never cut off with an ellipsis, left out instead. */
+function FitLine({ className, text }: { className: string; text: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fits, setFits] = useState(true)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setFits(el.scrollWidth <= el.clientWidth + 1)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [text])
+  return <div ref={ref} className={className} data-fit={fits ? undefined : 'no'} aria-hidden={fits ? undefined : true}>{text}</div>
+}
+
+function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void }) {
   const now = useTick(60_000)
   const feeds = feedLines(messages)
   // which Decline all is asking: an agent's id, 'all', or none
@@ -693,6 +709,7 @@ function Connected({ page, messages, onOpen }: { page: RavenPage; messages: Rave
                     <span className="rv-wcard-name" title={w.title || w.label}>{w.title || w.label}</span>
                     {w.pane && open(w.pane)}
                   </div>
+                  {w.status && <FitLine className="rv-wcard-status" text={w.status} />}
                   <div className="rv-wcard-meta">
                     {state && <span className="rv-wcard-state">{WATCH_WORD[state]}</span>}
                     <span className="rv-wcard-at" title={etTime(at)}>{w.lastAt ? lastSeen(Date.parse(at), now) : `since ${etTime(at)}`}</span>

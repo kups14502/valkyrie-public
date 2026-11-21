@@ -13,7 +13,7 @@ import {
   type TermSession,
 } from '../../lib/api'
 import {
-  PROJ_KEYS, fetchProjDoc, unlinkProjSession, updateProj, type ChecklistItem, type Exposure, type ProjectDoc,
+  areaLabel, PROJ_KEYS, fetchProjDoc, unlinkProjSession, updateProj, type ChecklistItem, type Exposure, type ProjectDoc,
 } from '../../lib/projectsApi'
 import { safeHref } from '../../components/Markdown'
 import {
@@ -42,7 +42,8 @@ const HOME_HOST = 'thor'
 const errText = (e: unknown) => apiErrorText(e, (e as Error | null)?.message || 'no reply')
 const httpStatus = (e: unknown): number | null => (e as { response?: { status?: number } } | null)?.response?.status ?? null
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
+/** personal reads Thor, server Odin (lib/projectsApi areaLabel) */
+const areaName = (a: string) => areaLabel(a)
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 /** "2:00 AM" today, "Sun 9:00 AM" within a week, else "Oct 24 9:00 AM" (the project detail's format) */
 const dayClock = (ms: number, now = Date.now()) => {

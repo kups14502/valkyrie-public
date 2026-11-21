@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Check } from 'lucide-react'
 import { apiErrorText, fetchLaunchTargets } from '../../lib/api'
 import {
-  BASE_AREAS, LIMITS, PROJ_KEYS, archiveProj, projAreasQuery, updateProj,
+  BASE_AREAS, LIMITS, PROJ_KEYS, archiveProj, areaLabel, projAreasQuery, updateProj,
   type Area, type Exposure, type Project, type ProjectPatch, type ProjStatus,
 } from '../../lib/projectsApi'
 import { Dropdown } from '../Dropdown'
@@ -185,7 +185,7 @@ export function ProjectEditSheet({ project, onClose }: { project: Project; onClo
           </div>
           <div>
             <span className={LABEL}>area</span>
-            <Dropdown value={draft.area} options={areas.map((a) => ({ value: a, label: a }))} onChange={(v) => set('area', v as Area)} />
+            <Dropdown value={draft.area} options={areas.map((a) => ({ value: a, label: areaLabel(a) }))} onChange={(v) => set('area', v as Area)} />
           </div>
           <div>
             <span className={LABEL}>folder on thor</span>

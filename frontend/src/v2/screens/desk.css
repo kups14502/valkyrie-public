@@ -1,6 +1,6 @@
 /* The Desk (Desk.tsx) at /m/desk inside the v2 shell's .vl-page. It fills the page instead of
-   scrolling it: the Raven card on top (the sessions Raven started; folded, a chip at the strip's
-   right end), his strip of tabs, then the grid of terminals. It wears the Raven tab's look: the
+   scrolling it: "Sessions" at the top left, right of it the Raven card (the sessions Raven started;
+   folded, a chip at the strip's right end) over his strip of tabs, then the grid of terminals. It wears the Raven tab's look: the
    composer's rounded box and soft edge for every surface, bubbles for the tabs in view, round
    buttons, the Connected column's rows and small uppercase headings. The terminals are one layer
    of iframes placed by inline style (Desk.tsx boxStyle), so a layout change never reloads one;
@@ -128,7 +128,14 @@
   border-radius: 9px;
 }
 
-/* ---------- the strip: "Sessions", his tabs, "+" (and the folded Raven chip) ---------- */
+/* ---------- the top: "Sessions" at the left; right of it the Raven card (open) over the strip ---------- */
+
+/* "Sessions" keeps its place at the top left whatever opens beside it: the card grows the right column only */
+.dk-top { flex: none; display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.dk-top-l { flex: none; display: flex; align-items: center; height: var(--dk-strip-h); }
+.dk-top-r { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- the strip: his tabs, "+" (and the folded Raven chip) ---------- */
 
 .dk-bar {
   position: relative;
@@ -345,7 +352,19 @@
 .dk-drop-hint[data-zone='bottom'] { top: 50%; }
 
 .dk-quiet { margin: 18px 4px; font-size: 12.5px; color: var(--dim); }
-.dk-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 18px 4px; }
+/* no tab open: the word, "+", and the recover card; it scrolls on its own when the card is long */
+.dk-empty {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 4px 24px;
+}
 .dk-empty p { margin: 0; font-size: 13px; color: var(--dim); }
 .dk-start {
   display: inline-flex;
@@ -362,6 +381,45 @@
 }
 .dk[data-coarse] .dk-start { min-height: 44px; }
 .dk-start[data-pressed] { background: var(--dk-fill-hi); }
+
+/* the empty Desk's recover card: the Raven card's rounded box and rows (kit/raven.css .rv-compose, messages.css .rv-crow) */
+.dk-recov.rv-compose { align-self: stretch; flex: none; gap: 4px; margin-top: 4px; padding: 6px 8px 8px 14px; border-radius: 22px; }
+.dk-recov-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
+.dk-recov-acts .dk-start { min-height: 32px; padding: 0 8px 0 11px; font-size: 12.5px; }
+.dk[data-coarse] .dk-recov-acts .dk-start { min-height: 42px; }
+.dk-recover-btn:disabled { opacity: .7; }
+.dk-recov-rows { max-height: none; overflow: visible; }
+.dk[data-coarse] .dk-recov-rows { max-height: none; }
+.dk-recrow:disabled { opacity: .55; }
+/* a row's context (Thor, Odin, a client area): a small pill before when it closed */
+.dk-ctx {
+  flex: none;
+  align-self: center;
+  padding: 0 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border: 1px solid var(--dk-edge);
+  border-radius: 9px;
+}
+/* how many a Recover brings back */
+.dk-recover-n {
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  border-radius: 9px;
+  text-shadow: none;
+}
 
 /* "Sessions": his running panes by area and project, then Raven's, then the closed ones; under the strip's start */
 .dk-list {
@@ -431,6 +489,8 @@
 .dk[data-coarse] .dk-recover { min-height: 40px; }
 .dk-recover:disabled { opacity: .7; }
 .dk-recover[data-pressed] { background: var(--dk-fill-hi); }
+/* under the head: one Recover per context that has any */
+.dk-recover-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .dk-cg + .dk-cg { margin-top: 4px; }
 .dk-crow .dk-row-t { color: var(--text); }
 .dk-crow:disabled { opacity: .55; }
@@ -522,6 +582,7 @@
   .dk-row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-row:disabled:hover { background: none; }
   .dk-recover:not(:disabled):hover { border-color: var(--dk-edge-hi); }
+  .dk-recrow:not(:disabled):hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-fold:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
   .dk-fold:hover .dk-fold-t { color: var(--text); }
   .dk-fold:hover .dk-fold-i { color: var(--fg); }

@@ -15,6 +15,19 @@ export type Area = string
 export const MIXABLE_AREAS: readonly Area[] = ['personal', 'server']
 export const BASE_AREAS = MIXABLE_AREAS
 export const isClientArea = (area: Area) => !MIXABLE_AREAS.includes(area)
+// The fixed two are shown by the machine they run on: personal work is thor,
+// server work is odin. Only the name he sees: the keys stay 'personal' and
+// 'server' in stored rows, launch targets, URLs and Raven's tools.
+export const FIXED_AREA_NAMES: Readonly<Record<string, string>> = { personal: 'Thor', server: 'Odin' }
+/**
+ * An area's name on screen: the fixed two by their machine, else the name in
+ * `names` (his main terminals' names, kit/data areaNamesOf), else the key
+ * capitalized; no area reads Other.
+ */
+export function areaLabel(area: string, names?: ReadonlyMap<string, string>): string {
+  if (!area || area === 'other') return 'Other'
+  return FIXED_AREA_NAMES[area] ?? names?.get(area.toLowerCase()) ?? area[0].toUpperCase() + area.slice(1)
+}
 // ProjectStatus on the backend; renamed here because lib/api.ts already exports one.
 export type ProjStatus = 'active' | 'paused' | 'archived'
 export type Exposure = 'tailnet' | 'anywhere'

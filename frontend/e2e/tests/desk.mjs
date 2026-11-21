@@ -359,7 +359,7 @@ function layoutTests() {
       const tip = tabOf(d, P.w2)?.tip ?? ''
       t.check(tip.includes('Mailbox move plan') && /asking for \d+m/.test(tip) && tip.includes(ASK), `the asking tab's tooltip reads ${JSON.stringify(tip)}: want its title, "asking for Nm" and the question`)
       t.check(/Work · working for/.test(tabOf(d, P.w1)?.tip ?? '') && (tabOf(d, P.w1)?.tip ?? '').includes('Acme Corporation'), `the work tab's tooltip reads ${JSON.stringify(tabOf(d, P.w1)?.tip)}: want its area, how long it has worked and its folder`)
-      t.check(new RegExp(`Personal · ${PROJECT}`).test(tabOf(d, P.pj)?.tip ?? ''), `the project tab's tooltip reads ${JSON.stringify(tabOf(d, P.pj)?.tip)}`)
+      t.check(new RegExp(`Thor · ${PROJECT}`).test(tabOf(d, P.pj)?.tip ?? ''), `the project tab's tooltip reads ${JSON.stringify(tabOf(d, P.pj)?.tip)}`)
       t.check(/ended/.test(tabOf(d, P.d1)?.tip ?? ''), `the ended tab's tooltip reads ${JSON.stringify(tabOf(d, P.d1)?.tip)}`)
       if (!grid) {
         const short = d.tabs.filter((x) => x.h < 43.5)
@@ -966,10 +966,10 @@ function listTests() {
           rows: [...p.querySelectorAll('.dk-row')].map((r) => `${r.querySelector('.dk-row-t')?.textContent}|${r.querySelector('.dk-row-s')?.textContent}`),
         })),
       })))
-      t.check(shape.map((g) => g.area).join() === 'Work,Personal,Server,Other', `the list's areas read ${JSON.stringify(shape.map((g) => g.area))}`)
-      const personal = shape.find((g) => g.area === 'Personal')
+      t.check(shape.map((g) => g.area).join() === 'Work,Thor,Odin,Other', `the list's areas read ${JSON.stringify(shape.map((g) => g.area))}`)
+      const personal = shape.find((g) => g.area === 'Thor')
       t.check(personal?.parts.length === 2 && personal.parts[0].project === '' && personal.parts[1].project === PROJECT && personal.parts[1].rows[0]?.startsWith('Seed order'),
-        `Personal reads ${JSON.stringify(personal)}: want its sessions, then the project's under its name`)
+        `Thor reads ${JSON.stringify(personal)}: want its sessions, then the project's under its name`)
       t.check(personal?.parts[0].rows.some((r) => r === 'Old notes|off the desk'), `the session off the Desk is not marked so: ${JSON.stringify(personal?.parts[0].rows)}`)
       t.check(shape[0]?.parts[0].rows[0] === 'Fix the login page|here', `the session in view is not marked: ${JSON.stringify(shape[0]?.parts[0].rows)}`)
       await t.shot(page, 'list')
@@ -978,7 +978,7 @@ function listTests() {
       t.check(!(await page.eval(() => !!document.querySelector('.dk-list'))), 'the list stayed open')
       await tap(page, '.vl-page[data-active] .dk-list-btn')
       await until(page, () => document.querySelectorAll('.dk-list .dk-lg .dk-fold[aria-expanded="false"]').length === 4, 'the areas did not fold again when the list reopened')
-      await tap(page, { sel: '.dk-list .dk-lg .dk-fold', text: /^Personal/ })
+      await tap(page, { sel: '.dk-list .dk-lg .dk-fold', text: /^Thor/ })
       await tap(page, { sel: '.dk-list .dk-row', text: /Old notes/ })
       await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a session off the Desk did not come back from the list', [P.d1])
     },
@@ -1050,7 +1050,7 @@ function closedTests() {
         t.check(c.n === '3' && c.all === 'Recover all', `the closed head reads ${JSON.stringify({ n: c.n, all: c.all })}`)
         t.check(JSON.stringify(c.groups) === JSON.stringify([
           { area: 'Work', rows: ['Quarterly license review'] },
-          { area: 'Personal', rows: ['Trip packing list', 'Desk lamp wiring'] },
+          { area: 'Thor', rows: ['Trip packing list', 'Desk lamp wiring'] },
         ]), `the closed list reads ${JSON.stringify(c.groups)}: want by area, newest first, without the done one, the other host's or the one a pane holds`)
         const last = await page.eval(() => {
           const kids = [...document.querySelector('.dk-list').children]
@@ -1092,6 +1092,40 @@ function closedTests() {
         t.check(['vk-e2e0000a01', 'vk-e2e0000b02', 'vk-e2e0000b03'].every((n) => tabNames(d).includes(n)), `the tabs read ${JSON.stringify(tabNames(d))}`)
         t.check(viewNames(d).join() === 'vk-e2e0000a01', `Recover all changed the grid to ${JSON.stringify(viewNames(d))}`)
         t.check(!st.kills.length, `a kill went out: ${JSON.stringify(st.kills)}`)
+      })
+    },
+  }, {
+    name: 'desk:closed:empty',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 120_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      st.panes = []
+      addClosed(st)
+      await page.goto('/m/desk')
+      await t.step('the empty Desk lists what Recover all brings back, each with its context and when it closed', async () => {
+        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-empty .dk-recov .dk-recrow').length === 4,
+          'the empty Desk lists no 4 closed sessions', [], 30_000)
+        const c = await page.eval(() => {
+          const card = document.querySelector('.vl-page[data-active] .dk-empty .dk-recov')
+          return {
+            btns: [...card.querySelectorAll('.dk-recov-acts .dk-start')].map((b) => b.textContent),
+            rows: [...card.querySelectorAll('.dk-recrow')].map((r) => [r.querySelector('.rv-crow-name')?.textContent, r.querySelector('.dk-ctx')?.textContent, r.querySelector('.rv-crow-note')?.textContent]),
+          }
+        })
+        t.check(c.btns[0] === 'Recover all 4' && c.btns.includes('Recover Thor 3') && c.btns.length === 3, `the recover buttons read ${JSON.stringify(c.btns)}`)
+        t.check(JSON.stringify(c.rows[1]) === JSON.stringify(['Trip packing list', 'Thor', '30m ago']), `the second row reads ${JSON.stringify(c.rows[1])}`)
+        t.check(c.rows.map((r) => r[0]).join() === 'Weekend trip plan,Trip packing list,Quarterly license review,Desk lamp wiring', `the rows read ${JSON.stringify(c.rows)}, want newest first`)
+        await t.shot(page, 'recover-card')
+      })
+      await t.step('Recover Thor reopens only that context, newest first', async () => {
+        await tap(page, { sel: '.vl-page[data-active] .dk-recov .dk-recover-btn', text: /^Recover Thor/ })
+        await toastSays(page, /^Reopened 3 Thor sessions as tabs$/, 'no word that Recover Thor finished')
+        const want = [SID.p1, CL.trip, CL.lamp]
+        t.check(st.opens.map((o) => o.sessionId).join() === want.join(), `the opens: ${JSON.stringify(st.opens.map((o) => o.sessionId))}, want ${JSON.stringify(want)}`)
       })
     },
   }, {

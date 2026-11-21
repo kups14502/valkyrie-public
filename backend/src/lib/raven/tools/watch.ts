@@ -17,16 +17,16 @@ import { clip } from './util.js'
 // Watches live in agents.sqlite's kv (raven:watches), cursor included, so a
 // restart picks up where it left off without relaying anything twice.
 //
-// Each watch keeps the job it is on now, for the Watching card. Claude's own
-// title (thor's board, the pane title) is picked once from the first prompt,
-// so a main terminal on its fifth job still wore its first one. The job is the
-// name Raven gave it when it typed the work in, or else the newest prompt of
-// four words or more; a short reply ("yes, do it") keeps the job it answers.
+// The Watching card's title is the job's name as Raven gave it, the label of
+// session_start or session_send, and nothing else: no prompt, no answer and no
+// Claude title ever names it. His screenshot showed a cut-off sentence of a
+// prompt and a release headline as titles. Without a label the card shows the
+// pane's own label. Under it the card shows the session's latest status line,
+// the first sentence of its newest answer, only when that is short enough to fit.
 // A watch whose pane ends leaves the Watching card at once: the card shows
 // only sessions that are working or idle.
 
 const KEY = 'raven:watches'
-const JOB_MAX = 120
 export const TICK_MS = 8_000
 export const QUIET_MS = 12_000
 export const STALE_MS = 24 * 3_600_000
@@ -57,39 +57,26 @@ export type Watch = {
   lastRelayedId: string
   /** what Raven does with the next answer (once) */
   followUp: string
-  /** the job it is on now; '' when none is known, absent on a watch from before jobs were kept */
-  job?: string
-  /** the start of the line Raven last typed, until the transcript shows it: Raven's own prompt keeps Raven's name for the job */
-  typed?: string
+  /** the job's name from Raven's label (session_start, session_send); '' or absent when Raven gave none */
+  title?: string
+  /** the first sentence of its newest answer, '' when that is too long for one line */
+  status?: string
 }
 
 const meaningful = (e: TranscriptEntry) => e.kind === 'user' || e.kind === 'assistant' || e.kind === 'tool' || e.kind === 'result'
 
 const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
-// what a prompt Raven typed often opens with: "Brendon's request:", "Request from Brendon (via Raven):", "Bug from Brendon, must fix:"
-const ASKED_BY = /^[^:]{0,40}\bBrendon\b[^:]{0,30}:\s*/i
+const STATUS_MAX = 140
+// markdown that does not show on the card: emphasis, code ticks, links, a list or heading lead
+const MD_LEAD = /^(?:[>#*+-]+|\d+[.)])\s+/
 
-/** A prompt as the name of a job: one line, without a "Brendon's request:" lead. '' for a reply under four words, a slash command or a shell line. */
-export function jobOf(text: string): string {
-  const line = flat(text)
-  if (!line || line.startsWith('/') || line.startsWith('!')) return ''
-  const body = line.replace(ASKED_BY, '')
-  if (body.split(' ').length < 4) return ''
-  return clip(body.charAt(0).toUpperCase() + body.slice(1), JOB_MAX)
-}
-
-/** The start of a line Raven types, as the transcript will show it. */
-export const typedMark = (line: string): string => flat(line).slice(0, 80)
-
-/** The newest prompt in a page that names a job, or ''. */
-function lastJob(entries: TranscriptEntry[]): string {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i]
-    if (e.kind !== 'user' || !e.text) continue
-    const j = jobOf(e.text)
-    if (j) return j
-  }
-  return ''
+/** The status line of an answer: its first sentence as plain text; '' when it runs past STATUS_MAX. */
+export function statusOf(text: string): string {
+  const first = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const line = flat(first.replace(MD_LEAD, '').replace(/\*\*|__|`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1'))
+  const m = /^.+?[.!?](?=\s|$)/u.exec(line)
+  const s = (m ? m[0] : line).replace(/:$/, '').trim()
+  return s.length <= STATUS_MAX ? s : ''
 }
 
 export function listWatches(): Watch[] {
@@ -122,7 +109,7 @@ async function readPage(w: Pick<Watch, 'pane' | 'sessionId'>, cursor: string): P
  * before anything is typed into it, so what it said before is never relayed
  * and an answer that comes back within seconds still is.
  */
-export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; job?: string; typed?: string }): Promise<Watch> {
+export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; title?: string }): Promise<Watch> {
   const key = watchKey(w.pane, w.sessionId)
   const nowMs = io.now()
   const now = new Date(nowMs).toISOString()
@@ -133,8 +120,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
     x.label = w.label || x.label
     if (w.sessionId) x.sessionId = w.sessionId
     if (w.followUp !== undefined) x.followUp = w.followUp
-    if (w.job) x.job = w.job
-    if (w.typed !== undefined) x.typed = w.typed
+    if (w.title) x.title = w.title
     x.lastActivityAt = now
     saveWatches(list)
     return x
@@ -142,7 +128,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   const next: Watch = {
     key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: now, lastActivityAt: now,
     cursor: '', baselined: Boolean(w.fresh), lastNewAt: nowMs, lastSeenAt: 0, tail: [], lastRelayedId: '', followUp: w.followUp ?? '',
-    job: w.job ?? '', typed: w.typed ?? '',
+    title: w.title ?? '', status: '',
   }
   if (!w.fresh) {
     try {
@@ -152,7 +138,6 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
         next.cursor = page.cursor
         next.sessionId = page.sessionId
         next.lastSeenAt = Math.max(0, ...page.entries.map((e) => e.at || 0))
-        if (!next.job) next.job = lastJob(page.entries)
       }
     } catch (e) {
       // the first tick reads it instead, keeping only entries newer than the watch
@@ -163,28 +148,6 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   list.push(next)
   saveWatches(list)
   return next
-}
-
-/**
- * A watch from before jobs were kept: its job from the newest page of its transcript, once. Only for a main terminal
- * or a window on thor, whose label names no job; a pane Raven started is named for its job already.
- */
-export async function fillJob(key: string): Promise<void> {
-  const w = getWatch(key)
-  if (!w || w.job !== undefined) return
-  let job = ''
-  try {
-    const page = await readPage(w, '')
-    if (page?.sessionId) job = lastJob(page.entries)
-  } catch (e) {
-    console.error(`[raven-watch] ${w.label} job:`, (e as Error).message)
-    return
-  }
-  const list = listWatches()
-  const x = list.find((y) => y.key === key && y.since === w.since)
-  if (!x || x.job !== undefined) return
-  x.job = job
-  saveWatches(list, Boolean(job))
 }
 
 export function removeWatch(key: string): boolean {
@@ -202,14 +165,10 @@ function take(w: Watch, entries: TranscriptEntry[]): boolean {
     if (e.at) w.lastSeenAt = Math.max(w.lastSeenAt, e.at)
     if (!meaningful(e)) continue
     any = true
-    if (e.kind === 'user' && e.text) {
-      if (w.typed && flat(e.text).startsWith(w.typed)) w.typed = ''
-      else {
-        const job = jobOf(e.text)
-        if (job) w.job = job
-      }
-    }
+    // a new prompt: the last turn's status says nothing about it
+    if (e.kind === 'user' && e.text?.trim()) w.status = ''
     if (e.kind === 'assistant' && e.text?.trim()) {
+      w.status = statusOf(e.text)
       if (!w.tail.some((t) => t.id === e.id)) w.tail.push({ id: e.id, text: e.text.trim() })
     } else {
       w.tail = []

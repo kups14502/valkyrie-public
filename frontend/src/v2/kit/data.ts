@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api, fetchAIUsage, fetchHosts, fetchLights, fetchMediaDownloads, fetchMediaRequests,
@@ -10,7 +10,7 @@ import { fetchInboxCount, type InboxCount } from '../../lib/inboxApi'
 import { fetchTasks, type TasksPage } from '../../lib/tasksApi'
 import type { HostStat, LaunchTarget, ServiceUnit, VehicleStat } from '../../lib/api'
 import { lightColor, pctFromBrightness } from '../../lib/lights'
-import { fetchProjList } from '../../lib/projectsApi'
+import { areaLabel, fetchProjList } from '../../lib/projectsApi'
 import { shortName } from '../../lib/quickSessions'
 import { fetchDailyStreak, fetchTrackerWindow, supplementDateKey } from '../../lib/supplementsApi'
 
@@ -1106,6 +1106,29 @@ export function useLaunchTargets(): Live<TargetVM[]> {
         return { key, label: shortName({ key, label } as LaunchTarget), phone: t.phone === true, project: t.project === true, group: typeof t.group === 'string' ? t.group : null }
       })
   }, 5 * 60_000, { revive: (d) => (Array.isArray(d) ? (d as Partial<TargetVM>[]).map((x) => ({ group: null, ...x }) as TargetVM) : undefined) })
+}
+
+/**
+ * Area names as his main terminals are named: thor's launch-targets.json names
+ * the main targets (the phone ones that are not projects), and an area matching
+ * one by key or by name reads that name. lib/projectsApi
+ * areaLabel puts the fixed two (Thor, Odin) first and capitalizes the rest.
+ */
+export function areaNamesOf(targets: TargetVM[] | undefined): ReadonlyMap<string, string> {
+  const m = new Map<string, string>()
+  for (const t of targets ?? []) {
+    if (!t.phone || t.project || !t.label) continue
+    m.set(t.key.toLowerCase(), t.label)
+    m.set(t.label.toLowerCase(), t.label)
+  }
+  return m
+}
+
+/** An area's name on screen (areaLabel with his main terminals' names), from the shared launch-target read. */
+export function useAreaLabel(): (area: string) => string {
+  const targets = useLaunchTargets()
+  const names = useMemo(() => areaNamesOf(targets.data), [targets.data])
+  return useCallback((a: string) => areaLabel(a, names), [names])
 }
 
 // ---------- Thor RGB ----------

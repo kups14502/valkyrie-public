@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, X } from 'lucide-react'
 import { apiErrorText, fetchSessionList } from '../../lib/api'
 import { relIso } from '../../lib/term'
-import { MIXABLE_AREAS, PROJ_KEYS, isClientArea, linkProjSession, type ProjectDoc } from '../../lib/projectsApi'
+import { MIXABLE_AREAS, PROJ_KEYS, areaLabel, isClientArea, linkProjSession, type ProjectDoc } from '../../lib/projectsApi'
 import { Sheet } from './Sheet'
 
 const SHOWN = 40
@@ -71,7 +71,7 @@ export function AddSessionSheet({ projectId, doc, onClose }: { projectId: string
         <div className="py-6 text-center text-xs uppercase tracking-[0.3em] text-[var(--color-text-faint)]">&gt; loading<span className="cursor-blink">_</span></div>
       ) : rows.length === 0 ? (
         <div className="py-6 text-center text-[11px] text-[var(--color-text-faint)]">
-          {q ? 'No session matches.' : `No unlinked ${area} sessions on thor.`}
+          {q ? 'No session matches.' : `No unlinked ${areaLabel(area)} sessions on thor.`}
         </div>
       ) : (
         <ul>

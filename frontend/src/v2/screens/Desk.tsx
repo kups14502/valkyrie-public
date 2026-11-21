@@ -9,7 +9,7 @@ import { BASE_AREAS, PROJ_KEYS, fetchProjList, isClientArea, projAreasQuery } fr
 import { useProfile } from '../../lib/deviceMode'
 import { seedTerminal } from '../../lib/sessionLaunch'
 import { errText } from '../../lib/term'
-import { ago, useLaunchTargets, useSessionIndex, useTick, type SessionBrief, type TargetVM } from '../kit/data'
+import { ago, useAreaLabel, useLaunchTargets, useSessionIndex, useTick, type SessionBrief, type TargetVM } from '../kit/data'
 import {
   MAX_VIEW, deskLayout, doneAt, editLayout, notePlaced, onDesk, paneState, setDeskInView, syncLayout, unseenDone, useDeskPanes, useDeskStore,
 } from '../kit/desk'
@@ -33,7 +33,10 @@ import './desk.css'
 // at the strip's start lists them all by area and project, each area folded
 // until he opens it; "+" starts one. Under the running ones it lists the sessions closed and not marked done
 // (AI > Sessions' Recent, thor's only): a pick resumes one in the focused pane,
-// and "Recover all" resumes every one of them as a tab.
+// "Recover all" resumes every one of them as a tab, and "Recover Thor" (one
+// button per context that has any) resumes only that context's. With no tab
+// open, the empty Desk lists the same closed sessions in a Raven-style card,
+// each with its context and when it closed; a tap resumes that one.
 //
 // Under it, the grid: one session fills the Desk at first. On a desktop he
 // drags a tab (or a pane's title) onto a pane: its middle puts it in that
@@ -57,8 +60,12 @@ import './desk.css'
 // tab's rounded chat-box look) that lists them all. A pick there, or in
 // Sessions, puts that one on the Desk as a tab with the bird (kit/desk.ts
 // layout.raven); closing its tab minimizes it into Raven again. The card's
-// open or folded state is kept per device, folded at first. A session he
-// resumes from Raven's closed ones is still Raven's.
+// open or folded state is kept per device, folded at first. Open, it sits right
+// of "Sessions" on the same row, over the tabs, so "Sessions" never moves. A
+// session he resumes from Raven's closed ones is still Raven's.
+//
+// Contexts are areas (lib/projectsApi areaLabel): personal reads Thor and
+// server Odin, a client area its main terminal's name.
 
 const EMPTY: TermSession[] = []
 /** iframes kept mounted (each is a whole page): the grid's panes, then the most recent others */
@@ -88,7 +95,8 @@ const WORD: Record<PaneState, string> = { working: 'working', asking: 'asking', 
 /** The mark's icon for a pane state; a shell has none, an ended pane the faint closed mark. */
 const markOf = (st: PaneState): SessionState | null => (st === 'shell' ? null : st === 'dead' ? 'closed' : st)
 
-const areaName = (a: string) => (a ? a[0].toUpperCase() + a.slice(1) : 'Other')
+/** A closed session's context: its area, '' when the board has none. */
+const areaOf = (s: SessionBrief) => (s.area && s.area !== 'other' ? s.area : '')
 /** The conversation a pane runs: a new pane knows it from the start, a resume keeps it as its target. */
 const paneSid = (t: TermSession) => t.sessionId || (t.mode === 'resume' ? t.target : '')
 
@@ -198,7 +206,10 @@ function useLongPress(onLong: () => void) {
 
 /** The closed, not done sessions of one area, newest first. */
 type ClosedGroup = { area: string; rows: SessionBrief[]; raven?: boolean }
-type Recover = { done: number; total: number }
+/** A recover running: scope 'all' (Recover all) or the area key of one context's button. */
+type Recover = { done: number; total: number; scope: string }
+/** One context's Recover button: its area, the name he sees, how many it brings back. */
+type RecoverArea = { area: string; label: string; n: number }
 
 export default function Desk({ active }: ScreenProps) {
   const qc = useQueryClient()
@@ -239,6 +250,7 @@ export default function Desk({ active }: ScreenProps) {
   const areas = useQuery(projAreasQuery).data ?? BASE_AREAS
   const projects = useQuery({ queryKey: PROJ_KEYS.list, queryFn: () => fetchProjList(), staleTime: 60_000 })
   const now = useTick(active ? 30_000 : 300_000)
+  const areaName = useAreaLabel()
   const titles = useMemo(() => {
     const m = new Map<string, string>()
     for (const [id, b] of index.byId) if (b.title) m.set(id, b.title)
@@ -320,7 +332,7 @@ export default function Desk({ active }: ScreenProps) {
         raven.push(s)
         continue
       }
-      const a = s.area && s.area !== 'other' ? s.area : ''
+      const a = areaOf(s)
       const rows = by.get(a)
       if (rows) rows.push(s)
       else by.set(a, [s])
@@ -329,6 +341,15 @@ export default function Desk({ active }: ScreenProps) {
     if (raven.length) out.push({ area: '', rows: raven, raven: true })
     return out
   }, [closed, rankOf])
+  // one Recover button per context that has closed sessions (Raven's included, as Recover all), in area order
+  const recoverAreas = useMemo(() => {
+    const n = new Map<string, number>()
+    for (const s of closed) {
+      const a = areaOf(s)
+      if (a) n.set(a, (n.get(a) ?? 0) + 1)
+    }
+    return [...n].sort((a, b) => rankOf(a[0]) - rankOf(b[0])).map(([area, k]): RecoverArea => ({ area, label: areaName(area), n: k }))
+  }, [closed, rankOf, areaName])
 
   // the grid: the panes he placed that are still on the Desk; before he placed any, the first tab fills it
   const placedView = L.view.filter((n) => tabNames.has(n))
@@ -592,15 +613,17 @@ export default function Desk({ active }: ScreenProps) {
   }
 
   /**
-   * Recover all: every closed, not done session comes back as a tab, newest
-   * first, one at a time. The grid stays as it is. One failure does not stop
-   * the rest; a full pane list (409) does.
+   * Recover all ('all'), or one context's Recover (its area key): those
+   * closed, not done sessions come back as tabs, newest first, one at a time.
+   * The grid stays as it is. One failure does not stop the rest; a full pane
+   * list (409) does.
    */
-  const recoverAll = async () => {
-    const rows = closed.filter((s) => !opening.has(s.id))
+  const recoverMany = async (scope: string) => {
+    const rows = closed.filter((s) => !opening.has(s.id) && (scope === 'all' || areaOf(s) === scope))
     if (recovering.current || !rows.length) return
+    const what = scope === 'all' ? '' : `${areaName(scope)} `
     recovering.current = true
-    setRecover({ done: 0, total: rows.length })
+    setRecover({ done: 0, total: rows.length, scope })
     let opened = 0
     let failed = 0
     let error: unknown = null
@@ -624,9 +647,10 @@ export default function Desk({ active }: ScreenProps) {
     void qc.invalidateQueries({ queryKey: ['term', 'sessions'] })
     void qc.invalidateQueries({ queryKey: ['sessionList'] })
     const total = rows.length
-    if (full) toast(`Reopened ${opened} of ${total}: Valkyrie has no room for more terminals. Close some, then Recover all again.`, { ms: 7000 })
+    const again = scope === 'all' ? 'Recover all' : `Recover ${areaName(scope)}`
+    if (full) toast(`Reopened ${opened} of ${total}: Valkyrie has no room for more terminals. Close some, then ${again} again.`, { ms: 7000 })
     else if (failed) toast(`${failed} of ${total} did not reopen: ${errText(error)}`, { ms: 6000 })
-    else toast(`Reopened ${opened} ${opened === 1 ? 'session' : 'sessions'} as tabs`)
+    else toast(`Reopened ${opened} ${what}${opened === 1 ? 'session' : 'sessions'} as tabs`)
   }
 
   // ---------- keys: here, and handed up by a terminal (DeskHost.key) ----------
@@ -811,95 +835,110 @@ export default function Desk({ active }: ScreenProps) {
     else place(name)
   }
   const ravenOff = ravens.filter((s) => !tabNames.has(s.name)).map((s) => s.name)
+  // an empty Desk on the phone has no strip (nothing to switch) unless the folded Raven chip needs it
+  const strip = !(empty && phone) || (!ravenOpen && ravens.length > 0)
+  const card = ravenOpen && ravens.length > 0
+  // the tabs' row; an empty Desk with the card open would leave it blank
+  const bar = strip && !(empty && card)
 
   return (
     <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-n={n}>
-      {ravenOpen && ravens.length > 0 && (
-        <RavenCard
-          rows={ravens}
-          meta={metaOf}
-          tip={tooltip}
-          view={view}
-          focus={focus}
-          off={ravenOff}
-          coarse={coarse}
-          now={now}
-          onOpen={openRaven}
-          onMenu={(name, el) => openMenu(name, el)}
-          onFold={() => setRavenOpen(false)}
-        />
-      )}
-      {/* an empty Desk on the phone has no strip: nothing to switch */}
-      {(!(empty && phone) || (!ravenOpen && ravens.length > 0)) && (
-        <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
-          <Press
-            className="dk-list-btn"
-            aria-expanded={listOpen}
-            aria-label="All sessions"
-            title="All sessions, by area and project"
-            onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
-          >
-            <Icon name={ListTree} size={coarse ? 17 : 14} tone={listOpen ? 'fg' : 'dim'} glow={listOpen} />
-            {!phone && <span>Sessions</span>}
-            <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
-          </Press>
-          <div ref={stripRef} className="dk-tabs" role="tablist" aria-label="Your sessions">
-            {tabs.map((s, i) => {
-              const m = metaOf(s)
-              // a quiet line where the area changes, and before Raven's
-              const prev = tabs[i - 1]
-              const split = !!prev && ((meta.get(prev.name)?.area ?? '') !== m.area || byRaven(prev) !== byRaven(s))
-              return (
-                <Tab
-                  key={s.name}
-                  s={s}
-                  title={m.title}
-                  tip={tooltip(s)}
-                  split={split}
-                  raven={byRaven(s)}
-                  on={view.includes(s.name)}
-                  focused={focus === s.name}
-                  coarse={coarse}
-                  draggable={grid}
-                  onOpen={(el) => {
-                    if (focus === s.name && coarse) openMenu(s.name, el)
-                    else openTab(s.name)
-                  }}
-                  onMenu={(el) => openMenu(s.name, el)}
-                  onClose={() => closeTab(s.name)}
-                  onDragStart={beginDrag(s.name, 'tab')}
-                  onDragEnd={endDrag}
-                />
-              )
-            })}
+      {/* "Sessions" at the top left, and right of it the Raven card (open) over the strip: opening the card never moves "Sessions" */}
+      {(strip || card) && (
+        <div className="dk-top">
+          {strip && (
+            <div className="dk-top-l">
+              <Press
+                className="dk-list-btn"
+                aria-expanded={listOpen}
+                aria-label="All sessions"
+                title="All sessions, by area and project"
+                onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
+              >
+                <Icon name={ListTree} size={coarse ? 17 : 14} tone={listOpen ? 'fg' : 'dim'} glow={listOpen} />
+                {!phone && <span>Sessions</span>}
+                <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
+              </Press>
+            </div>
+          )}
+          <div className="dk-top-r">
+            {card && (
+              <RavenCard
+                rows={ravens}
+                meta={metaOf}
+                tip={tooltip}
+                view={view}
+                focus={focus}
+                off={ravenOff}
+                coarse={coarse}
+                now={now}
+                onOpen={openRaven}
+                onMenu={(name, el) => openMenu(name, el)}
+                onFold={() => setRavenOpen(false)}
+              />
+            )}
+            {bar && (
+              <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
+                <div ref={stripRef} className="dk-tabs" role="tablist" aria-label="Your sessions">
+                  {tabs.map((s, i) => {
+                    const m = metaOf(s)
+                    // a quiet line where the area changes, and before Raven's
+                    const prev = tabs[i - 1]
+                    const split = !!prev && ((meta.get(prev.name)?.area ?? '') !== m.area || byRaven(prev) !== byRaven(s))
+                    return (
+                      <Tab
+                        key={s.name}
+                        s={s}
+                        title={m.title}
+                        tip={tooltip(s)}
+                        split={split}
+                        raven={byRaven(s)}
+                        on={view.includes(s.name)}
+                        focused={focus === s.name}
+                        coarse={coarse}
+                        draggable={grid}
+                        onOpen={(el) => {
+                          if (focus === s.name && coarse) openMenu(s.name, el)
+                          else openTab(s.name)
+                        }}
+                        onMenu={(el) => openMenu(s.name, el)}
+                        onClose={() => closeTab(s.name)}
+                        onDragStart={beginDrag(s.name, 'tab')}
+                        onDragEnd={endDrag}
+                      />
+                    )
+                  })}
+                </div>
+                {!empty && (
+                  <Press
+                    className="dk-add"
+                    aria-label="New session"
+                    title="New session, or put one back"
+                    aria-expanded={picker}
+                    onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}
+                  >
+                    <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
+                  </Press>
+                )}
+                {!ravenOpen && ravens.length > 0 && (
+                  <Press
+                    className="dk-rchip"
+                    data-lit={ravenLit > 0 || undefined}
+                    data-tone={ravenAsking ? 'ask' : undefined}
+                    data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
+                    aria-expanded={false}
+                    aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
+                    title="Show the sessions Raven started"
+                    onPress={() => { setMenu(null); setRavenOpen(true) }}
+                  >
+                    <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
+                    <span>Raven</span>
+                    <span className="dk-rchip-n">{ravens.length}</span>
+                  </Press>
+                )}
+              </div>
+            )}
           </div>
-          {!empty && (
-            <Press
-              className="dk-add"
-              aria-label="New session"
-              title="New session, or put one back"
-              aria-expanded={picker}
-              onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}
-            >
-              <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
-            </Press>
-          )}
-          {!ravenOpen && ravens.length > 0 && (
-            <Press
-              className="dk-rchip"
-              data-lit={ravenLit > 0 || undefined}
-              data-tone={ravenAsking ? 'ask' : undefined}
-              data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
-              aria-expanded={false}
-              aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
-              title="Show the sessions Raven started"
-              onPress={() => { setMenu(null); setRavenOpen(true) }}
-            >
-              <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
-              <span>Raven</span>
-              <span className="dk-rchip-n">{ravens.length}</span>
-            </Press>
-          )}
         </div>
       )}
 
@@ -987,12 +1026,17 @@ export default function Desk({ active }: ScreenProps) {
               <Icon name="add" size={14} tone="fg" glow />
               <span>{own ? 'Put one back' : 'New session'}</span>
             </Press>
-            {(closed.length > 0 || recover) && (
-              <Press className="dk-start dk-recover-all" disabled={!!recover} onPress={() => void recoverAll()}>
-                <Icon name="refresh" size={14} tone="fg" glow className={recover ? 'vl-pulse' : undefined} />
-                <span>{recover ? `Recovering ${recover.done}/${recover.total}` : `Recover all ${closed.length}`}</span>
-              </Press>
-            )}
+            <RecoverCard
+              rows={closed}
+              areas={recoverAreas}
+              opening={opening}
+              recover={recover}
+              coarse={coarse}
+              now={now}
+              areaName={areaName}
+              onReopen={(s) => void recoverOne(s)}
+              onRecover={(scope) => void recoverMany(scope)}
+            />
           </div>
         )}
 
@@ -1007,12 +1051,14 @@ export default function Desk({ active }: ScreenProps) {
             closed={closedGroups}
             closedN={closed.length}
             closedReady={index.ready}
+            recoverAreas={recoverAreas}
+            areaName={areaName}
             opening={opening}
             recover={recover}
             now={now}
             onPick={(name) => { setListOpen(false); place(name) }}
             onReopen={(s) => void recoverOne(s)}
-            onRecoverAll={() => void recoverAll()}
+            onRecover={(scope) => void recoverMany(scope)}
             onClose={() => setListOpen(false)}
           />
         )}
@@ -1294,7 +1340,7 @@ function TabMenu({ title, live, beside, closable, closeLabel, x, y, arm, onBesid
 // ---------- "Sessions": every running pane by area, then project; then the closed, not done ones ----------
 
 function SessionList({
-  groups, ravens, meta, view, off, focus, closed, closedN, closedReady, opening, recover, now, onPick, onReopen, onRecoverAll, onClose,
+  groups, ravens, meta, view, off, focus, closed, closedN, closedReady, recoverAreas, areaName, opening, recover, now, onPick, onReopen, onRecover, onClose,
 }: {
   groups: { area: string; projects: { project: string; rows: TermSession[] }[] }[]
   /** the panes Raven started, newest first: a section of their own under his */
@@ -1307,13 +1353,17 @@ function SessionList({
   closedN: number
   /** the board has been read this page load */
   closedReady: boolean
+  /** one Recover per context that has closed sessions */
+  recoverAreas: RecoverArea[]
+  areaName: (area: string) => string
   /** ids being resumed */
   opening: ReadonlySet<string>
   recover: Recover | null
   now: number
   onPick: (name: string) => void
   onReopen: (s: SessionBrief) => void
-  onRecoverAll: () => void
+  /** 'all', or one context's area key */
+  onRecover: (scope: string) => void
   onClose: () => void
 }) {
   // every area starts folded each time the list opens; a press on its name opens it
@@ -1358,18 +1408,19 @@ function SessionList({
     <section className="dk-closed" aria-label="Closed, not done">
       <div className="dk-closed-head">
         <h3 className="dk-k">Closed, not done <span className="dk-n">{closedN}</span></h3>
-        {(closedN > 0 || recover) && (
+        {(closedN > 0 || recover?.scope === 'all') && (
           <Press
             className="dk-recover"
             disabled={!!recover}
             title={`Reopen all ${closedN} as tabs on the Desk`}
-            onPress={onRecoverAll}
+            onPress={() => onRecover('all')}
           >
-            <Icon name="refresh" size={12} tone="fg" className={recover ? 'vl-pulse' : undefined} />
-            {recover ? `Recovering ${recover.done}/${recover.total}` : 'Recover all'}
+            <Icon name="refresh" size={12} tone="fg" className={recover?.scope === 'all' ? 'vl-pulse' : undefined} />
+            {recover?.scope === 'all' ? `Recovering ${recover.done}/${recover.total}` : 'Recover all'}
           </Press>
         )}
       </div>
+      <RecoverButtons areas={recoverAreas} recover={recover} areaName={areaName} onRecover={onRecover} />
       {!closedReady && <p className="dk-quiet-row">Reading the closed sessions</p>}
       {closedReady && !closedN && <p className="dk-quiet-row">Every closed session is marked done.</p>}
       {closed.map((g) => {
@@ -1428,6 +1479,110 @@ function SessionList({
         {closedPart}
       </div>
     </>
+  )
+}
+
+// ---------- recover: one Recover per context, and the empty Desk's card ----------
+
+/**
+ * One Recover per context that has closed, not done sessions ("Recover Thor",
+ * "Recover Odin"), in area order, each with its count; a context with none has
+ * no button. The one running keeps its button and shows its progress; the rest
+ * wait. With `all`, Recover all leads the row (the empty Desk's card).
+ */
+function RecoverButtons({ all, areas, recover, areaName, onRecover }: {
+  /** the closed count: Recover all first, in the empty Desk's look */
+  all?: number
+  areas: RecoverArea[]
+  recover: Recover | null
+  areaName: (area: string) => string
+  onRecover: (scope: string) => void
+}) {
+  const scope = recover?.scope
+  const list = scope && scope !== 'all' && !areas.some((a) => a.area === scope) ? [...areas, { area: scope, label: areaName(scope), n: 0 }] : areas
+  const big = all !== undefined
+  const btn = (key: string, text: string, n: number, title: string) => {
+    const running = scope === key
+    return (
+      <Press
+        key={key}
+        className={big ? cx('dk-start dk-recover-btn', key === 'all' && 'dk-recover-all') : 'dk-recover dk-recover-ctx'}
+        data-scope={key}
+        disabled={!!recover}
+        title={title}
+        onPress={() => onRecover(key)}
+      >
+        <Icon name="refresh" size={big ? 14 : 12} tone="fg" glow={big} className={running ? 'vl-pulse' : undefined} />
+        {running && recover
+          ? <span>{`Recovering ${recover.done}/${recover.total}`}</span>
+          : <><span>{text}</span>{' '}<span className="dk-recover-n">{n}</span></>}
+      </Press>
+    )
+  }
+  if (!list.length && !big) return null
+  return (
+    <div className={big ? 'dk-recov-acts' : 'dk-recover-row'}>
+      {big && (all > 0 || scope === 'all') && btn('all', 'Recover all', all, `Reopen all ${all} as tabs on the Desk`)}
+      {list.map((a) => btn(a.area, `Recover ${a.label}`, a.n, `Reopen the ${a.n} closed ${a.label} ${a.n === 1 ? 'session' : 'sessions'} as tabs`))}
+    </div>
+  )
+}
+
+/**
+ * The empty Desk's list: every closed, not done session on thor (the set
+ * Recover all brings back), newest first, each with its context and when it
+ * closed; a tap resumes that one as a tab. Over the rows, Recover all and one
+ * Recover per context. The Raven card's rounded box and rows, so the empty Desk
+ * reads like the Raven tab.
+ */
+function RecoverCard({ rows, areas, opening, recover, coarse, now, areaName, onReopen, onRecover }: {
+  rows: SessionBrief[]
+  areas: RecoverArea[]
+  /** ids being resumed */
+  opening: ReadonlySet<string>
+  recover: Recover | null
+  coarse: boolean
+  now: number
+  areaName: (area: string) => string
+  onReopen: (s: SessionBrief) => void
+  onRecover: (scope: string) => void
+}) {
+  if (!rows.length && !recover) return null
+  const n = rows.length
+  return (
+    <section className="dk-recov rv-compose" aria-label="Closed sessions to recover">
+      <div className="dk-raven-head">
+        <Icon name="refresh" size={coarse ? 16 : 14} tone="fg" glow />
+        <span className="dk-raven-k">Recover</span>
+        <span className="dk-raven-n">{`${n} closed, not done`}</span>
+      </div>
+      <RecoverButtons all={n} areas={areas} recover={recover} areaName={areaName} onRecover={onRecover} />
+      <div className="dk-raven-rows dk-recov-rows">
+        {rows.map((s) => {
+          const busy = opening.has(s.id)
+          const title = s.title || 'Untitled session'
+          const ctx = areaName(areaOf(s))
+          const when = s.last ? `${ago(s.last, now)} ago` : ''
+          const line = [s.raven ? 'Started by Raven' : '', s.cwd ? shortFolder(s.cwd) : ''].filter(Boolean).join(' · ')
+          return (
+            <Press
+              key={s.id}
+              className="dk-rrow rv-crow dk-recrow"
+              disabled={busy || !!recover}
+              title={s.cwd ?? undefined}
+              aria-label={`${title}, ${ctx}${when ? `, closed ${when}` : ''}. Recover it.`}
+              onPress={() => onReopen(s)}
+            >
+              <StateIcon a="closed" size={14} className="dk-rrow-mark" />
+              <span className="rv-crow-name">{title}</span>
+              <span className="dk-ctx">{ctx}</span>
+              <span className="rv-crow-note">{busy ? 'opening' : when}</span>
+              {line && <span className="rv-crow-line">{line}</span>}
+            </Press>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 

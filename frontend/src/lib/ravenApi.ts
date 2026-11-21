@@ -85,10 +85,11 @@ export type RavenMsg = {
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
 /**
- * label: the pane's name (often the main target's); title: the job it is on now, when that says more. state: null
- * when thor's board is not answering for a window on thor (absent from an older API); lastAt: its last activity.
+ * label: the pane's name (often the main target's); title: the job's name as Raven labeled it, when that says more;
+ * status: the first sentence of its newest answer, when short. state: null when thor's board is not answering for a
+ * window on thor (absent from an older API); lastAt: its last activity.
  */
-export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; state?: 'working' | 'idle' | 'closed' | null; lastAt?: string }
+export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; status?: string; state?: 'working' | 'idle' | 'closed' | null; lastAt?: string }
 export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number }
 
 export type RavenState = {
