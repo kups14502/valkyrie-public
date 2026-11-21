@@ -1428,6 +1428,143 @@ export function ravenTests() {
     })
   }
 
+  // The New line going away: it fades, then its space closes, so nothing jumps when it is dropped. Every frame of it
+  // is sampled twice: in an animation frame (before the thread's own ResizeObserver) and in a ResizeObserver made after
+  // the thread's (what gets painted once the pin or the hold has run).
+  const sampleClose = (page) => page.eval(() => {
+    const el = document.querySelector('.rv-msgs')
+    const col = document.querySelector('.rv-col')
+    const nc = { s: [], on: true, refs: null }
+    window.__nc = nc
+    const take = (via) => {
+      const line = el.querySelector('.rv-new')
+      const L = el.getBoundingClientRect().top
+      if (line && !nc.refs) {
+        const item = line.closest('.rv-item')
+        // the row above the line, the line's own row, the newest row, and the first row whole on screen
+        const top = [...el.querySelectorAll('.rv-item')].find((x) => x.getBoundingClientRect().top >= L)
+        nc.refs = { above: item.previousElementSibling, row: line.nextElementSibling, last: [...el.querySelectorAll('.rv-msg')].at(-1), top }
+      }
+      if (!nc.refs) return
+      const y = (x) => (x?.isConnected ? x.getBoundingClientRect().top - L : null)
+      const lr = line?.getBoundingClientRect()
+      nc.s.push({
+        t: performance.now(), via, line: !!line, fading: !!line?.hasAttribute('data-fading'),
+        h: line ? lr.height + parseFloat(getComputedStyle(line).marginTop) : 0, lineBottom: line ? lr.bottom - L : null,
+        above: y(nc.refs.above), row: y(nc.refs.row), last: y(nc.refs.last), top: y(nc.refs.top), st: el.scrollTop,
+      })
+    }
+    const ro = new ResizeObserver(() => take('ro'))
+    ro.observe(col)
+    const loop = () => { take('raf'); if (nc.on) requestAnimationFrame(loop); else ro.disconnect() }
+    requestAnimationFrame(loop)
+    return true
+  })
+  /** stops the sampler once the line has been gone 400 ms; the samples from its fade on */
+  const closeSamples = async (page) => {
+    await until(page, () => !document.querySelector('.rv .rv-new') && window.__nc.s.some((x) => x.fading), 'the New line did not fade and go')
+    await sleep(400)
+    return page.eval(() => {
+      window.__nc.on = false
+      const s = window.__nc.s
+      return s.slice(Math.max(0, s.findIndex((x) => x.fading) - 1))
+    })
+  }
+  const r1 = (n) => Math.round(n * 10) / 10
+
+  for (const device of ['phone', 'ipad', 'desktop']) {
+    tests.push({
+      name: `raven:new-close:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        // read up to 107: only the proposal (108) is unread, it fits, so the thread opens at the bottom and reads it.
+        // The read waits for the page to settle: a first load can draw no frames for seconds, which is no close.
+        const st = ravenBackend(page, { filler: 40, replyMs: -1, lastRead: 107 })
+        const answer = page.writeHandler
+        let release
+        const settled = new Promise((r) => { release = r })
+        page.onWrite(async (w) => {
+          if (w.method === 'POST' && w.path === '/api/raven/read') await settled
+          return answer(w)
+        })
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => !!document.querySelector('.rv .rv-new') && !!document.querySelector('.rv-msgs .rv-thumb img')?.complete, 'no New line above the unread proposal')
+        await sleep(1500)
+        await sampleClose(page)
+        await sleep(200)
+        release()
+        await waitFor(() => st.reads.length, 30_000, 'POST /api/raven/read at the bottom').catch((e) => t.check(false, e.message))
+        const s = await closeSamples(page)
+        const withLine = s.filter((x) => x.line)
+        const H = withLine[0]?.h ?? 0
+        const lastIn = withLine.at(-1)
+        const firstOut = s.find((x) => !x.line)
+        let step = 0
+        for (let i = 1; i < s.length; i++) if (s[i].above !== null && s[i - 1].above !== null) step = Math.max(step, Math.abs(s[i].above - s[i - 1].above))
+        const lastDrift = Math.max(...s.map((x) => Math.abs(x.last - s[0].last)))
+        const gap = await page.eval(() => { const el = document.querySelector('.rv-msgs'); return Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) })
+        t.note(`New line ${r1(H)} px; ${s.length} samples; largest step of the row above ${r1(step)} px; it slid ${r1(s.at(-1).above - s[0].above)} px; newest row drift ${r1(lastDrift)} px`)
+        t.check(H > 20, `the New line was not drawn full height when it began to fade (${r1(H)} px)`)
+        t.check(!!lastIn && lastIn.h < 1, `the New line still took ${r1(lastIn?.h ?? -1)} px when it was dropped`)
+        t.check(!!firstOut && Math.abs(firstOut.above - lastIn.above) <= 1, `the row above jumped ${r1((firstOut?.above ?? 0) - (lastIn?.above ?? 0))} px when the line was dropped`)
+        t.check(step < H * 0.5, `the row above moved ${r1(step)} px in one frame (the line was ${r1(H)} px): a jump, not a slide`)
+        t.check(lastDrift <= 1, `the newest row moved ${r1(lastDrift)} px: the bottom did not hold`)
+        t.check(gap < 4, `the thread is ${gap} px off its bottom after the close`)
+        await fits(t, page, `${ROUTE} new-close @${device}`)
+      },
+    })
+  }
+
+  // Scrolled up with the New line above the screen, another device reads: the rows he reads hold still. The thread
+  // holds them itself with the browser's scroll anchoring off for the close, so this Chromium run stands for WebKit
+  // (Safari has no anchoring) too.
+  for (const device of ['phone', 'ipad', 'desktop']) {
+    tests.push({
+      name: `raven:new-hold:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { filler: 40, replyMs: -1, lastRead: 108 })
+        for (let i = 0; i < 14; i++) {
+          st.messages.push({ id: 150 + i, author: 'raven', text: `Unread line ${i}\n\nA second paragraph, so the unread run is taller than the screen.`, createdAt: iso(Date.now() - (14 - i) * 1000), refs: [], meta: {}, proposal: null })
+        }
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => !!document.querySelector('.rv .rv-new') && !!document.querySelector('.rv .rv-latest'), 'no New line with unread lines', [], 60_000)
+        // past the New line by 150 px, short of the bottom
+        const at = await page.eval(() => {
+          const el = document.querySelector('.rv-msgs')
+          const line = document.querySelector('.rv .rv-new')
+          el.scrollTop = line.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop + 150
+          return { gap: Math.round(el.scrollHeight - el.scrollTop - el.clientHeight), lineBottom: Math.round(line.getBoundingClientRect().bottom - el.getBoundingClientRect().top) }
+        })
+        t.check(at.lineBottom < 0 && at.gap > 80, `the New line is not above the screen with the bottom out of reach: ${JSON.stringify(at)}`)
+        await sleep(600)
+        await sampleClose(page)
+        await sleep(200)
+        st.lastRead = st.nextId - 1
+        st.seq++
+        const s = await closeSamples(page)
+        const y0 = s[0].top
+        // what gets painted: after the hold (the ResizeObserver samples), and every frame once the line is gone
+        const painted = s.filter((x) => x.via === 'ro' || !x.line)
+        const drift = Math.max(...painted.map((x) => Math.abs(x.top - y0)))
+        const H = s.find((x) => x.line)?.h ?? 0
+        t.note(`New line ${r1(H)} px; ${s.length} samples (${painted.length} painted); scrolled ${r1(s.at(-1).st - s[0].st)} px; the top row moved at most ${r1(drift)} px`)
+        t.check(H > 20, `the New line was not drawn full height when it began to fade (${r1(H)} px)`)
+        t.check(drift <= 1, `the row at the top of the screen moved ${r1(drift)} px while the New line above it closed`)
+        t.check(Math.abs(s.at(-1).st - s[0].st + H) <= 2, `the list scrolled ${r1(s.at(-1).st - s[0].st)} px, want ${r1(-H)} (the line's height)`)
+        await fits(t, page, `${ROUTE} new-hold @${device}`)
+      },
+    })
+  }
+
   // Decline all in Connected: asked first (Keep backs out with nothing sent), then the agent's waiting proposals
   // are declined in one call with the count he saw; the badge and the overall button go away
   for (const device of ['phone', 'desktop']) {

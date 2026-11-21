@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Moon, Zap } from 'lucide-react'
-import { fetchThorRgb, setThorRgb, type ThorRgbMode } from '../lib/api'
+import { Monitor, Moon, Zap } from 'lucide-react'
+import { fetchScreenSync, fetchThorRgb, setThorRgb, type ThorRgbMode } from '../lib/api'
 
 // thor's desk lighting, next to the room's bulbs because that is how Brendon
 // thinks about it: the desk is part of the room. These are the same two actions
@@ -11,6 +11,10 @@ import { fetchThorRgb, setThorRgb, type ThorRgbMode } from '../lib/api'
 // The press does not wait for the work. A relight runs two full OpenRGB cycles
 // and takes about 45 seconds, so the button fires the task and the panel polls
 // until thor agrees.
+//
+// "screen" is screen sync: the desk AND the room's bulbs follow thor's main
+// monitor until it is pressed again (or relight / dark takes over). The bulbs
+// that were on join, and go back to how they were when it ends.
 
 type Size = 'normal' | 'pad' | 'dense'
 
@@ -59,13 +63,27 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
   const state = rgb?.state ?? 'unknown'
   const reachable = rgb?.installed === true
   const lit = state === 'lit'
+  const screen = state === 'screen'
+
+  const sync = useQuery({
+    queryKey: ['screenSync'],
+    queryFn: fetchScreenSync,
+    enabled: screen,
+    refetchInterval: screen ? 5_000 : false,
+  })
+  const following = screen ? sync.data?.bulbs.length ?? null : null
 
   // Stop waiting once thor reports the state that was asked for, or when the
   // relight's worst case has passed. Always on a timer, never a bare setState
   // in the effect body: that cascades renders.
   useEffect(() => {
     if (!pending) return
-    const satisfied = pending.mode === 'relight' ? state === 'lit' : state === 'dark'
+    const satisfied = {
+      relight: state === 'lit',
+      dark: state === 'dark',
+      screen: state === 'screen',
+      'screen-off': state !== 'screen',
+    }[pending.mode]
     const held = Date.now() - pending.at
     const wait = Math.max(0, (satisfied ? MIN_BUSY_MS : SETTLE_MS) - held)
     const timer = setTimeout(() => setPending(null), wait)
@@ -99,6 +117,9 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
     if (!reachable) return 'thor is not answering'
     if (pending?.mode === 'relight') return 'relighting · up to 45s'
     if (pending?.mode === 'dark') return 'going dark…'
+    if (pending?.mode === 'screen') return 'starting screen sync…'
+    if (pending?.mode === 'screen-off') return 'ending screen sync…'
+    if (screen) return following == null ? 'following the main monitor' : `following the main monitor · desk + ${following} bulb${following === 1 ? '' : 's'}`
     if (lit) return `lit · storm streaming · relit ${relTime(rgb?.tasks.relight.lastRun ?? null)}`
     if (state === 'dark') return `dark · blanked ${relTime(rgb?.tasks.dark.lastRun ?? null)}`
     // Relight was the last press and nothing is streaming, so it failed. Say
@@ -111,14 +132,14 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
   return (
     <div
       className={s.card}
-      style={{ boxShadow: lit && size !== 'dense' ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}
+      style={{ boxShadow: (lit || screen) && size !== 'dense' ? '0 0 24px -10px rgba(var(--color-accent-rgb),0.5)' : undefined }}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <Zap
             size={size === 'pad' ? 26 : size === 'dense' ? 16 : 22}
-            className={`shrink-0 ${lit ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}
-            style={lit ? { filter: 'drop-shadow(0 0 6px var(--color-accent))' } : undefined}
+            className={`shrink-0 ${lit || screen ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-faint)]'}`}
+            style={lit || screen ? { filter: 'drop-shadow(0 0 6px var(--color-accent))' } : undefined}
           />
           {/* Dense puts the status beside the name, so the row is one line. */}
           <div className={size === 'dense' ? 'flex min-w-0 items-baseline gap-2' : 'min-w-0'}>
@@ -157,6 +178,21 @@ export function ThorRgbControl({ size = 'normal' }: { size?: Size }) {
           >
             <Moon size={s.icon} />
             dark
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => fire(screen ? 'screen-off' : 'screen')}
+            aria-label={screen ? 'Stop screen sync' : 'Lights follow the main monitor'}
+            title={screen ? 'Stop screen sync' : 'The desk and the bulbs follow the main monitor'}
+            className={`${s.button} flex items-center gap-2 border ${s.caps} transition active:border-[var(--color-accent)] disabled:opacity-40 ${
+              screen
+                ? 'border-[var(--color-accent)]/70 bg-[rgba(var(--color-accent-rgb),0.1)] text-[var(--color-accent)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-dim)]'
+            }`}
+          >
+            <Monitor size={s.icon} />
+            screen
           </button>
         </div>
       </div>

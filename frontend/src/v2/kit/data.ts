@@ -1136,7 +1136,8 @@ export function useAreaLabel(): (area: string) => string {
 export type RgbVM = {
   /** false only when the backend has no RGB route at all (404/501) */
   installed: boolean
-  state: 'lit' | 'dark' | 'unknown'
+  /** 'screen': screen sync is running, the desk and the bulbs follow thor's main monitor */
+  state: 'lit' | 'dark' | 'screen' | 'unknown'
   /** OpenRGB server up / the storm effect streaming */
   openrgb: boolean
   storm: boolean
@@ -1167,7 +1168,7 @@ export function useThorRgb(): Live<RgbVM> {
     const ok = (v: unknown) => (typeof v === 'number' ? v === 0 : null)
     return {
       installed: true,
-      state: p.state === 'lit' || p.state === 'dark' ? p.state : 'unknown',
+      state: p.state === 'lit' || p.state === 'dark' || p.state === 'screen' ? p.state : 'unknown',
       openrgb: p.openrgb === true,
       storm: p.storm === true,
       relightAt: at(task('relight').lastRun),

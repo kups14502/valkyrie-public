@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Valkyrie",
-  "version": "0.3.212",
+  "version": "0.3.215",
   "identifier": "com.brendonkupsch.mastercontrol",
   "build": {
     "frontendDist": "../dist",

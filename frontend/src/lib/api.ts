@@ -1045,16 +1045,18 @@ export const termPath = (name?: string | null, back?: string | null): string => 
 // `state` is what the desk is doing: 'lit' is a live fact (the storm is
 // streaming), 'dark' is inferred on thor from which button ran last, and
 // 'unknown' means relight was the last press and nothing is streaming, so it
-// failed.
+// failed. 'screen' means screen sync is running: the desk and the bulbs follow
+// thor's main monitor (C:\Thor\ThorRGB\screen_sync.py).
 
-export type ThorRgbMode = 'relight' | 'dark'
+export type ThorRgbMode = 'relight' | 'dark' | 'screen' | 'screen-off'
 export type ThorRgbTask = { registered: boolean; lastRun: string | null; lastResult: number | null }
 export type ThorRgbState = {
   installed: boolean
-  state: 'lit' | 'dark' | 'unknown'
+  state: 'lit' | 'dark' | 'screen' | 'unknown'
   openrgb: boolean
   storm: boolean
-  tasks: Record<ThorRgbMode, ThorRgbTask>
+  screen: boolean
+  tasks: Record<'relight' | 'dark', ThorRgbTask>
 }
 
 const parseRgbTask = (raw: unknown): ThorRgbTask => {
@@ -1071,6 +1073,7 @@ const RGB_ABSENT: ThorRgbState = {
   state: 'unknown',
   openrgb: false,
   storm: false,
+  screen: false,
   tasks: { relight: { registered: false, lastRun: null, lastResult: null }, dark: { registered: false, lastRun: null, lastResult: null } },
 }
 
@@ -1088,9 +1091,10 @@ export const fetchThorRgb = async (): Promise<ThorRgbState> => {
   const state = wsStr(p.state)
   return {
     installed: true,
-    state: state === 'lit' || state === 'dark' ? state : 'unknown',
+    state: state === 'lit' || state === 'dark' || state === 'screen' ? state : 'unknown',
     openrgb: p.openrgb === true,
     storm: p.storm === true,
+    screen: p.screen === true,
     tasks: {
       relight: parseRgbTask((p.tasks as Record<string, unknown> | undefined)?.relight),
       dark: parseRgbTask((p.tasks as Record<string, unknown> | undefined)?.dark),
@@ -1100,6 +1104,13 @@ export const fetchThorRgb = async (): Promise<ThorRgbState> => {
 
 export const setThorRgb = async (mode: ThorRgbMode) =>
   (await api.post<{ ok: boolean; mode?: string; detail?: string }>('/hosts/thor/rgb', { mode })).data
+
+// The bulbs' side of screen sync: which bulbs are following the screen.
+export type ScreenSyncState = { active: boolean; bulbs: string[] }
+export const fetchScreenSync = async (): Promise<ScreenSyncState> => {
+  const p = ((await api.get<unknown>('/lights/screen')).data ?? {}) as Record<string, unknown>
+  return { active: p.active === true, bulbs: Array.isArray(p.bulbs) ? p.bulbs.filter((b): b is string => typeof b === 'string') : [] }
+}
 
 // Every machine's sessions in one list: thor in full, the others only where
 // they are still current (the backend's SESSION_MERGE_DAYS window). Falls back

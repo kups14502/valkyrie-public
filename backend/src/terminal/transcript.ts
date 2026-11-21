@@ -16,7 +16,9 @@ import { createHash } from 'node:crypto'
 //     <task-notification>, the compaction summary (isCompactSummary).
 //   - assistant lines: ONE content block per line (text, thinking or tool_use),
 //     several lines per API message. Thinking on current models is usually an
-//     empty string with a signature, which says nothing worth drawing.
+//     empty string with a signature, which says nothing worth drawing. On
+//     2.1.322 every line carries its message's stop_reason: 'tool_use' on all
+//     lines of a message that calls a tool, 'end_turn' on the answer's.
 //   - system lines by subtype: informational (usage limit, hook notices),
 //     away_summary, compact_boundary, local_command; turn_duration and
 //     stop_hook_summary are bookkeeping.
@@ -49,6 +51,12 @@ export type TranscriptEntry = {
   todos?: TranscriptTodo[]
   model?: string
   usage?: TranscriptUsage
+  /**
+   * The stop_reason of the API message an assistant line belongs to: every line of one message carries it, so a
+   * text line that stopped for a tool ('tool_use') is a progress line mid-turn, never the turn's answer ('end_turn').
+   * 'error' on an API error that ended the turn. Absent when the line does not say (older builds).
+   */
+  stop?: string
 }
 
 export type TranscriptPage = {
@@ -351,13 +359,14 @@ export function parseLines(lines: Iterable<string>, st: TodoState = newTodoState
       const synthetic = model === '<synthetic>' || !model
       if (o.isApiErrorMessage === true) {
         const text = clean(blocksText(content, { imageNote: false }))
-        if (text) push({ id, at, kind: 'system', text: cut(text, SYSTEM_MAX).text })
+        if (text) push({ id, at, kind: 'system', text: cut(text, SYSTEM_MAX).text, stop: 'error' })
         continue
       }
       // Every line of one API message carries that request's usage, so each
       // entry an assistant line makes says how full the context was.
       const usage = synthetic ? null : usageOf(msg, model, st)
-      const m = synthetic ? {} : usage ? { model, usage } : { model }
+      const stop = str(msg.stop_reason)
+      const m = { ...(synthetic ? {} : usage ? { model, usage } : { model }), ...(stop ? { stop } : {}) }
       content.forEach((b, i) => {
         if (!isObj(b)) return
         const bid = content.length === 1 ? id : `${id}:${i}`

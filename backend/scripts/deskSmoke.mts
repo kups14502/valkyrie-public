@@ -150,6 +150,32 @@ const BUSY_SCREEN = `${IDLE_SCREEN}\n\u273b Thinking\u2026 (12s \u00b7 esc to in
   check('screenBusy: the words in any case', PS.screenBusy('(3s \u00b7 ESC to interrupt)') && !PS.screenBusy(null))
 }
 
+// 2.1.322 dropped "esc to interrupt" from the busy line: vk-9bbd600d87 and vk-bbdcd8078f on 2026-11-21, in the middle
+// of a job and read as idle
+{
+  const RULE = '\u2500'.repeat(80)
+  const box = `${RULE}\n> \n${RULE}  Opus 5.5 C:\\...\\server\\valkyrie (main) | eff xhigh wk 31%\n  \u23f5\u23f5 bypass permissions on (shift+tab to cycle) \u00b7 \u2190 5 agents\n`
+  const job = [
+    '\u25cf The report already keeps daily numbers, so no sync change is needed there. Reading its records.',
+    '',
+    '\u25cf Running 1 shell command\u2026',
+    '  \u23bf  $ cd backend/src/lib && sed -n 185,210p tables.ts',
+    '',
+  ].join('\n')
+  const thinking = `${job}\n\u2736 Zigzagging\u2026 (12m 18s \u00b7 \u2193 54.7k tokens \u00b7 still thinking with xhigh effort)\n\n${box}`
+  const tasks = `${job}\n${' '.repeat(120)}\u273d Deliberating\u2026 (8m 16s \u00b7 \u2193 40.0k tokens)\n  \u23bf  \u25fc Move the helpers to their own module\n     \u25fb Run lint\n\n${box}`
+  const starting = `${job}\n* Grooving\u2026\n\n${box}`
+  const done = `\u25cf Your message came through as only "ed.".\n  What do you want me to do?\n\n\u273b Saut\u00e9ed for 4s \u00b7 done 6:31 PM\n\n${box}`
+  const quoted = `\u25cf The card read:\n  \u2736 Zigzagging\u2026 (12m 18s \u00b7 \u2193 54.7k tokens)\n  That was the old rule.\n\n\u273b Worked for 2m 3s\n\n${box}`
+  check('screenBusy 2.1.322: the spinner line with its time and tokens', PS.screenBusy(thinking))
+  check('screenBusy 2.1.322: a task list between it and the prompt box', PS.screenBusy(tasks))
+  check('screenBusy 2.1.322: the spinner before its time shows', PS.screenBusy(starting))
+  check('screenBusy 2.1.322: a finished turn is not busy', !PS.screenBusy(done))
+  check('screenBusy 2.1.322: a spinner line quoted in the answer is not busy', !PS.screenBusy(quoted))
+  check('screenBusy 2.1.322: a spinner line under the prompt box is not the busy line', !PS.screenBusy(`${done}\u2736 Zigzagging\u2026 (3s)\n`))
+  check('screenBusy 2.1.322: a tool step\'s own line is not the busy line', !PS.screenBusy(`${job}\n${box}`))
+}
+
 // --------------------------------------------- 2. the tracker over fakes ---
 
 {

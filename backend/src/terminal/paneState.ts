@@ -9,8 +9,9 @@ import type { TranscriptEntry, TranscriptPage } from './transcript.js'
 //   dead     tmux kept the pane after its program failed.
 //   shell    a shell pane: no Claude in it.
 //   working  the pane printed something in the last 30 s and its screen shows
-//            Claude's busy line ("esc to interrupt"). Raven's tools use the
-//            same check (lib/raven/tools/sessions.ts and watch.ts).
+//            Claude's busy line (the spinner line, or "esc to interrupt" on
+//            older builds). Raven's tools use the same check
+//            (lib/raven/tools/sessions.ts and watch.ts).
 //   asking   Claude is done and wants something from him: thor's session board
 //            says the session waits on him (a permission prompt or a dialog),
 //            or Claude's last reply ends with a question, or has a `Next:` line.
@@ -34,14 +35,44 @@ export type PaneStateFields = {
 
 // ---------------------------------------------------------- the busy rule ----
 
+// Older builds end the busy line with "esc to interrupt". 2.1.322 dropped it:
+// the line is a spinner glyph, a word and an ellipsis, then the turn's time and
+// tokens, "✽ Deliberating… (8m 16s · ↓ 40.0k tokens)" (thor's panes,
+// 2026-11-21). Missing it made Watching show two sessions in the middle of a
+// job as Idle, and told Raven their turns were over. The spinner line sits just
+// above the prompt box, with at most the task list between, so only the last
+// lines there count: a spinner line quoted in Claude's own output higher up
+// does not make a pane busy. The page's terminal skin reads the same line
+// (frontend/src/v2/kit/termscreen.ts SPIN_LINE).
+// Read up from the prompt box, the first status line decides: the spinner line
+// is busy, the line a finished turn leaves ("✻ Sautéed for 4s · done 6:31 PM")
+// is not.
 export const BUSY_RE = /esc to interrupt/i
+export const SPIN_RE = /^\s*[·✢✳✶✻✽*]\s+\S[^\n]*?…(?:\s*$|\s+\(\d+[hms]\b)/u
+const DONE_RE = /^\s*[·✢✳✶✻✽*]\s+\S+ for \d+[hms]\b/u
+const SPIN_LINES = 12
 // the spinner repaints every second; a pane quiet for half a minute is not working
 export const BUSY_WINDOW_MS = 30_000
 
 type Printed = Pick<TermSession, 'name' | 'dead' | 'activityAt'> & { outputAt?: number }
 
-/** Claude's busy line on a captured screen. */
-export const screenBusy = (screen: string | null | undefined): boolean => BUSY_RE.test(screen ?? '')
+/** The screen above the prompt box (its top rule is the second to last rule); the whole screen when it has none. */
+function aboveBox(s: string): string {
+  const at = [...s.matchAll(/─{20,}/g)].map((m) => m.index ?? 0)
+  return at.length ? s.slice(0, at[Math.max(0, at.length - 2)]) : s
+}
+
+/** Claude's busy line on a captured screen: "esc to interrupt" anywhere, or the spinner line just above the prompt box. */
+export function screenBusy(screen: string | null | undefined): boolean {
+  const s = screen ?? ''
+  if (BUSY_RE.test(s)) return true
+  const lines = aboveBox(s).split('\n').filter((l) => l.trim()).slice(-SPIN_LINES)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (SPIN_RE.test(lines[i])) return true
+    if (DONE_RE.test(lines[i])) return false
+  }
+  return false
+}
 
 /** When the pane last printed: tmux's window activity, or the session's own (a key, an attach) when that is newer. */
 export const lastPrinted = (p: Printed): number => Math.max(p.outputAt ?? 0, p.activityAt || 0)

@@ -71,6 +71,8 @@ const SOURCE_WORD: Record<string, string> = { siri: 'Siri', hotkey: 'hotkey', ap
 const STICK_PX = 80
 const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '])
 const reducedMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+/** a row's top against the list's visible top */
+const rowY = (list: Element, row: Element) => row.getBoundingClientRect().top - list.getBoundingClientRect().top
 
 export default function Messages({ active }: ScreenProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -161,6 +163,25 @@ export default function Messages({ active }: ScreenProps) {
     stick.current = bottom
     setAtBottom(bottom)
   }, [pin])
+  // The New line closes (messages.css). At the bottom the pin holds the newest lines and the rest slides down.
+  // Scrolled up with the line above the screen, the rows he reads hold still: the row under the line keeps its
+  // place on screen by the list scrolling up as much as the line shrank. The browser's own anchoring is off for
+  // the close (messages.css), WebKit has none, so every engine does it this one way. `off` is the row's place in
+  // the content, which his own scrolling never moves; `rest` the part of a pixel the scroll could not take yet.
+  const closing = useRef<{ row: Element; off: number; rest: number } | null>(null)
+  const hold = useCallback(() => {
+    const el = listRef.current
+    const c = closing.current
+    if (!el || !c || !c.row.isConnected) return
+    const off = rowY(el, c.row) + el.scrollTop
+    const line = c.row.previousElementSibling
+    if (line?.classList.contains('rv-new') && line.getBoundingClientRect().top < el.getBoundingClientRect().top) {
+      const want = el.scrollTop + off - c.off + c.rest
+      el.scrollTop = want
+      c.rest = want - el.scrollTop
+    }
+    c.off = off
+  }, [])
 
   useLayoutEffect(() => {
     if (stick.current) pin()
@@ -173,6 +194,7 @@ export default function Messages({ active }: ScreenProps) {
     if (!el || !col) return
     const follow = () => {
       if (stick.current) pin()
+      else hold()
       measure()
     }
     const ro = new ResizeObserver(follow)
@@ -188,7 +210,7 @@ export default function Messages({ active }: ScreenProps) {
       vv?.removeEventListener('resize', later)
       window.removeEventListener('resize', later)
     }
-  }, [pin, measure])
+  }, [pin, measure, hold])
 
   // his own hand on the thread stops the chip's glide where it is
   useEffect(() => {
@@ -296,8 +318,15 @@ export default function Messages({ active }: ScreenProps) {
   else if (firstUnread === null && mark && !mark.fading) setMark({ ...mark, fading: true })
   useEffect(() => {
     if (!mark?.fading) return
-    const t = window.setTimeout(() => setMark(null), 2500)
+    // the fade, then the close (messages.css): gone by 2.6 s, so dropping it moves nothing
+    const t = window.setTimeout(() => setMark(null), 2900)
     return () => window.clearTimeout(t)
+  }, [mark])
+  // the row under a closing New line, and its place in the content at the last look
+  useLayoutEffect(() => {
+    const el = listRef.current
+    const row = mark?.fading ? el?.querySelector('.rv-new[data-fading]')?.nextElementSibling : null
+    closing.current = el && row ? { row, off: rowY(el, row) + el.scrollTop, rest: 0 } : null
   }, [mark])
 
   const entered = active && shown && !!page
@@ -415,7 +444,7 @@ export function Thread({ messages, names, mark = null }: { messages: RavenMsg[];
         return (
           <div key={m.id} className="rv-item">
             {newDay && <div className="rv-day"><span>{dayLabel(t, now)}</span></div>}
-            {mark?.id === m.id && <div className="rv-new" role="separator" aria-label="New messages" data-fading={mark.fading || undefined}><span>New</span></div>}
+            {mark?.id === m.id && <div className="rv-new" role="separator" aria-label="New messages" data-fading={mark.fading || undefined}><div><span>New</span></div></div>}
             <Row m={m} grouped={grouped} last={last} split={split} names={names} />
           </div>
         )

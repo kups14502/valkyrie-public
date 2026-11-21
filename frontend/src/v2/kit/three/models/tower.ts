@@ -14,13 +14,14 @@
 // shows a big I/O cover, the AIO pump head and two memory sticks; the PSU
 // shroud has a perforated top and the floor in front of it is open mesh. At the
 // rear (seen from behind, the glass is on the right): a handle slot, a LINK
-// label up the left, the I/O plate, a Y-pattern vent over the lit exhaust fan,
-// seven slot covers and the PSU. The LEGO skyline that stands on the real case
-// is left out.
+// label up the left, the I/O plate, a Y-pattern vent, seven slot covers and the
+// PSU. No fan sits behind the rear vent (Brendon, 2026-11-21: the real case has
+// none). The LEGO skyline that stands on the real case is left out.
 //
 // Groups: cpu (pump head, cold plate, hoses, radiator, VRM fins), mem (the two
-// sticks), gpu (card, its fans, logo), disk (M.2 drives under the board's heat
-// sinks), fans (intake, radiator and exhaust fans), psu (PSU, cables), board.
+// sticks), gpu (card, its fans, logo), disk.C / disk.E / disk.F (the three M.2
+// drives under the board's heat sinks, each glowing by its own drive), fans
+// (intake and radiator fans), psu (PSU, cables), board.
 
 import type { Model, Vec3 } from '../engine'
 import type { Beam, Flow } from '../render'
@@ -48,8 +49,8 @@ const FAN_X = XB - 0.13, FAN_Z = 1.66, FAN_YS = [1.52, 2.72, 3.92]
 const RX0 = -0.88, RX1 = 0.32, RAD_Y0 = 4.49, RAD_Y1 = 4.76, RZ0 = -1.95, RZ1 = 1.69
 const TOP_FAN_ZS = [-1.33, -0.13, 1.07]
 const TOP_FAN_Y = 4.885
-/** rear exhaust fan center */
-const EXH: Vec3 = [-0.42, 3.65, -HZ + 0.17]
+/** rear vent center (an empty fan mount: thor has no rear exhaust fan) */
+const VENT: Vec3 = [-0.42, 3.65, -HZ]
 
 const SH: Style = { layer: 'shell' }
 const SHd: Style = { layer: 'shell', w: 0.55 }
@@ -193,10 +194,10 @@ function rear(b: Builder) {
   for (let k = 0; k < 7; k++) for (const x of [-0.09, 0.09]) b.rect([ioX + x, 3.92 - k * 0.13, z - 0.003], X, Y, 0.14, 0.055, SHd)
   for (const x of [-0.1, 0, 0.1]) b.circle([ioX + x, 2.88, z - 0.003], X, Y, 0.028, 8, SHd)
 
-  // exhaust vent: Y pattern over the fan, height-adjust slots on both sides
-  b.roundRect([EXH[0], EXH[1], z], X, Y, 1.04, 1.36, 0.06, SHd, 2)
-  ymesh(b, [EXH[0], EXH[1], z], X, Y, 0.98, 1.3, 0.14, PERF)
-  for (const x of [EXH[0] - 0.6, EXH[0] + 0.6]) for (const y of [EXH[1] - 0.4, EXH[1] + 0.35]) b.roundRect([x, y, z], X, Y, 0.05, 0.3, 0.025, SHd, 2)
+  // rear vent: the Y pattern over an empty fan mount, height-adjust slots on both sides
+  b.roundRect([VENT[0], VENT[1], z], X, Y, 1.04, 1.36, 0.06, SHd, 2)
+  ymesh(b, [VENT[0], VENT[1], z], X, Y, 0.98, 1.3, 0.14, PERF)
+  for (const x of [VENT[0] - 0.6, VENT[0] + 0.6]) for (const y of [VENT[1] - 0.4, VENT[1] + 0.35]) b.roundRect([x, y, z], X, Y, 0.05, 0.3, 0.025, SHd, 2)
 
   // seven slot covers; the GPU's bracket fills the top three
   const slot = (k: number) => 2.6 - k * 0.2032
@@ -304,12 +305,27 @@ function memory(b: Builder) {
   }
 }
 
+/**
+ * thor's three M.2 drives by slot (Brendon's marked-up screenshot, 2026-11-21,
+ * and Windows' PCI bus per drive): C: (Samsung 9100 PRO 4 TB, CPU lanes) in the
+ * top slot between the socket and the GPU; E: (990 PRO 2 TB, CPU lanes) in the
+ * upper slot under the card, the one that reaches further toward the front;
+ * F: (980 1 TB, chipset) in the lower slot under it. Each glows by its own
+ * drive's fill (kit/hero useHeat: heat['disk.C'] and so on).
+ */
+const M2 = {
+  C: { y0: 2.72, y1: 2.92, z0: -1.75, z1: -0.62 },
+  E: { y0: 1.62, y1: 1.8, z0: -1.85, z1: -0.75 },
+  F: { y0: 1.38, y1: 1.54, z0: -1.85, z1: -0.95 },
+} as const
+
 function disks(b: Builder) {
-  // the top M.2 under its heat sink, between the socket and the GPU; two more under the card
-  b.box([XB - 0.07, 2.72, -1.75], [XB, 2.92, -0.62], hot('disk', 0.9))
-  for (let z = -1.69; z < -0.64; z += 0.08) b.line([XB - 0.07, 2.74, z], [XB - 0.07, 2.9, z], hot('disk', 0.45))
-  b.box([XB - 0.06, 1.62, -1.85], [XB, 1.8, -0.75], hot('disk', 0.55))
-  b.box([XB - 0.06, 1.38, -1.85], [XB, 1.54, -0.95], hot('disk', 0.45))
+  // the top M.2 under its finned heat sink; the two under the card
+  const c = M2.C
+  b.box([XB - 0.07, c.y0, c.z0], [XB, c.y1, c.z1], hot('disk.C', 0.9))
+  for (let z = c.z0 + 0.06; z < c.z1 - 0.02; z += 0.08) b.line([XB - 0.07, c.y0 + 0.02, z], [XB - 0.07, c.y1 - 0.02, z], hot('disk.C', 0.45))
+  b.box([XB - 0.06, M2.E.y0, M2.E.z0], [XB, M2.E.y1, M2.E.z1], hot('disk.E', 0.55))
+  b.box([XB - 0.06, M2.F.y0, M2.F.z0], [XB, M2.F.y1, M2.F.z1], hot('disk.F', 0.45))
 }
 
 function gpu(b: Builder) {
@@ -367,8 +383,6 @@ function intake(b: Builder) {
   for (const z of TOP_FAN_ZS) {
     b.fan([(RX0 + RX1) / 2, TOP_FAN_Y, z], Z, X, 1.2, { frame: SHd, ring: hot('fans', 0.7), blade: hot('fans', 0.65), blades: 9, depth: 0.25, speed: 0.9 })
   }
-  // lit exhaust fan behind the rear vent
-  b.fan(EXH, Y, X, 1.2, { frame: SHd, ring: hot('fans', 0.8), blade: hot('fans', 0.7), blades: 9, depth: 0.25, speed: 0.9 })
 }
 
 function psu(b: Builder) {
@@ -400,21 +414,24 @@ export function thorTower(): Model {
   psu(b)
 
   // each on its part, spread apart for the small heroes: the pump head, the top of the outer memory stick's lit
-  // edge, the GPU's lit logo, the M.2 heat sink under the card
+  // edge, the GPU's lit logo, and a drive per M.2 slot: C: left of center on the top one, E: toward the front
+  // end of the upper one under the card (past F's end), F: toward the rear on the lower one. Id disk.<letter>
+  // is the drive's name in /api/hosts (kit/hero diskKey); the system drive first.
   b.hotspot('cpu', [XB - 0.505, CPU_Y, CPU_Z], 'CPU')
   b.hotspot('mem', [XB - 0.565, 4.1, -0.18], 'Memory')
   b.hotspot('gpu', [GX1 - 0.006, GY0 + 0.14, 0.38], 'GPU')
-  b.hotspot('disk', [XB - 0.065, 1.71, -1.3], 'Disk')
+  b.hotspot('disk.C', [XB - 0.075, (M2.C.y0 + M2.C.y1) / 2, -1.4], 'Disk C')
+  b.hotspot('disk.E', [XB - 0.065, (M2.E.y0 + M2.E.y1) / 2, -0.95], 'Disk E')
+  b.hotspot('disk.F', [XB - 0.065, (M2.F.y0 + M2.F.y1) / 2, -1.6], 'Disk F')
 
   // orbit around the case itself; radius as before, so the floor keeps its scale
   return b.model([0, CY, 0], 3.75)
 }
 
-/** Light beams and airflow for WireScene (off on every hero since 2026-10-17, kept for reference): in through the solid side, out the top and rear. */
+/** Light beams and airflow for WireScene (off on every hero since 2026-10-17, kept for reference): in through the solid side, out the top (no rear exhaust fan). */
 export const TOWER_FX: { beams: Beam[]; flow: Flow[] } = {
   beams: [],
   flow: [
     { from: [HX + 3, 2.7, FAN_Z], to: [-0.3, Y1 + 2.2, -0.2], via: [-0.2, 3.2, 1.2], speed: 2.4, spread: 0.7, lanes: 10 },
-    { from: [HX + 3, 2.2, FAN_Z], to: [EXH[0], EXH[1], -HZ - 3], via: [-0.2, 3.0, 0], speed: 2.6, spread: 0.6, lanes: 9 },
   ],
 }

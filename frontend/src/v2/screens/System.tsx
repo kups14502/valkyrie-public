@@ -10,6 +10,7 @@ import {
   type TradeBotArm, type TradeBotPage,
 } from '../../lib/api'
 import { HOST_POSE, Hero, MODEL_ONLY_IDS, MODEL_ONLY_LABEL, heroModel, hostModel, type HostModelId, type ModelOnlyId } from '../kit/hero'
+import { diskKey, diskSpot } from '../kit/drives'
 import { TrackRibbon } from '../kit/three'
 import { EquityChart } from '../kit/three/EquityChart'
 import { usePalette, useSetting } from '../kit/theme'
@@ -675,7 +676,7 @@ function DeviceDetail({ id, on, i, ref }: { id: ModelOnlyId; on: boolean; i: num
   )
 }
 
-/** spot: the model's hotspot the plate lights, when it is not the plate's id (each disk lights the one disk diamond) */
+/** spot: the model's hotspot the plate lights, when it is not the plate's id (a disk: its own drive's slot on thor's tower, else the one disk diamond) */
 type Metric = { id: string; icon: IconName; label: string; value: number | null; tone: Tone; sizes: string | null; spot?: string; aria?: string }
 
 /**
@@ -704,10 +705,12 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
   // the phone and tablet report a battery and storage, never CPU or memory: no empty plates for those,
   // and the battery leads where the CPU would
   const noLoad = host.mobile || (host.cpu == null && host.mem == null && !!host.battery)
-  // more than one disk: a plate each, named, in a row of their own under the others
+  // more than one disk: a plate each, named, in a row of their own under the others; each lights its own drive's
+  // slot where the model has one (thor: C, E, F), else the one disk diamond, and a drive with no slot lights none
+  const diskSpotOf = (name: string | null): string => (model ? diskSpot(heroModel(model), name, true) ?? (name ? diskKey(name) : 'disk') : 'disk')
   const disks: Metric[] = host.disks.length > 1
     ? host.disks.map((d, k) => ({
-      id: `disk-${k}`, icon: 'disk', label: d.name ?? `Disk ${k + 1}`, aria: `Disk ${d.name ?? k + 1}`, value: d.percent, tone: loadTone(d.percent), sizes: sizesGb(d.usedGb, d.totalGb), spot: 'disk',
+      id: `disk-${k}`, icon: 'disk', label: d.name ?? `Disk ${k + 1}`, aria: `Disk ${d.name ?? k + 1}`, value: d.percent, tone: loadTone(d.percent), sizes: sizesGb(d.usedGb, d.totalGb), spot: diskSpotOf(d.name),
     } satisfies Metric))
     : []
   const metrics: Metric[] = [
@@ -716,7 +719,7 @@ function HostDetail({ host, on, epoch, t1, i, ref }: { host: HostVM; on: boolean
       { id: 'mem', icon: 'mem', label: 'Memory', value: host.mem, tone: loadTone(host.mem), sizes: memSizes(host) } satisfies Metric,
     ]),
     ...(disks.length || (host.mobile && host.disk == null) ? [] : [
-      { id: 'disk', icon: 'disk', label: spots.get('disk') ?? 'Disk', value: host.disk, tone: loadTone(host.disk), sizes: diskSizes(host) } satisfies Metric,
+      { id: 'disk', icon: 'disk', label: spots.get('disk') ?? 'Disk', value: host.disk, tone: loadTone(host.disk), sizes: diskSizes(host), spot: (model && diskSpot(heroModel(model), host.disks[0]?.name ?? null)) || 'disk' } satisfies Metric,
     ]),
   ]
   if (host.battery) {

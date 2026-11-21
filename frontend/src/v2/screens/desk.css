@@ -1,8 +1,9 @@
 /* The Desk (Desk.tsx) at /m/desk inside the v2 shell's .vl-page. It fills the page instead of
    scrolling it: "Sessions" at the top left, right of it the Raven card (the sessions Raven started;
-   folded, a chip at the strip's right end) over his strip of tabs, then the grid of terminals. It wears the Raven tab's look: the
-   composer's rounded box and soft edge for every surface, bubbles for the tabs in view, round
-   buttons, the Connected column's rows and small uppercase headings. The terminals are one layer
+   folded, a chip at the strip's right end) over his strip of tabs, then the grid of terminals. The Raven card alone wears the
+   Raven tab's look (the composer's accent-tinted rounded box, the glowing uppercase label); the Desk's own controls
+   ("Sessions", its list, the empty Desk's Recover box and buttons) are plain grey, so only Raven's sessions look like
+   Raven. Bubbles for the tabs in view, the Connected column's rows and small uppercase headings. The terminals are one layer
    of iframes placed by inline style (Desk.tsx boxStyle), so a layout change never reloads one;
    each pane's frame and title row, and the drop targets while a drag is on, lie over them. */
 
@@ -14,6 +15,11 @@
   --dk-edge: color-mix(in srgb, var(--fg) calc(var(--line-a) + 8%), transparent);
   --dk-edge-hi: color-mix(in srgb, var(--fg) 55%, transparent);
   --dk-r: 18px;
+  /* the Desk's own surfaces: plain grey, never the accent tint above (that box is the Raven card's) */
+  --dk-plain: #0a0a0a;
+  --dk-plain-hi: #161616;
+  --dk-plain-edge: rgba(255, 255, 255, .1);
+  --dk-plain-edge-hi: rgba(255, 255, 255, .26);
   position: absolute;
   inset: 0 0 var(--foot-pad) 0;
   display: flex;
@@ -155,17 +161,17 @@
   align-items: center;
   gap: 6px;
   height: 30px;
-  padding: 0 9px 0 11px;
+  padding: 0 8px 0 10px;
   font-size: 12px;
   font-weight: 600;
   color: var(--dim);
-  background: var(--dk-fill);
-  border: 1px solid var(--dk-edge);
-  border-radius: 999px;
+  background: var(--dk-plain);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 10px;
 }
 .dk[data-coarse] .dk-list-btn { height: 38px; padding: 0 9px 0 12px; }
-.dk-list-btn[aria-expanded='true'] { color: var(--fg); border-color: var(--dk-edge-hi); }
-.dk-list-btn[data-pressed] { background: var(--dk-fill-hi); }
+.dk-list-btn[aria-expanded='true'] { color: var(--text); background: var(--dk-plain-hi); border-color: var(--dk-plain-edge-hi); }
+.dk-list-btn[data-pressed] { background: var(--dk-plain-hi); }
 /* the tabs: a row that scrolls sideways when they do not fit, "+" right after it */
 .dk-tabs {
   /* the tabs' offsetParent, so their offsets are in the row's own (scrolled) space */
@@ -279,7 +285,7 @@
   .dk-tab-x:hover .vl-icon { color: var(--fg); }
   .dk-add:hover { border-color: var(--dk-edge-hi); }
   .dk-add:hover .vl-icon { color: var(--fg); }
-  .dk-list-btn:hover { color: var(--text); border-color: var(--dk-edge-hi); }
+  .dk-list-btn:hover { color: var(--text); border-color: var(--dk-plain-edge-hi); }
   .dk-rchip:hover { border-color: var(--dk-edge-hi); }
   .dk-rrow:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-rrow[data-here]:hover { background: var(--dk-fill-hi); }
@@ -371,40 +377,88 @@
   align-items: center;
   gap: 7px;
   min-height: 36px;
-  padding: 0 16px 0 12px;
+  padding: 0 14px 0 11px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--fg);
-  background: var(--dk-fill);
-  border: 1px solid var(--dk-edge);
-  border-radius: 999px;
+  color: var(--text);
+  background: var(--dk-plain);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 10px;
 }
 .dk[data-coarse] .dk-start { min-height: 44px; }
-.dk-start[data-pressed] { background: var(--dk-fill-hi); }
+.dk-start[data-pressed] { background: var(--dk-plain-hi); }
 
-/* the empty Desk's recover card: the Raven card's rounded box and rows (kit/raven.css .rv-compose, messages.css .rv-crow) */
-.dk-recov.rv-compose { align-self: stretch; flex: none; gap: 4px; margin-top: 4px; padding: 6px 8px 8px 14px; border-radius: 22px; }
-.dk-recov-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
-.dk-recov-acts .dk-start { min-height: 32px; padding: 0 8px 0 11px; font-size: 12.5px; }
-.dk[data-coarse] .dk-recov-acts .dk-start { min-height: 42px; }
+/* the empty Desk's Recover box: a plain grey box of its own, squarer than the Raven card, a sentence-case title
+   with no glow, its buttons over a hairline, then the rows */
+.dk-recov {
+  align-self: stretch;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 8px 10px 8px 12px;
+  background: var(--dk-plain);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 12px;
+}
+.dk-recov-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.dk-recov-k { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.dk-recov-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--dim); }
+.dk-recov-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px; border-bottom: 1px solid var(--dk-plain-edge); }
+.dk-recover-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 7px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 8px;
+}
+.dk[data-coarse] .dk-recover-btn { min-height: 42px; }
+.dk-recover-btn[data-pressed] { background: var(--dk-plain-hi); }
 .dk-recover-btn:disabled { opacity: .7; }
-.dk-recov-rows { max-height: none; overflow: visible; }
-.dk[data-coarse] .dk-recov-rows { max-height: none; }
+.dk-recov-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  gap: 2px 8px;
+  margin: 2px -4px 0 -6px;
+}
+.dk-recrow.rv-crow {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 5px 8px 5px 6px;
+  gap: 1px 8px;
+  align-items: center;
+  text-align: left;
+  border-top: 0;
+  border-radius: 8px;
+  transition: background-color .15s;
+}
+.dk[data-coarse] .dk-recrow.rv-crow { min-height: 44px; }
+.dk-recrow-mark { flex: none; align-self: center; width: 16px; height: 16px; }
+.dk-recrow .rv-crow-line { padding-left: 24px; }
+.dk-recrow[data-pressed] { background: rgba(255, 255, 255, .07); }
 .dk-recrow:disabled { opacity: .55; }
-/* a row's context (Thor, Odin, a client area): a small pill before when it closed */
+/* a row's context (Thor, Odin, a client area): a small grey tag before when it closed */
 .dk-ctx {
   flex: none;
   align-self: center;
-  padding: 0 7px;
+  padding: 0 6px;
   font-size: 9.5px;
   font-weight: 700;
   line-height: 16px;
   letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  border: 1px solid var(--dk-edge);
-  border-radius: 9px;
+  color: var(--dim);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 5px;
 }
 /* how many a Recover brings back */
 .dk-recover-n {
@@ -416,8 +470,8 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-  border-radius: 9px;
+  background: rgba(255, 255, 255, .08);
+  border-radius: 5px;
   text-shadow: none;
 }
 
@@ -435,9 +489,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 10px 12px 14px;
-  background: var(--dk-fill);
-  border: 1px solid var(--dk-edge);
-  border-radius: 22px;
+  background: var(--dk-plain);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 12px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, .85);
 }
 .dk-lp + .dk-lp { margin-top: 6px; }
@@ -464,7 +518,7 @@
 .dk-lg[data-raven] .dk-fold-t, .dk-cg[data-raven] .dk-fold-t { color: var(--fg); }
 .dk-row[data-on] .dk-row-t { color: var(--fg); }
 /* under the running ones: the sessions closed and not marked done, and Recover all */
-.dk-closed { padding-top: 10px; border-top: 1px solid var(--line); }
+.dk-closed { padding-top: 10px; border-top: 1px solid var(--dk-plain-edge); }
 .dk-closed-head {
   display: flex;
   align-items: center;
@@ -482,13 +536,14 @@
   padding: 0 12px 0 10px;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--fg);
-  border: 1px solid var(--dk-edge);
-  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid var(--dk-plain-edge);
+  border-radius: 8px;
 }
 .dk[data-coarse] .dk-recover { min-height: 40px; }
 .dk-recover:disabled { opacity: .7; }
-.dk-recover[data-pressed] { background: var(--dk-fill-hi); }
+.dk-recover[data-pressed] { background: var(--dk-plain-hi); }
 /* under the head: one Recover per context that has any */
 .dk-recover-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .dk-cg + .dk-cg { margin-top: 4px; }
@@ -575,14 +630,15 @@
 .dk-row-s { flex: none; font-size: 11px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
 .dk-row[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
 @media (hover: hover) and (pointer: fine) {
-  .dk-start:hover { border-color: var(--dk-edge-hi); }
+  .dk-start:hover { border-color: var(--dk-plain-edge-hi); }
+  .dk-recover-btn:not(:disabled):hover { border-color: var(--dk-plain-edge-hi); }
   .dk-mi:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
   .dk-pick-x:hover { color: var(--fg); border-color: var(--dk-edge-hi); }
   .dk-chip:not(:disabled):hover { color: var(--fg); border-color: var(--dk-edge-hi); }
   .dk-row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-row:disabled:hover { background: none; }
-  .dk-recover:not(:disabled):hover { border-color: var(--dk-edge-hi); }
-  .dk-recrow:not(:disabled):hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+  .dk-recover:not(:disabled):hover { border-color: var(--dk-plain-edge-hi); }
+  .dk-recrow:not(:disabled):hover { background: rgba(255, 255, 255, .04); }
   .dk-fold:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
   .dk-fold:hover .dk-fold-t { color: var(--text); }
   .dk-fold:hover .dk-fold-i { color: var(--fg); }

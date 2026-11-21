@@ -44,7 +44,8 @@ const ok = (body) => ({ status: 200, body })
 // `spots`: the hotspot ids System maps its plates to (cpu, mem, disk...), which a rebuilt model must keep;
 // `all`: every one of them must be in view and on its part from the Hosts camera (the round-6 heroes)
 const MODELS = [
-  { id: 'thor', label: 'Thor', spots: ['cpu', 'mem', 'gpu', 'disk'], all: true },
+  // thor: a diamond per M.2 drive (disk.C top slot, disk.E and disk.F under the card), each disk plate lighting its own
+  { id: 'thor', label: 'Thor', spots: ['cpu', 'mem', 'gpu', 'disk.C', 'disk.E', 'disk.F'], all: true },
   { id: 'odin', label: 'Odin', spots: ['cpu', 'mem', 'disk', 'raid'], all: true },
   { id: 'frame', label: 'Loki', spots: ['cpu', 'mem', 'disk', 'battery', 'lens'], all: true },
   { id: 'mimir', label: 'Mimir' },

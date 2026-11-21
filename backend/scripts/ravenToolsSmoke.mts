@@ -1402,6 +1402,119 @@ agents.syncRoster()
   for (const w of watch.listWatches()) watch.removeWatch(w.key)
 }
 
+// ------------------------------------------- a turn the transcript holds open ---
+
+// vk-9bbd600d87 and vk-bbdcd8078f, 2026-11-21 2:48 AM ET: in the middle of a job, a progress line and then a long
+// Edit or Bash with nothing new in the transcript; the screen's busy line was one the old rule did not know. Watching
+// showed them Idle and Raven heard "Its turn is over".
+{
+  posts.length = 0
+  wakes.length = 0
+  const tick = async (ms = 0) => { clock += ms; await watch.tickWatches() }
+  const card = async (key: string) => (await tools.ravenSessionsState()).watching.find((w) => (w.pane || `sid:${w.sessionId}`) === key)
+  type Said = { from: string; text: string }
+  const saidIn = (w?: { payload: Record<string, unknown> }) => ((w?.payload.said ?? []) as Said[]).map((s) => `${s.from}:${s.text}`)
+  const replies = () => wakes.filter((w) => w.kind === 'session_reply')
+  const stopped = (e: TranscriptEntry, stop: string): TranscriptEntry => ({ ...e, stop })
+  const midTurn = (text: string) => stopped(entry('assistant', text), 'tool_use')
+  const step = () => stopped(entry('tool'), 'tool_use')
+  // 2.1.322's busy line, no "esc to interrupt": just above the prompt box
+  const SPIN = IDLE.replace(/^(?=─{20,})/m, '✶ Zigzagging… (12m 18s · ↓ 54.7k tokens · still thinking with xhigh effort)\n\n')
+  check('busy rule 2.1.322: the fixture\'s spinner line is busy, the idle screen is not', paneStateMod.screenBusy(SPIN) && !paneStateMod.screenBusy(IDLE) && !paneStateMod.screenBusy(DIALOG))
+
+  const sid = 'bbbbbbbb-3333-4444-8555-666666666666'
+  const p = pane('vk-0pen00turn', 'Watch: monitor every service', 'server', sid)
+  screensBy.set(p.name, [IDLE])
+  await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid })
+  say(p.name, sid, entry('user', 'monitor every service'), midTurn('Merges. Now the report sync edits (views, daily snapshot, down time, page read).'), step())
+  await tick(1_000)
+  await tick(13_000)
+  await tick(8_000)
+  check('open turn: a progress line and a tool still running, quiet with no spinner, is no turn end', replies().length === 0, wakes)
+  check('open turn: Watching shows it working', (await card(p.name))?.state === 'working', await card(p.name))
+  await tick(40_000)
+  check('open turn: a minute on, its lines go as progress', wakes.length === 1 && wakes[0].kind === 'session_progress' && wakes[0].payload.turnEnded === false
+    && saidIn(wakes[0]).join('|') === 'prompt:monitor every service|claude:Merges. Now the report sync edits (views, daily snapshot, down time, page read).', wakes)
+
+  // the tool's result came back and the newest line stopped for a tool: still mid-turn, so it goes as progress, never as the end
+  say(p.name, sid, entry('result'), midTurn('The report part is written and type-checks.'))
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: a newest line that stopped for a tool is no turn end', replies().length === 0, wakes)
+  check('open turn: Watching still shows it working', (await card(p.name))?.state === 'working')
+  await tick(50_000)
+  check('open turn: that line goes as progress after a minute', wakes.length === 2 && wakes[1].kind === 'session_progress' && saidIn(wakes[1]).join('|') === 'claude:The report part is written and type-checks.', wakes)
+
+  // the answer: its message ended the turn, so the quiet check hands it over
+  say(p.name, sid, step(), entry('result'), stopped(entry('assistant', 'All four connectors write their daily trends now.'), 'end_turn'))
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: the answer ends the turn', replies().length === 1 && wakes.at(-1)?.kind === 'session_reply' && saidIn(wakes.at(-1)).join('|') === 'claude:All four connectors write their daily trends now.', wakes.slice(2))
+  check('open turn: Watching shows it idle after the answer', (await card(p.name))?.state === 'idle', await card(p.name))
+
+  // an older build's lines say no stop reason: 2.1.322's spinner line on the screen holds the turn instead
+  say(p.name, sid, entry('user', 'and the video line'), entry('assistant', 'Reading the video records.'))
+  screensBy.set(p.name, [SPIN])
+  await tick(1_000)
+  await tick(13_000)
+  await tick(8_000)
+  check('open turn: the 2.1.322 spinner line holds a turn whose lines say no stop reason', replies().length === 1, wakes.slice(2))
+  check('open turn: Watching shows the 2.1.322 spinner as working', (await card(p.name))?.state === 'working')
+  screensBy.set(p.name, [IDLE])
+  await tick(8_000)
+  check('open turn: the spinner gone, the turn ends', replies().length === 2 && saidIn(wakes.at(-1)).join('|') === 'prompt:and the video line|claude:Reading the video records.', wakes.slice(2))
+
+  // an open tool step with a dialog on the screen waits on him: handed over as asking, and Watching does not say working
+  say(p.name, sid, entry('user', 'delete the old builds'), midTurn('Removing the old build folders.'), step())
+  screensBy.set(p.name, [DIALOG])
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: a dialog on an open step is handed over as asking', replies().length === 3 && wakes.at(-1)?.payload.asking === true, wakes.at(-1))
+  check('open turn: Watching does not show a turn waiting on him as working', (await card(p.name))?.state === 'idle', await card(p.name))
+  screensBy.set(p.name, [IDLE])
+
+  // a turn the transcript never closed (Claude killed mid-step) stops counting after 15 quiet minutes
+  say(p.name, sid, entry('result'), midTurn('Checking the disk.'), step())
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: held while it is fresh', replies().length === 3)
+  await tick(15 * 60_000)
+  check('open turn: 15 quiet minutes on, it is read as over', replies().length === 4 && saidIn(wakes.at(-1)).join('|').endsWith('claude:Checking the disk.'), wakes.at(-1))
+  check('open turn: and Watching shows it idle', (await card(p.name))?.state === 'idle')
+
+  // an interrupt closes the turn
+  say(p.name, sid, entry('user', 'try again'), midTurn('Trying again.'), step(), entry('result'), entry('system', 'Interrupted'))
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: an interrupt ends it', replies().length === 5 && saidIn(wakes.at(-1)).join('|') === 'prompt:try again|claude:Trying again.', wakes.at(-1))
+
+  // a session watched in the middle of a job is working from the first read
+  const msid = 'cccccccc-3333-4444-8555-666666666666'
+  const mp = pane('vk-0pen00mid1', 'Thor 3D model', 'server', msid)
+  screensBy.set(mp.name, [IDLE])
+  say(mp.name, msid, entry('user', 'label the fan and M.2 slots'), midTurn('Now System > Hosts: each disk plate lights its own slot.'), step())
+  await watch.startWatch({ pane: mp.name, label: mp.label, sessionId: msid })
+  check('open turn: a session watched mid-job shows working at once', (await card(mp.name))?.state === 'working', await card(mp.name))
+
+  // a window on thor has no screen: thor's board says when it waits on him
+  const tsid = 'dddddddd-3333-4444-8555-666666666666'
+  say(`sid:${tsid}`, tsid, entry('user', 'earlier'), entry('assistant', 'Earlier answer.'))
+  await watch.startWatch({ pane: '', label: 'Desk session', sessionId: tsid })
+  say(`sid:${tsid}`, tsid, entry('user', 'clean up'), midTurn('Cleaning up.'), step())
+  const before = replies().length
+  await tick(1_000)
+  await tick(13_000)
+  check('open turn: a window on thor mid-step is no turn end', replies().length === before, wakes.at(-1))
+  ;(fakeIo as any).boardCached = () => [{ sessionId: tsid, live: true, activity: 'asking' }]
+  ioMod.setRavenToolsIo(fakeIo)
+  await tick(8_000)
+  check('open turn: a window on thor the board says asks is handed over as asking', replies().length === before + 1 && wakes.at(-1)?.payload.asking === true, wakes.at(-1))
+  delete (fakeIo as any).boardCached
+  ioMod.setRavenToolsIo(fakeIo)
+
+  for (const w of watch.listWatches()) watch.removeWatch(w.key)
+}
+
 // ------------------------------------------------------ the Watching card ---
 
 {

@@ -537,11 +537,12 @@ router.post('/hosts/:host/launch-new', async (req, res) => {
 
 // -------------------------------------------------------------- desk RGB ----
 // thor's desk lighting: the same two actions as its "Relight Thor" and "Dark
-// Thor" desktop buttons. Same rule as the launch routes above: the client sends
+// Thor" desktop buttons, plus screen sync on and off (the desk and the bulbs
+// follow thor's main monitor; routes/screenSync.ts has the bulbs' side). Same rule as the launch routes above: the client sends
 // a MODE from a fixed list, never a task name, and thor maps it to a scheduled
 // task out of its own local table.
 
-const RGB_MODES = new Set(['relight', 'dark'])
+const RGB_MODES = new Set(['relight', 'dark', 'screen', 'screen-off'])
 
 router.get('/hosts/thor/rgb', async (_req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
@@ -556,7 +557,7 @@ router.get('/hosts/thor/rgb', async (_req, res) => {
 router.post('/hosts/thor/rgb', async (req, res) => {
   if (!LAUNCHER_TOKEN) return notConfigured(res)
   const mode = String((req.body ?? {}).mode ?? '')
-  if (!RGB_MODES.has(mode)) return res.status(400).json({ error: 'mode must be relight or dark' })
+  if (!RGB_MODES.has(mode)) return res.status(400).json({ error: 'mode must be relight, dark, screen or screen-off' })
   // The reply comes back as soon as the task is STARTED. A relight runs two
   // full OpenRGB cycles and takes about 45 seconds, so the page polls the
   // status route instead of holding a request open for it.

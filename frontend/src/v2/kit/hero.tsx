@@ -5,6 +5,7 @@ import {
   type Beam, type CameraPose, type Flow, type HotspotPoint, type Model, type Vec3,
 } from './three'
 import { useHosts } from './data'
+import { diskKey } from './drives'
 import { usePalette, useSetting } from './theme'
 import { useReducedMotion } from './motion'
 import { useShell } from './shell'
@@ -132,8 +133,10 @@ export function useHeroId(): [HeroId, (v: HeroId) => void] {
 const unit = (v: number | null | undefined, d: number) => (v == null ? d : Math.max(0, Math.min(1, v / 100)))
 
 /**
- * WireScene heat for a host: { cpu, mem, disk } 0..1 from live data, gpu a dim
- * idle glow (no metric), fans follow cpu. battery = HostVM.battery percent
+ * WireScene heat for a host: { cpu, mem, disk } 0..1 from live data (disk the
+ * fullest drive's, and each drive's own under its diskKey, disk.C, for a model
+ * with a slot per drive, kit/drives), gpu a dim idle glow (no metric), fans
+ * follow cpu. battery = HostVM.battery percent
  * (frame, mimir, phone, tablet), display a steady glow while online. Hosts
  * without a battery get no battery key, so thor and odin render exactly as before.
  *
@@ -150,6 +153,7 @@ export function useHeat(hostId: string): { heat: Record<string, number>; online:
   const cpu = online && !v ? unit(h?.cpu, 0.2) : 0.04
   const mem = online ? unit(h?.mem, 0.3) : 0.04
   const disk = online ? unit(h?.disk, 0.3) : 0.04
+  const drives = online ? (h?.disks ?? []).filter((d) => d.name).map((d) => `${d.name}=${d.percent}`).join('|') : ''
   const pct = h?.battery?.percent
   const battery = pct == null ? null : online ? unit(pct, 0.5) : 0.04
   // a car is still there while asleep: only offline (or a stale reading) dims its pack
@@ -170,10 +174,14 @@ export function useHeat(hostId: string): { heat: Record<string, number>; online:
       return out
     }
     const out: Record<string, number> = { cpu, mem, disk, gpu: online ? 0.14 : 0.04, fans: cpu, psu: online ? 0.3 : 0.04 }
+    for (const d of drives ? drives.split('|') : []) {
+      const k = d.lastIndexOf('=')
+      out[diskKey(d.slice(0, k))] = unit(Number(d.slice(k + 1)), 0.3)
+    }
     if (battery != null) out.battery = battery
     if (hostId === 'frame' || hostId === 'mimir') out.display = online ? 0.55 : 0.04
     return out
-  }, [car, cpu, mem, disk, online, battery, hostId])
+  }, [car, cpu, mem, disk, drives, online, battery, hostId])
   return { heat, online, cpu }
 }
 

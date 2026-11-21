@@ -15,6 +15,7 @@ import { Icon, hostIcon, type IconName, type IconTone } from '../kit/icons'
 import { usePalette, useSetting } from '../kit/theme'
 import { useReducedMotion } from '../kit/motion'
 import { HOST_POSE, Hero, MODEL_ONLY_IDS, MODEL_ONLY_LABEL, heroModel, hostModel, hotspotSides, useHeat, type HostModelId } from '../kit/hero'
+import { diskKey, diskSpot, hasDriveSpots } from '../kit/drives'
 import type { HotspotPoint } from '../kit/three'
 import { thisDeviceId } from '../kit/thisDevice'
 import { EquityChart } from '../kit/three/EquityChart'
@@ -2044,19 +2045,24 @@ const reportsBatteryOnly = (h: HostVM) => h.mobile || (h.cpu == null && h.mem ==
 /**
  * This device's numbers: CPU, memory and disk, plus the battery where it has
  * one (Loki); the phone and tablet their battery and storage (storage once
- * either has reported).
+ * either has reported). On a model with a slot per drive (thor's tower) each
+ * drive gets its own number, keyed by its hotspot (disk.C), so each line ends
+ * on that drive's own M.2.
  */
-function deviceCells(h: HostVM): HostCell[] {
+function deviceCells(h: HostVM, model?: HostModelId | null): HostCell[] {
   const b = h.battery
   const bat: HostCell[] = b
     ? [{ key: 'bat', icon: b.charging ? 'charging' : 'battery', label: b.charging ? 'Battery, charging' : 'Battery', v: b.percent, alert: !b.charging && b.percent <= 15 }]
     : []
   const disk = (label: string): HostCell => ({ key: 'disk', icon: 'disk', label, v: h.disk, alert: (h.disk ?? 0) >= 90 })
   if (reportsBatteryOnly(h)) return [...bat, ...(b || h.disk != null ? [disk('Storage')] : [])]
+  const drives = model && h.disks.length > 1 && hasDriveSpots(heroModel(model))
+    ? h.disks.map((d, k): HostCell => ({ key: diskKey(d.name ?? `#${k + 1}`), icon: 'disk', label: d.name ? `Disk ${d.name}` : `Disk ${k + 1}`, v: d.percent, alert: d.percent >= 90 }))
+    : [disk(diskWord(h))]
   return [
     { key: 'cpu', icon: 'cpu', label: 'CPU', v: h.cpu, alert: false },
     { key: 'mem', icon: 'mem', label: 'Memory', v: h.mem, alert: (h.mem ?? 0) >= 90 },
-    disk(diskWord(h)),
+    ...drives,
     ...bat,
   ]
 }
@@ -2064,12 +2070,15 @@ function deviceCells(h: HostVM): HostCell[] {
 /** "25.4 / 31.1 GB" (GiB, as Windows and htop show memory; System > Hosts words it the same) */
 const memSizes = (h: HostVM) => (h.memUsedGb != null && h.memTotalGb != null ? `${h.memUsedGb.toFixed(1)} / ${h.memTotalGb.toFixed(1)} GB` : null)
 
-/** "3.1 / 4.0 TB", "101 / 256 GB" (decimal, as drives are sold; as System > Hosts words it) */
-function diskSizes(h: HostVM): string | null {
-  if (h.diskUsedGb == null || h.diskTotalGb == null) return null
+/** "3.1 / 4.0 TB", "101 / 256 GB" (decimal, as drives are sold; as System > Hosts words it): the fullest disk's */
+const diskSizes = (h: HostVM): string | null => gbSizes(h.diskUsedGb, h.diskTotalGb)
+
+/** used / total GiB as diskSizes words them */
+function gbSizes(usedGb: number | null, totalGb: number | null): string | null {
+  if (usedGb == null || totalGb == null) return null
   const dec = (gib: number) => (gib * 1024 ** 3) / 1e9
   const one = (gb: number, unit: 'TB' | 'GB') => (unit === 'TB' ? (gb / 1000).toFixed(1) : gb >= 10 ? gb.toFixed(0) : gb.toFixed(1))
-  const used = dec(h.diskUsedGb), total = dec(h.diskTotalGb)
+  const used = dec(usedGb), total = dec(totalGb)
   const tu = total >= 1000 ? 'TB' : 'GB'
   const uu = used >= 100 && tu === 'TB' ? 'TB' : 'GB'
   return uu === tu ? `${one(used, uu)} / ${one(total, tu)} ${tu}` : `${one(used, uu)} ${uu} / ${one(total, tu)} ${tu}`
@@ -2080,6 +2089,10 @@ function cellSizes(h: HostVM, key: string): string | null {
   if (key === 'cpu') return h.cores ? `${h.cores} cores` : null
   if (key === 'mem') return memSizes(h)
   if (key === 'disk') return diskSizes(h)
+  if (key.startsWith('disk.')) {
+    const d = h.disks.find((x, k) => diskKey(x.name ?? `#${k + 1}`) === key)
+    return d ? gbSizes(d.usedGb, d.totalGb) : null
+  }
   if (key === 'bat') return h.battery?.charging ? 'charging' : null
   return null
 }
@@ -2141,7 +2154,8 @@ function readSlots(keyList: string, model: HostModelId | null, pose: string): Re
   const at = model ? hotspotSides(model, pose) : {}
   const spots = model ? heroModel(model).hotspots : []
   const all = keys.map((key, k) => {
-    const id = SPOT_OF[key] ?? key
+    // the one disk number: the model's disk, or on thor's tower its system drive's slot
+    const id = key === 'disk' && model ? diskSpot(heroModel(model), null) ?? key : SPOT_OF[key] ?? key
     return { key, spot: spots.findIndex((s) => s.id === id), x: at[id]?.x ?? (k + 0.5) / keys.length, y: at[id]?.y ?? k }
   })
   const byX = [...all].sort((a, b) => a.x - b.x)
@@ -2199,7 +2213,7 @@ function DeviceStage({ id, active, i, compact, fill }: { id: HostModelId | null;
   const model = id ? hostModel(id) : null
   const label = h ? cap(h.label) : id ? DEVICE_LABEL[id] : 'This device'
   const stale = !!h && h.online && h.stale
-  const cells = h && online ? deviceCells(h) : []
+  const cells = h && online ? deviceCells(h, model) : []
   // the phone or tablet is up and its first battery reading has not come in
   const noBattery = !!h && online && reportsBatteryOnly(h) && !h.battery
   const modelOnly = !!id && !!hosts.data && !h && (MODEL_ONLY_IDS as readonly string[]).includes(id)
@@ -2307,11 +2321,13 @@ function DeviceStage({ id, active, i, compact, fill }: { id: HostModelId | null;
 
   const row = (c: HostCell) => {
     const sz = h ? cellSizes(h, c.key) : null
+    const spot = slots.slot[c.key]?.spot ?? -1
     return (
       <span
         key={c.key}
         className="hm-dev-row"
         data-k={c.key}
+        data-spot={model && spot >= 0 ? heroModel(model).hotspots[spot]?.id : undefined}
         data-alert={c.alert || undefined}
         data-hot={hot === c.key || undefined}
         onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHot(c.key) }}

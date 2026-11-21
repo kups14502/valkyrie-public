@@ -13,7 +13,7 @@ import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
-import { AUTO_CLOSE_MS, closesAt, getWatch, keepWatch, listWatches, removeWatch, startWatch, waitCounts, watchKey, type Watch } from './watch.js'
+import { AUTO_CLOSE_MS, closesAt, getWatch, keepWatch, listWatches, removeWatch, startWatch, turnOpen, waitCounts, watchKey, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
@@ -134,7 +134,9 @@ export async function mainTargets(waitMs?: number): Promise<{ key: string; label
 // Working or not is the Desk's busy rule (terminal/paneState.ts), read through io.
 const busy = (p: TermSession): Promise<boolean> => paneBusy(p, io.capture, io.now())
 
-// Watching's rule: busy, or its turn ended with background work still out (a
+// Watching's rule: busy, or the transcript says its turn is still going and no
+// prompt waits on him (watch.ts turnOpen: a tool runs, Claude is on a tool's
+// result or between steps), or its turn ended with background work still out (a
 // background shell, a monitor, an agent: paneState.ts screenWaiting), so a
 // session waiting on a build reads Working. A wait counts only while the
 // session had activity in the last 15 minutes or Raven holds it with
@@ -148,6 +150,7 @@ const quietReads = new Map<string, { at: number; waiting: boolean }>()
 async function working(p: TermSession, w: Watch): Promise<boolean> {
   if (p.dead) return false
   const now = io.now()
+  if (turnOpen(w, now) && !w.asking) return true
   for (const [name, r] of quietReads) if (now - r.at > 10 * 60_000) quietReads.delete(name)
   const counts = waitCounts(w, now)
   if (mayBeBusy(p, now)) {

@@ -855,7 +855,7 @@ export default function Desk({ active }: ScreenProps) {
                 title="All sessions, by area and project"
                 onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
               >
-                <Icon name={ListTree} size={coarse ? 17 : 14} tone={listOpen ? 'fg' : 'dim'} glow={listOpen} />
+                <Icon name={ListTree} size={coarse ? 17 : 14} tone="dim" />
                 {!phone && <span>Sessions</span>}
                 <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
               </Press>
@@ -1023,7 +1023,7 @@ export default function Desk({ active }: ScreenProps) {
             {/* every pane can be off the Desk while it runs: then "+" puts them back */}
             <p>{own ? `${own} running, none on the Desk.` : ravens.length ? 'None of yours is open.' : 'No session is open.'}</p>
             <Press className="dk-start" aria-expanded={picker} onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}>
-              <Icon name="add" size={14} tone="fg" glow />
+              <Icon name="add" size={14} tone="dim" />
               <span>{own ? 'Put one back' : 'New session'}</span>
             </Press>
             <RecoverCard
@@ -1415,7 +1415,7 @@ function SessionList({
             title={`Reopen all ${closedN} as tabs on the Desk`}
             onPress={() => onRecover('all')}
           >
-            <Icon name="refresh" size={12} tone="fg" className={recover?.scope === 'all' ? 'vl-pulse' : undefined} />
+            <Icon name="refresh" size={12} tone="dim" className={recover?.scope === 'all' ? 'vl-pulse' : undefined} />
             {recover?.scope === 'all' ? `Recovering ${recover.done}/${recover.total}` : 'Recover all'}
           </Press>
         )}
@@ -1506,13 +1506,13 @@ function RecoverButtons({ all, areas, recover, areaName, onRecover }: {
     return (
       <Press
         key={key}
-        className={big ? cx('dk-start dk-recover-btn', key === 'all' && 'dk-recover-all') : 'dk-recover dk-recover-ctx'}
+        className={big ? cx('dk-recover-btn', key === 'all' && 'dk-recover-all') : 'dk-recover dk-recover-ctx'}
         data-scope={key}
         disabled={!!recover}
         title={title}
         onPress={() => onRecover(key)}
       >
-        <Icon name="refresh" size={big ? 14 : 12} tone="fg" glow={big} className={running ? 'vl-pulse' : undefined} />
+        <Icon name="refresh" size={big ? 13 : 12} tone="dim" className={running ? 'vl-pulse' : undefined} />
         {running && recover
           ? <span>{`Recovering ${recover.done}/${recover.total}`}</span>
           : <><span>{text}</span>{' '}<span className="dk-recover-n">{n}</span></>}
@@ -1532,8 +1532,8 @@ function RecoverButtons({ all, areas, recover, areaName, onRecover }: {
  * The empty Desk's list: every closed, not done session on thor (the set
  * Recover all brings back), newest first, each with its context and when it
  * closed; a tap resumes that one as a tab. Over the rows, Recover all and one
- * Recover per context. The Raven card's rounded box and rows, so the empty Desk
- * reads like the Raven tab.
+ * Recover per context. A plain grey box of its own: the accent-tinted box and
+ * glowing label are the Raven card's alone.
  */
 function RecoverCard({ rows, areas, opening, recover, coarse, now, areaName, onReopen, onRecover }: {
   rows: SessionBrief[]
@@ -1550,14 +1550,14 @@ function RecoverCard({ rows, areas, opening, recover, coarse, now, areaName, onR
   if (!rows.length && !recover) return null
   const n = rows.length
   return (
-    <section className="dk-recov rv-compose" aria-label="Closed sessions to recover">
-      <div className="dk-raven-head">
-        <Icon name="refresh" size={coarse ? 16 : 14} tone="fg" glow />
-        <span className="dk-raven-k">Recover</span>
-        <span className="dk-raven-n">{`${n} closed, not done`}</span>
+    <section className="dk-recov" aria-label="Closed sessions to recover">
+      <div className="dk-recov-head">
+        <Icon name="refresh" size={coarse ? 16 : 14} tone="dim" />
+        <span className="dk-recov-k">Recover</span>
+        <span className="dk-recov-n">{`${n} closed, not done`}</span>
       </div>
       <RecoverButtons all={n} areas={areas} recover={recover} areaName={areaName} onRecover={onRecover} />
-      <div className="dk-raven-rows dk-recov-rows">
+      <div className="dk-recov-rows">
         {rows.map((s) => {
           const busy = opening.has(s.id)
           const title = s.title || 'Untitled session'
@@ -1567,13 +1567,13 @@ function RecoverCard({ rows, areas, opening, recover, coarse, now, areaName, onR
           return (
             <Press
               key={s.id}
-              className="dk-rrow rv-crow dk-recrow"
+              className="rv-crow dk-recrow"
               disabled={busy || !!recover}
               title={s.cwd ?? undefined}
               aria-label={`${title}, ${ctx}${when ? `, closed ${when}` : ''}. Recover it.`}
               onPress={() => onReopen(s)}
             >
-              <StateIcon a="closed" size={14} className="dk-rrow-mark" />
+              <StateIcon a="closed" size={14} className="dk-recrow-mark" />
               <span className="rv-crow-name">{title}</span>
               <span className="dk-ctx">{ctx}</span>
               <span className="rv-crow-note">{busy ? 'opening' : when}</span>

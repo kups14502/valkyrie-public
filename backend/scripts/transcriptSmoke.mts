@@ -199,6 +199,17 @@ const wi = bigInput[0].tool?.input as { content: string }
 assert.ok(wi.content.length <= 2001 && JSON.stringify(bigInput).length < 10_000)
 ok('parser: a large tool input is cut down (one Write cannot make a page megabytes long)')
 
+// 2.1.322: every line of an API message carries its stop_reason, so a progress line mid-turn says it stopped for a tool
+const stops = P.parseLines([
+  line({ type: 'assistant', uuid: uuid(910), timestamp: '2026-11-21T07:48:00.000Z', message: { model: 'm', stop_reason: 'tool_use', content: [{ type: 'text', text: 'Merges. Now the report sync edits.' }] } }),
+  line({ type: 'assistant', uuid: uuid(911), timestamp: '2026-11-21T07:48:00.000Z', message: { model: 'm', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't9', name: 'Edit', input: { file_path: '/x' } }] } }),
+  line({ type: 'assistant', uuid: uuid(912), timestamp: '2026-11-21T07:50:00.000Z', message: { model: 'm', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] } }),
+  line({ type: 'assistant', uuid: uuid(913), timestamp: '2026-11-21T07:50:00.000Z', message: { model: 'm', content: [{ type: 'text', text: 'An older build.' }] } }),
+  line({ type: 'assistant', uuid: uuid(914), timestamp: '2026-11-21T07:51:00.000Z', isApiErrorMessage: true, message: { model: '<synthetic>', content: [{ type: 'text', text: 'API Error: 500' }] } }),
+])
+assert.deepEqual(stops.map((e) => `${e.kind}:${e.stop ?? '-'}`), ['assistant:tool_use', 'tool:tool_use', 'assistant:end_turn', 'assistant:-', 'system:error'])
+ok('parser: each entry carries its message\'s stop reason; an API error is marked as one')
+
 // The conversation as a tree, the way Claude Code writes it: every line names
 // its parent. Numbers are the lines' uuids.
 const SR = uuid(3000)

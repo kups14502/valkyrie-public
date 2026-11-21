@@ -1112,7 +1112,7 @@ function closedTests() {
         const c = await page.eval(() => {
           const card = document.querySelector('.vl-page[data-active] .dk-empty .dk-recov')
           return {
-            btns: [...card.querySelectorAll('.dk-recov-acts .dk-start')].map((b) => b.textContent),
+            btns: [...card.querySelectorAll('.dk-recov-acts .dk-recover-btn')].map((b) => b.textContent),
             rows: [...card.querySelectorAll('.dk-recrow')].map((r) => [r.querySelector('.rv-crow-name')?.textContent, r.querySelector('.dk-ctx')?.textContent, r.querySelector('.rv-crow-note')?.textContent]),
           }
         })

@@ -32,7 +32,7 @@ import './lights.css'
 type Vars = CSSProperties & Record<`--${string}`, string | number>
 /** raw: Home Assistant's 0-255 brightness, sent back with a color pick so the bulb keeps its level */
 type Bulb = LightVM & { raw: number | null }
-type RgbPick = 'relight' | 'dark'
+type RgbPick = 'relight' | 'dark' | 'screen'
 type Swatch = (typeof SWATCHES)[number]
 
 /** glow strength the room gives a lit bulb whose brightness is unknown (drawing only, never shown as a number) */
@@ -49,6 +49,8 @@ const PRESET_ICON: Partial<Record<string, IconName>> = { Warm: 'warm', Cool: 'ni
 const RGB_OPTS: { value: RgbPick; label: string; icon: IconName }[] = [
   { value: 'relight', label: 'Relight', icon: 'refresh' },
   { value: 'dark', label: 'Dark', icon: 'bulbOff' },
+  // screen sync: the desk and the bulbs follow thor's main monitor. Relight or Dark ends it.
+  { value: 'screen', label: 'Screen', icon: 'watch' },
 ]
 
 // bulbs quantize color (the real backend allows 12 per channel), so match loosely, but tightly
@@ -96,7 +98,7 @@ function useRgbPress(state: RgbVM['state'] | undefined) {
   // once the call has landed: done when thor agrees (after the floor), or when the worst case passes
   useEffect(() => {
     if (!pending?.sent) return
-    const satisfied = pending.mode === 'relight' ? state === 'lit' : state === 'dark'
+    const satisfied = state === { relight: 'lit', dark: 'dark', screen: 'screen' }[pending.mode]
     const wait = Math.max(0, (satisfied ? RGB_MIN_BUSY_MS : RGB_SETTLE_MS) - (Date.now() - pending.at))
     const t = setTimeout(() => setPending((p) => (p?.id === pending.id ? null : p)), wait)
     return () => clearTimeout(t)
@@ -122,7 +124,7 @@ function useRgbPress(state: RgbVM['state'] | undefined) {
       })
       .catch((e: unknown) => {
         setPending((p) => (p?.id === id ? null : p))
-        toast(`Thor RGB ${mode === 'dark' ? 'Dark' : 'Relight'} failed: ${why(e)}`)
+        toast(`Thor RGB ${{ relight: 'Relight', dark: 'Dark', screen: 'Screen' }[mode]} failed: ${why(e)}`)
       })
   }
   return { pending: pending?.mode ?? null, press }
@@ -222,13 +224,14 @@ function rgbStatus(d: RgbVM | undefined, failed: boolean, updatedAt: number, pen
   if (failed) {
     // thor did not answer: say so, over the last good state and its age
     if (!d || !d.installed) return { text: '', bad: 'Thor is not answering' }
-    const was = d.state === 'lit' ? 'lit' : d.state === 'dark' ? 'dark' : 'state unknown'
+    const was = d.state === 'lit' ? 'lit' : d.state === 'dark' ? 'dark' : d.state === 'screen' ? 'following the screen' : 'state unknown'
     return { bad: 'Thor is not answering', text: `${was} ${ago(updatedAt, now)} ago` }
   }
   // thor's agent can take 8 s to time out, twice: past a few seconds, say what is going on and for how long
   if (!d) return { text: now - askedAt >= 5000 ? `Thor is slow to answer · ${ago(askedAt, now)}` : 'Checking' }
   if (!d.installed) return { text: 'Not set up on this backend' }
-  if (pending) return { text: pending === 'relight' ? 'Relighting · up to 45s' : 'Going dark' }
+  if (pending) return { text: { relight: 'Relighting · up to 45s', dark: 'Going dark', screen: 'Starting screen sync' }[pending] }
+  if (d.state === 'screen') return { text: 'Screen · the desk and the bulbs follow the main monitor' }
   if (d.state === 'lit') {
     const parts = ['Lit']
     if (d.storm) parts.push('storm streaming')
@@ -345,7 +348,7 @@ export default function Lights({ active }: ScreenProps) {
   const rgbPress = useRgbPress(rgbD?.state)
   const rgbUsable = !!rgbD && rgbD.installed && !rgbQ.failed
   // the plates and the room show what the desk is really doing; a press in flight is the status line's to say
-  const rgb: RgbPick | null = rgbD?.installed && (rgbUsable || rgbQ.failed) ? (rgbD.state === 'lit' ? 'relight' : rgbD.state === 'dark' ? 'dark' : null) : null
+  const rgb: RgbPick | null = rgbD?.installed && (rgbUsable || rgbQ.failed) ? (rgbD.state === 'lit' ? 'relight' : rgbD.state === 'dark' ? 'dark' : rgbD.state === 'screen' ? 'screen' : null) : null
   const [rgbAskedAt] = useState(() => Date.now())
   const rgbLine = rgbStatus(rgbD, rgbQ.failed, rgbQ.updatedAt, rgbPress.pending, now, rgbAskedAt)
 

@@ -1283,6 +1283,8 @@ function deviceReport() {
     const nums = ((g?.querySelector('path')?.getAttribute('d') || '').match(/-?\d+(\.\d+)?/g) || []).map(Number)
     return {
       key,
+      // the model's part the number reads (its hotspot id): disk.C for thor's C: drive
+      spot: row.getAttribute('data-spot'),
       side: row.closest('.hm-dev-rows')?.getAttribute('data-side') ?? null,
       box: px(row.getBoundingClientRect()),
       bar: px(row.querySelector('.hm-mini-bar').getBoundingClientRect()),
@@ -1349,12 +1351,23 @@ const HERO_WATCH = `(() => {
 function deviceTests() {
   const LOAD = ['CPU 23%', 'Memory 41%', 'Disk 62%']
   const SIZES = ['16 cores', '13.0 / 32.0 GB', '1.2 / 2.0 TB']
+  // thor as its publisher reports it: every fixed drive, the system drive first (sizes as Windows has them, 2026-11-21)
+  const DRIVES = {
+    disks: [
+      { name: 'C:', used: 3828781719552, total: 3999590584320, percent: 95.7 },
+      { name: 'E:', used: 198417350656, total: 2000382062592, percent: 9.9 },
+      { name: 'F:', used: 884066721792, total: 1000187359232, percent: 88.4 },
+    ],
+  }
   // thor's fake last hour peaks at 50% CPU
   const HOUR_CAP = /^Last hour\s*CPU\s*Mem\s*peak 50%$/
   const cases = [
     { name: 'app-thor', device: 'desk1080', app: 'THOR', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true },
     { name: 'app-thor-1600', device: 'desktop', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true },
     { name: 'app-thor-1440', device: 'desk1440', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, rows: LOAD, sizes: SIZES, hour: true, tall: true },
+    // thor's three drives: a number each, its line on that drive's own M.2 (C: the top slot, E: and F: under the card)
+    { name: 'app-thor-drives', device: 'desk1080', app: 'thor', want: 'thor', label: 'Thor', state: /^Online · up 25h 0m$/, thor: DRIVES, drives: true, hour: true,
+      rows: ['CPU 23%', 'Memory 41%', 'Disk C: 96%', 'Disk E: 10%', 'Disk F: 88%'], sizes: ['16 cores', '13.0 / 32.0 GB', '3.8 / 4.0 TB', '0.2 / 2.0 TB', '0.9 / 1.0 TB'] },
     { name: 'app-mimir', device: 'desk1440', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [], sizes: [] },
     { name: 'app-mimir-1080', device: 'desk1080', app: 'mimir', want: 'mimir', label: 'Mimir', state: /^Offline$/, rows: [], sizes: [] },
     { name: 'browser', device: 'desktop', want: 'thor', label: 'Thor', state: /^Online/, rows: LOAD, sizes: SIZES, hour: true },
@@ -1375,6 +1388,7 @@ function deviceTests() {
       quietThor(page)
       const doc = deviceHosts()
       if (c.tablet) Object.assign(doc.hosts.find((h) => h.host === 'tablet'), c.tablet)
+      if (c.thor) Object.assign(doc.hosts.find((h) => h.host === 'thor'), c.thor)
       page.mock('/api/hosts', () => ok(doc))
       await page.goto('/m/dashboard')
       await shellUp(page)
@@ -1453,8 +1467,10 @@ function deviceTests() {
         for (const rd of r.reads) {
           const hit = rd.box && rd.box.l < o.x1 && rd.box.r > o.x0 && rd.box.t < o.y1 && rd.box.b > o.y0
           t.check(!hit, `the ${rd.key} number lies over the model: ${JSON.stringify(rd.box)} against the model's ${[o.x0, o.y0, o.x1, o.y1].map(Math.round)}`)
-          const at = r.spots[SPOT[rd.key]]
-          if (!t.check(at, `the ${r.hero} model has no ${SPOT[rd.key]} part for the ${rd.key} number`)) continue
+          const part = rd.spot || SPOT[rd.key]
+          if (c.drives && rd.key.startsWith('disk')) t.check(rd.spot === rd.key && /^disk\.[CEF]$/.test(rd.key), `the ${rd.key} number reads part ${rd.spot}, want its own drive's M.2 (${rd.key})`)
+          const at = r.spots[part]
+          if (!t.check(at, `the ${r.hero} model has no ${part} part for the ${rd.key} number`)) continue
           if (!t.check(rd.line && rd.line.opacity > 0.3 && rd.line.to.length === 2, `the ${rd.key} number has no leader line (${JSON.stringify(rd.line)})`)) continue
           t.check(Math.hypot(rd.line.to[0] - at[0], rd.line.to[1] - at[1]) <= 2.5, `the ${rd.key} line ends at ${rd.line.to.map(Math.round)}, its part is at ${at.map(Math.round)}`)
           const inner = rd.side === 'l' ? rd.bar.r : rd.bar.l
@@ -1482,7 +1498,7 @@ function deviceTests() {
       t.check(Math.abs(turned.outline?.yaw ?? 0) > 5, `a drag on the model did not turn it (yaw ${turned.outline?.yaw})`)
       // turned, every line still ends on its part
       for (const rd of turned.reads) {
-        const p = turned.spots[{ cpu: 'cpu', mem: 'mem', disk: 'disk', bat: 'battery' }[rd.key]]
+        const p = turned.spots[rd.spot || { cpu: 'cpu', mem: 'mem', disk: 'disk', bat: 'battery' }[rd.key]]
         if (p && rd.line?.to.length === 2 && rd.line.opacity > 0) t.check(Math.hypot(rd.line.to[0] - p[0], rd.line.to[1] - p[1]) <= 4, `turned, the ${rd.key} line ends at ${rd.line.to.map(Math.round)}, its part is at ${p.map(Math.round)}`)
       }
       // a tap on the model opens System > Hosts with this device picked

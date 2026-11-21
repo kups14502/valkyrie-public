@@ -12,13 +12,25 @@ import { clip } from './util.js'
 // transcript is read forward from a cursor. Every line Claude writes, its
 // progress lines too, is kept in full (with the prompts typed into it, for
 // context) until it is handed to Raven as one event:
-//   - at the end of a turn: nothing new for 12 s and a pane's screen no longer
-//     shows the working spinner (session_reply). It says whether a question or
-//     permission prompt is open there and whether background work is still out.
+//   - at the end of a turn: nothing new for 12 s, a pane's screen no longer
+//     shows the working spinner, and the transcript does not say the turn is
+//     still going (session_reply). It says whether a question or permission
+//     prompt is open there and whether background work is still out.
 //   - mid-turn, once a minute: the oldest unread line is 60 s old and Claude has
-//     moved on to a tool step since (session_progress). A line that is still the
-//     newest can be the turn's answer, so it waits for the 12 s check.
+//     moved on to a tool step since, or its newest line stopped for a tool
+//     (session_progress). A line that may be the turn's answer waits for the
+//     12 s check.
 //   - when a pane dies (session_reply, ended).
+// The transcript says a turn is still going (`open`) while its newest step is
+// a prompt he typed, a tool call, a tool's result, or a line of a message that
+// stopped for a tool (stop_reason tool_use, transcript.ts): a long Edit or
+// Bash, or minutes of thinking, writes nothing for a while. Only an answer
+// (stop_reason end_turn, or a line that does not say), an interrupt or an API
+// error closes it. On 2026-11-21 at 2:48 AM ET two panes in the middle of a job
+// ("Merges. Now the report sync edits…") showed Idle and Raven heard "Its turn
+// is over": the spinner check missed 2.1.322's busy line (paneState.ts) and
+// nothing else held the turn open. An open turn with a prompt waiting on him is
+// still handed over, as asking; one quiet for AUTO_CLOSE_MS no longer counts.
 // Brendon asked for it 2026-11-21: "make it so you read every shortened working
 // message, and read the important ones and communicate them to me." Nothing a
 // session writes is posted in the thread: Raven's own short take replaces it
@@ -89,6 +101,10 @@ export type Watch = {
   pendingSince: number
   /** the newest meaningful entry's kind: 'tool' is a step still open (a permission prompt can wait on it) */
   lastKind: EntryKind | ''
+  /** the transcript says the turn is still going: see `opens` */
+  open?: boolean
+  /** the last quiet check found a question, permission prompt or menu open on its screen; cleared by anything new */
+  asking?: boolean
   /** the lastNewAt of the last quiet spell read as a turn's end, so each spell is read once */
   settledAt: number
   /** what Raven does with the next answer (once) */
@@ -124,10 +140,32 @@ export function closesAt(w: Watch): number | null {
 export const waitCounts = (w: Pick<Watch, 'lastActivityAt' | 'keepUntil'>, now: number): boolean =>
   now - (Date.parse(w.lastActivityAt) || 0) < AUTO_CLOSE_MS || (w.keepUntil ?? 0) > now
 
+/**
+ * The turn is still going by the transcript, and that still counts: something new came in the last AUTO_CLOSE_MS.
+ * A turn the transcript never closed (Claude killed mid-step) reads as over after that.
+ */
+export const turnOpen = (w: Pick<Watch, 'open' | 'lastNewAt'>, now: number): boolean =>
+  Boolean(w.open) && now - (w.lastNewAt || 0) < AUTO_CLOSE_MS
+
 /** A watch as stored before every line went to Raven: the final answer's parts and the last one relayed. */
 type OldWatch = Watch & { tail?: { id: string; text: string }[]; lastRelayedId?: string }
 
-const meaningful = (e: TranscriptEntry) => e.kind === 'user' || e.kind === 'assistant' || e.kind === 'tool' || e.kind === 'result'
+// "/model" or "! ls" can get no answer from Claude at all, so they hold nothing open; the spinner covers a slash command that does
+const LOCAL_INPUT = /^[/!]/
+const interrupted = (e: TranscriptEntry) => e.kind === 'system' && (e.text === 'Interrupted' || e.stop === 'error')
+const meaningful = (e: TranscriptEntry) => e.kind === 'user' || e.kind === 'assistant' || e.kind === 'tool' || e.kind === 'result' || interrupted(e)
+
+/** Whether the turn is still going after entry `e`, by the transcript alone. */
+function opens(e: TranscriptEntry): boolean {
+  if (e.kind === 'user') return !LOCAL_INPUT.test(e.text?.trim() ?? '')
+  if (e.kind === 'tool' || e.kind === 'result') return true
+  if (e.kind === 'assistant') return e.stop === 'tool_use'
+  return false
+}
+
+/** The turn's state after `entries`, from `open`: the newest meaningful entry decides. */
+const openAfter = (entries: TranscriptEntry[], open: boolean): boolean =>
+  entries.reduce((o, e) => (meaningful(e) ? opens(e) : o), open)
 
 const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
 const STATUS_MAX = 140
@@ -220,6 +258,8 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
         next.cursor = page.cursor
         next.sessionId = page.sessionId
         next.lastSeenAt = Math.max(0, ...page.entries.map((e) => e.at || 0))
+        // what it said before is not news, but a turn it is in the middle of is Working
+        if (openAfter(page.entries, false)) next.open = true
       }
     } catch (e) {
       // the first tick reads it instead, keeping only entries newer than the watch
@@ -259,6 +299,12 @@ function add(w: Watch, s: RavenSaid): boolean {
   return true
 }
 
+/** Sets an optional flag, leaving it out of the stored watch when false. */
+function setFlag(w: Watch, k: 'open' | 'asking', on: boolean): void {
+  if (on) w[k] = true
+  else delete w[k]
+}
+
 /** Folds new entries into the watch: every line Claude writes and every prompt typed, oldest first. */
 function take(w: Watch, entries: TranscriptEntry[], now: number): boolean {
   let any = false
@@ -267,6 +313,8 @@ function take(w: Watch, entries: TranscriptEntry[], now: number): boolean {
     if (!meaningful(e)) continue
     any = true
     w.lastKind = e.kind
+    setFlag(w, 'open', opens(e))
+    setFlag(w, 'asking', false)
     const text = e.text?.trim() ?? ''
     if (e.kind === 'user' && text) {
       // a new prompt: the last turn's status says nothing about it
@@ -345,6 +393,11 @@ async function promptClosed(pane: string): Promise<boolean> {
   }
 }
 
+/** A window on thor (no screen to read): thor's board says it waits on him, from Claude's own status. */
+function boardAsks(sessionId: string): boolean {
+  return Boolean(sessionId) && (io.boardCached() ?? []).some((r) => r.sessionId === sessionId && r.activity === 'asking')
+}
+
 /** Still watched, and the same watch: a tool can turn it off (or stop the pane) while a pass is reading. */
 const stillWatched = (w: Watch): boolean => getWatch(w.key)?.since === w.since
 
@@ -385,19 +438,24 @@ async function tickOne(w: Watch, now: number): Promise<boolean> {
     }
   }
   const claude = w.pending.some((s) => s.from === 'claude')
-  // a quiet spell, read once: the turn is over unless the pane still shows Claude's spinner (a long tool step, thinking).
-  // A step still open with nothing written can be a permission prompt waiting on him.
+  // a quiet spell, read once: the turn is over unless the pane still shows Claude's spinner (a long tool step, thinking)
+  // or the transcript says the turn is still going. A step still open with nothing written can be a permission prompt
+  // waiting on him: that is handed over, as asking, open or not. An open turn is checked again on every pass.
   if ((claude || w.lastKind === 'tool') && now - w.lastNewAt >= QUIET_MS && w.settledAt !== w.lastNewAt) {
     const screen = w.pane ? await io.capture(w.pane) : null
-    if (!screenBusy(screen)) {
-      w.settledAt = w.lastNewAt
-      const asking = w.pane ? await promptClosed(w.pane) : false
-      if ((claude || asking) && stillWatched(w)) handOff(w, { turnEnded: true, asking, background: screenWaiting(screen) }, now)
-      return keep
+    if (screenBusy(screen)) setFlag(w, 'asking', false)
+    else {
+      const asking = w.pane ? await promptClosed(w.pane) : boardAsks(w.sessionId)
+      setFlag(w, 'asking', asking)
+      if (asking || !turnOpen(w, now)) {
+        w.settledAt = w.lastNewAt
+        if ((claude || asking) && stillWatched(w)) handOff(w, { turnEnded: true, asking, background: screenWaiting(screen) }, now)
+        return keep
+      }
     }
   }
-  // mid-turn, once a minute. Claude's newest line can be the turn's answer: it waits for the quiet check instead
-  if (claude && w.lastKind !== 'assistant' && now - w.pendingSince >= BATCH_MS && stillWatched(w)) handOff(w, { turnEnded: false }, now)
+  // mid-turn, once a minute. A newest line that may be the turn's answer waits for the quiet check instead
+  if (claude && (w.lastKind !== 'assistant' || w.open) && now - w.pendingSince >= BATCH_MS && stillWatched(w)) handOff(w, { turnEnded: false }, now)
   return keep
 }
 

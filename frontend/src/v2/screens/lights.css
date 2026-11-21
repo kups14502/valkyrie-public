@@ -442,12 +442,13 @@ html[data-motion='reduced'] .lt-sw { animation: vl-fade .12s linear both; }
 .lt-rgb-ctl { flex: none; transition: opacity .25s; }
 /* thor not answering, not set up, or not checked yet: the plates stay visible but cannot be pressed */
 .lt-rgb-ctl[data-locked] { opacity: .4; }
-.lt-rgb-seg { width: 184px; height: 40px; }
+.lt-rgb-seg { width: 312px; height: 40px; }
 .lt-seg-none .vl-seg-plate { opacity: 0; }
 /* a press in flight: the pressed cell (cells follow the plate) breathes a line until thor agrees */
 .lt-rgb-ctl[data-pending] { cursor: progress; }
 .lt-rgb-ctl[data-pending='relight'] .vl-seg-cell:nth-child(2),
-.lt-rgb-ctl[data-pending='dark'] .vl-seg-cell:nth-child(3) {
+.lt-rgb-ctl[data-pending='dark'] .vl-seg-cell:nth-child(3),
+.lt-rgb-ctl[data-pending='screen'] .vl-seg-cell:nth-child(4) {
   box-shadow: inset 0 0 0 1px var(--fg);
   animation: lt-wait 1.4s ease-in-out infinite;
 }
@@ -616,13 +617,16 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
 .lt-layout[data-shape] .lt-room-label { font-size: 13px; }
 .lt-layout[data-shape] .lt-room-label .lt-hd-ic { width: 17px; height: 17px; vertical-align: -3px; }
 
-/* Thor RGB: status beside a bigger pair of plates; a narrow column stacks them */
+/* Thor RGB: status beside bigger plates (three: Relight, Dark, Screen); a narrow column stacks them */
 .lt-layout[data-shape] .lt-rgb { gap: 14px; min-height: 52px; }
 .lt-layout[data-shape] .lt-rgb-name { font-size: 13px; line-height: 20px; }
 .lt-layout[data-shape] .lt-rgb-name .lt-hd-ic { width: 18px; height: 18px; margin-right: 9px; }
 .lt-layout[data-shape] .lt-rgb-state { padding-left: 27px; margin-top: 2px; font-size: 13.5px; line-height: 18px; }
-.lt-layout[data-shape] .lt-rgb-seg { width: 260px; height: 52px; font-size: 15px; }
+.lt-layout[data-shape] .lt-rgb-seg { width: 390px; height: 52px; font-size: 15px; }
 .lt-layout[data-shape] .lt-rgb-seg .vl-icon { width: 18px; height: 18px; }
+/* the pad on its side: the status shares a half-width column, so the three plates go text-only */
+.lt-layout[data-shape='wide'] .lt-rgb-seg { width: 252px; font-size: 13px; }
+.lt-layout[data-shape='wide'] .lt-rgb-seg .vl-icon { display: none; }
 @container ltc (max-width: 400px) {
   .lt-layout[data-shape] .lt-rgb { flex-direction: column; align-items: stretch; gap: 10px; }
   .lt-layout[data-shape] .lt-rgb-seg { width: 100%; }
@@ -727,5 +731,5 @@ html[data-motion='reduced'] .lt-rgb-ctl[data-pending] .vl-seg-cell { animation: 
 .lt-layout[data-tall] .lt-rgb-name { font-size: 14.5px; line-height: 22px; }
 .lt-layout[data-tall] .lt-rgb-name .lt-hd-ic { width: 20px; height: 20px; margin-right: 10px; }
 .lt-layout[data-tall] .lt-rgb-state { padding-left: 30px; font-size: 15px; line-height: 20px; }
-.lt-layout[data-tall] .lt-rgb-seg { width: 300px; height: 58px; font-size: 16px; }
+.lt-layout[data-tall] .lt-rgb-seg { width: 450px; height: 58px; font-size: 16px; }
 .lt-layout[data-tall] .lt-rgb-seg .vl-icon { width: 20px; height: 20px; }

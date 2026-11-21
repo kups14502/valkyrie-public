@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import { readFileSync } from 'node:fs'
+import { createScreenSync } from './screenSync.js'
 
 const router = Router()
 const AUTH_FILE = '/home/brendon/.config/homeassistant/claude_auth.json'
@@ -586,6 +587,13 @@ const engine = createLightEngine({
   },
 })
 
+// The bulbs following thor's main monitor (screenSync.ts). thor posts the
+// frames; everything about when a bulb gets a command lives there.
+const screenSync = createScreenSync({
+  rows: () => engine.lights(),
+  submit: (id, p) => engine.submit(id, p),
+})
+
 router.get('/lights', async (_req, res) => {
   try {
     res.json(await engine.lights())
@@ -621,6 +629,9 @@ router.post('/lights/turn', async (req, res) => {
     else if (typeof color_temp_kelvin === 'number' && Number.isFinite(color_temp_kelvin)) patch.color = { kelvin: color_temp_kelvin }
   }
 
+  // A bulb changed by hand leaves a running screen sync and keeps the change.
+  screenSync.release(entities)
+
   // Per bulb: each completes the patch from its own target, so a preset keeps
   // every bulb at its own level, and each has its own queue.
   const results = await Promise.allSettled(entities.map((e) => engine.submit(e, patch)))
@@ -636,6 +647,33 @@ router.post('/lights/turn', async (req, res) => {
   // A partial failure is reported, not rolled back: the bulbs that obeyed
   // should stay where the user put them.
   res.json({ ok: true, ...(failed.length ? { failed } : {}) })
+})
+
+const unit = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? clamp(v, 0, 1) : null
+
+router.get('/lights/screen', (_req, res) => {
+  res.json(screenSync.status())
+})
+
+router.post('/lights/screen/frame', async (req, res) => {
+  const { rgb, sat, level } = req.body ?? {}
+  const s = unit(sat)
+  const l = unit(level)
+  if (!isRgb(rgb) || s == null || l == null) {
+    return res.status(400).json({ error: 'send rgb [r, g, b], sat 0-1 and level 0-1' })
+  }
+  try {
+    await screenSync.frame({ rgb: rgb.map((n) => clamp(Math.round(Number(n)), 0, 255)) as RGB, sat: s, level: l })
+    const st = screenSync.status()
+    res.json({ ok: true, active: st.active, bulbs: st.bulbs.length })
+  } catch (err) {
+    res.status(503).json({ error: 'HA unreachable', detail: (err as Error).message })
+  }
+})
+
+router.post('/lights/screen/stop', async (_req, res) => {
+  await screenSync.stop('thor ended the sync')
+  res.json({ ok: true })
 })
 
 export default router

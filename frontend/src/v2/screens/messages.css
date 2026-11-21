@@ -112,10 +112,15 @@ html[data-motion='reduced'] .rv-latest { animation: none; }
 .rv-empty { margin-top: 18vh; text-align: center; }
 .rv-day { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
 .rv-day::before, .rv-day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-/* the first line he has not read: a lit hairline labeled New, faded out once the read lands */
-.rv-new { display: flex; align-items: center; gap: 10px; margin: 16px 0 0; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); transition: opacity .6s var(--ease); }
-.rv-new::before, .rv-new::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--fg) 55%, transparent); }
-.rv-new[data-fading] { opacity: 0; transition-delay: 1.6s; }
+/* the first line he has not read: a lit hairline labeled New. Once the read lands it fades, then its space closes
+   (its one row 1fr to 0fr, the margin with it) before Messages.tsx drops it at 2.9 s, so the thread slides
+   instead of jumping. The row is not clipped: the glow stays whole, and the line is clear by the time it closes. */
+.rv-new { display: grid; grid-template-rows: 1fr; margin: 16px 0 0; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-shadow: var(--text-glow); transition: opacity .6s var(--ease), grid-template-rows .4s var(--ease), margin-top .4s var(--ease); }
+.rv-new > div { display: flex; align-items: center; gap: 10px; min-height: 0; }
+.rv-new > div::before, .rv-new > div::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--fg) 55%, transparent); }
+.rv-new[data-fading] { opacity: 0; grid-template-rows: 0fr; margin-top: 0; pointer-events: none; transition-delay: 1.6s, 2.2s, 2.2s; }
+/* while it closes, Messages.tsx holds the rows on screen itself; Chromium's scroll anchoring would hold them twice */
+.rv-msgs:has(.rv-new[data-fading]) { overflow-anchor: none; }
 
 .rv-msg { position: relative; padding: 12px 0 2px; }
 .rv-msg[data-grouped] { padding-top: 6px; }
