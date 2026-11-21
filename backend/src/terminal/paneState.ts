@@ -55,6 +55,34 @@ export async function paneBusy(p: Printed, capture: (name: string) => Promise<st
   return screenBusy(await capture(p.name))
 }
 
+// ---------------------------------------------------------- the waiting rule ----
+
+// A turn that ended with background work still out: a shell run in the
+// background, a monitor, a background agent. Claude Code counts them in the
+// footer under its prompt box ("⏵⏵ bypass permissions on · 1 shell, 1 monitor
+// · ← 5 agents") and lists a running agent under it ("( ) general-purpose
+// Probe   2s · ↓ 29.3k tokens"), measured on odin's panes 2026-11-20. "← 5
+// agents" is the list of other sessions, not work of its own. Raven's Watching
+// list counts a waiting session as working (lib/raven/tools/sessions.ts); the
+// Desk's tabs do not. His words: "they shouldn't be idle if they are waiting
+// on something, they should still be working."
+const RULE_RE = /─{20,}/g
+const BG_ITEM = /^\d+ (?:shells?|monitors?|background tasks?|local agents?)$/
+const BG_AGENT_ROW = /(?:^|\s)\([^()\n]{0,2}\)\s+\S.*\s\d+[smh]\s·\s[↓↑]\s[\d.]+k?\s+tokens\s*$/mu
+
+/** Background work still running, by the screen's footer: what comes after the prompt box's last rule. */
+export function screenWaiting(screen: string | null | undefined): boolean {
+  const s = screen ?? ''
+  let end = -1
+  for (const m of s.matchAll(RULE_RE)) end = (m.index ?? 0) + m[0].length
+  if (end < 0) return false
+  const foot = s.slice(end)
+  for (const line of foot.split('\n')) {
+    for (const part of line.split(/[·,]/)) if (BG_ITEM.test(part.trim())) return true
+  }
+  return BG_AGENT_ROW.test(foot)
+}
+
 // -------------------------------------------------------------- the title ----
 
 const TITLE_MAX = 120

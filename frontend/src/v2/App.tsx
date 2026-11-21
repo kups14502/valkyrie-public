@@ -38,7 +38,7 @@ const Term = lazy(() => import('./screens/Term'))
 // a window of its own, no tab bar, the status strip as its title bar. The
 // session one is the terminal above in its standalone mode.
 const ProjectWindow = lazy(() => import('./screens/ProjectWindow'))
-// The desktop app's always-on-top Raven widget (lib.rs opens it as raven-widget).
+// The desktop app's Raven widget on the desktop (lib.rs opens it as raven-widget).
 const RavenWidget = lazy(() => import('./screens/RavenWidget'))
 
 // Valkyrie v2: the phone-first shell, mounted by src/App.tsx at /m/* outside

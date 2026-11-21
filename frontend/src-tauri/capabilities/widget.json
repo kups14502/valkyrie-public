@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "raven-widget",
-  "description": "The always-on-top Raven widget (src/v2/screens/RavenWidget.tsx): it sizes and places its own window, drags it, and takes the focus when opened. Rust shows and hides it (lib.rs), so it has no show or hide of its own.",
+  "description": "The Raven widget on the desktop (src/v2/screens/RavenWidget.tsx): it sizes and places its own window, drags it, and takes the focus when opened. Rust shows and hides it (lib.rs), so it has no show or hide of its own.",
   "platforms": ["macOS", "windows", "linux"],
   "windows": ["raven-widget"],
   "permissions": [

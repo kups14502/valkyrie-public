@@ -262,14 +262,25 @@ fn open_new_ssh(target: String, host: String, group: Option<String>) -> Result<(
 
 // ------------------------------------------------------------ Raven widget ---
 //
-// A small always-on-top Raven button with a compact chat (the page is
-// /m/w/raven, src/v2/screens/RavenWidget.tsx). Rust owns whether it is on
+// A small Raven button with a compact chat that sits on the desktop (the page
+// is /m/w/raven, src/v2/screens/RavenWidget.tsx). Rust owns whether it is on
 // screen: it is on by default, Settings turns it off (the choice is a marker
 // file in the app's config folder), and after five minutes with no mouse or
 // keyboard input anywhere on the machine it is hidden completely, so an OLED
 // panel has no lit pixels under it. The first input brings it back. Idle is
 // the system's own count (GetLastInputInfo), so it hides even while Brendon
 // works in another app and wakes on input in any app.
+//
+// It is never on top of anything but the desktop: behind every app window and
+// fullscreen game, out of the taskbar and out of Alt-Tab. On Windows that is
+// a tool window (WS_EX_TOOLWINDOW, no WS_EX_APPWINDOW) that sits directly
+// above the desktop's own window (the one holding the icons): every z-order
+// change goes through widget_win::z_target (a subclass on
+// WM_WINDOWPOSCHANGING), and the 250 ms loop puts it back there if something
+// else moved. The desktop is normally the bottom of the stack, so the widget
+// is under every app; when Win+D or Show desktop brings the desktop forward,
+// the widget comes with it. A click or its own setFocus activates it without
+// raising it. On Linux it is keep-below with the skip-taskbar and skip-pager hints.
 //
 // On Windows the show and hide are plain ShowWindow calls with
 // SW_SHOWNOACTIVATE: a widget that comes back on a key press must never take
@@ -323,25 +334,195 @@ fn system_idle_ms() -> Option<u64> {
   None
 }
 
-/// Show or hide the widget without ever activating it.
+/// The widget's place among the windows on Windows: a tool window (no taskbar
+/// button, no Alt-Tab entry) kept directly above the desktop's own window.
+#[cfg(target_os = "windows")]
+mod widget_win {
+  #[repr(C)]
+  struct WindowPos {
+    hwnd: isize,
+    hwnd_insert_after: isize,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+    flags: u32,
+  }
+
+  type SubclassProc = unsafe extern "system" fn(isize, u32, usize, isize, usize, usize) -> isize;
+
+  #[link(name = "user32")]
+  extern "system" {
+    fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+    fn GetWindowLongW(hwnd: isize, index: i32) -> i32;
+    fn SetWindowLongW(hwnd: isize, index: i32, value: i32) -> i32;
+    fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    fn GetWindow(hwnd: isize, cmd: u32) -> isize;
+    fn FindWindowExW(parent: isize, after: isize, class: *const u16, title: *const u16) -> isize;
+  }
+  #[link(name = "comctl32")]
+  extern "system" {
+    fn SetWindowSubclass(hwnd: isize, proc_: SubclassProc, id: usize, data: usize) -> i32;
+    fn RemoveWindowSubclass(hwnd: isize, proc_: SubclassProc, id: usize) -> i32;
+    fn DefSubclassProc(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+  }
+
+  const SW_HIDE: i32 = 0;
+  const SW_SHOWNOACTIVATE: i32 = 4;
+  const GWL_EXSTYLE: i32 = -20;
+  const WS_EX_TOPMOST: u32 = 0x0000_0008;
+  const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+  const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+  const HWND_TOP: isize = 0;
+  const HWND_BOTTOM: isize = 1;
+  const GW_HWNDPREV: u32 = 3;
+  const SWP_NOSIZE: u32 = 0x0001;
+  const SWP_NOMOVE: u32 = 0x0002;
+  const SWP_NOZORDER: u32 = 0x0004;
+  const SWP_NOACTIVATE: u32 = 0x0010;
+  const SWP_FRAMECHANGED: u32 = 0x0020;
+  const SWP_NOOWNERZORDER: u32 = 0x0200;
+  const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
+  const WM_WINDOWPOSCHANGING: u32 = 0x0046;
+  const WM_NCDESTROY: u32 = 0x0082;
+  const SUBCLASS_ID: usize = 0x5241_5645; // "RAVE"
+
+  fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+  }
+
+  /// The desktop's own top-level window: the one holding SHELLDLL_DefView
+  /// (the icons), Progman on current Windows 11, a WorkerW where a wallpaper
+  /// app or an older build moved the icons. 0 when Explorer is not running.
+  unsafe fn desktop_host() -> isize {
+    let defview = wide("SHELLDLL_DefView");
+    let progman = FindWindowExW(0, 0, wide("Progman").as_ptr(), std::ptr::null());
+    if progman != 0 && FindWindowExW(progman, 0, defview.as_ptr(), std::ptr::null()) != 0 {
+      return progman;
+    }
+    let worker = wide("WorkerW");
+    let mut w = 0;
+    loop {
+      w = FindWindowExW(0, w, worker.as_ptr(), std::ptr::null());
+      if w == 0 {
+        return progman;
+      }
+      if FindWindowExW(w, 0, defview.as_ptr(), std::ptr::null()) != 0 {
+        return w;
+      }
+    }
+  }
+
+  /// Where the widget goes in the stack: directly above the desktop's window
+  /// (as the window to sit under, or HWND_TOP when nothing non-topmost is above
+  /// it), or None when it is there already.
+  unsafe fn z_target(me: isize) -> Option<isize> {
+    let host = desktop_host();
+    if host == 0 {
+      return Some(HWND_BOTTOM);
+    }
+    let above = GetWindow(host, GW_HWNDPREV);
+    if above == me {
+      return None;
+    }
+    if above == 0 || GetWindowLongW(above, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0 {
+      return Some(HWND_TOP);
+    }
+    Some(above)
+  }
+
+  /// Every z-order change of the widget, from Windows, tao or this file, lands on z_target.
+  unsafe extern "system" fn subclass(hwnd: isize, msg: u32, wparam: usize, lparam: isize, _id: usize, _data: usize) -> isize {
+    if msg == WM_WINDOWPOSCHANGING && lparam != 0 {
+      let pos = &mut *(lparam as *mut WindowPos);
+      if pos.flags & SWP_NOZORDER == 0 {
+        match z_target(hwnd) {
+          Some(after) => pos.hwnd_insert_after = after,
+          None => pos.flags |= SWP_NOZORDER,
+        }
+      }
+    } else if msg == WM_NCDESTROY {
+      RemoveWindowSubclass(hwnd, subclass, SUBCLASS_ID);
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+  }
+
+  /// A tool window without WS_EX_APPWINDOW: no taskbar button and no Alt-Tab
+  /// entry. tao rewrites the extended style when its own window flags change,
+  /// so this runs again on every show and every tick (it costs one read when nothing changed).
+  pub fn keep_tool_window(me: isize) {
+    // SAFETY: the widget's own handle; style reads and writes on a window of this process
+    unsafe {
+      let ex = GetWindowLongW(me, GWL_EXSTYLE) as u32;
+      let want = (ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+      if want != ex {
+        SetWindowLongW(me, GWL_EXSTYLE, want as i32);
+        SetWindowPos(
+          me,
+          0,
+          0,
+          0,
+          0,
+          0,
+          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS,
+        );
+      }
+    }
+  }
+
+  /// Put the widget where z_target says. The 250 ms loop calls it too: a click
+  /// on the desktop or another window's move can come between the two without
+  /// the widget's own z-order changing. It costs a few lookups when nothing moved.
+  pub fn restack(me: isize) {
+    // SAFETY: the widget's own handle; a z-order move that never activates it
+    unsafe {
+      if let Some(after) = z_target(me) {
+        SetWindowPos(me, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+      }
+    }
+  }
+
+  /// Hook the widget's z-order. Must run on the thread that owns the window (the main thread).
+  pub fn install(me: isize) {
+    // SAFETY: the widget's own handle, on its own thread; the subclass removes itself on WM_NCDESTROY
+    if unsafe { SetWindowSubclass(me, subclass, SUBCLASS_ID, 0) } == 0 {
+      log::warn!("raven widget: could not hook the window's z-order");
+    }
+  }
+
+  pub fn set_shown(me: isize, show: bool) {
+    // SAFETY: the window's own handle, a show command with no other effect
+    unsafe { ShowWindow(me, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+  }
+}
+
+#[cfg(target_os = "windows")]
+fn widget_hwnd(win: &tauri::WebviewWindow) -> Option<isize> {
+  win.hwnd().ok().map(|h| h.0 as isize)
+}
+
+/// Show or hide the widget without ever activating it, and keep it out of the
+/// taskbar and Alt-Tab and below every app after each change.
 #[cfg(desktop)]
 fn widget_set_shown(win: &tauri::WebviewWindow, show: bool) {
   #[cfg(target_os = "windows")]
   {
-    #[link(name = "user32")]
-    extern "system" {
-      fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
-    }
-    const SW_HIDE: i32 = 0;
-    const SW_SHOWNOACTIVATE: i32 = 4;
-    if let Ok(h) = win.hwnd() {
-      // SAFETY: the window's own handle, a show command with no other effect
-      unsafe { ShowWindow(h.0 as isize, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+    if let Some(me) = widget_hwnd(win) {
+      widget_win::keep_tool_window(me);
+      widget_win::set_shown(me, show);
+      if show {
+        widget_win::keep_tool_window(me);
+        widget_win::restack(me);
+      }
     }
   }
   #[cfg(not(target_os = "windows"))]
   {
     let _ = if show { win.show() } else { win.hide() };
+    if show {
+      let _ = win.set_skip_taskbar(true);
+      let _ = win.set_always_on_bottom(true);
+    }
   }
 }
 
@@ -380,6 +561,14 @@ fn widget_sync(app: &tauri::AppHandle) {
   if st.shown.swap(want, SeqCst) != want {
     widget_set_shown(&win, want);
   }
+  // back directly above the desktop if anything moved in between (Win+D, a click on the desktop)
+  #[cfg(target_os = "windows")]
+  if let Some(me) = widget_hwnd(&win) {
+    widget_win::keep_tool_window(me);
+    if want {
+      widget_win::restack(me);
+    }
+  }
 }
 
 #[cfg(desktop)]
@@ -397,7 +586,8 @@ fn widget_create(app: &tauri::AppHandle) {
     .decorations(false)
     .transparent(true)
     .shadow(false)
-    .always_on_top(true)
+    // never on top of an app; on Windows the z-order hook in widget_win keeps it there instead
+    .always_on_bottom(cfg!(not(target_os = "windows")))
     .skip_taskbar(true)
     .visible(false)
     .focused(false)
@@ -405,6 +595,12 @@ fn widget_create(app: &tauri::AppHandle) {
     .build();
   match built {
     Ok(win) => {
+      // a tool window with its z-order hooked before it is ever shown
+      #[cfg(target_os = "windows")]
+      if let Some(me) = widget_hwnd(&win) {
+        widget_win::keep_tool_window(me);
+        let _ = win.run_on_main_thread(move || widget_win::install(me));
+      }
       // a failed first load (the same WebView2 cold start as the main window) gets one retry
       std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(4000));

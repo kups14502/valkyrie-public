@@ -418,7 +418,7 @@ export function PushToTalkRow() {
   )
 }
 
-/** Settings, desktop app only: the always-on-top Raven widget on or off (it is on unless turned off). */
+/** Settings, desktop app only: the Raven widget on the desktop on or off (it is on unless turned off). */
 export function RavenWidgetRow() {
   const on = useRavenWidgetOn()
   const [busy, setBusy] = useState(false)
@@ -433,7 +433,7 @@ export function RavenWidgetRow() {
     <div className="st-row">
       <span className="st-row-icon st-row-glyph" aria-hidden><Bird size={14} strokeWidth={1.7} className="vl-icon vl-icon-dim" /></span>
       <span className="st-row-label">Raven widget</span>
-      <span className="st-row-value vl-ellipsis">{on ? 'On top of every app, hides after 5 minutes idle' : 'Off'}</span>
+      <span className="st-row-value vl-ellipsis">{on ? 'On the desktop behind every app, hides after 5 minutes idle' : 'Off'}</span>
       <Press className="vl-link vl-hit st-row-act" disabled={busy} onPress={flip}>{on ? 'Turn off' : 'Turn on'}</Press>
     </div>
   )

@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { isTauri, isTauriMobile } from './auth'
 
-// The desktop app's Raven widget: a small always-on-top button with a compact
+// The desktop app's Raven widget: a small button on the desktop with a compact
 // chat, in a window of its own (label raven-widget, page /m/w/raven, see
 // src/v2/screens/RavenWidget.tsx). Rust creates it, keeps the on/off choice
 // and hides it after five minutes with no input (src-tauri/src/lib.rs). This

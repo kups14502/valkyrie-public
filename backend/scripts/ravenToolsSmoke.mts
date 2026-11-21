@@ -168,6 +168,7 @@ const tools = await import('../src/lib/raven/tools/index.ts')
 const ioMod = await import('../src/lib/raven/tools/io.ts')
 const watch = await import('../src/lib/raven/tools/watch.ts')
 const sessionsMod = await import('../src/lib/raven/tools/sessions.ts')
+const paneStateMod = await import('../src/terminal/paneState.ts')
 const originMod = await import('../src/lib/sessionOrigin.ts')
 const vaultMod = await import('../src/lib/raven/tools/vault.ts')
 const screens = JSON.parse(fs.readFileSync(new URL('./fixtures/pane-screens.json', import.meta.url), 'utf8')).screens as { name: string; screen: string }[]
@@ -226,6 +227,8 @@ let clock = Date.now()
 const panes: TermSession[] = []
 const screensBy = new Map<string, string[]>()
 const states = new Map<string, 'live' | 'dead' | 'gone'>()
+// panes that printed nothing for a minute: the busy rule never reads their screen
+const quiet = new Set<string>()
 const typed: { pane: string; text: string }[] = []
 const created: Record<string, unknown>[] = []
 const killed: string[] = []
@@ -238,6 +241,17 @@ const IDLE = screen('v283-idle')
 const TYPED = screen('v283-typed')
 const DIALOG = screen('v283-dialog')
 const BUSY = `${IDLE}\n✻ Thinking… (12s · esc to interrupt)\n`
+// a turn that ended with a background shell still running: the footer counts it (vk-7f99bde0a3 on odin, 2026-11-20)
+const WAITING = [
+  '● The fix is committed. A background check is waiting for v0.3.208 to finish.',
+  '  Ran 5 shell commands',
+  '✻ Worked for 9m 38s · done 11:03 PM · 1 shell still running',
+  '%RULE%> ',
+  '%RULE%  Opus 5.5 C:\\...\\server\\valkyrie (main) | eff xhigh wk 25%',
+  '  ⏵⏵ bypass permissions on · 1 shell · ← 5 agents',
+].join('\n').replaceAll('%RULE%', '─'.repeat(60))
+// the same screen once the shell is done: "← 5 agents" lists other sessions, no work of its own
+const WAITED = WAITING.replace(' · 1 shell still running', '').replace(' · 1 shell ·', ' ·')
 
 const page = (key: string, after: string): TranscriptPage | null => {
   const t = transcripts.get(key)
@@ -273,7 +287,7 @@ async function fakeCapture(p: string): Promise<string | null> {
   return list.length > 1 ? list.shift()! : list[0]
 }
 const fakeIo = {
-  listPanes: async () => panes.filter((p) => states.get(p.name) !== 'gone').map((p) => ({ ...p, activityAt: clock, dead: states.get(p.name) === 'dead' })),
+  listPanes: async () => panes.filter((p) => states.get(p.name) !== 'gone').map((p) => ({ ...p, activityAt: quiet.has(p.name) ? clock - 60_000 : clock, ...(quiet.has(p.name) ? { outputAt: clock - 60_000 } : {}), dead: states.get(p.name) === 'dead' })),
   createPane: async (o: Record<string, unknown>) => {
     created.push(o)
     const name = `vk-${String(++paneSeq).padStart(10, '0')}`
@@ -1109,6 +1123,27 @@ agents.syncRoster()
     c?.title === 'Rotate nginx certs' && c.label === 'Server work' && c.state === 'idle' && Date.parse(c.lastAt) === said, c)
   screensBy.set(p.name, [BUSY])
   check('card: working while the spinner shows', (await card(p.name))?.state === 'working')
+  screensBy.set(p.name, [IDLE])
+
+  // waiting on background work: working while it runs, quiet or printing, then idle once it is done
+  quiet.add(p.name)
+  screensBy.set(p.name, [WAITING])
+  clock += 6_000
+  check('card: a quiet pane with a background shell running is working', (await card(p.name))?.state === 'working')
+  screensBy.set(p.name, [WAITED])
+  check('card: a quiet pane\'s screen is read again only after 5 s', (await card(p.name))?.state === 'working')
+  clock += 6_000
+  check('card: the background shell done and nothing printed, idle', (await card(p.name))?.state === 'idle')
+  quiet.delete(p.name)
+  screensBy.set(p.name, [WAITING])
+  check('card: a printing pane with a background shell running is working', (await card(p.name))?.state === 'working')
+  check('the waiting rule: only the footer counts, and not the other sessions\' "← 5 agents"',
+    paneStateMod.screenWaiting(WAITING) && !paneStateMod.screenWaiting(WAITED) && !paneStateMod.screenWaiting(IDLE) && !paneStateMod.screenWaiting(BUSY)
+      && !paneStateMod.screenWaiting('  Ran 4 shell commands\n1 shell still running'))
+  check('the waiting rule: a running background agent under the footer',
+    paneStateMod.screenWaiting(`${WAITED}\n                    ● main\n  ( ) general-purpose  Footer probe agent         2s · ↓ 29.3k tokens\n`))
+  check('the waiting rule: a monitor beside a shell', paneStateMod.screenWaiting(WAITED.replace('· ← 5', '· 1 shell, 1 monitor · /tasks to see subagents · ← 5')))
+  check('Desk tabs: a waiting pane stays idle there', !(await paneStateMod.paneBusy({ name: p.name, dead: false, activityAt: clock, outputAt: clock }, async () => WAITING, clock)))
   screensBy.set(p.name, [IDLE])
 
   // he types a new job into the pane himself: the card follows it; a short reply does not

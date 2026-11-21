@@ -13,7 +13,7 @@ import { Press, toast } from '../kit/ui'
 import { Thread } from './Messages'
 import './ravenwidget.css'
 
-// The desktop app's Raven widget (/m/w/raven, in the always-on-top window
+// The desktop app's Raven widget (/m/w/raven, in the desktop-level window
 // lib.rs opens as raven-widget): a round Raven button, and on a click a
 // compact chat, the Raven tab's own thread and box. Drag the button, or the
 // chat by its header, anywhere; the spot is remembered as the window's

@@ -7,7 +7,7 @@ import { noteRavenStarted, ravenStartedIds } from '../../sessionOrigin.js'
 import { paneLimitState } from '../../accountSwitchCore.js'
 import type { LaunchTargetInfo } from '../../../routes/hostLaunch.js'
 import { CLAUDE_EFFORTS, SESSION_NAME_RE, TARGET_RE, UUID_RE, type ClaudeEffort, type CreateOpts, type TermSession } from '../../../terminal/tmux.js'
-import { paneBusy } from '../../../terminal/paneState.js'
+import { mayBeBusy, paneBusy, screenBusy, screenWaiting } from '../../../terminal/paneState.js'
 import type { TranscriptEntry } from '../../../terminal/transcript.js'
 import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
@@ -130,6 +130,30 @@ export async function mainTargets(waitMs?: number): Promise<{ key: string; label
 
 // Working or not is the Desk's busy rule (terminal/paneState.ts), read through io.
 const busy = (p: TermSession): Promise<boolean> => paneBusy(p, io.capture, io.now())
+
+// Watching's rule: busy, or its turn ended with background work still out (a
+// background shell, a monitor, an agent: paneState.ts screenWaiting), so a
+// session waiting on a build reads Working. A quiet pane's screen is read at
+// most every 5 s; one that printed lately is read on every poll, as busy reads it.
+const QUIET_READ_MS = 5_000
+const quietReads = new Map<string, { at: number; waiting: boolean }>()
+
+async function working(p: TermSession): Promise<boolean> {
+  if (p.dead) return false
+  const now = io.now()
+  for (const [name, r] of quietReads) if (now - r.at > 10 * 60_000) quietReads.delete(name)
+  if (mayBeBusy(p, now)) {
+    const screen = await io.capture(p.name)
+    const waiting = screenWaiting(screen)
+    quietReads.set(p.name, { at: now, waiting })
+    return screenBusy(screen) || waiting
+  }
+  const last = quietReads.get(p.name)
+  if (last && now - last.at < QUIET_READ_MS) return last.waiting
+  const waiting = screenWaiting(await io.capture(p.name))
+  quietReads.set(p.name, { at: now, waiting })
+  return waiting
+}
 
 function mainOf(pane: string): string | null {
   for (const [target, r] of Object.entries(mainsMap())) if (r.pane === pane) return target
@@ -406,7 +430,7 @@ export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: R
     else {
       const m = mainState.get(w.pane)
       const p = panes.find((x) => x.name === w.pane)
-      state = m === 'working' || m === 'idle' ? m : !p || p.dead ? 'closed' : (await busy(p)) ? 'working' : 'idle'
+      state = m === 'working' ? m : !p || p.dead ? 'closed' : (await working(p)) ? 'working' : 'idle'
     }
     const at = Math.max(w.lastSeenAt || 0, boardAt(rows, w.sessionId)) || Date.parse(w.lastActivityAt)
     return card(w, state, at)
