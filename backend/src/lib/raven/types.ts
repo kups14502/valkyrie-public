@@ -65,10 +65,29 @@ export type RavenMeta = {
     /** a session relay's conversation title from thor's board, added when the thread is read (never stored) */
     title?: string
   }
+  /**
+   * What the watched sessions wrote that Raven read in the run this message closes, kept under it for history (the
+   * app shows it collapsed). Claude's lines only, newest kept when long; the session itself has all of it.
+   */
+  sessions?: RavenSessionCopy[]
   /** where the message came in from when Brendon did not type it in the app */
   source?: 'app' | 'quick' | 'siri' | 'hotkey' | 'api'
   /** a run that failed or was stopped */
   error?: string
+}
+
+/** One line a watched session wrote, as the watcher hands it to Raven (lib/raven/tools/watch.ts). */
+export type RavenSaid = { id: string; at: number; from: 'claude' | 'prompt'; text: string }
+
+/** A watched session's lines under Raven's message: pane name (or conversation id), its labels, and what Claude wrote. */
+export type RavenSessionCopy = {
+  from: string
+  label: string
+  title?: string
+  sessionId?: string
+  lines: { at: string; text: string }[]
+  /** lines left out of this copy (older ones, past the size kept here) */
+  more?: number
 }
 
 /** Everything a Raven tool needs about the run that called it. */

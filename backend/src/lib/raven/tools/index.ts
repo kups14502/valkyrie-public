@@ -1,5 +1,6 @@
 import type { RavenToolGroup } from '../types.js'
 import { registerAgentTools } from './agents.js'
+import { closeQuietJobs } from './autoclose.js'
 import { registerMediaTools } from './media.js'
 import { registerSessionTools, sessionsSnapshot, sessionsState, sessionTitles, titleFor, type RavenMain, type RavenWatch } from './sessions.js'
 import { registerThorFileTools } from './thorfiles.js'
@@ -15,6 +16,7 @@ import { registerWorkTools } from './work.js'
 //   agents.ts    the work agents: status, channels, a question to one, pause, check, pending proposals
 //   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, watch, stop
 //   watch.ts     the relay watcher: a watched session's answers come back into the DM
+//   autoclose.ts a job Raven started that stays quiet after its answer is closed and marked done
 //   media.ts     Plex requests: search, request, live status
 //   vault.ts     the Obsidian vault, live on thor (odin's nightly copy when thor is off): search, read, list, recent, a new note
 //   thorfiles.ts his own files on thor, live and read-only: list, read, search
@@ -32,9 +34,9 @@ export const registerRavenTools: RavenToolGroup = (server, ctx) => {
   registerWorkTools(server, ctx)
 }
 
-/** Starts what runs beside Raven (the relay watcher). Called once by startRaven. */
+/** Starts what runs beside Raven: the relay watcher, and after each of its passes the jobs' auto-close. Called once by startRaven. */
 export function startRavenTools(): void {
-  startWatcher()
+  startWatcher(async () => { await closeQuietJobs() })
 }
 
 /** Plain lines for Raven's prompt: main terminals and watched sessions. Never throws. */

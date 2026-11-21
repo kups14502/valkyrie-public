@@ -23,7 +23,9 @@ import {
 import { chooseRoute, needsRouter, ravenSettings, type Route } from './settings.js'
 import { ravenPush } from './push.js'
 import { ravenSnapshot, startRavenTools } from './tools/index.js'
-import { RAVEN_CHANNEL, RAVEN_ID, RAVEN_NAME, type RavenEffort, type RavenMeta, type RavenNotice, type RavenTier, type RavenToolCtx, type RavenToolGroup } from './types.js'
+import {
+  RAVEN_CHANNEL, RAVEN_ID, RAVEN_NAME, type RavenEffort, type RavenMeta, type RavenNotice, type RavenSessionCopy, type RavenTier, type RavenToolCtx, type RavenToolGroup,
+} from './types.js'
 
 // Raven's run loop: Brendon's one assistant, a single thread (#raven) in
 // Valkyrie Messages. Like a work agent (lib/agents.ts) Raven is not a process:
@@ -45,12 +47,17 @@ export type RavenFeature = { id: string; tools?: RavenToolGroup; status?: () => 
 
 const HOURLY_CAP = Number(process.env.RAVEN_HOURLY_CAP || 60)
 const DAILY_CAP = Number(process.env.RAVEN_DAILY_CAP || 400)
+// A run Brendon did not start (what a session wrote, an agent's answer) stops short of the caps, so the last runs of
+// the hour and the day are always his. What waits meanwhile is read with the next run.
+const BG_HOURLY_CAP = Number(process.env.RAVEN_BG_HOURLY_CAP || Math.max(1, HOURLY_CAP - 15))
+const BG_DAILY_CAP = Number(process.env.RAVEN_BG_DAILY_CAP || Math.max(1, DAILY_CAP - 60))
 const RUN_TIMEOUT_MS = Number(process.env.RAVEN_RUN_TIMEOUT_MS || 10 * 60_000)
 const MCP_URL = process.env.RAVEN_MCP_URL || `http://127.0.0.1:${process.env.PORT || 3001}/api/raven-mcp`
 /** The smoke test shrinks every wake delay; production runs at 1. */
 const DELAY_SCALE = Number(process.env.RAVEN_DELAY_SCALE || 1)
 const BRENDON_DELAY = 500
-const WAKE_DELAYS: Record<string, number> = { agent_reply: 5_000, session_reply: 2_000 }
+// a session's mid-turn lines wait a little so several sessions' batches make one run
+const WAKE_DELAYS: Record<string, number> = { agent_reply: 5_000, session_reply: 2_000, session_progress: 30_000 }
 const HISTORY = 40
 const STALE_EVENT_MS = 6 * 3_600_000
 const DISALLOWED = 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite'
@@ -283,15 +290,22 @@ export function stopRaven(): boolean {
 
 const baseKind = (k: string) => k.replace(/^retry:/, '')
 const isBrendonEvent = (e: AgentEvent) => baseKind(e.kind) === 'message' && e.payload.from === 'brendon'
+/** What a watched session wrote (lib/raven/tools/watch.ts): Brendon has not seen it, only Raven reads it. */
+const isSessionEvent = (e: AgentEvent) => baseKind(e.kind) === 'session_reply' || baseKind(e.kind) === 'session_progress'
 const brendonIds = (events: AgentEvent[]) => events.filter(isBrendonEvent).map((e) => Number(e.payload.messageId)).filter((n) => Number.isFinite(n) && n > 0)
 
 const capNoteKey = 'raven:cap-note'
 
-function capWait(): { until: number; why: string } | null {
+/** quiet: a background run held for his share of the cap; it says nothing in the thread. */
+function capWait(background: boolean): { until: number; why: string; quiet?: boolean } | null {
   const hourAgo = new Date(Date.now() - 3_600_000).toISOString()
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString()
-  if (runsSince(RAVEN_ID, dayAgo) >= DAILY_CAP) return { until: Date.now() + 3_600_000, why: `the daily cap of ${DAILY_CAP} runs` }
-  if (runsSince(RAVEN_ID, hourAgo) >= HOURLY_CAP) return { until: Date.now() + 15 * 60_000, why: `the hourly cap of ${HOURLY_CAP} runs` }
+  const day = runsSince(RAVEN_ID, dayAgo)
+  const hour = runsSince(RAVEN_ID, hourAgo)
+  if (day >= DAILY_CAP) return { until: Date.now() + 3_600_000, why: `the daily cap of ${DAILY_CAP} runs` }
+  if (hour >= HOURLY_CAP) return { until: Date.now() + 15 * 60_000, why: `the hourly cap of ${HOURLY_CAP} runs` }
+  if (background && day >= BG_DAILY_CAP) return { until: Date.now() + 3_600_000, why: 'the runs kept for his messages today', quiet: true }
+  if (background && hour >= BG_HOURLY_CAP) return { until: Date.now() + 10 * 60_000, why: 'the runs kept for his messages this hour', quiet: true }
   return null
 }
 
@@ -327,7 +341,12 @@ const isSilent = (text: string) => !text.trim() || NO_REPLY_RE.test(text.trim())
 async function runOnce(): Promise<boolean> {
   const events = openEvents(RAVEN_ID)
   if (!events.length) return false
-  const cap = capWait()
+  const cap = capWait(!events.some(isBrendonEvent))
+  if (cap?.quiet) {
+    setState({ status: 'idle', statusNote: `Holding updates until ${etLabel(new Date(cap.until).toISOString())}: ${cap.why}` })
+    wake(cap.until - Date.now())
+    return false
+  }
   if (cap) {
     const last = Number(getKv(capNoteKey) ?? 0)
     if (Date.now() - last > 60 * 60_000) {
@@ -367,6 +386,9 @@ async function runOnce(): Promise<boolean> {
   const bg = settings.rules.background
   let route: Route = { tier: bg.model, effort: bg.effort, why: 'relay', routed: false, rule: 'background' }
   let used: { model: string | null; effort: RavenEffort | null } = { model: null, effort: null }
+  // what the watched sessions wrote, kept under whatever this run posts (collapsed in the app)
+  const copies = sessionCopies(events)
+  const withCopies = (meta: RavenMeta): RavenMeta => (copies.length ? { ...meta, sessions: copies } : meta)
   try {
     if (fromBrendon) {
       const asked = events.filter(isBrendonEvent)
@@ -394,7 +416,7 @@ async function runOnce(): Promise<boolean> {
     if (reply && !NO_REPLY_RE.test(reply)) {
       const meta: RavenMeta = { tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, why: route.why, ...pickMeta(route, used.model) }
       if (replyTo) meta.replyTo = replyTo
-      const msg = ravenMessage(reply, { meta, push: true, force: fromBrendon })
+      const msg = ravenMessage(reply, { meta: withCopies(meta), push: true, force: fromBrendon })
       settle(ids, { reply: msg.text, done: true })
     } else {
       settle(ids, { reply: '', done: true })
@@ -404,13 +426,14 @@ async function runOnce(): Promise<boolean> {
     const raw = errorText(e).trim()
     endRun(runId, { status: 'failed', error: stopped ? 'stopped' : raw.slice(0, 400), durationMs: Date.now() - t0 })
     if (stopped) {
-      ravenMessage('Stopped.', { meta: { error: 'stopped', ...(replyTo ? { replyTo } : {}) } })
+      ravenMessage('Stopped.', { meta: withCopies({ error: 'stopped', ...(replyTo ? { replyTo } : {}) }) })
       settle(ids, { reply: 'Stopped.', done: true })
     } else {
       const line = `That failed: ${errorLine(e).replace(/[.\s]+$/, '')}.`
       const meta: RavenMeta = { error: clip(raw, 500), tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, ...pickMeta(route, used.model) }
       if (replyTo) meta.replyTo = replyTo
-      ravenMessage(line, { meta, push: fromBrendon, force: true })
+      // a failed read of what a session wrote leaves it under the line, so nothing it said is lost
+      ravenMessage(line, { meta: withCopies(meta), push: fromBrendon, force: true })
       settle(ids, { reply: line, done: true, error: true })
       console.error('[raven] run failed:', raw.slice(0, 400))
     }
@@ -495,7 +518,109 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
 
 const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
 
-function renderEvent(e: AgentEvent): string {
+// ---- what a watched session wrote ----
+// Every line Claude wrote reaches the prompt whole. Only when one run holds more than this (Raven held at a cap
+// for a long while) are the oldest lines left out, with a note: the prompt goes to the CLI as one argument, and
+// Linux refuses one past 128 KB.
+const SESSION_TEXT_MAX = 48_000
+/** the copy kept under Raven's message, per session: the newest lines, enough to look back at */
+const COPY_MAX = 6_000
+
+type SaidLine = { at: number; from: 'claude' | 'prompt'; text: string }
+
+function saidOf(e: AgentEvent): SaidLine[] {
+  const said = e.payload.said
+  if (!Array.isArray(said)) return []
+  return said.filter((s): s is SaidLine => Boolean(s) && typeof s.text === 'string')
+    .map((s) => ({ at: Number(s.at) || Date.parse(e.createdAt), from: s.from === 'prompt' ? 'prompt' : 'claude', text: s.text }))
+}
+
+/** Per session event, how many of its oldest lines are left out of the prompt (0: none). The newest lines go in first. */
+function sessionCuts(events: AgentEvent[]): Map<number, number> {
+  const cuts = new Map<number, number>()
+  let left = SESSION_TEXT_MAX
+  for (let k = events.length - 1; k >= 0; k--) {
+    const e = events[k]
+    if (!isSessionEvent(e)) continue
+    const said = saidOf(e)
+    let i = said.length
+    while (i > 0 && said[i - 1].text.length <= left) left -= said[--i].text.length
+    if (i > 0) left = 0
+    cuts.set(e.id, i)
+  }
+  return cuts
+}
+
+const sessionWho = (p: Record<string, unknown>) => [str(p.label), str(p.pane) && `pane ${str(p.pane)}`].filter(Boolean).join(', ') || 'a watched session'
+const atLabel = (ms: number) => etLabel(new Date(ms).toISOString())
+// a line's own line breaks, indented under it so the next line's time stands out
+const indented = (text: string) => text.replace(/\r/g, '').replace(/\n/g, '\n    ')
+
+function renderSession(e: AgentEvent, cut: number, retry: string): string {
+  const p = e.payload
+  const kind = baseKind(e.kind)
+  const follow = str(p.followUp) ? `\n  Your follow-up instruction for this answer: ${str(p.followUp)}` : ''
+  // a job Raven started (lib/raven/tools/watch.ts): this run decides whether it is finished
+  const job = p.job === true
+    ? `\n  You started this session for a job${str(p.title) ? ` ("${clip(str(p.title), 80)}")` : ''}. If this turn reports the job done, or it failed with nothing left to try, `
+      + `session_stop ${str(p.pane)} now, in this run: that ends it and marks it done. If it is still on the job and waits on something long `
+      + `(a release, a build), session_keep it. Otherwise it is closed and marked done on its own 15 minutes after this turn.`
+    : ''
+  // queued before every line went to Raven: the answer alone
+  if (!Array.isArray(p.said)) return `- The session ${sessionWho(p)} answered: ${clip(str(p.text), 3000)}${follow}${job}${retry}`
+  const said = saidOf(e)
+  const jobName = str(p.title) ? ` (job: ${str(p.title)})` : ''
+  const state = p.ended ? 'Its pane has ended.' : kind === 'session_progress' ? 'It is still working.' : 'Its turn is over.'
+  const out = [`- The session ${sessionWho(p)}${jobName} wrote, in full, oldest first. ${state}${retry}`]
+  if (cut > 0) out.push(`  (${cut} older line${cut === 1 ? '' : 's'} left out here for length: session_read shows the latest ones)`)
+  for (const s of said.slice(cut)) out.push(`  [${atLabel(s.at)}] ${s.from === 'prompt' ? 'Prompt typed into it' : 'Claude'}: ${indented(s.text.trim())}`)
+  if (!said.length) out.push('  (nothing new written)')
+  if (p.asking) out.push('  Its screen shows no prompt box: a question, a permission prompt or a menu is open there, waiting on Brendon.')
+  if (p.background) out.push('  It still waits on background work (a shell, a monitor or an agent), so more can come from it.')
+  return out.join('\n') + follow + job
+}
+
+/** The copies kept under Raven's message: Claude's lines per session, newest kept up to COPY_MAX each. */
+function sessionCopies(events: AgentEvent[]): RavenSessionCopy[] {
+  const by = new Map<string, RavenSessionCopy>()
+  for (const e of events) {
+    if (!isSessionEvent(e)) continue
+    const p = e.payload
+    const from = str(p.pane) || str(p.sessionId)
+    const key = from || str(p.label)
+    let c = by.get(key)
+    if (!c) {
+      c = { from, label: str(p.label) || 'Session', lines: [] }
+      if (str(p.title)) c.title = str(p.title)
+      if (str(p.sessionId)) c.sessionId = str(p.sessionId)
+      by.set(key, c)
+    }
+    const lines = Array.isArray(p.said)
+      ? saidOf(e).filter((x) => x.from === 'claude').map((x) => ({ at: new Date(x.at).toISOString(), text: x.text.trim() }))
+      : str(p.text) ? [{ at: e.createdAt, text: str(p.text).trim() }] : []
+    c.lines.push(...lines.filter((l) => l.text))
+  }
+  const out: RavenSessionCopy[] = []
+  for (const c of by.values()) {
+    if (!c.lines.length) continue
+    let left = COPY_MAX
+    let i = c.lines.length
+    while (i > 0 && c.lines[i - 1].text.length <= left) left -= c.lines[--i].text.length
+    if (i === c.lines.length) {
+      // the newest line alone is longer than the copy: its head, cut
+      const last = c.lines[i - 1]
+      if (i > 1) c.more = i - 1
+      c.lines = [{ ...last, text: clip(last.text, COPY_MAX) }]
+    } else {
+      if (i > 0) c.more = i
+      c.lines = c.lines.slice(i)
+    }
+    out.push(c)
+  }
+  return out
+}
+
+function renderEvent(e: AgentEvent, cut = 0): string {
   const p = e.payload
   const kind = baseKind(e.kind)
   const retry = e.kind.startsWith('retry:') ? ' (a retry: Valkyrie restarted during the first try)' : ''
@@ -510,11 +635,9 @@ function renderEvent(e: AgentEvent): string {
   switch (kind) {
     case 'agent_reply':
       return `- @${str(p.from)} (${str(p.name) || str(p.from)}) wrote in this thread (message ${str(p.messageId)}): ${str(p.text)}${retry}`
-    case 'session_reply': {
-      const who = [str(p.label), str(p.pane) && `pane ${str(p.pane)}`].filter(Boolean).join(', ') || 'a watched session'
-      const follow = str(p.followUp) ? `\n  Your follow-up instruction for this answer: ${str(p.followUp)}` : ''
-      return `- The session ${who} answered: ${clip(str(p.text), 3000)}${follow}${retry}`
-    }
+    case 'session_reply':
+    case 'session_progress':
+      return renderSession(e, cut, retry)
     case 'message':
       return `- A message from ${str(p.from) || 'someone'}: ${str(p.text)}${retry}`
     default:
@@ -600,12 +723,22 @@ export async function ravenLiveSnapshot(): Promise<string> {
   return out.join('\n')
 }
 
+// What a session wrote reaches him only through Raven: the bar for telling him, and the rest is silence.
+const SESSIONS_NOW = 'He has not seen what the watched sessions wrote: only you read it, and what you say is all he gets of it. '
+  + 'Read every line. Tell him only what matters, in one to four plain lines in your own words: a job finished or shipped (say the version), '
+  + 'failed or blocked, needs him (a question, a permission, an approval, a device update or an app reload), something risky '
+  + '(odin\'s CPU or load, data loss, a stuck build) or a real change of plan. Routine progress, narration and steps that went fine get nothing. '
+  + 'Never paste what a session wrote. A job you started that reports it is done: session_stop it in this run (that marks it done) and tell him the result in one line.'
+
 async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswer = false): Promise<{ system: string; prompt: string }> {
   const system = ravenBrief({ features: features.filter((f) => f.tools).map((f) => f.id) })
+  const cuts = sessionCuts(events)
+  const sessions = events.some(isSessionEvent)
+  const others = events.some((e) => !isBrendonEvent(e) && !isSessionEvent(e))
   const prompt = [
     `Now: ${nyNowLine()}.`,
     '## What woke you',
-    events.map(renderEvent).join('\n'),
+    events.map((e) => renderEvent(e, cuts.get(e.id) ?? 0)).join('\n'),
     '## Your notebook',
     ravenNotebook().trim() || '(empty. Start one with notebook_set once you learn something worth keeping.)',
     `## The thread, last ${HISTORY} messages, oldest first`,
@@ -619,10 +752,16 @@ async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswe
         + 'look at the agent or session first (working since when, what it last said, what it waits on).'
         + (mustAnswer ? ' Your first try this run ended with no reply at all, which left him waiting with nothing: answer him now. '
           + 'Whatever that try already did with your tools stays done: never repeat it, look and answer.' : '')
-      // an agent's post, a session's answer and a notice are already in the thread: repeating them is a second row and a second buzz
-      : 'Brendon did not write this time. What woke you is already in the thread where he reads it: never repeat it. '
-        + 'Do a follow-up you were given, or answer when it needs a decision or a fact from you that the post does not give him, in one or two lines. '
-        + 'Otherwise your final answer is exactly (no reply).',
+        + (sessions ? ' The watched sessions\' lines above he has not seen: add a line for each thing in them that matters to him '
+          + '(finished, failed or blocked, needs him, risky, a change of plan), nothing for the rest.' : '')
+      : [
+        'Brendon did not write this time.',
+        sessions ? SESSIONS_NOW : '',
+        // an agent's post and a notice are already in the thread: repeating them is a second row and a second buzz
+        others ? 'An agent\'s post or a notice that woke you is already in the thread where he reads it: never repeat it. '
+          + 'Answer it only when it needs a decision or a fact from you that the post does not give him, in one or two lines.' : '',
+        'Do a follow-up you were given. When nothing here needs him, your whole final answer is exactly (no reply).',
+      ].filter(Boolean).join(' '),
   ].join('\n\n')
   return { system, prompt }
 }

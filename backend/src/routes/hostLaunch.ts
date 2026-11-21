@@ -448,6 +448,22 @@ export async function markSessionsDone(ids: string[], host = 'thor'): Promise<bo
   }
 }
 
+/**
+ * Ends a conversation's Claude on its machine, background shells and monitors first (thor's Kill-Session.ps1),
+ * the same call as the board's stop. 'stopped', 'none' when nothing runs it there, 'failed' when the host cannot say.
+ * An SSH-opened session is killed elevated through a scheduled task, which can take about 12 s.
+ */
+export async function stopSessionOnHost(sessionId: string, host = 'thor'): Promise<'stopped' | 'none' | 'failed'> {
+  const launcher = LAUNCHERS[host]
+  if (!launcher?.token || !UUID_RE.test(sessionId)) return 'failed'
+  try {
+    const r = await callHostLauncher(launcher, '/stop', { method: 'POST', body: { sessionId } }, 20_000)
+    return r.status === 200 ? 'stopped' : r.status === 404 ? 'none' : 'failed'
+  } catch {
+    return 'failed'
+  }
+}
+
 // One copy of thor's board rows for this whole box. Every read of thor's
 // /sessions here refreshes it: GET /session-board, which the Sessions screens
 // poll, and boardSessions (Raven's tools). boardNow answers from the copy at

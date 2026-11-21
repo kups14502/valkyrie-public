@@ -13,7 +13,7 @@ import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
-import { getWatch, listWatches, removeWatch, startWatch, watchKey, type Watch } from './watch.js'
+import { AUTO_CLOSE_MS, closesAt, getWatch, keepWatch, listWatches, removeWatch, startWatch, waitCounts, watchKey, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
@@ -42,6 +42,9 @@ const MAINS_KEY = 'raven:mains'
 const PROMPT_WAIT_MS = 45_000
 const TEXT_MAX = 8_000
 const TARGETS_TTL_MS = 10 * 60_000
+const KEEP_DEFAULT_MIN = 60
+const KEEP_MAX_MIN = 240
+const AUTO_CLOSE_MIN = AUTO_CLOSE_MS / 60_000
 
 export type RavenMain = { target: string; label: string; pane: string | null; state: 'working' | 'idle' | 'closed' | 'dead' }
 export type WatchState = 'working' | 'idle' | 'closed'
@@ -133,21 +136,27 @@ const busy = (p: TermSession): Promise<boolean> => paneBusy(p, io.capture, io.no
 
 // Watching's rule: busy, or its turn ended with background work still out (a
 // background shell, a monitor, an agent: paneState.ts screenWaiting), so a
-// session waiting on a build reads Working. A quiet pane's screen is read at
-// most every 5 s; one that printed lately is read on every poll, as busy reads it.
+// session waiting on a build reads Working. A wait counts only while the
+// session had activity in the last 15 minutes or Raven holds it with
+// session_keep (watch.ts waitCounts): a poll left running after the last
+// answer reads Idle after that, never Working for good. A quiet pane's screen
+// is read at most every 5 s; one that printed lately is read on every poll, as
+// busy reads it.
 const QUIET_READ_MS = 5_000
 const quietReads = new Map<string, { at: number; waiting: boolean }>()
 
-async function working(p: TermSession): Promise<boolean> {
+async function working(p: TermSession, w: Watch): Promise<boolean> {
   if (p.dead) return false
   const now = io.now()
   for (const [name, r] of quietReads) if (now - r.at > 10 * 60_000) quietReads.delete(name)
+  const counts = waitCounts(w, now)
   if (mayBeBusy(p, now)) {
     const screen = await io.capture(p.name)
     const waiting = screenWaiting(screen)
     quietReads.set(p.name, { at: now, waiting })
-    return screenBusy(screen) || waiting
+    return screenBusy(screen) || (waiting && counts)
   }
+  if (!counts) return false
   const last = quietReads.get(p.name)
   if (last && now - last.at < QUIET_READ_MS) return last.waiting
   const waiting = screenWaiting(await io.capture(p.name))
@@ -212,6 +221,27 @@ async function resolve(session: string, panes: TermSession[], allowBoard: boolea
  */
 function ravenLaunched(p: TermSession): boolean {
   return !mainOf(p.name) && ravenOwnSession(p.sessionId)
+}
+
+/** A pane the auto-close may close (autoclose.ts): one Raven opened with session_start, never a main terminal or one he opened. */
+export const isRavenJob = (p: TermSession): boolean => !p.dead && p.mode !== 'shell' && ravenLaunched(p)
+
+/**
+ * Closes a session Raven started, for good: off Watching (no "ended" line), its background shells and monitors and
+ * then its Claude ended on thor, the pane killed, a project run in it failed, the conversation marked done on the
+ * Desk. session_stop and the auto-close both close one this way. Killing the pane alone ends Claude but leaves what
+ * it runs in the background on thor (Kill-Session.ps1), so thor goes first.
+ */
+export async function closeJob(p: TermSession): Promise<{ killed: boolean; markedDone: boolean }> {
+  removeWatch(p.name)
+  if (p.sessionId) removeWatch(watchKey('', p.sessionId))
+  const onThor = p.sessionId ? await io.stopOnThor(p.sessionId).catch(() => 'failed' as const) : 'none'
+  const killed = (await io.killPane(p.name).catch(() => false)) || onThor === 'stopped'
+  if (!killed) return { killed, markedDone: false }
+  // a project run in that pane never reports now, as when the page stops it (routes/terminal.ts)
+  try { failRunsForTmux(p.name, 'stopped before it reported') } catch (e) { console.error('[raven-tools] runs for', p.name, words(e)) }
+  const markedDone = p.sessionId ? await io.markDone([p.sessionId]).catch(() => false) : false
+  return { killed, markedDone }
 }
 
 /** A conversation Raven started with session_start: on Raven's record and never a main terminal's. */
@@ -419,7 +449,7 @@ export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: R
     else {
       const m = mainState.get(w.pane)
       const p = panes.find((x) => x.name === w.pane)
-      state = m === 'working' ? m : !p || p.dead ? 'closed' : (await working(p)) ? 'working' : 'idle'
+      state = m === 'working' ? m : !p || p.dead ? 'closed' : (await working(p, w)) ? 'working' : 'idle'
     }
     const at = Math.max(w.lastSeenAt || 0, boardAt(rows, w.sessionId)) || Date.parse(w.lastActivityAt)
     return card(w, state, at)
@@ -444,6 +474,14 @@ export function titleFor(titles: Map<string, string>, sessionId: string | undefi
   return t && t.toLowerCase() !== label.trim().toLowerCase() ? t : undefined
 }
 
+/** A job's part of its snapshot line: Raven's to close, and when it closes on its own. */
+function jobLine(w: Watch): string {
+  if (!w.job) return ''
+  const at = closesAt(w)
+  const kept = (w.keepUntil ?? 0) > io.now() ? `, kept open until ${et(w.keepUntil!)}` : ''
+  return `, a job you started (session_stop it once it reports the job done)${kept}${at !== null ? `, closes on its own at ${et(at)}` : ''}`
+}
+
 /** Plain lines for Raven's prompt: main terminals, watched sessions, other panes. */
 export async function sessionsSnapshot(): Promise<string> {
   // the run loop gives the whole snapshot 5 s (lib/raven/run.ts): thor gets 4 of them
@@ -458,9 +496,9 @@ export async function sessionsSnapshot(): Promise<string> {
   }
   const all = listWatches()
   if (all.length) {
-    lines.push('Watched sessions (their answers are relayed into this DM):')
+    lines.push('Watched sessions (everything they write comes to you; he sees only what you tell him):')
     for (const w of all) {
-      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: ${w.title ? `on "${clip(w.title, 100)}", ` : ''}since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}`)
+      lines.push(`- ${w.label}${w.pane ? ` (pane ${w.pane})` : ' (window on thor)'}: ${w.title ? `on "${clip(w.title, 100)}", ` : ''}since ${et(w.since)}, last activity ${ago(io.now() - Date.parse(w.lastActivityAt))} ago${w.followUp ? `, follow-up: ${clip(w.followUp, 200)}` : ''}${jobLine(w)}`)
     }
   } else {
     lines.push('Watched sessions: none.')
@@ -511,11 +549,14 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
 
   server.registerTool('session_start', {
     description: 'Start a new Claude session on thor in a launch target and type the prompt into it once its prompt shows (up to 45 s). '
-      + 'main: true makes it that target\'s main terminal (if one is open, the prompt goes there instead). Its answers are relayed into this DM '
-      + 'unless watch is false; followUp is what you do with its next answer (you get woken with it). label names the job: the pane\'s name, '
+      + 'main: true makes it that target\'s main terminal (if one is open, the prompt goes there instead). Everything it writes comes to you '
+      + '(not to Brendon) unless watch is false; followUp is what you do with its next answer (you get woken with it). label names the job: the pane\'s name, '
       + 'and the title on Brendon\'s Watching card. '
       + `model (${modelKeys().join(', ')}) and effort (${CLAUDE_EFFORTS.join(', ')}) are what its Claude starts with; without them it starts on `
-      + 'Brendon\'s defaults. They apply only to a session this starts: refused when the main terminal is already open. Only when Brendon\'s message asks.',
+      + 'Brendon\'s defaults. They apply only to a session this starts: refused when the main terminal is already open. Only when Brendon\'s message asks. '
+      + 'A session this starts (not main) is a job: while you watch it, every answer of it wakes you, and in the same run an answer reports its job done you must '
+      + `session_stop it, which marks it done. One that stays quiet ${AUTO_CLOSE_MIN} minutes after an answer is closed and marked done on its own `
+      + 'unless you session_keep it while it waits on something long.',
     inputSchema: {
       target: z.string().max(32), prompt: z.string().min(1).max(TEXT_MAX), label: z.string().max(60).optional(),
       watch: z.boolean().optional(), followUp: z.string().max(1000).optional(), main: z.boolean().optional(),
@@ -560,7 +601,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     noteRavenStarted(sessionId, io.now())
     const pane = await newPane({ mode: 'new', host: 'thor', target: key, newId: sessionId, label, cols: 120, rows: 40, ...launch })
     ctx.acted()
-    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true, title })
+    if (watch) await startWatch({ pane, label, sessionId, followUp: a.followUp, fresh: true, title, job: true })
     await promptOrThrow(pane, label)
     noteRavenTouched(sessionId)
     await typeInto(pane, label, text)
@@ -570,7 +611,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
   server.registerTool('session_send', {
     description: 'Type a message into a Claude session and press Enter. session is a pane name, a main target key (its main terminal, started if '
       + 'none is open), a conversation id, or a unique part of its label. files are DM attachment ids: each is copied to thor first and its path '
-      + 'there goes after the text (thor takes pictures, videos and documents). Its answer is relayed here unless watch is false; followUp is what you do with '
+      + 'there goes after the text (thor takes pictures, videos and documents). Everything it writes comes to you unless watch is false; followUp is what you do with '
       + 'the next answer. label names the job on Brendon\'s Watching card: give one whenever the message starts new work, leave it out for a follow-up '
       + 'in the same job. Refused while a question or permission prompt is open in it, or while Brendon has text typed there. '
       + 'model and effort (as in session_start) apply only when this starts the main terminal; refused for a session already running. '
@@ -631,7 +672,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
   }))
 
   server.registerTool('session_watch', {
-    description: "Turn relaying a session's answers into this DM on or off. Turning it on is only when Brendon's message asks; off is always allowed.",
+    description: "Turn watching a session on or off: everything a watched session writes comes to you in full, and you tell Brendon what matters. Turning it on is only when Brendon's message asks; off is always allowed.",
     inputSchema: { session: z.string().max(120), on: z.boolean() },
   }, (a) => toolRun(async () => {
     if (!a.on) {
@@ -676,7 +717,8 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
 
   server.registerTool('session_stop', {
     description: 'Stop a session in a pane here: closes the pane, which ends its Claude on thor (the conversation stays resumable). Not for windows on thor. '
-      + 'A session you started with session_start you may close on your own once its work is done, and closing it marks it done on the Desk. '
+      + 'A session you started with session_start you close on your own, in any run (a relay too): in the same run its answer reports the job done, '
+      + 'stop it. That ends its background shells and monitors first and marks it done on the Desk. '
       + 'Any other (a main terminal, one Brendon opened) only when Brendon\'s message asks.',
     inputSchema: { session: z.string().max(120) },
   }, (a) => toolRun(async () => {
@@ -688,6 +730,13 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
     if (r.kind === 'main') return `${r.target.label} has no main terminal open.`
     const p = r.pane
+    if (own) {
+      // Raven's own session is finished work: done on the board, so the Desk's closed list and Recover all skip it
+      const c = await closeJob(p)
+      if (!c.killed) throw new RavenToolError(`${p.label} (${p.name}) could not be stopped; it may have ended already`)
+      ctx.acted()
+      return { stopped: p.name, label: p.label, markedDone: c.markedDone, ...(c.markedDone ? {} : { note: 'thor did not answer, so it is not marked done on the Desk yet' }) }
+    }
     // stopped on purpose: no "ended" line for it; it leaves Watching, whichever way it was watched
     removeWatch(p.name)
     if (p.sessionId) removeWatch(watchKey('', p.sessionId))
@@ -700,10 +749,23 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (main) setMain(main, null)
     if (!killed) throw new RavenToolError(`${p.label} (${p.name}) could not be stopped; it may have ended already`)
     ctx.acted()
-    // Raven's own session is finished work: done on the board, so the Desk's closed list and Recover all skip it.
-    // One of Brendon's stays open there, to resume when he wants it.
-    if (!own || !p.sessionId) return { stopped: p.name, label: p.label }
-    const done = await io.markDone([p.sessionId]).catch(() => false)
-    return { stopped: p.name, label: p.label, markedDone: done, ...(done ? {} : { note: 'thor did not answer, so it is not marked done on the Desk yet' }) }
+    // one of Brendon's stays open on the Desk, to resume when he wants it
+    return { stopped: p.name, label: p.label }
+  }))
+
+  server.registerTool('session_keep', {
+    description: 'Keep a session you started with session_start open while it waits on something long (a release, a build, a long test run): '
+      + `nothing closes it on its own until minutes from now (default ${KEEP_DEFAULT_MIN}, at most ${KEEP_MAX_MIN}), and its background wait shows `
+      + `Working on Brendon's Watching card meanwhile. Without it, a session you started that stays quiet ${AUTO_CLOSE_MIN} minutes after an answer `
+      + 'is closed and marked done on its own. Use it in the run whose answer says it still waits; a job that is done gets session_stop instead.',
+    inputSchema: { session: z.string().max(120), minutes: z.number().int().min(1).max(KEEP_MAX_MIN).optional() },
+  }, (a) => toolRun(async () => {
+    const r = await resolve(a.session, await io.listPanes(), false)
+    if (r.kind !== 'pane' || !ravenLaunched(r.pane)) throw new RavenToolError('session_keep is only for a session you started with session_start; nothing closes the others on its own')
+    const w = getWatch(r.pane.name)
+    if (!w?.job) throw new RavenToolError(`${r.pane.label} is not watched as a job, so nothing closes it on its own`)
+    const until = io.now() + (a.minutes ?? KEEP_DEFAULT_MIN) * 60_000
+    keepWatch(w.key, until)
+    return { kept: r.pane.name, label: r.pane.label, until: et(until) }
   }))
 }

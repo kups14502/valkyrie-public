@@ -39,6 +39,18 @@ export type RavenRelay = {
   title?: string
 }
 
+/** What a watched session wrote that Raven read for this message, kept under it (collapsed): Claude's lines, newest kept. */
+export type RavenSessionCopy = {
+  /** the pane name, or the conversation id of a window on thor */
+  from: string
+  label: string
+  title?: string
+  sessionId?: string
+  lines: { at: string; text: string }[]
+  /** older lines not kept in this copy */
+  more?: number
+}
+
 /** What a message carries beyond its text. Every field optional. */
 export type RavenMeta = {
   tier?: RavenTier
@@ -52,6 +64,7 @@ export type RavenMeta = {
   replyTo?: number
   files?: RavenFile[]
   relay?: RavenRelay
+  sessions?: RavenSessionCopy[]
   source?: 'app' | 'quick' | 'siri' | 'hotkey' | 'api'
   error?: string
 }

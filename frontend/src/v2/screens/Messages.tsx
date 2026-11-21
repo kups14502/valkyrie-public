@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, ChevronRight } from 'lucide-react'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
@@ -12,7 +12,7 @@ import { apiErrorText } from '../../lib/api'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
   RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
-  replyMetaTitle, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type Ref,
+  replyMetaTitle, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -498,11 +498,44 @@ function Row({ m, grouped, last, split, names }: { m: RavenMsg; grouped: boolean
           {m.text && <Markdown className="rv-md">{m.text}</Markdown>}
           {files}
           {refs.length > 0 && <Refs refs={refs} />}
+          {m.meta.sessions?.map((c, i) => <SessionCopy key={`${c.from}-${i}`} copy={c} />)}
           {(m.proposals ?? (m.proposal ? [m.proposal] : [])).map((p) => <ProposalCard key={p.id} p={p} />)}
           {meta && <p className="rv-meta" title={replyMetaTitle(m.meta)}>{meta}</p>}
         </>
       )}
     </article>
+  )
+}
+
+/**
+ * What a watched session wrote, under Raven's take on it: closed until he opens it. Raven reads every line; the
+ * thread shows only Raven's words, and this is there to look back at. Open goes to the session itself.
+ */
+function SessionCopy({ copy }: { copy: RavenSessionCopy }) {
+  const navigate = useNavigate()
+  const pane = TERM_NAME_RE.test(copy.from) ? copy.from : null
+  const termPath = pane ? v2TermPath(pane) : null
+  const name = copy.title || copy.label
+  const n = copy.lines.length + (copy.more ?? 0)
+  return (
+    <details className="rv-said">
+      <summary>
+        <ChevronRight className="rv-said-chev" size={13} strokeWidth={1.8} aria-hidden />
+        <span>What {name} wrote <span className="rv-said-n">· {n} {n === 1 ? 'message' : 'messages'}</span></span>
+      </summary>
+      <div className="rv-said-body">
+        {copy.more ? <p className="rv-said-more">{copy.more} older {copy.more === 1 ? 'message is' : 'messages are'} in the session.</p> : null}
+        {copy.lines.map((l, i) => (
+          <div key={i} className="rv-said-line">
+            <time title={NY_DAY.format(Date.parse(l.at))}>{etTime(l.at)}</time>
+            <Markdown className="rv-md">{l.text}</Markdown>
+          </div>
+        ))}
+        {termPath && (
+          <a className="rv-open" href={termPath} onClick={(e) => { e.preventDefault(); navigate(termPath) }}>Open the session</a>
+        )}
+      </div>
+    </details>
   )
 }
 

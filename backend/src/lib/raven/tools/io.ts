@@ -5,7 +5,7 @@ import {
 } from '../../../terminal/tmux.js'
 import { pageFrom, paneTranscript, readerFor } from '../../../terminal/transcriptFeed.js'
 import type { TranscriptPage } from '../../../terminal/transcript.js'
-import { boardNow, boardSessions, launchTargets, markSessionsDone, uploadToThor, type LaunchTargetInfo } from '../../../routes/hostLaunch.js'
+import { boardNow, boardSessions, launchTargets, markSessionsDone, stopSessionOnHost, uploadToThor, type LaunchTargetInfo } from '../../../routes/hostLaunch.js'
 import { getRavenFile } from '../files.js'
 import type { RavenFile } from '../types.js'
 
@@ -38,6 +38,8 @@ export type RavenToolsIo = {
   boardCached: () => BoardRow[] | null
   /** marks conversations done on thor's board (the Desk's closed list); false when thor cannot say */
   markDone: (sessionIds: string[]) => Promise<boolean>
+  /** ends a conversation's Claude on thor, its background shells and monitors first; 'none' when nothing runs it there */
+  stopOnThor: (sessionId: string) => Promise<'stopped' | 'none' | 'failed'>
   uploadToThor: (name: string, data: Buffer) => Promise<{ path: string }>
   /** a DM attachment and where its bytes are (lib/raven/files.ts) */
   ravenFile: (id: string) => { file: RavenFile; path: string } | null
@@ -80,6 +82,7 @@ const real: RavenToolsIo = {
   boardSessions: () => boardSessions(20_000),
   boardCached: () => boardNow()?.rows ?? null,
   markDone: (ids) => markSessionsDone(ids),
+  stopOnThor: (id) => stopSessionOnHost(id),
   uploadToThor,
   ravenFile: (id) => getRavenFile(id),
   readFile: (p) => readFile(p),

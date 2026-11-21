@@ -40,7 +40,10 @@ export function ravenPost(text: string, opts?: { refs?: Ref[]; meta?: RavenMeta;
   safe('post', () => poster?.(text, opts))
 }
 
-/** Queue an event for Raven and wake it (a watched session answered and a follow-up was asked for). Never throws. */
-export function wakeRavenWith(kind: string, payload: Record<string, unknown>): void {
-  safe('wake', () => waker?.(kind, payload))
+/** Queue an event for Raven and wake it (what a watched session wrote, an agent's answer). Never throws. False when Raven did not take it. */
+export function wakeRavenWith(kind: string, payload: Record<string, unknown>): boolean {
+  if (!waker) return false
+  let took = false
+  safe('wake', () => { waker!(kind, payload); took = true })
+  return took
 }

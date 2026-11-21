@@ -194,6 +194,33 @@ html[data-motion='reduced'] .rv-latest { animation: none; }
   white-space: nowrap;
 }
 
+/* what a watched session wrote, under Raven's take on it: one quiet line until he opens it */
+.rv-said { margin-top: 8px; }
+.rv-said > summary {
+  display: inline-flex; align-items: flex-start; gap: 6px; max-width: 100%; line-height: 17px;
+  font-size: 11.5px; color: var(--dim); cursor: pointer; list-style: none; user-select: none;
+}
+.rv-said > summary::-webkit-details-marker { display: none; }
+.rv-said > summary:hover, .rv-said[open] > summary { color: var(--fg); }
+.rv-said > summary:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 3px; border-radius: 4px; }
+.rv-said-chev { flex: none; margin-top: 2px; transition: transform .15s var(--ease); }
+.rv-said[open] .rv-said-chev { transform: rotate(90deg); }
+html[data-motion='reduced'] .rv-said-chev { transition: none; }
+.rv-said-n { color: color-mix(in srgb, var(--dim) 78%, transparent); }
+.rv-said-body {
+  margin-top: 8px; padding: 8px 12px 10px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--line); border-radius: 12px;
+}
+.rv-said-line + .rv-said-line { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rv-said-line time { display: block; margin-bottom: 2px; font-size: 10.5px; color: color-mix(in srgb, var(--dim) 78%, transparent); }
+.rv-msg .rv-said-line .rv-md { font-size: 12.5px; line-height: 19px; color: var(--text); }
+.rv-msg .rv-said-line .rv-md p { margin-bottom: 8px; }
+.rv-msg .rv-said-line .rv-md p:last-child { margin-bottom: 0; }
+.rv-said-more { margin: 0 0 8px; font-size: 11px; color: var(--dim); }
+.rv-said-body .rv-open { display: inline-block; margin-top: 10px; }
+@media (pointer: coarse) { .rv-said > summary { padding-block: 10px; margin-block: -10px; } }
+
 /* Raven at work: one live line at the end of the thread */
 .rv-working { display: flex; align-items: center; gap: 8px; padding: 16px 0 2px; font-size: 12px; color: var(--fg); }
 

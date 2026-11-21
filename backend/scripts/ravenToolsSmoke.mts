@@ -168,6 +168,8 @@ const tools = await import('../src/lib/raven/tools/index.ts')
 const ioMod = await import('../src/lib/raven/tools/io.ts')
 const watch = await import('../src/lib/raven/tools/watch.ts')
 const sessionsMod = await import('../src/lib/raven/tools/sessions.ts')
+const autoclose = await import('../src/lib/raven/tools/autoclose.ts')
+const utilMod = await import('../src/lib/raven/tools/util.ts')
 const paneStateMod = await import('../src/terminal/paneState.ts')
 const originMod = await import('../src/lib/sessionOrigin.ts')
 const vaultMod = await import('../src/lib/raven/tools/vault.ts')
@@ -229,6 +231,8 @@ const screensBy = new Map<string, string[]>()
 const states = new Map<string, 'live' | 'dead' | 'gone'>()
 // panes that printed nothing for a minute: the busy rule never reads their screen
 const quiet = new Set<string>()
+// panes nobody typed in, opened or printed in for an hour: the auto-close may look at them
+const away = new Set<string>()
 const typed: { pane: string; text: string }[] = []
 const created: Record<string, unknown>[] = []
 const killed: string[] = []
@@ -281,13 +285,19 @@ const board = [
 let boardUp = true
 const doneMarks: string[] = []
 let doneFails = false
+// thor's stop (Kill-Session.ps1): what was asked, and which panes were killed by then
+const thorStops: { sid: string; killedThen: string[] }[] = []
+let thorStopAnswer: 'stopped' | 'none' | 'failed' = 'stopped'
 let targetsUp = true
 async function fakeCapture(p: string): Promise<string | null> {
   const list = screensBy.get(p) ?? [IDLE]
   return list.length > 1 ? list.shift()! : list[0]
 }
 const fakeIo = {
-  listPanes: async () => panes.filter((p) => states.get(p.name) !== 'gone').map((p) => ({ ...p, activityAt: quiet.has(p.name) ? clock - 60_000 : clock, ...(quiet.has(p.name) ? { outputAt: clock - 60_000 } : {}), dead: states.get(p.name) === 'dead' })),
+  listPanes: async () => panes.filter((p) => states.get(p.name) !== 'gone').map((p) => {
+    const at = away.has(p.name) ? clock - 3_600_000 : quiet.has(p.name) ? clock - 60_000 : clock
+    return { ...p, activityAt: at, ...(at < clock ? { outputAt: at } : {}), dead: states.get(p.name) === 'dead' }
+  }),
   createPane: async (o: Record<string, unknown>) => {
     created.push(o)
     const name = `vk-${String(++paneSeq).padStart(10, '0')}`
@@ -320,6 +330,7 @@ const fakeIo = {
   ravenFile: (id: string) => (id === 'f1' ? { file: { id: 'f1', name: 'photo.jpg', mime: 'image/jpeg', size: 4, createdAt: new Date().toISOString() }, path: '/fake/f1.jpg' } : null),
   readFile: async () => Buffer.from('jpeg'),
   markDone: async (ids: string[]) => { if (doneFails) return false; doneMarks.push(...ids); return true },
+  stopOnThor: async (sid: string) => { thorStops.push({ sid, killedThen: [...killed] }); return thorStopAnswer },
   sleep: async (ms: number) => { clock += ms },
   now: () => clock,
 }
@@ -330,7 +341,7 @@ ioMod.setRavenToolsIo(fakeIo)
 {
   const listed = (await (await client({ fromBrendon: true })).listTools()).tools.map((t) => t.name)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
-    'session_send', 'session_read', 'session_watch', 'session_stop', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
+    'session_send', 'session_read', 'session_watch', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
     'project_get', 'tickets', 'inbox', 'calendar', 'brief']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
@@ -819,11 +830,15 @@ agents.syncRoster()
     r = await call('session_stop', { session: startPane }, false)
     check('session_stop: Raven closes its own session_start pane without Brendon', !r.isError && killed.includes(startPane) && r.json.markedDone === true && acted > actedBefore, r)
     check('session_stop: its own pane is marked done on the Desk and leaves the Watching list', doneMarks.includes(startSid) && !watch.getWatch(startPane) && !watch.listWatches().some((w) => w.sessionId === startSid), { doneMarks, w: watch.listWatches() })
+    const atThor = thorStops.find((x) => x.sid === startSid)
+    check('session_stop: its background work and Claude end on thor before the pane is killed', !!atThor && !atThor.killedThen.includes(startPane), thorStops)
     const card = (await tools.ravenSessionsState()).watching.find((w: { sessionId?: string }) => w.sessionId === startSid) as { state?: string } | undefined
     check('session_stop: it leaves the Watching card at once', !card, card)
     const k0 = killed.length
     r = await call('session_stop', { session: mainPane }, false)
     check('session_stop: his main terminal stays gated', r.isError && /Brendon's own message/.test(r.text) && killed.length === k0, r)
+    r = await call('session_keep', { session: mainPane }, false)
+    check('session_keep: never for his main terminal', r.isError && /only for a session you started/.test(r.text), r)
     const his = pane('vk-6666666666', 'His own work', 'work', '66666666-2222-4333-8444-555555555555')
     r = await call('session_stop', { session: his.name }, false)
     check('session_stop: a pane Brendon opened stays gated', r.isError && /Brendon's own message/.test(r.text) && killed.length === k0, r)
@@ -838,6 +853,16 @@ agents.syncRoster()
     r = await call('session_stop', { session: quick }, false)
     check('session_stop: thor not answering still closes it, and says it is not marked done', !r.isError && killed.includes(quick) && r.json.markedDone === false && /not marked done/.test(r.json.note), r)
     doneFails = false
+    // the pane already gone in tmux (no remain-on-exit) after thor ended its Claude: still stopped
+    r = await call('session_start', { target: 'work', prompt: 'gone job', watch: false })
+    const gonePane = r.json.pane as string
+    const realKill = fakeIo.killPane
+    fakeIo.killPane = async (p: string) => { states.set(p, 'gone'); return false }
+    ioMod.setRavenToolsIo(fakeIo)
+    r = await call('session_stop', { session: gonePane }, false)
+    check('session_stop: thor ended it and the pane went with it, still stopped and marked done', !r.isError && r.json.markedDone === true, r)
+    fakeIo.killPane = realKill
+    ioMod.setRavenToolsIo(fakeIo)
 
     // session_done: the Sessions tab's done flag; his own sessions only when he asks
     r = await call('session_start', { target: 'work', prompt: 'another job', watch: false })
@@ -873,6 +898,7 @@ agents.syncRoster()
   r = await call('session_stop', { session: 'personal' })
   check('session_stop: the main pane is killed, unwatched, unmapped', !r.isError && killed.includes(mainPane) && !watch.getWatch(mainPane), r)
   check('session_stop: his main is not marked done (he resumes it)', doneMarks.length === marks0 && r.json.markedDone === undefined, { doneMarks, r })
+  check('session_stop: his main is not ended on thor either', !thorStops.some((x) => x.sid === main.newId), thorStops)
   r = await call('main_terminals')
   check('main_terminals: closed again', r.json[0].pane === null && r.json[0].state === 'closed', r.json)
   r = await call('session_stop', { session: 'router' })
@@ -886,58 +912,116 @@ agents.syncRoster()
   posts.length = 0
   wakes.length = 0
   const tick = async (ms = 0) => { clock += ms; await watch.tickWatches() }
+  type Said = { at: number; from: string; text: string }
+  const saidIn = (w?: { payload: Record<string, unknown> }) => ((w?.payload.said ?? []) as Said[]).map((s) => `${s.from}:${s.text}`)
+  const lastWake = () => wakes[wakes.length - 1]
   const sid = '22222222-3333-4444-8555-666666666666'
   const p = pane('vk-aaaaaaaaaa', 'Server work', 'server', sid)
   screensBy.set(p.name, [IDLE])
-  // history before the watch is never relayed
+  // history before the watch never reaches Raven
   say(p.name, sid, entry('user', 'old prompt'), entry('assistant', 'An old answer.'))
   await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid })
   await tick(20_000)
-  check('watch: history is not relayed', posts.length === 0, posts)
+  check('watch: history is not handed over', posts.length === 0 && wakes.length === 0, { posts, wakes })
 
-  // an answer: held 12 s, then relayed once
+  // an answer: held 12 s, then handed to Raven once with its prompt; nothing posts in the thread
   say(p.name, sid, entry('user', 'is nginx up?'))
   await tick(1_000)
   say(p.name, sid, entry('assistant', 'Yes, nginx is up.'))
   await tick(8_000)
-  check('watch: the answer just arrived, held', posts.length === 0, posts)
+  check('watch: the answer just arrived, held', wakes.length === 0, wakes)
   await tick(8_000)
-  check('watch: 8 s of quiet is not enough', posts.length === 0, posts)
+  check('watch: 8 s of quiet is not enough', wakes.length === 0, wakes)
   await tick(8_000)
-  check('watch: relayed after 12 s of quiet', posts.length === 1 && posts[0].text === 'Yes, nginx is up.', posts)
-  const m = posts[0]?.opts
-  check('watch: relay meta, link and push', m?.meta?.relay?.kind === 'session' && m.meta.relay.from === p.name && m.meta.relay.label === 'Server work' && m.meta.relay.sessionId === sid
-    && m.refs?.[0]?.url === `/m/ai/term/${p.name}` && m.push === true, m)
+  check('watch: after 12 s of quiet the turn goes to Raven', wakes.length === 1 && wakes[0].kind === 'session_reply'
+    && saidIn(wakes[0]).join('|') === 'prompt:is nginx up?|claude:Yes, nginx is up.' && wakes[0].payload.turnEnded === true, wakes)
+  check('watch: the hand-off names the session', wakes[0]?.payload.pane === p.name && wakes[0].payload.label === 'Server work' && wakes[0].payload.sessionId === sid
+    && !wakes[0].payload.asking && !wakes[0].payload.ended && !wakes[0].payload.followUp, wakes[0]?.payload)
+  check('watch: nothing a session writes posts in the thread', posts.length === 0, posts)
   await tick(8_000)
   await tick(8_000)
-  check('watch: never twice', posts.length === 1, posts)
+  check('watch: never twice', wakes.length === 1, wakes)
 
-  // narration then tools then the answer: only the answer; held while the spinner shows
+  // narration, tools and the answer: every line, in order, once the spinner is gone. Claude's newest line can be the
+  // answer, so a minute of spinner after it hands nothing over mid-turn
   say(p.name, sid, entry('user', 'restart it'), entry('assistant', 'Restarting nginx now.'), entry('tool'), entry('result'), entry('assistant', 'Done.'), entry('assistant', 'It came back in 2 s.'))
   screensBy.set(p.name, [BUSY])
   await tick(1_000)
-  await tick(15_000)
-  check('watch: held while the pane shows the spinner', posts.length === 1, posts)
+  await tick(61_000)
+  check('watch: held while the pane shows the spinner, the newest line too', wakes.length === 1, wakes.slice(1))
   screensBy.set(p.name, [IDLE])
   await tick(8_000)
-  check('watch: only the final answer, its parts joined', posts.length === 2 && posts[1].text === 'Done.\n\nIt came back in 2 s.', posts)
+  check('watch: every line of the turn, the narration too', wakes.length === 2 && wakes[1].kind === 'session_reply'
+    && saidIn(wakes[1]).join('|') === 'prompt:restart it|claude:Restarting nginx now.|claude:Done.|claude:It came back in 2 s.', wakes.slice(1))
 
-  // follow-up: woken once with the answer
-  await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid, followUp: 'If it failed, open a task' })
-  say(p.name, sid, entry('user', 'check certs'), entry('assistant', 'Certs expire in 60 days.'))
+  // mid-turn: a line older than a minute, Claude in a tool step since, goes as progress; the rest at the turn's end
+  say(p.name, sid, entry('user', 'build it'), entry('assistant', 'Building the frontend now.'), entry('tool'))
+  screensBy.set(p.name, [BUSY])
+  await tick(1_000)
+  await tick(30_000)
+  check('watch: mid-turn lines wait for a minute', wakes.length === 2, wakes.slice(2))
+  await tick(31_000)
+  check('watch: a minute on, mid-turn lines go as progress', wakes.length === 3 && wakes[2].kind === 'session_progress' && wakes[2].payload.turnEnded === false
+    && saidIn(wakes[2]).join('|') === 'prompt:build it|claude:Building the frontend now.', wakes.slice(2))
+  say(p.name, sid, entry('result'), entry('assistant', 'Built in 3 min.'))
+  screensBy.set(p.name, [IDLE])
   await tick(1_000)
   await tick(13_000)
-  check('watch: follow-up wakes Raven', wakes.length === 1 && wakes[0].kind === 'session_reply' && wakes[0].payload.followUp === 'If it failed, open a task' && wakes[0].payload.text === 'Certs expire in 60 days.', wakes)
+  check('watch: the turn end carries only what came after the progress', wakes.length === 4 && wakes[3].kind === 'session_reply'
+    && saidIn(wakes[3]).join('|') === 'claude:Built in 3 min.', wakes.slice(3))
+
+  // follow-up: on the turn's end, once; never on a progress batch
+  await watch.startWatch({ pane: p.name, label: p.label, sessionId: sid, followUp: 'If it failed, open a task' })
+  say(p.name, sid, entry('user', 'check certs'), entry('assistant', 'Reading the certs.'), entry('tool'))
+  screensBy.set(p.name, [BUSY])
+  await tick(1_000)
+  await tick(61_000)
+  check('watch: a progress batch leaves the follow-up', lastWake()?.kind === 'session_progress' && !lastWake().payload.followUp && watch.getWatch(p.name)?.followUp === 'If it failed, open a task', lastWake())
+  say(p.name, sid, entry('result'), entry('assistant', 'Certs expire in 60 days.'))
+  screensBy.set(p.name, [IDLE])
+  await tick(1_000)
+  await tick(13_000)
+  check('watch: the follow-up rides the turn end', lastWake()?.kind === 'session_reply' && lastWake().payload.followUp === 'If it failed, open a task'
+    && saidIn(lastWake()).join('|') === 'claude:Certs expire in 60 days.', lastWake())
+  const w0 = wakes.length
   say(p.name, sid, entry('user', 'thanks'), entry('assistant', 'Any time.'))
   await tick(1_000)
   await tick(13_000)
-  check('watch: the follow-up is used once', wakes.length === 1 && posts[posts.length - 1].text === 'Any time.', { wakes, last: posts[posts.length - 1] })
+  check('watch: the follow-up is used once', wakes.length === w0 + 1 && !lastWake().payload.followUp && saidIn(lastWake()).join('|') === 'prompt:thanks|claude:Any time.', lastWake())
 
-  // a long answer is cut at 3,000 characters
-  say(p.name, sid, entry('user', 'dump it'), entry('assistant', 'x'.repeat(5000)))
+  // a long line reaches Raven whole; a long prompt is context, its head is enough
+  say(p.name, sid, entry('user', `dump it ${'p'.repeat(3000)}`), entry('assistant', 'x'.repeat(5000)))
   await tick(1_000)
   await tick(13_000)
-  check('watch: cut at 3000', posts[posts.length - 1].text.length === 3000, posts[posts.length - 1].text.length)
+  const long = (lastWake()?.payload.said ?? []) as Said[]
+  check('watch: a long line is never cut', long.find((s) => s.from === 'claude')?.text.length === 5000, long.map((s) => s.text.length))
+  check('watch: a long prompt keeps its head', (long.find((s) => s.from === 'prompt')?.text.length ?? 0) <= 1000, long.map((s) => s.text.length))
+
+  // a question or permission prompt open after a tool step, nothing written: Raven hears it waits on him
+  say(p.name, sid, entry('user', 'deploy it'), entry('tool'))
+  screensBy.set(p.name, [DIALOG])
+  const w1 = wakes.length
+  await tick(1_000)
+  await tick(13_000)
+  check('watch: an open dialog after a tool step is a hand-off that asks', wakes.length === w1 + 1 && lastWake().payload.asking === true && lastWake().kind === 'session_reply'
+    && saidIn(lastWake()).join('|') === 'prompt:deploy it', lastWake())
+  await tick(8_000)
+  await tick(8_000)
+  check('watch: the same quiet spell is read once', wakes.length === w1 + 1, wakes.slice(w1))
+  // a tool step that ends at the prompt with nothing written hands nothing over
+  say(p.name, sid, entry('result'), entry('tool'))
+  screensBy.set(p.name, [IDLE])
+  await tick(1_000)
+  await tick(13_000)
+  check('watch: a quiet tool step at the prompt, nothing written, is not news', wakes.length === w1 + 1, wakes.slice(w1))
+
+  // a turn that ended with a background shell still running says so
+  say(p.name, sid, entry('result'), entry('assistant', 'Waiting on the release in the background.'))
+  screensBy.set(p.name, [WAITING])
+  await tick(1_000)
+  await tick(13_000)
+  check('watch: background work still out is in the hand-off', lastWake()?.payload.background === true && !lastWake().payload.asking, lastWake())
+  screensBy.set(p.name, [IDLE])
 
   // a rewind: the page holds already-seen entries plus the new branch
   const t = transcripts.get(p.name)!
@@ -954,41 +1038,41 @@ agents.syncRoster()
     return origPT(name, after)
   }
   ioMod.setRavenToolsIo(fakeIo)
-  const before = posts.length
+  const before = wakes.length
   await tick(0)
   await tick(13_000)
-  check('watch: after a rewind only the new answer', posts.length === before + 1 && posts[posts.length - 1].text === 'A different answer.', posts.slice(before))
+  check('watch: after a rewind only the new lines', wakes.length === before + 1 && saidIn(lastWake()).join('|') === 'prompt:a different question|claude:A different answer.', wakes.slice(before))
   fakeIo.paneTranscript = origPT
   ioMod.setRavenToolsIo(fakeIo)
 
-  // the pane dies: the last answer, then one "ended" line, and the watch is gone
+  // the pane dies: its last lines and the end go to Raven at once, and the watch is gone
   say(p.name, sid, entry('user', 'last one'), entry('assistant', 'Bye.'))
   states.set(p.name, 'dead')
-  const b2 = posts.length
+  const b2 = wakes.length
   await tick(1_000)
-  check('watch: a dying pane relays its last answer and ends', posts.length === b2 + 2 && posts[b2].text === 'Bye.' && posts[b2 + 1].text === 'Server work ended' && !watch.getWatch(p.name), posts.slice(b2))
+  check('watch: a dying pane hands over its last lines and its end', wakes.length === b2 + 1 && wakes[b2].payload.ended === true && wakes[b2].kind === 'session_reply'
+    && saidIn(wakes[b2]).join('|') === 'prompt:last one|claude:Bye.' && !watch.getWatch(p.name) && posts.length === 0, { wakes: wakes.slice(b2), posts })
   await tick(13_000)
-  check('watch: nothing after the end', posts.length === b2 + 2)
+  check('watch: nothing after the end', wakes.length === b2 + 1)
 
-  // a window on thor: no link, no spinner check
+  // a window on thor: no pane, no spinner check
   const bsid = '33333333-3333-4444-8555-666666666666'
   say(`sid:${bsid}`, bsid, entry('user', 'earlier'))
   await watch.startWatch({ pane: '', label: 'Desk session', sessionId: bsid })
   say(`sid:${bsid}`, bsid, entry('assistant', 'Desk answer.'))
   await tick(1_000)
   await tick(13_000)
-  const last = posts[posts.length - 1]
-  check('watch: a window on thor relays without a link', last.text === 'Desk answer.' && (last.opts?.refs ?? []).length === 0 && last.opts?.meta?.relay?.from === bsid, last)
+  check('watch: a window on thor hands over by its conversation', lastWake()?.payload.pane === '' && lastWake().payload.sessionId === bsid && saidIn(lastWake()).join('|') === 'claude:Desk answer.', lastWake())
 
   // a fresh session: everything in it is news
   const fsid = '44444444-3333-4444-8555-666666666666'
   const fp = pane('vk-bbbbbbbbbb', 'Fresh one', 'work', fsid)
   screensBy.set(fp.name, [IDLE])
-  await watch.startWatch({ pane: fp.name, label: fp.label, sessionId: fsid, fresh: true })
+  await watch.startWatch({ pane: fp.name, label: fp.label, sessionId: fsid, fresh: true, title: 'Fresh job' })
   say(fp.name, fsid, entry('user', 'first prompt'), entry('assistant', 'First answer.'))
   await tick(1_000)
   await tick(13_000)
-  check('watch: a fresh session relays its first answer', posts[posts.length - 1].text === 'First answer.', posts[posts.length - 1])
+  check('watch: a fresh session hands over its first turn, with the job', saidIn(lastWake()).join('|') === 'prompt:first prompt|claude:First answer.' && lastWake().payload.title === 'Fresh job', lastWake())
 
   // a session whose first read failed: only entries after the watch began count
   const lsid = '55555555-3333-4444-8555-666666666666'
@@ -1001,17 +1085,17 @@ agents.syncRoster()
   await watch.startWatch({ pane: lp.name, label: lp.label, sessionId: lsid })
   check('watch: a failed first read leaves it unbaselined', watch.getWatch(lp.name)?.baselined === false)
   say(lp.name, lsid, entry('user', 'go'), entry('assistant', 'After the watch.'))
-  const b3 = posts.length
+  const b3 = wakes.length
   await tick(1_000)
   await tick(13_000)
-  check('watch: only what came after the watch', posts.length === b3 + 1 && posts[b3].text === 'After the watch.', posts.slice(b3))
+  check('watch: only what came after the watch', wakes.length === b3 + 1 && saidIn(wakes[b3]).join('|') === 'prompt:go|claude:After the watch.', wakes.slice(b3))
   fakeIo.paneTranscript = realPT
   ioMod.setRavenToolsIo(fakeIo)
 
   // 24 h with nothing new drops a watch without a word
-  const b4 = posts.length
+  const b4 = wakes.length
   await tick(25 * 3_600_000)
-  check('watch: stale watches drop silently', watch.listWatches().length === 0 && posts.length === b4, watch.listWatches())
+  check('watch: stale watches drop silently', watch.listWatches().length === 0 && wakes.length === b4 && posts.length === 0, watch.listWatches())
 
   // a read that holds the pass open, released by hand
   const gated = (name: string) => {
@@ -1027,14 +1111,13 @@ agents.syncRoster()
     return () => { release(); fakeIo.paneTranscript = orig; ioMod.setRavenToolsIo(fakeIo) }
   }
 
-  // a tool refreshing a watch while a pass relays it: the answer and the follow-up go out once
+  // a tool refreshing a watch while a pass hands it over: the lines and the follow-up go once
   const rsid = '66666666-3333-4444-8555-666666666666'
   const rp = pane('vk-dddddddddd', 'Race one', 'work', rsid)
   screensBy.set(rp.name, [IDLE])
   await watch.startWatch({ pane: rp.name, label: rp.label, sessionId: rsid, fresh: true, followUp: 'Tell him' })
   say(rp.name, rsid, entry('user', 'go'), entry('assistant', 'Raced answer.'))
   await tick(1_000)
-  const b5 = posts.length
   const w5 = wakes.length
   clock += 13_000
   const open5 = gated(rp.name)
@@ -1044,22 +1127,21 @@ agents.syncRoster()
   await pass5
   await tick(8_000)
   await tick(8_000)
-  check('watch: a refresh during a pass relays once', posts.length === b5 + 1 && posts[b5].text === 'Raced answer.', posts.slice(b5).map((x) => x.text))
-  check('watch: a refresh during a pass wakes once', wakes.length === w5 + 1, wakes.slice(w5))
+  check('watch: a refresh during a pass hands over once', wakes.length === w5 + 1 && saidIn(wakes[w5]).join('|') === 'prompt:go|claude:Raced answer.' && wakes[w5].payload.followUp === 'Tell him', wakes.slice(w5))
 
   // a watch removed during a pass: nothing more from it
   say(rp.name, rsid, entry('user', 'again'), entry('assistant', 'Not wanted.'))
   await tick(1_000)
-  const b6 = posts.length
+  const b6 = wakes.length
   clock += 13_000
   const open6 = gated(rp.name)
   const pass6 = watch.tickWatches()
   watch.removeWatch(rp.name)
   open6()
   await pass6
-  check('watch: removed during a pass relays nothing', posts.length === b6, posts.slice(b6).map((x) => x.text))
+  check('watch: removed during a pass hands nothing over', wakes.length === b6, wakes.slice(b6))
 
-  // more text after a relay, with no prompt or tool between: only the new part goes out
+  // more text after a hand-off, with no prompt or tool between: only the new part goes
   const msid = '77777777-3333-4444-8555-666666666666'
   say(`sid:${msid}`, msid, entry('user', 'earlier'))
   await watch.startWatch({ pane: '', label: 'Desk two', sessionId: msid })
@@ -1069,7 +1151,7 @@ agents.syncRoster()
   say(`sid:${msid}`, msid, entry('assistant', 'Part two.'))
   await tick(1_000)
   await tick(13_000)
-  check('watch: a later part is relayed alone', posts.length >= 2 && posts[posts.length - 2].text === 'Part one.' && posts[posts.length - 1].text === 'Part two.', posts.slice(-2).map((x) => x.text))
+  check('watch: a later part goes alone', saidIn(wakes[wakes.length - 2]).join('|') === 'prompt:plan it|claude:Part one.' && saidIn(lastWake()).join('|') === 'claude:Part two.', wakes.slice(-2))
   watch.removeWatch(`sid:${msid}`)
 
   // a pane that dies while thor's transcripts cannot be read still ends
@@ -1081,11 +1163,49 @@ agents.syncRoster()
   fakeIo.paneTranscript = async (n: string, after: string) => { if (n === dp.name) throw new Error('thor asleep'); return okPT(n, after) }
   ioMod.setRavenToolsIo(fakeIo)
   states.set(dp.name, 'dead')
-  const b7 = posts.length
+  const b7 = wakes.length
   await tick(8_000)
-  check('watch: dies while thor is unreadable, still ends', posts.length === b7 + 1 && posts[b7].text === 'Dark one ended' && !watch.getWatch(dp.name), { posts: posts.slice(b7).map((x) => x.text), w: watch.getWatch(dp.name) })
+  check('watch: dies while thor is unreadable, still ends', wakes.length === b7 + 1 && wakes[b7].payload.ended === true && saidIn(wakes[b7]).length === 0 && !watch.getWatch(dp.name),
+    { wakes: wakes.slice(b7), w: watch.getWatch(dp.name) })
   fakeIo.paneTranscript = okPT
   ioMod.setRavenToolsIo(fakeIo)
+
+  // Raven not running: mid-turn lines wait, the turn's answer posts raw as it did before, and the end posts its line
+  hooks.setRavenWaker(null)
+  const nsid = 'abababab-3333-4444-8555-666666666666'
+  const np = pane('vk-gggggggggg', 'No Raven', 'work', nsid)
+  screensBy.set(np.name, [BUSY])
+  await watch.startWatch({ pane: np.name, label: np.label, sessionId: nsid, fresh: true })
+  say(np.name, nsid, entry('user', 'go'), entry('assistant', 'Progress.'), entry('tool'))
+  const p8 = posts.length
+  await tick(1_000)
+  await tick(61_000)
+  check('no Raven: mid-turn lines are kept, nothing posts', posts.length === p8 && watch.getWatch(np.name)?.pending.length === 2, watch.getWatch(np.name)?.pending)
+  say(np.name, nsid, entry('result'), entry('assistant', 'Final.'))
+  screensBy.set(np.name, [IDLE])
+  await tick(1_000)
+  await tick(13_000)
+  const raw = posts[p8]
+  check('no Raven: the answer posts raw, with its link and a push', posts.length === p8 + 1 && raw.text === 'Progress.\n\nFinal.' && raw.opts?.meta?.relay?.kind === 'session'
+    && raw.opts.meta.relay.from === np.name && raw.opts?.refs?.[0]?.url === `/m/ai/term/${np.name}` && raw.opts?.push === true && watch.getWatch(np.name)?.pending.length === 0, posts.slice(p8))
+  states.set(np.name, 'dead')
+  await tick(1_000)
+  check('no Raven: an ended pane posts its line', posts.length === p8 + 2 && posts[p8 + 1].text === 'No Raven ended', posts.slice(p8))
+  hooks.setRavenWaker((kind, payload) => { wakes.push({ kind, payload }) })
+
+  // a watch stored before every line went to Raven: its unrelayed answer is unread, its old fields go
+  store.setKv('raven:watches', JSON.stringify([{
+    key: 'vk-hhhhhhhhhh', pane: 'vk-hhhhhhhhhh', label: 'Old one', sessionId: 'cdcdcdcd-3333-4444-8555-666666666666', since: new Date(clock).toISOString(),
+    lastActivityAt: new Date(clock).toISOString(), cursor: '4', baselined: true, lastNewAt: clock, lastSeenAt: clock,
+    tail: [{ id: 'o1', text: 'Sent before.' }, { id: 'o2', text: 'Not sent yet.' }], lastRelayedId: 'o1', followUp: '', title: '', status: '',
+  }]))
+  const old = watch.getWatch('vk-hhhhhhhhhh') as (ReturnType<typeof watch.getWatch> & { tail?: unknown; lastRelayedId?: unknown }) | null
+  check('old watch: the unrelayed part is unread, the old fields gone', old?.pending.map((s) => `${s.from}:${s.text}`).join('|') === 'claude:Not sent yet.' && old.pendingSince > 0
+    && old.tail === undefined && old.lastRelayedId === undefined, old)
+  store.setKv('raven:watches', JSON.stringify([{ ...JSON.parse(store.getKv('raven:watches')!)[0], tail: [{ id: 'o1', text: 'Sent.' }], lastRelayedId: 'o1' }]))
+  const idle = watch.getWatch('vk-hhhhhhhhhh')
+  check('old watch: all relayed, its quiet spell already read', idle?.pending.length === 0 && idle.settledAt === idle.lastNewAt, idle)
+  watch.removeWatch('vk-hhhhhhhhhh')
 
   // a thor board row whose conversation runs in a pane here is that pane, never a second watch
   const psid = '99999999-aaaa-4bbb-8ccc-dddddddddddd'
@@ -1108,6 +1228,178 @@ agents.syncRoster()
   // the timer exists and does not hold the process open
   tools.startRavenTools()
   watch.stopWatcher()
+}
+
+// ------------------------------------------- jobs: Raven closes what it started ---
+// 2026-11-21: "iPad: match desktop dashboard layout" reported "I shipped v0.3.211" at 1:39 AM ET with no follow-up set,
+// so no run read it, and a poll it left running kept its card on Working until he asked at 2:01 AM ET.
+
+{
+  posts.length = 0
+  wakes.length = 0
+  const MIN = 60_000
+  const step = async (ms = 0) => { clock += ms; await watch.tickWatches(); return autoclose.closeQuietJobs() }
+  const card = async (key: string) => (await tools.ravenSessionsState()).watching.find((w) => w.pane === key)
+  const LEFTOVER = WAITING
+  const start = async (label: string) => {
+    const r = await call('session_start', { target: 'work', prompt: `Do the ${label} job and ship it`, label })
+    const pane = r.json.pane as string
+    away.add(pane)
+    screensBy.set(pane, [IDLE])
+    return { pane, sid: r.json.sessionId as string }
+  }
+  // an answer, relayed once the 12 s of quiet are over
+  const answer = async (j: { pane: string; sid: string }, text: string, prompt = true) => {
+    if (prompt) say(j.pane, j.sid, entry('user', 'go on'))
+    say(j.pane, j.sid, entry('tool'), entry('assistant', text))
+    await step(1_000)
+    await step(13_000)
+  }
+
+  const job = await start('iPad: match desktop dashboard layout')
+  check('session_start: a session it starts is a job', watch.getWatch(job.pane)?.job === true, watch.getWatch(job.pane))
+  await answer(job, 'Release v0.3.211 is building on odin at nice 19. Waiting on the odin release to finish.')
+  const w1 = wakes.at(-1)
+  check('job: an answer wakes Raven with no follow-up set, marked a job', wakes.length === 1 && w1?.kind === 'session_reply' && w1.payload.job === true
+    && w1.payload.pane === job.pane && w1.payload.title === 'iPad: match desktop dashboard layout' && /Waiting on the odin release/.test(JSON.stringify(w1.payload.said)), wakes)
+  const relayAt = watch.getWatch(job.pane)?.relayedAt ?? 0
+  check('job: the relay time is kept, and the close time is 15 minutes after it', relayAt === clock && watch.closesAt(watch.getWatch(job.pane)!) === relayAt + 15 * MIN, watch.getWatch(job.pane))
+  {
+    const snap = await tools.ravenSnapshot()
+    check('snapshot: a job says it is Raven\'s to close and when it closes on its own', /a job you started \(session_stop it once it reports the job done\), closes on its own at .+ ET/.test(snap), snap)
+  }
+
+  // it waits on the release: Raven keeps it open
+  let r = await call('session_keep', { session: job.pane, minutes: 30 }, false)
+  check('session_keep: a relay run keeps its own job open', !r.isError && r.json.kept === job.pane && / ET$/.test(r.json.until), r)
+  screensBy.set(job.pane, [LEFTOVER])
+  let closed = await step(16 * MIN)
+  check('job: kept, it is not closed 16 minutes after its answer', !closed.length && !!watch.getWatch(job.pane) && !killed.includes(job.pane), closed)
+  check('card: kept, its background wait still reads Working', (await card(job.pane))?.state === 'working')
+
+  // the final report, with its poll left running behind it
+  await answer(job, 'I shipped v0.3.211. It gives the iPad the desktop dashboard layout and it is live now.')
+  check('job: the final report wakes Raven too', wakes.length === 2 && wakes[1].payload.job === true && /I shipped v0\.3\.211/.test(JSON.stringify(wakes[1].payload.said)), wakes)
+  const shippedAt = watch.getWatch(job.pane)!.relayedAt!
+  closed = await step(14 * MIN)
+  check('job: 14 minutes after its report it is still open', !closed.length && !!watch.getWatch(job.pane), closed)
+  check('card: a background wait 14 minutes after the last activity is Working', (await card(job.pane))?.state === 'working')
+  clock += MIN + 1_000
+  check('card: a background wait quiet 15 minutes after the last answer reads Idle', (await card(job.pane))?.state === 'idle')
+  const k0 = killed.length
+  const p0 = posts.length
+  closed = await step(0)
+  check('auto-close: quiet 15 minutes after its report, it closes', closed.length === 1 && closed[0] === job.pane && killed.length === k0 + 1 && killed.at(-1) === job.pane, { closed, killed: killed.slice(k0) })
+  const stop = thorStops.find((x) => x.sid === job.sid)
+  check('auto-close: its leftover wait and Claude end on thor before the pane goes', !!stop && !stop.killedThen.includes(job.pane), thorStops)
+  check('auto-close: marked done on the Desk, gone from Watching', doneMarks.includes(job.sid) && !watch.getWatch(job.pane) && !(await card(job.pane)), { doneMarks, w: watch.getWatch(job.pane) })
+  const line = posts.slice(p0)
+  check('auto-close: one quiet line in the thread, no buzz, no run', line.length === 1 && line[0].text === `iPad: match desktop dashboard layout closed and marked done: quiet for 15 minutes after its last answer (${utilMod.etClock(shippedAt)}).`
+    && !line[0].opts?.push && line[0].opts?.meta?.relay?.from === job.pane && wakes.length === 2, { line, wakes: wakes.length })
+  states.set(job.pane, 'gone')
+  await step(8_000)
+  check('auto-close: no "ended" line after it', posts.length === p0 + 1, posts.slice(p0))
+
+  // without a keep, no background work: closed 15 minutes after the answer
+  const plain = await start('Rotate the backup keys')
+  await answer(plain, 'The backup keys are rotated and the old ones are revoked.')
+  closed = await step(15 * MIN)
+  check('auto-close: a job quiet 15 minutes with nothing left running closes too', closed.includes(plain.pane) && doneMarks.includes(plain.sid), closed)
+
+  // never while he could be there, mid-turn, at a question, with text in its prompt
+  const guard = await start('Guarded job')
+  await answer(guard, 'Done with the guarded job.')
+  clock += 16 * MIN
+  const gp = panes.find((x) => x.name === guard.pane)!
+  gp.clients = 1
+  check('auto-close: never while a client is attached', !(await autoclose.closeQuietJobs()).length)
+  gp.clients = 0
+  away.delete(guard.pane)
+  check('auto-close: never when he typed in it or opened it in the last 15 minutes', !(await autoclose.closeQuietJobs()).length)
+  away.add(guard.pane)
+  screensBy.set(guard.pane, [BUSY])
+  check('auto-close: never while the spinner shows', !(await autoclose.closeQuietJobs()).length)
+  screensBy.set(guard.pane, [DIALOG])
+  check('auto-close: never at a question or a permission prompt', !(await autoclose.closeQuietJobs()).length)
+  screensBy.set(guard.pane, [TYPED])
+  check('auto-close: never with text typed in its prompt', !(await autoclose.closeQuietJobs()).length && !killed.includes(guard.pane))
+  screensBy.set(guard.pane, [IDLE])
+  // Raven types a follow-up into it: anything after the relay holds it off
+  r = await call('session_send', { session: guard.pane, text: 'Now push the branch to GitHub as well.' }, false)
+  check('auto-close: Raven typing into it after the relay holds it off', !r.isError && watch.closesAt(watch.getWatch(guard.pane)!) === null && !(await autoclose.closeQuietJobs()).length, watch.getWatch(guard.pane))
+  say(guard.pane, guard.sid, entry('user', 'Now push the branch to GitHub as well.'))
+  await step(1_000)
+  check('auto-close: the new prompt in its transcript keeps it open', watch.closesAt(watch.getWatch(guard.pane)!) === null)
+  r = await call('session_stop', { session: guard.pane }, false)
+  check('session_stop: Raven stops its job in a relay run', !r.isError && r.json.markedDone === true && killed.includes(guard.pane), r)
+
+  // only jobs: never his main terminal or a pane he opened, even with a watch that says job
+  const forged = async (name: string, label: string, target: string, sid: string) => {
+    const p = pane(name, label, target, sid)
+    away.add(name)
+    screensBy.set(name, [IDLE])
+    await watch.startWatch({ pane: name, label, sessionId: sid, fresh: true, job: true })
+    say(name, sid, entry('user', 'x'), entry('assistant', 'Finished.'))
+    await step(1_000)
+    await step(13_000)
+    return p
+  }
+  const hisSid = 'dddddddd-3333-4444-8555-666666666666'
+  const hisPane = await forged('vk-7777777777', 'His session', 'work', hisSid)
+  r = await call('session_start', { target: 'personal', prompt: 'Main job', main: true, watch: false })
+  const mainName = r.json.pane as string
+  const mainSid = r.json.sessionId as string
+  away.add(mainName)
+  await watch.startWatch({ pane: mainName, label: 'Personal', sessionId: mainSid, fresh: true, job: true })
+  say(mainName, mainSid, entry('user', 'x'), entry('assistant', 'Main finished.'))
+  await step(1_000)
+  await step(13_000)
+  const kBefore = killed.length
+  closed = await step(20 * MIN)
+  check('auto-close: never a pane he opened, never his main terminal', !closed.length && killed.length === kBefore && !!watch.getWatch(hisPane.name) && !!watch.getWatch(mainName), { closed, killed: killed.slice(kBefore) })
+  r = await call('session_keep', { session: hisPane.name }, false)
+  check('session_keep: never for a pane he opened', r.isError && /only for a session you started/.test(r.text), r)
+  watch.removeWatch(hisPane.name)
+  watch.removeWatch(mainName)
+  states.set(hisPane.name, 'gone')
+  r = await call('session_stop', { session: 'personal' })
+  states.set(mainName, 'gone')
+
+  // a main terminal Raven started is no job, and its answers wake nobody without a follow-up
+  r = await call('session_send', { session: 'work', text: 'Look at the queue', label: 'Queue check' })
+  const workMain = r.json.pane as string
+  const wBefore = wakes.length
+  say(workMain, (await fakeIo.listPanes()).find((p: TermSession) => p.name === workMain)!.sessionId, entry('user', 'Look at the queue'), entry('assistant', 'The queue is empty.'))
+  await step(1_000)
+  await step(13_000)
+  check('main terminal: not a job; its turn reaches Raven with no close request', !watch.getWatch(workMain)?.job && wakes.length === wBefore + 1 && !wakes.at(-1)!.payload.job
+    && /The queue is empty\./.test(JSON.stringify(wakes.at(-1)!.payload.said)), { w: watch.getWatch(workMain), wakes: wakes.slice(wBefore) })
+  await call('session_stop', { session: 'work' })
+
+  // a job that ends by itself hands its last answer to Raven without asking Raven to close it
+  const ends = await start('Ends by itself')
+  say(ends.pane, ends.sid, entry('user', 'go'), entry('assistant', 'All done here.'))
+  await step(1_000)
+  states.set(ends.pane, 'dead')
+  const wEnd = wakes.length
+  await step(13_000)
+  check('job: a pane that ended hands over its answer, with no close request', wakes.length === wEnd + 1 && wakes.at(-1)!.payload.ended === true && !wakes.at(-1)!.payload.job
+    && /All done here\./.test(JSON.stringify(wakes.at(-1)!.payload.said)) && !posts.some((x) => x.text === 'All done here.') && !watch.getWatch(ends.pane), wakes.slice(wEnd))
+  states.set(ends.pane, 'gone')
+
+  // thor not answering: still closed, and the line says it is not marked done
+  const dark = await start('Dark job')
+  await answer(dark, 'Dark job is done.')
+  thorStopAnswer = 'failed'
+  doneFails = true
+  const pDark = posts.length
+  closed = await step(15 * MIN)
+  check('auto-close: thor not answering still closes the pane, and says it is not marked done', closed.includes(dark.pane)
+    && /^Dark job closed: quiet for 15 minutes after its last answer \(.+ ET\)\. It is not marked done on the Desk yet: thor did not answer\.$/.test(posts.slice(pDark).at(-1)?.text ?? ''), posts.slice(pDark))
+  thorStopAnswer = 'stopped'
+  doneFails = false
+
+  for (const w of watch.listWatches()) watch.removeWatch(w.key)
 }
 
 // ------------------------------------------------------ the Watching card ---

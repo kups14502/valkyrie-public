@@ -792,6 +792,26 @@ check('relay run: gated tool refuses', rr[1]?.isError === true, rr[1])
 check('(no reply) posts nothing', thread().length === msgsBefore + 1 && lastRaven().prompt.includes('For Raven: the cart is ready.'), thread().slice(msgsBefore))
 check('gate log', gateSeen.includes(true) && gateSeen.includes(false), gateSeen)
 
+// a job Raven started answered (lib/raven/tools/watch.ts): the run that reads it is told to close it when it is done
+queue({ result: '(no reply)' })
+runsAt = runsOf()
+hooks.wakeRavenWith('session_reply', {
+  pane: 'vk-0000000009', label: 'Work', sessionId: '3c2608cc-c46d-4710-a697-0e6e79248681', turnEnded: true,
+  said: [{ at: Date.now(), from: 'claude', text: 'I shipped v0.3.211. It is live now.' }], job: true, title: 'iPad: match desktop dashboard layout',
+})
+await until(() => runsOf() > runsAt)
+await ravenIdle()
+{
+  const jp = lastRaven().prompt ?? ''
+  check('job answer: the run is told to session_stop it now when done, or session_keep it', jp.includes('I shipped v0.3.211.')
+    && jp.includes('You started this session for a job ("iPad: match desktop dashboard layout")') && jp.includes('session_stop vk-0000000009 now, in this run')
+    && jp.includes('session_keep it') && jp.includes('closed and marked done on its own 15 minutes after this turn'), jp.slice(0, 1200))
+  check('job answer: a finished job is stopped in the run, and he gets the result in one line',
+    jp.includes('A job you started that reports it is done: session_stop it in this run (that marks it done) and tell him the result in one line.'), jp.slice(-700))
+  check('brief: a session Raven started is its to close, in the same run', lastRaven().sys.includes('is yours to close. In the same run its answer reports the job done, session_stop it')
+    && lastRaven().sys.includes('Start a session, stop one he opened or one of his main terminals'), lastRaven().sys)
+}
+
 // Brendon naming an agent in the thread wakes it as well as Raven
 agentScript('groceries', [{ tool: 'post', args: { channel: 'raven', text: 'Added milk.' } }])
 queue({ result: 'Asked Groceries.' }, { result: '(no reply)' })
@@ -877,6 +897,69 @@ check('stop while routing: no late post', !thread().some((m) => m.text === 'neve
 router({})
 queue()
 
+// ---------------------------------------- what a watched session wrote ---
+// Every line goes to Raven whole (lib/raven/tools/watch.ts); the thread gets only Raven's take, the lines kept under it.
+
+{
+  const SID = 'abcdabcd-1111-4222-8333-444455556666'
+  const long = `Step two of three. ${'detail '.repeat(700)}END-OF-LONG`
+  queue({ result: '(no reply)' })
+  runsAt = runsOf()
+  const msgs0 = thread().length
+  hooks.wakeRavenWith('session_progress', {
+    pane: 'vk-0123456789', label: 'Server work', title: 'Rotate certs', sessionId: SID, turnEnded: false,
+    said: [{ at: Date.now(), from: 'prompt', text: 'rotate the certs' }, { at: Date.now(), from: 'claude', text: long }],
+  })
+  await until(() => runsOf() > runsAt)
+  await ravenIdle()
+  let pr = lastRaven().prompt ?? ''
+  check('session lines: a long line reaches the prompt whole', pr.includes('Step two of three.') && pr.includes('END-OF-LONG') && pr.includes('It is still working.')
+    && pr.includes('Prompt typed into it: rotate the certs') && pr.includes('(job: Rotate certs)'), pr.slice(0, 900))
+  check('session prompt: only Raven reads them, and the bar for telling him', pr.includes('He has not seen what the watched sessions wrote') && pr.includes('a job finished or shipped')
+    && pr.includes('exactly (no reply)') && !pr.includes('is already in the thread'), pr.slice(-1400))
+  check('session lines Raven drops: nothing in the thread', thread().length === msgs0, thread().slice(msgs0))
+
+  queue({ result: 'Certs rotated on odin; nginx reloaded clean.' })
+  runsAt = runsOf()
+  hooks.wakeRavenWith('session_reply', {
+    pane: 'vk-0123456789', label: 'Server work', sessionId: SID, turnEnded: true, asking: true, background: true,
+    said: [{ at: Date.now(), from: 'claude', text: 'All three certs rotated. nginx -t passed and it reloaded.' }],
+  })
+  await until(() => runsOf() > runsAt)
+  await ravenIdle()
+  pr = lastRaven().prompt ?? ''
+  check('session reply: turn over, an open dialog and background work said', pr.includes('Its turn is over.') && pr.includes('no prompt box') && pr.includes('background work'), pr.slice(0, 900))
+  const take = lastRavenMsg()
+  check('session reply: Raven\'s take posts, never a raw session row', take?.text === 'Certs rotated on odin; nginx reloaded clean.' && !thread().slice(msgs0).some((m) => m.meta.relay?.kind === 'session'),
+    thread().slice(msgs0).map((m) => m.text))
+  const copy = (take?.meta as any)?.sessions?.[0]
+  check('session reply: the lines kept under the take', copy?.from === 'vk-0123456789' && copy.label === 'Server work' && copy.sessionId === SID && copy.lines.length === 1
+    && copy.lines[0].text.startsWith('All three certs') && !copy.more, take?.meta)
+  ;[, rv] = await j('GET', '/raven')
+  check('GET /raven: the copy rides the message', rv.messages.find((m: any) => m.id === take?.id)?.meta.sessions?.[0]?.lines?.length === 1)
+
+  // more than one run holds: the newest lines whole, a note for the oldest; the copy keeps the newest it can
+  queue({ result: 'Still on it.' })
+  runsAt = runsOf()
+  const big = Array.from({ length: 12 }, (_, i) => ({ at: Date.now(), from: 'claude', text: `L${i} ${'z'.repeat(5000)}` }))
+  hooks.wakeRavenWith('session_progress', { pane: 'vk-0123456789', label: 'Server work', said: big, turnEnded: false })
+  await until(() => runsOf() > runsAt)
+  await ravenIdle()
+  pr = lastRaven().prompt ?? ''
+  check('session lines past the budget: the newest whole, the oldest named', pr.includes(`L11 ${'z'.repeat(5000)}`) && pr.includes('L3 z') && !pr.includes('L2 z')
+    && pr.includes('3 older lines left out'), pr.length)
+  const bigCopy = (lastRavenMsg()?.meta as any)?.sessions?.[0]
+  check('the copy: the newest line, the rest counted', bigCopy?.lines.length === 1 && bigCopy.lines[0].text.startsWith('L11') && bigCopy.more === 11, { n: bigCopy?.lines.length, more: bigCopy?.more })
+
+  // an answer queued by an older API (text, no lines) still reads
+  queue({ result: '(no reply)' })
+  runsAt = runsOf()
+  hooks.wakeRavenWith('session_reply', { pane: 'vk-0123456789', label: 'Server work', text: 'OLD-SHAPE answer.' })
+  await until(() => runsOf() > runsAt)
+  await ravenIdle()
+  check('an older session_reply still reads', (lastRaven().prompt ?? '').includes('answered: OLD-SHAPE answer.'))
+}
+
 // ----------------------------------------- a restart with a run in flight ---
 // The run row is left 'running' and its events claimed; the next start closes it and gives them one more try.
 
@@ -895,6 +978,25 @@ check('restart: its message runs once more, as his (router ran, replyTo kept)', 
   && calls().slice(before).some((c) => c.kind === 'ask') && lastRaven().prompt.includes('a retry'), { reply, calls: calls().slice(before).map((c) => c.kind) })
 
 // ----------------------------------------------------------------- caps ---
+
+// a run he did not start stops short of the cap: the last runs of the hour stay his
+{
+  const now0 = store.runsSince('raven', new Date(Date.now() - 3_600_000).toISOString())
+  check('reserve: the smoke reaches the cap share from below', now0 < 45, now0)
+  for (let i = now0; i < 45; i++) store.startRun(`bg-${i}`, 'raven', 'cap filler')
+  runsAt = runsOf()
+  const m0 = thread().length
+  hooks.wakeRavenWith('session_reply', { pane: 'vk-0123456789', label: 'Server work', turnEnded: true, said: [{ at: Date.now(), from: 'claude', text: 'HELD-LINE shipped v9.9.9.' }] })
+  await until(() => /Holding updates/.test(raven.ravenState().statusNote), 3000)
+  check('reserve: a session hand-off waits quietly near the cap', runsOf() === runsAt && thread().length === m0 && /Holding updates/.test(raven.ravenState().statusNote),
+    { runs: runsOf() - runsAt, note: raven.ravenState().statusNote, msgs: thread().slice(m0).map((m) => m.text) })
+  queue({ result: 'Here. Also: Server work shipped v9.9.9.' })
+  await j('POST', '/raven/messages', { text: 'are you there' })
+  await until(() => runsOf() > runsAt)
+  await ravenIdle()
+  const lp = lastRaven().prompt ?? ''
+  check('reserve: his message still runs, the held lines with it', lastRavenMsg()?.text.startsWith('Here.') && lp.includes('HELD-LINE') && lp.includes('he has not seen'), lp.slice(-900))
+}
 
 const have = store.runsSince('raven', new Date(Date.now() - 3_600_000).toISOString())
 for (let i = have; i < 60; i++) store.startRun(`cap-${i}`, 'raven', 'cap filler')
