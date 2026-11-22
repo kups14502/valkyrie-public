@@ -64,6 +64,12 @@ export type RavenMeta = {
     sessionId?: string
     /** a session relay's conversation title from thor's board, added when the thread is read (never stored) */
     title?: string
+    /** a feed's notice about a state that changes (a count, an open incident): its key, unique within the source (RavenNotice.live) */
+    live?: string
+    /** that state as it stands now, when it moved since the notice ("4 items waiting for your review") */
+    now?: string
+    /** the state is over (the queue is empty, the incident cleared) or a newer notice took its place: when, and a word on it */
+    cleared?: { at: string; note?: string }
   }
   /**
    * What the watched sessions wrote that Raven read in the run this message closes, kept under it for history (the
@@ -123,4 +129,22 @@ export type RavenNotice = {
   tag?: string
   /** display name for the source ("Backup"); defaults to the source key, capitalized */
   label?: string
+  /**
+   * The notice reports a state that changes (a count waiting, an open incident): a key for that state, stable within
+   * the source ('review'). A newer notice with the same key replaces it, and POST /api/raven/notify/clear (clearNotice)
+   * updates or closes it, so the sidebar never shows a count that is no longer true.
+   */
+  live?: string
+}
+
+/** POST /api/raven/notify/clear: the state a live notice reported moved (now) or is over (no now). */
+export type RavenNoticeClear = {
+  source: string
+  live: string
+  /** the state as it stands now, one line; absent or empty = the state is over and the notice is cleared */
+  now?: string
+  /** a word for a cleared notice ("All reviewed") */
+  note?: string
+  /** a notice from before live keys counts as this one when its first line ends with this text */
+  legacy?: string
 }

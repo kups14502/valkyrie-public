@@ -1,4 +1,5 @@
 import { AgentError, findMessages, getMessage, listMessages, messagesBetween, type Message } from '../agentsStore.js'
+import { liveTag } from './notices.js'
 import { RAVEN_CHANNEL, RAVEN_ID } from './types.js'
 import { et } from './tools/util.js'
 
@@ -107,7 +108,7 @@ function render(m: Message, sessions: boolean): string {
   const head = [`#${m.id}`, et(m.createdAt), threadAuthor(m)]
   if (m.meta.replyTo) head.push(`reply to #${m.meta.replyTo}`)
   if (m.meta.error) head.push('failed')
-  const out = [head.join(' · ')]
+  const out = [head.join(' · ') + liveTag(m, et)]
   if (m.meta.files?.length) out.push(`[files: ${m.meta.files.map((f) => `${f.name} (id ${f.id})`).join(', ')}]`)
   out.push(m.text || '(no text)')
   if (sessions) {

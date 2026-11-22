@@ -17,6 +17,10 @@
 //            arithmetic (matches in text, steps with wrap-around, the first
 //            match, the Raven count past the loaded lines, the word under
 //            the pointer for the context menu's Find).
+//   feeds    e2e/raven-feeds-unit.mjs: src/v2/kit/ravenFeeds.ts, the feeds in
+//            the Raven tab's Connected list (each feed's newest line, a
+//            cleared one left out, an agent's own feed under its row) and a
+//            live notice's line in the thread (cleared, or the count now).
 //
 // The backend half of the lights (routes/lights.ts, the engine that holds each
 // bulb to its target) is backend/scripts/lightsEngine.test.mts, run on odin.
@@ -93,6 +97,20 @@ export function unitTests() {
         t.note(`find-unit: ${pass} passed, ${fail} failed`)
         t.check(code === 0, `e2e/find-unit.mjs exited ${code}`)
         t.check(fail === 0 && pass >= 9, `find-unit: ${pass} passed, ${fail} failed`)
+        for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
+      },
+    },
+    {
+      name: 'unit:raven-feeds',
+      group: 'unit',
+      timeout: 60_000,
+      async run(t) {
+        const { code, out } = await runNode(resolve(HERE, '..', 'raven-feeds-unit.mjs'), 50_000)
+        const pass = Number(/ℹ pass (\d+)/.exec(out)?.[1] ?? NaN)
+        const fail = Number(/ℹ fail (\d+)/.exec(out)?.[1] ?? NaN)
+        t.note(`raven-feeds-unit: ${pass} passed, ${fail} failed`)
+        t.check(code === 0, `e2e/raven-feeds-unit.mjs exited ${code}`)
+        t.check(fail === 0 && pass >= 9, `raven-feeds-unit: ${pass} passed, ${fail} failed`)
         for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
       },
     },

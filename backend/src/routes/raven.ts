@@ -6,11 +6,12 @@ import {
 } from '../lib/agentsStore.js'
 import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
+import { clearNotice, ravenFeeds } from '../lib/raven/notices.js'
 import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenState, stopRaven, waitForReply, withTimeout } from '../lib/raven/run.js'
 import { ravenPickView, setRavenSettings } from '../lib/raven/settings.js'
 import { readClip, transcribe } from '../lib/raven/voice.js'
 import { ravenRelayTitles, ravenSessionsState } from '../lib/raven/tools/index.js'
-import { RAVEN_CHANNEL, type RavenNotice } from '../lib/raven/types.js'
+import { RAVEN_CHANNEL, type RavenNotice, type RavenNoticeClear } from '../lib/raven/types.js'
 
 // Raven's thread (lib/raven/run.ts) for the app: the one conversation in the
 // Raven tab, its live state, Brendon's attachments, Stop, and the doors in
@@ -102,6 +103,8 @@ async function stateView(req: Request) {
     agents: listAgents().filter((a) => a.enabled && !hidden.has(a.area))
       .map((a) => ({ id: a.id, name: a.name, area: a.area, status: a.status, pending: pending.filter((p) => p.agentId === a.id).length })),
     paused: isPaused(),
+    // each feed's newest line (lib/raven/notices.ts), a cleared one left out
+    feeds: ravenFeeds(),
     // his model and effort pick and the models it offers (lib/raven/settings.ts), the same on every device
     ...ravenPickView(),
   }
@@ -249,6 +252,11 @@ function loopbackOnly(req: Request, res: Response, next: NextFunction) {
 router.post('/raven/notify', loopbackOnly, h((req, res) => {
   const r = postNotice((req.body ?? {}) as RavenNotice)
   res.json({ ok: true, posted: r.posted })
+}))
+
+// the state a live notice reported moved or is over: { source, live, now?, note?, legacy? } (lib/raven/notices.ts)
+router.post('/raven/notify/clear', loopbackOnly, h((req, res) => {
+  res.json({ ok: true, changed: clearNotice((req.body ?? {}) as RavenNoticeClear) })
 }))
 
 export default router

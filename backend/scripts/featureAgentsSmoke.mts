@@ -264,9 +264,11 @@ n = raven.postNotice({ source: 'widgets', label: 'Widgets', level: 'warn', title
 check('a notice it does not take posts as before', n.posted && !n.handedTo && rawNotice('2 widgets wait for review'), n)
 
 script('widget', [])
-raven.postNotice({ source: 'widgets', label: 'Widgets', level: 'warn', title: 'w4 jammed', tag: 'jam-w4' })
+raven.postNotice({ source: 'widgets', label: 'Widgets', level: 'warn', title: 'w4 jammed', tag: 'jam-w4', live: 'jam-w4' })
+check('a live notice it takes keeps its key in the event', store.openEvents('widget').some((e) => e.kind === 'notice' && (e.payload as any).live === 'jam-w4'), store.openEvents('widget'))
 await idle('widget')
 check('a run that posts nothing: the notice goes to the thread as it came', await until(() => rawNotice('w4 jammed')), ravenMsgs().slice(-3))
+check('the notice that came back keeps its live key, so its source can clear it', ravenMsgs().find((m) => m.text === 'w4 jammed')?.meta.relay?.live === 'jam-w4', ravenMsgs().slice(-3))
 
 script('widget', [{ exit: 1 }])
 raven.postNotice({ source: 'widgets', label: 'Widgets', level: 'warn', title: 'w5 jammed', tag: 'jam-w5' })

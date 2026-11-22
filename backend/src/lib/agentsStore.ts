@@ -515,6 +515,24 @@ export function messagesBetween(channelId: string, from: number, to: number, lim
     .all(channelId, from, to, Math.min(500, Math.max(1, limit))) as MessageRow[]).map(toMessage)
 }
 
+// a relay's kind and source out of meta, null for a row whose meta is not JSON
+const RELAY_KIND = "(CASE WHEN json_valid(meta) THEN json_extract(meta, '$.relay.kind') END)"
+const RELAY_FROM = "(CASE WHEN json_valid(meta) THEN json_extract(meta, '$.relay.from') END)"
+
+/** The relays in a channel from one source (meta.relay.from) of the given kinds, newest first: one feed's notices. */
+export function relayMessages(channelId: string, from: string, kinds: string[], limit = 200): Message[] {
+  if (!kinds.length) return []
+  return (db.prepare(`SELECT * FROM messages WHERE channelId = ? AND ${RELAY_FROM} = ? AND ${RELAY_KIND} IN (${kinds.map(() => '?').join(', ')})
+    ORDER BY id DESC LIMIT ?`).all(channelId, from, ...kinds, Math.min(1000, Math.max(1, limit))) as MessageRow[]).map(toMessage)
+}
+
+/** The newest relay of each source among the given kinds, newest first: what each feed said last. */
+export function newestRelays(channelId: string, kinds: string[]): Message[] {
+  if (!kinds.length) return []
+  return (db.prepare(`SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE channelId = ? AND ${RELAY_KIND} IN (${kinds.map(() => '?').join(', ')})
+    GROUP BY ${RELAY_FROM}) ORDER BY id DESC`).all(channelId, ...kinds) as MessageRow[]).map(toMessage)
+}
+
 /**
  * The messages of a channel whose text (or a file name on them) has the terms, lowercase, as plain substrings:
  * every term, newest first; with any, at least one term, the most terms first. sessions also searches what the

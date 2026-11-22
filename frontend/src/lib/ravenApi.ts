@@ -37,6 +37,12 @@ export type RavenRelay = {
   sessionId?: string
   /** a session relay: the conversation's own title, when it says more than the label */
   title?: string
+  /** a feed's notice about a state that changes (a count, an open incident): its key */
+  live?: string
+  /** that state as it stands now, when it moved since the notice */
+  now?: string
+  /** the state is over (queue empty, incident cleared) or a newer notice replaced it */
+  cleared?: { at: string; note?: string }
 }
 
 /** What a watched session wrote that Raven read for this message, kept under it (collapsed): Claude's lines, newest kept. */
@@ -104,6 +110,8 @@ export type RavenMain = { target: string; label: string; pane: string | null; st
  */
 export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; status?: string; state?: 'working' | 'idle' | 'closed' | null; lastAt?: string }
 export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number }
+/** A feed's newest line (a cleared one is left out by the API): its source key, name, the line, when, and the message. */
+export type RavenFeed = { from: string; label: string; text: string; at: string; id: number }
 
 export type RavenState = {
   /** for GET /api/msg/changes?since= */
@@ -121,6 +129,8 @@ export type RavenState = {
   agents: RavenAgent[]
   /** the agents' global pause */
   paused: boolean
+  /** each feed's newest line, a cleared one left out (absent from an older backend: the app reads the thread) */
+  feeds?: RavenFeed[]
   /** his model and effort pick and the models it offers (absent from a backend before the picker) */
   settings?: RavenSettings
   models?: RavenModelInfo[]

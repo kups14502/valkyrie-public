@@ -565,7 +565,7 @@ export function takeNotice(n: RavenNotice): string | null {
     const a = getAgent(d.id)
     if (!a?.enabled || a.kind !== 'feature' || capWait(a.id)) return null
     addEvent(a.id, 'notice', {
-      source: n.source, label: n.label ?? '', level: n.level, title: n.title, body: n.body ?? '', url: n.url ?? '', tag: n.tag ?? '', at: nowIso(),
+      source: n.source, label: n.label ?? '', level: n.level, title: n.title, body: n.body ?? '', url: n.url ?? '', tag: n.tag ?? '', live: n.live ?? '', at: nowIso(),
     })
     // the notices of one pass arrive together: one run takes them all
     wake(a.id, 20_000, 'a problem notice')
@@ -583,7 +583,7 @@ function noticesToThread(events: AgentEvent[]): void {
     const s = (k: string) => (typeof p[k] === 'string' && p[k] ? String(p[k]) : undefined)
     notifyRaven({
       source: s('source') ?? 'valkyrie', level: (s('level') as RavenNotice['level']) ?? 'warn', title: s('title') ?? 'A problem notice',
-      body: s('body'), url: s('url'), tag: s('tag'), label: s('label'),
+      body: s('body'), url: s('url'), tag: s('tag'), label: s('label'), live: s('live'),
     }, { direct: true })
   }
 }

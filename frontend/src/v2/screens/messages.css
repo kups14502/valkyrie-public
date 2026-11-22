@@ -173,6 +173,11 @@ html[data-motion='reduced'] .rv-latest { animation: none; }
 .rv-msg-from { font-size: 11px; color: var(--dim); }
 .rv-msg[data-kind='relay'] .rv-md { font-size: 13px; line-height: 19px; }
 .rv-msg[data-kind='relay'] .rv-prop { margin-bottom: 0; }
+/* a feed's notice about a state that changes: the count as it stands under it; once cleared the block goes grey */
+.rv-live { margin-top: 4px; font-size: 11.5px; line-height: 16px; color: var(--fg); }
+.rv-msg[data-cleared] { border-left-color: var(--line); background: color-mix(in srgb, var(--text) 3%, transparent); }
+.rv-msg[data-cleared] .rv-msg-head b, .rv-msg[data-cleared] .rv-md { color: var(--dim); }
+.rv-msg[data-cleared] .rv-live { color: var(--dim); }
 .rv-msg[data-kind='system'] .rv-md { font-size: 12px; color: var(--dim); }
 .rv-msg[data-error] .rv-md { color: var(--hot); font-size: 12.5px; }
 .rv-open {

@@ -15,6 +15,7 @@ import { listTasks, nyToday } from '../tasksStore.js'
 import { workConf } from '../workConfig.js'
 import { setRavenNoticeHandler, setRavenPoster, setRavenWaker, type NoticeOpts } from './hooks.js'
 import { ensureRavenChannel } from './channel.js'
+import { liveKey, liveTag, replaceLive, SOURCE_RE } from './notices.js'
 import { threadAuthor } from './history.js'
 import { ravenBrief } from './brief.js'
 import { humanSize, pruneRavenFiles, ravenFilesFor } from './files.js'
@@ -150,11 +151,11 @@ export function brendonToRaven(input: { text?: unknown; files?: unknown; source?
 // minutes of the last one posted is dropped. warn and alert push. A notice a
 // feature agent takes (lib/agents.ts takeNotice) wakes that agent instead,
 // and the agent tells Brendon itself; direct (that agent's own fallback)
-// skips both steps.
+// skips both steps. A notice with a live key (a count, an open incident)
+// clears the older open one with that key (lib/raven/notices.ts).
 
 const NOTICE_FOLD_MS = 30 * 60_000
 const noticeSeen = new Map<string, number>()
-const SOURCE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 export function postNotice(n: RavenNotice, opts: NoticeOpts = {}): { posted: boolean; message: Message | null; handedTo?: string } {
   const source = String(n?.source ?? '').trim().toLowerCase()
@@ -166,6 +167,7 @@ export function postNotice(n: RavenNotice, opts: NoticeOpts = {}): { posted: boo
   const body = typeof n.body === 'string' ? n.body.trim() : ''
   const url = typeof n.url === 'string' && (/^https:\/\//.test(n.url) || /^\/m\//.test(n.url)) ? n.url.slice(0, 2000) : null
   const tag = typeof n.tag === 'string' ? n.tag.trim().slice(0, 120) : ''
+  const live = liveKey(n.live)
   if (tag && !opts.direct) {
     const key = `${source}\n${tag}`
     const at = noticeSeen.get(key)
@@ -175,7 +177,7 @@ export function postNotice(n: RavenNotice, opts: NoticeOpts = {}): { posted: boo
   }
   const label = (typeof n.label === 'string' && n.label.trim()) ? n.label.trim().slice(0, 40) : source.charAt(0).toUpperCase() + source.slice(1)
   if (!opts.direct) {
-    const agent = takeNotice({ source, level, title: title.slice(0, 300), body: body ? clip(body, 3000) : undefined, url: url ?? undefined, tag: tag || undefined, label })
+    const agent = takeNotice({ source, level, title: title.slice(0, 300), body: body ? clip(body, 3000) : undefined, url: url ?? undefined, tag: tag || undefined, label, live: live || undefined })
     if (agent) return { posted: false, message: null, handedTo: agent }
   }
   const kind = source === 'valkyrie' || source === 'system' ? 'system' : 'feature'
@@ -183,9 +185,10 @@ export function postNotice(n: RavenNotice, opts: NoticeOpts = {}): { posted: boo
   const loud = level !== 'info'
   const message = ravenMessage(clip(body ? `${title.slice(0, 300)}\n\n${body}` : title.slice(0, 300), 6000), {
     refs: url ? [{ type: 'link', url, label: 'Open' }] : [],
-    meta: { relay: { kind, from: source, label } },
+    meta: { relay: live ? { kind, from: source, label, live } : { kind, from: source, label } },
     notify: loud, push: loud, title: label,
   })
+  if (live) replaceLive(source, live, message.id)
   return { posted: true, message }
 }
 
@@ -661,7 +664,7 @@ function renderThread(): string {
     const files = m.meta.files?.length ? ` [files: ${m.meta.files.map((f) => `${f.name} (id ${f.id})`).join(', ')}]` : ''
     const prop = m.proposalId ? ` [proposal #${m.proposalId}]` : ''
     const err = m.meta.error ? ' [failed]' : ''
-    return `[${m.id} · ${etLabel(m.createdAt)}] ${threadAuthor(m)}: ${cutText(m)}${files}${prop}${err}`
+    return `[${m.id} · ${etLabel(m.createdAt)}] ${threadAuthor(m)}: ${cutText(m)}${files}${prop}${err}${liveTag(m, etLabel)}`
   }).join('\n')
 }
 

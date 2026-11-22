@@ -138,6 +138,8 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
     ...(st.lastRead === undefined ? {} : { lastRead: st.lastRead }),
     mains: st.mains, watching: st.watching, agents: st.agents, paused: st.paused, messages: st.messages.slice(-60),
     settings: st.settings, models: st.models,
+    // each feed's newest line, a cleared one left out (backend lib/raven/notices.ts); unset = an older backend
+    ...(st.feeds ? { feeds: st.feeds } : {}),
   })
   page.mock('/api/raven', () => (down ? { status: 503, body: { error: 'Raven is restarting' } } : ok(body())))
   page.mock('/api/raven/messages', ({ query }) => {
@@ -1600,6 +1602,79 @@ export function ravenTests() {
         const cards = await page.eval(() => [...document.querySelectorAll('.rv-prop')].map((p) => p.dataset.status))
         t.check(cards.length === 2 && cards.every((s) => s === 'declined'), `the cards read ${JSON.stringify(cards)}`)
         await fits(t, page, `${ROUTE} decline all @${device}`)
+      },
+    })
+  }
+
+  // Feeds in Connected: a feature agent shows once (its row, its newest notice under it, no Feeds row of its own); a
+  // notice whose count moved shows the count now; a cleared one is grey in the thread with when and why, and the
+  // moment the API leaves it out of feeds the line under the agent goes away
+  for (const device of ['phone', 'desktop']) {
+    tests.push({
+      name: `raven:feeds:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page)
+        const at = (min) => new Date(Date.now() - min * 60_000).toISOString()
+        const dog = (id, text, relay, min) => ({ id, author: 'raven', text, createdAt: at(min), refs: [], meta: { relay: { kind: 'feature', from: 'watchdog', label: 'Watchdog', live: 'review', ...relay } }, proposal: null })
+        st.agents = [...st.agents, { id: 'watchdog', name: 'Watchdog', area: 'area3', status: 'idle', pending: 0 }]
+        st.messages = [
+          ...st.messages,
+          dog(110, '1 item waiting for your review\n\nLine one 1.', { cleared: { at: at(3), note: 'All reviewed' } }, 4),
+          dog(111, '9 items waiting for your review\n\nShop 9. Review has every line in one queue.', { now: '4 items waiting for your review' }, 2),
+        ]
+        st.feeds = [
+          { from: 'watchdog', label: 'Watchdog', text: '4 items waiting for your review', at: at(2), id: 111 },
+          { from: 'watcher', label: 'Watcher', text: 'Sync stalled for 2 hours.', at: at(20), id: 105 },
+        ]
+        await page.goto(ROUTE)
+        await threadUp(page)
+        if (device === 'phone') {
+          await page.tap({ sel: '.rv-conn-toggle' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-conn-drop .rv-crow'), 'the Connected toggle did not open the list')
+        }
+        await until(page, () => !!document.querySelector('.rv-conn .rv-crow-line[data-feed="watchdog"]'), 'no Watchdog notice under the Watchdog agent row')
+        const snap = () => {
+          const qa = (sel, r = document) => [...r.querySelectorAll(sel)]
+          const group = (name) => qa('.rv-conn .rv-group').find((g) => g.querySelector('h3')?.textContent?.startsWith(name))
+          const dogRow = qa('.rv-conn .rv-crow').find((r) => r.querySelector('.rv-crow-name')?.textContent === 'Watchdog')
+          const row = (id) => document.querySelector(`.rv-msgs [data-msg-id="${id}"]`) ?? qa('.rv .rv-msg').find((m) => m.textContent.includes(id === 110 ? '1 item waiting' : '9 items waiting'))
+          const r110 = row(110)
+          const r111 = row(111)
+          return {
+            dogNames: qa('.rv-conn .rv-crow-name').filter((n) => n.textContent === 'Watchdog').length,
+            agents: qa('.rv-crow-name', group('Agents')).map((n) => n.textContent),
+            feeds: group('Feeds') ? qa('.rv-crow-name', group('Feeds')).map((n) => n.textContent) : [],
+            under: dogRow?.querySelector('.rv-crow-line')?.textContent ?? null,
+            underInAgents: !!group('Agents')?.querySelector('.rv-crow-line[data-feed="watchdog"]'),
+            cleared: r110 ? { flag: r110.dataset.cleared !== undefined, live: r110.querySelector('.rv-live')?.textContent ?? null } : null,
+            moved: r111 ? { flag: r111.dataset.cleared !== undefined, live: r111.querySelector('.rv-live')?.textContent ?? null } : null,
+            dash: /\u2014/.test(document.querySelector('.rv')?.textContent ?? ''),
+          }
+        }
+        const s = await page.eval(snap)
+        t.check(s.dogNames === 1, `Watchdog shows ${s.dogNames} times in Connected, want once`)
+        t.check(JSON.stringify(s.agents) === JSON.stringify(['Triage agent', 'Shopping agent', 'Watchdog']), `the Agents read ${JSON.stringify(s.agents)}`)
+        t.check(JSON.stringify(s.feeds) === JSON.stringify(['Watcher']), `Feeds read ${JSON.stringify(s.feeds)} (Watchdog belongs under its agent)`)
+        t.check(s.underInAgents && s.under === '4 items waiting for your review', `under the Watchdog agent: ${JSON.stringify(s.under)}`)
+        t.check(s.cleared?.flag && /^Cleared \d{1,2}:\d{2} [AP]M ET · All reviewed$/.test(s.cleared.live ?? ''), `the cleared notice reads ${JSON.stringify(s.cleared)}`)
+        t.check(s.moved && !s.moved.flag && s.moved.live === 'Now: 4 items waiting for your review', `the moved notice reads ${JSON.stringify(s.moved)}`)
+        t.check(!s.dash, 'an em dash on Raven')
+        await t.shot(page, 'feeds')
+        // the queue empties: the API marks the notice cleared and leaves it out of feeds
+        st.messages = st.messages.map((m) => (m.id === 111 ? { ...m, meta: { relay: { ...m.meta.relay, now: undefined, cleared: { at: new Date().toISOString(), note: 'All reviewed' } } } } : m))
+        st.feeds = st.feeds.filter((f) => f.from !== 'watchdog')
+        st.seq++
+        await until(page, () => !document.querySelector('.rv-conn .rv-crow-line[data-feed="watchdog"]'), 'the Watchdog notice stayed under the agent after it cleared')
+        const s2 = await page.eval(snap)
+        t.check(s2.dogNames === 1 && s2.under === null, `after the clear: Watchdog ${s2.dogNames} times, under it ${JSON.stringify(s2.under)}`)
+        t.check(JSON.stringify(s2.feeds) === JSON.stringify(['Watcher']), `after the clear Feeds read ${JSON.stringify(s2.feeds)}`)
+        t.check(s2.moved?.flag && /^Cleared .* · All reviewed$/.test(s2.moved.live ?? ''), `after the clear the notice reads ${JSON.stringify(s2.moved)}`)
+        await t.shot(page, 'cleared')
+        await fits(t, page, `${ROUTE} feeds @${device}`)
       },
     })
   }

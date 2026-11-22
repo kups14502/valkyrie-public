@@ -8,6 +8,7 @@ import { useIntent, type ScreenProps } from '../kit/shell'
 import { RavenComposer, RavenFiles, RavenPick } from '../kit/raven'
 import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft, type DraftSnap } from '../kit/ravenStore'
 import { openFind, useFindProvider } from '../kit/findApi'
+import { feedsFromThread, liveLine, splitFeeds } from '../kit/ravenFeeds'
 import { addMenu, copyWithToast } from '../kit/menuApi'
 import { Markdown } from '../../components/Markdown'
 import { api, apiErrorText } from '../../lib/api'
@@ -15,7 +16,7 @@ import { isTauri } from '../../lib/auth'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
   RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
-  replyMetaTitle, searchRaven, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
+  replyMetaTitle, searchRaven, sendRaven, stopRaven, type Proposal, type RavenFeed, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -617,6 +618,8 @@ function Row({ m, grouped, last, split, names, onQuote }: {
   const from = relay?.title && relay.label ? relay.label : null
   const via = kind === 'me' && m.meta.source ? SOURCE_WORD[m.meta.source] : undefined
   const meta = kind === 'raven' && !m.meta.error && (m.meta.model || m.meta.tier) ? replyMetaLine(m.meta, m.createdAt, { time: false }) : null
+  // a feed's notice about a state that changes: the count as it stands, or cleared
+  const live = relay?.kind === 'feature' || relay?.kind === 'system' ? liveLine(relay, etTime) : null
   // a session relay's ref link to its pane is the Open link already
   const refs = termPath ? m.refs.filter((r) => !(r.type === 'link' && r.url === termPath)) : m.refs
   const files = m.meta.files && m.meta.files.length > 0 ? <RavenFiles files={m.meta.files} /> : null
@@ -647,7 +650,7 @@ function Row({ m, grouped, last, split, names, onQuote }: {
     ])
   }
   return (
-    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-split={split || undefined} data-error={m.meta.error ? '' : undefined} onContextMenu={onContextMenu}>
+    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-split={split || undefined} data-error={m.meta.error ? '' : undefined} data-cleared={relay?.cleared ? '' : undefined} onContextMenu={onContextMenu}>
       {!grouped && (
         <div className="rv-msg-head" data-sr={quiet || undefined}>
           <b>{label}</b>
@@ -672,6 +675,7 @@ function Row({ m, grouped, last, split, names, onQuote }: {
       ) : (
         <>
           {m.text && <Markdown className="rv-md">{m.text}</Markdown>}
+          {live && <p className="rv-live">{live}</p>}
           {files}
           {refs.length > 0 && <Refs refs={refs} />}
           {m.meta.sessions?.map((c, i) => <SessionCopy key={`${c.from}-${i}`} copy={c} />)}
@@ -817,19 +821,12 @@ const lastSeen = (at: number, now: number) => (now - at < 60_000 ? 'just now' : 
 const AGENT_WORD: Record<string, string> = { idle: 'idle', queued: 'about to start', working: 'working', resting: 'resting', error: 'last run failed' }
 
 /** The feeds that wrote into the thread (a feature's process, an odin script), each with its latest line. */
-function feedLines(messages: RavenMsg[]): { label: string; text: string; at: string }[] {
-  const seen = new Map<string, { label: string; text: string; at: string }>()
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const r = messages[i].meta.relay
-    if (r?.kind !== 'feature') continue
-    const key = r.from || r.label
-    if (seen.has(key)) continue
-    seen.set(key, { label: r.label || r.from, text: messages[i].text.split('\n')[0].replace(/[*_`#>]/g, '').trim(), at: messages[i].createdAt })
-  }
-  return [...seen.values()]
-}
-
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** An agent's own feed under its row: the newest line, a cleared one never shown (the API leaves it out). */
+function AgentFeedLine({ feed, now }: { feed: RavenFeed; now: number }) {
+  return <span className="rv-crow-line" data-feed={feed.from} title={`${etTime(feed.at)} · ${ago(Date.parse(feed.at), now)}`}>{feed.text}</span>
+}
 
 /**
  * Decline all, asked first: the line under an agent (or under the Agents heading, for every agent) that names the
@@ -877,7 +874,8 @@ function FitLine({ className, text }: { className: string; text: string }) {
 
 function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void }) {
   const now = useTick(60_000)
-  const feeds = feedLines(messages)
+  // each feed's newest line (a cleared one left out); an agent's own feed goes under its row, not under Feeds
+  const { byAgent, rest: feeds } = splitFeeds(page.feeds ?? feedsFromThread(messages), page.agents)
   // which Decline all is asking: an agent's id, 'all', or none
   const [asking, setAsking] = useState<string | null>(null)
   const waiting = page.agents.reduce((n, a) => n + a.pending, 0)
@@ -959,6 +957,7 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
                 {a.pending > 0 && (
                   <Press className="rv-crow-act" aria-expanded={asking === a.id} onPress={() => setAsking((v) => (v === a.id ? null : a.id))}>Decline all</Press>
                 )}
+                {byAgent.has(a.id) && <AgentFeedLine feed={byAgent.get(a.id)!} now={now} />}
               </div>
               {asking === a.id && a.pending > 0 && <DeclineAll agentId={a.id} count={a.pending} who={a.name} onDone={() => setAsking(null)} />}
             </div>
