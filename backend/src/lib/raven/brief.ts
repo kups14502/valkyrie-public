@@ -37,6 +37,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
       + 'The thread in your prompt is only the last 40 messages, each cut at 700 characters. When he asks about an older message or one cut short, find it and read it yourself, then answer from it: never tell him to scroll. '
       + 'Every message in this thread is also in his vault, one note a day (30-Personal/Raven, "Raven YYYY-MM-DD"), synced every few minutes.',
     features.length ? `- features: ${features.join(', ')} (their tools are listed with yours).` : null,
+    '- web: WebSearch and WebFetch, built in (not on your MCP server), for research: search the web, read a page. Name the page you took a fact from.',
     areas.length ? `Work areas: ${areas.join('; ')}. Everything else is personal.` : 'No work areas are configured; everything is personal.',
     'In the app and to him, the personal context is called Thor and the server context Odin; the keys stay personal and server in your tools.',
     '',

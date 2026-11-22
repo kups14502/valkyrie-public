@@ -61,7 +61,9 @@ const BRENDON_DELAY = 500
 const WAKE_DELAYS: Record<string, number> = { agent_reply: 5_000, session_reply: 2_000, session_progress: 30_000 }
 const HISTORY = 40
 const STALE_EVENT_MS = 6 * 3_600_000
-const DISALLOWED = 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite'
+/** The built-in tools a run gets beside the raven tools: research on the web, nothing that touches odin. */
+export const RAVEN_BUILTIN = 'WebSearch,WebFetch'
+const DISALLOWED = 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,Task,TodoWrite'
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
@@ -482,9 +484,10 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
           '--output-format', 'json',
           '--strict-mcp-config', `--mcp-config=${mcpFile}`,
           '--permission-mode', 'bypassPermissions',
-          // the raven tools are all it acts with: no built-in tool at all (the deny list alone leaves
-          // Monitor, which runs shell commands, and the tools that message or schedule other sessions)
-          '--tools', '',
+          // the raven tools are all it acts with, plus web search and fetch: --tools names every built-in
+          // tool it gets (the deny list alone leaves Monitor, which runs shell commands, and the tools
+          // that message or schedule other sessions)
+          '--tools', RAVEN_BUILTIN,
           '--disallowed-tools', DISALLOWED,
           '--no-session-persistence',
         ], {
