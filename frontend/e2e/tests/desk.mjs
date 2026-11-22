@@ -201,7 +201,7 @@ function desk() {
         state: t.getAttribute('data-state'),
         mark: t.querySelector('.vl-sicon')?.getAttribute('data-a') ?? null,
         title: t.querySelector('.dk-tab-t')?.textContent ?? '',
-        tip: t.getAttribute('title') ?? '',
+        tip: t.getAttribute('title') || t.getAttribute('data-vk-title') || '',
         h: r.height,
         inView: !!sr && r.left >= sr.left - 1 && r.right <= sr.right + 1,
       }

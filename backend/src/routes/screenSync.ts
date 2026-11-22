@@ -10,11 +10,14 @@
 // again at the end). A bulb he changes himself during a session leaves it and
 // keeps his change.
 //
-// Pacing: a Cync command is a full jump with no fade, and HA's Cync light sends
-// each one as a cloud packet. So a bulb gets a command only when the screen has
-// moved far enough, never more than once per MIN_GAP_MS, plus one late send to
-// land the final value after the screen settles. The engine's own queue
-// (newest target wins) does the rest.
+// Pacing: HA's Cync integration sends every command through ONE hub bulb,
+// and the hub relays them over the mesh one at a time, about 0.45 s each
+// (measured 2026-11-21: five commands sent together were reported 0.55, 1.0,
+// 1.7 and 1.9 s later, in send order). Commands sent faster only queue at the
+// hub and land late with an old color. So the session sends one command per
+// HUB_GAP_MS across all its bulbs, each time to the bulb furthest from the
+// screen, built from the newest frame at that moment. A scene change reaches
+// the first bulb in about half a second and walks through the rest.
 
 import type { Color, LightRow, Patch, RGB } from './lights.js'
 
@@ -30,6 +33,8 @@ type Member = {
   white: Color
   lastAt: number
   last: { pct: number; color: Color } | null
+  /** what the newest frame asks of this bulb */
+  want: { pct: number; color: Color } | null
   colored: boolean
 }
 
@@ -41,8 +46,10 @@ export type ScreenSyncDeps = {
 }
 
 export const SCREEN_TUNING = {
+  /** least time between two commands to any of the session's bulbs: the Cync hub's own pace */
+  hubGapMs: 450,
   /** least time between two commands to one bulb */
-  minGapMs: 1_000,
+  minGapMs: 600,
   /** a smaller change than the thresholds still goes out once the screen has held it this long */
   settleMs: 3_000,
   /** a color change this big (0-255, brightest channel 255) is worth a command */
@@ -107,6 +114,7 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
         white,
         lastAt: -Infinity,
         last: null,
+        want: null,
         colored: false,
       }]
     }))
@@ -132,20 +140,51 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
     const level = clamp(f.level * t.levelGain, 0, 1)
     const pct = clamp(Math.round(m.ceiling * (t.floor + (1 - t.floor) * level)), 1, 100)
     if (m.colored ? f.sat < t.colorOff : f.sat >= t.colorOn) m.colored = !m.colored
-    const color: Color = m.colored ? { rgb: f.rgb } : m.white
+    m.want = { pct, color: m.colored ? { rgb: f.rgb } : m.white }
+  }
 
+  /** How badly a bulb needs a command now: 0 none, 1 and up a visible change, Infinity never sent. */
+  function need(m: Member, at: number): number {
+    if (!m.want || at - m.lastAt < t.minGapMs) return 0
+    if (!m.last) return Infinity
+    const dc = colorStep(m.last.color, m.want.color)
+    const dp = Math.abs(m.last.pct - m.want.pct)
+    const n = Math.max(dc / t.rgbStep, dp / t.pctStep)
+    if (n >= 1) return n
+    // a smaller change still lands once the screen has held it a while
+    return (dc > 4 || dp > 0) && at - m.lastAt >= t.settleMs ? 0.5 : 0
+  }
+
+  let hubAt = -Infinity
+  let pumpTimer: ReturnType<typeof setTimeout> | null = null
+
+  function pump() {
+    if (!active) return
     const at = now()
-    if (at - m.lastAt < t.minGapMs) return
-    if (!m.last) return send(m, pct, color)
-    const dc = colorStep(m.last.color, color)
-    const dp = Math.abs(m.last.pct - pct)
-    if (dc >= t.rgbStep || dp >= t.pctStep) return send(m, pct, color)
-    if ((dc > 4 || dp > 0) && at - m.lastAt >= t.settleMs) send(m, pct, color)
+    const wait = hubAt + t.hubGapMs - at
+    if (wait > 0) {
+      pumpTimer ??= setTimeout(() => { pumpTimer = null; pump() }, wait)
+      pumpTimer.unref?.()
+      return
+    }
+    let best: Member | null = null
+    let most = 0
+    for (const m of members.values()) {
+      const n = need(m, at)
+      if (n > most || (n > 0 && n === most && best && m.lastAt < best.lastAt)) { best = m; most = n }
+    }
+    if (!best || !best.want) return
+    hubAt = at
+    send(best, best.want.pct, best.want.color)
+    pumpTimer ??= setTimeout(() => { pumpTimer = null; pump() }, t.hubGapMs)
+    pumpTimer.unref?.()
   }
 
   async function stop(why: string) {
     if (!active) return
     active = false
+    if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null }
+    hubAt = -Infinity
     const back = [...members.values()]
     members = new Map()
     lastFrame = null
@@ -173,6 +212,7 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
         await starting
       }
       for (const m of members.values()) follow(m, f)
+      pump()
     },
     stop,
     /** Brendon changed these bulbs himself: they leave the session and keep his change. */
@@ -190,6 +230,6 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
       }
     },
     /** test hook */
-    dispose() { clearInterval(timer) },
+    dispose() { clearInterval(timer); if (pumpTimer) clearTimeout(pumpTimer) },
   }
 }

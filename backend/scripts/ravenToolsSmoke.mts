@@ -343,7 +343,7 @@ ioMod.setRavenToolsIo(fakeIo)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
     'session_send', 'session_read', 'session_watch', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
-    'project_get', 'tickets', 'inbox', 'calendar', 'brief']
+    'project_get', 'tickets', 'inbox', 'calendar', 'brief', 'thread_search', 'thread_read']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
   check('the core tools are left to the endpoint', !['post', 'notebook_set', 'now', 'attachment', 'attachments'].some((n) => listed.includes(n)), listed)
   check('no extra tools', listed.length === want.length, listed)
@@ -507,6 +507,48 @@ agents.syncRoster()
   check('media_request: needs its id', r.isError && /foreignAlbumId/.test(r.text), r)
   r = await call('media_requests')
   check('media_requests: live status', Array.isArray(r.json) && r.json[0].status === 'downloading 40%' && r.json[1].stuck === true && / ET$/.test(r.json[0].asked), r.json)
+}
+
+// ------------------------------------------------------------- thread ---
+
+{
+  const say = (author: string, text: string, meta: Record<string, unknown> = {}) => store.addMessage({ channelId: 'raven', author, text, meta })
+  const idea = say('brendon', 'Can you tell the crewtastrophe session: what happens to the factions is also affected by the player (destroying faction ships or not helping them in events, getting closer into their territory). '
+    + 'x'.repeat(900) + ' Wormholes could jump you around the map.')
+  const reply = say('raven', 'I could not pass it on to that session.', { replyTo: idea.id })
+  store.addMessage({ channelId: 'east-triage', author: 'east-triage', text: 'Not in the thread: factions and wormholes.' })
+  const pic = say('brendon', 'the sketch', { files: [{ id: 'f1', name: 'sector-map.png', mime: 'image/png', size: 10, createdAt: new Date().toISOString() }] })
+  const ran = say('raven', 'Filed it.', { sessions: [{ from: 'vk-1', label: 'Crew', lines: [{ at: new Date().toISOString(), text: 'Backlog item written to docs/BACKLOG.md' }] }] })
+  const before = acted
+
+  let r = await call('thread_search', { query: 'Factions WORMHOLES' }, false)
+  check('thread_search: every word, any run, case-insensitive', !r.isError && r.json?.mode === 'all' && r.json.total === 1 && r.json.hits[0].id === idea.id, r)
+  check('thread_search: the hit has ET time, author and a snippet', / ET$/.test(r.json?.hits?.[0]?.at ?? '') && r.json.hits[0].author === 'Brendon' && /factions/i.test(r.json.hits[0].snippet), r.json)
+  check('thread_search: other channels are left out', !r.text.includes('Not in the thread'), r.text)
+  r = await call('thread_search', { query: 'crewtraswtrophe factions territory' })
+  check('thread_search: a typo falls back to any word, most words first', r.json?.mode === 'any' && r.json.hits[0].id === idea.id && r.json.hits[0].words === 2, r.json)
+  r = await call('thread_search', { query: '"getting closer into their territory"' })
+  check('thread_search: a quoted phrase', r.json?.total === 1 && r.json.hits[0].id === idea.id, r.json)
+  r = await call('thread_search', { query: 'pass it on', from: 'brendon' })
+  check('thread_search: from narrows the author', /^No message/.test(r.text), r.text)
+  r = await call('thread_search', { query: 'sector-map' })
+  check('thread_search: a file name', r.json?.hits?.[0]?.id === pic.id && r.json.hits[0].snippet === '[file: sector-map.png]', r.json)
+  r = await call('thread_search', { query: 'BACKLOG.md' })
+  check('thread_search: session lines only when asked', /^No message/.test(r.text), r.text)
+  r = await call('thread_search', { query: 'BACKLOG.md', sessions: true })
+  check('thread_search: session lines', r.json?.hits?.[0]?.id === ran.id && /^\[session Crew\]/.test(r.json.hits[0].snippet), r.json)
+
+  r = await call('thread_read', { id: idea.id }, false)
+  check('thread_read: one message in full', !r.isError && r.text.startsWith(`#${idea.id} · `) && r.text.includes('Wormholes could jump you') && r.text.length > 1000, r.text.slice(0, 200))
+  r = await call('thread_read', { around: reply.id, context: 1 })
+  check('thread_read: around, oldest first, reply marked', r.text.indexOf(`#${idea.id} ·`) < r.text.indexOf(`#${reply.id} ·`) && r.text.includes(`reply to #${idea.id}`) && r.text.includes(`#${pic.id} ·`), r.text.slice(0, 400))
+  r = await call('thread_read', { from: pic.id, to: ran.id, sessions: true })
+  check('thread_read: a range with files and session lines', r.text.includes('[files: sector-map.png (id f1)]') && r.text.includes('Backlog item written') && !r.text.includes(`#${idea.id} ·`), r.text)
+  r = await call('thread_read', { id: 999_999 })
+  check('thread_read: a missing number is an error', r.isError && /no message #999999/.test(r.text), r)
+  r = await call('thread_read', {})
+  check('thread_read: nothing named is an error', r.isError, r)
+  check('thread: reading acts on nothing', acted === before, acted - before)
 }
 
 // -------------------------------------------------------------- vault ---

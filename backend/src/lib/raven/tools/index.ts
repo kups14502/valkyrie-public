@@ -4,6 +4,7 @@ import { closeQuietJobs } from './autoclose.js'
 import { registerMediaTools } from './media.js'
 import { registerSessionTools, sessionsSnapshot, sessionsState, sessionTitles, titleFor, type RavenMain, type RavenWatch } from './sessions.js'
 import { registerThorFileTools } from './thorfiles.js'
+import { registerThreadTools } from './thread.js'
 import { registerVaultTools } from './vault.js'
 import { startWatcher } from './watch.js'
 import { registerWorkTools } from './work.js'
@@ -20,6 +21,7 @@ import { registerWorkTools } from './work.js'
 //   media.ts     Plex requests: search, request, live status
 //   vault.ts     the Obsidian vault, live on thor (odin's nightly copy when thor is off): search, read, list, recent, a new note
 //   thorfiles.ts his own files on thor, live and read-only: list, read, search
+//   thread.ts    Raven's own thread, every message since it began: search, read in full
 //   work.ts      tasks, projects, tickets per work area, inbox, calendar, the morning brief
 
 export type { RavenMain, RavenWatch }
@@ -31,6 +33,7 @@ export const registerRavenTools: RavenToolGroup = (server, ctx) => {
   registerMediaTools(server, ctx)
   registerVaultTools(server, ctx)
   registerThorFileTools(server, ctx)
+  registerThreadTools(server, ctx)
   registerWorkTools(server, ctx)
 }
 

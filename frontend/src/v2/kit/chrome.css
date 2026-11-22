@@ -1,0 +1,186 @@
+/* ---------------------------------------------------------------------------
+   Valkyrie's own chrome in place of the browser's (kit/find.tsx, kit/menu.tsx,
+   kit/tooltip.tsx): the find bar and its marks, the context menu, tooltips,
+   and the v2 look for what the browser still draws itself: the selection,
+   focus rings, scrollbars. All of it keyed on html[data-v2] or a vk- class.
+   ------------------------------------------------------------------------- */
+
+/* ---- find bar ---- */
+.vk-find {
+  position: fixed;
+  z-index: 1001;
+  top: calc(var(--strip-h, 26px) + 8px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: min(360px, calc(100% - 16px));
+  height: 36px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--panel-line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--fill-a), #000), color-mix(in srgb, var(--fg) var(--fill-b), #000) 70%);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .8), 0 0 14px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 16%), transparent);
+  font-family: var(--font);
+  color: var(--text);
+  animation: vl-fade .12s linear both;
+}
+.vk-find input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  caret-color: var(--fg);
+}
+.vk-find input::placeholder { color: var(--faint); }
+.vk-find input[data-none] { color: var(--acc2); }
+.vk-find-n {
+  flex: none;
+  padding: 0 6px;
+  font-size: 10.5px;
+  letter-spacing: .06em;
+  color: var(--dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.vk-find-n[data-none] { color: color-mix(in srgb, var(--acc2) 80%, var(--dim)); }
+.vk-find-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.vk-find-btn:hover:not(:disabled) { color: var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.vk-find-btn:disabled { opacity: .35; cursor: default; }
+.vk-find-btn:focus-visible { outline: 1px solid var(--fg); outline-offset: -3px; }
+@media (max-width: 639px) {
+  .vk-find { left: calc(8px + env(safe-area-inset-left)); right: calc(8px + env(safe-area-inset-right)); width: auto; height: 42px; }
+  .vk-find input { font-size: 16px; }
+  .vk-find-btn { width: 36px; height: 36px; }
+}
+
+/* every match, and the one in focus (CSS Custom Highlight API; literal colors, a highlight reads no variables everywhere) */
+::highlight(vk-find) { background-color: rgba(255, 200, 60, .32); color: #fff; }
+::highlight(vk-find-cur) { background-color: #ffc83c; color: #000; }
+
+/* a Raven line reached by a link (?msg=) */
+.rv-item[data-flash] > .rv-msg { animation: vk-flash 2.2s ease-out both; }
+@keyframes vk-flash {
+  0%, 30% { background: color-mix(in srgb, var(--fg) 14%, transparent); box-shadow: -10px 0 0 color-mix(in srgb, var(--fg) 14%, transparent), 10px 0 0 color-mix(in srgb, var(--fg) 14%, transparent); }
+  100% { background: transparent; box-shadow: none; }
+}
+
+/* ---- context menu ---- */
+.vk-menu {
+  position: fixed;
+  z-index: 1002;
+  min-width: 196px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px 0;
+  border: 1px solid var(--panel-line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) var(--fill-a), #000), color-mix(in srgb, var(--fg) var(--fill-b), #000) 70%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .85), 0 0 14px color-mix(in srgb, var(--fg) calc(var(--glow-k) * 16%), transparent);
+  font-family: var(--font);
+  color: var(--text);
+  text-shadow: 0 0 3px #000;
+  outline: none;
+  animation: vl-fade .08s linear both;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.vk-menu-sec + .vk-menu-sec { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.vk-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 12px 0 11px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.vk-menu-row svg { flex: none; color: var(--dim); }
+.vk-menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vk-menu-row kbd {
+  flex: none;
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  color: var(--faint);
+}
+.vk-menu-row[data-on], .vk-menu-row:active { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+.vk-menu-row[data-on] svg { color: var(--fg); }
+.vk-menu-row[data-danger] { color: color-mix(in srgb, var(--acc2) 85%, #fff); }
+.vk-menu-row:disabled { opacity: .4; cursor: default; }
+.vk-menu[data-touch] .vk-menu-row { min-height: 42px; font-size: 14px; }
+html[data-motion='reduced'] :is(.vk-menu, .vk-find) { animation: none; }
+
+/* ---- tooltips ---- */
+.vk-tip {
+  position: fixed;
+  z-index: 1003;
+  max-width: 340px;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, .92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .7);
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 15px;
+  letter-spacing: .02em;
+  color: var(--text);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  animation: vl-fade .1s linear both;
+}
+html[data-motion='reduced'] .vk-tip { animation: none; }
+
+/* ---- the browser's own parts in the v2 look ---- */
+html[data-v2] ::selection { background: color-mix(in srgb, var(--fg) 38%, #000); color: #fff; }
+html[data-v2] .rv-bubble ::selection { background: color-mix(in srgb, var(--fg) 55%, #000); }
+
+@layer base {
+  /* a ring in the accent where a control draws none of its own */
+  html[data-v2] :focus-visible { outline: 1px solid var(--fg); outline-offset: 2px; }
+  /* Scrollbars: thin, in the accent, and only on the scroller under the mouse, so no bar sits lit on the OLED
+     screen while nothing moves. A screen's own scrollbar rules still win (they are outside this layer). */
+  html[data-v2], html[data-v2] * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  html[data-v2] *:hover { scrollbar-color: color-mix(in srgb, var(--fg) 34%, transparent) transparent; }
+}
+
+/* the phone's and the iPad's own long-press callout (link preview, save picture): the long press is the app menu */
+@media (hover: none) {
+  html[data-v2] :is(a, img) { -webkit-touch-callout: none; }
+}
+
+/* ---- files over the Raven tab ---- */
+.rv-drop {
+  position: absolute;
+  inset: 6px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line-strong);
+  background: rgba(0, 0, 0, .78);
+  color: var(--fg);
+  font-size: 13px;
+  letter-spacing: .08em;
+  pointer-events: none;
+  animation: vl-fade .1s linear both;
+}
+.rv-drop span { padding: 10px 16px; border: 1px solid var(--panel-line); background: var(--panel-fill); text-shadow: var(--text-glow); }

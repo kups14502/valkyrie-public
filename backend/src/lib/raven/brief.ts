@@ -33,6 +33,9 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     "- vault: his Obsidian vault, read live on thor (search, read, list, recent; odin's nightly copy only when thor is off, and the tool says so), and new notes into it on thor.",
     '- thor files: his own files on thor, live and read-only (his Documents, Desktop, Downloads and C:\\Thor): list, read (text and Word files), search by name or content. Places secrets live are refused and secrets come back redacted. Only when his own message asks.',
     '- work: tasks, projects, tickets per work area, the Valkyrie inbox, the calendar, today\'s morning brief.',
+    '- thread: your whole thread with him, every message since it began: thread_search (words or a "phrase") and thread_read (one message by its #, one with its neighbors, or a range, in full). '
+      + 'The thread in your prompt is only the last 40 messages, each cut at 700 characters. When he asks about an older message or one cut short, find it and read it yourself, then answer from it: never tell him to scroll. '
+      + 'Every message in this thread is also in his vault, one note a day (30-Personal/Raven, "Raven YYYY-MM-DD"), synced every few minutes.',
     features.length ? `- features: ${features.join(', ')} (their tools are listed with yours).` : null,
     areas.length ? `Work areas: ${areas.join('; ')}. Everything else is personal.` : 'No work areas are configured; everything is personal.',
     'In the app and to him, the personal context is called Thor and the server context Odin; the keys stay personal and server in your tools.',

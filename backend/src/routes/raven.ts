@@ -2,7 +2,7 @@ import path from 'node:path'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { isLoopbackReq, requireStrongAuth, viaCloudflare } from '../middleware/auth.js'
 import {
-  AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, unreadCounts, type Message,
+  AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, searchMessages, unreadCounts, type Message,
 } from '../lib/agentsStore.js'
 import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
@@ -118,6 +118,14 @@ router.get('/raven/messages', h((req, res) => {
   const before = Number(req.query.before) || undefined
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60))
   res.json({ messages: messagesView(listMessages(RAVEN_CHANNEL, { before, limit })) })
+}))
+
+// the find bar (Ctrl+F) over the whole thread: the ids of the lines that hold the words, oldest first, and how
+// often each holds them, so the app can count and reach lines it has not loaded
+router.get('/raven/search', h((req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : ''
+  const hits = searchMessages(RAVEN_CHANNEL, q)
+  res.json({ q, hits, total: hits.reduce((n, h) => n + h.n, 0) })
 }))
 
 router.post('/raven/messages', h((req, res) => {

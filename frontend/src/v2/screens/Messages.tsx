@@ -1,18 +1,21 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowDown, ChevronRight } from 'lucide-react'
+import { ArrowDown, ChevronRight, Copy, ExternalLink, Link2, Quote, Search, TextSelect, X } from 'lucide-react'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
 import { RavenComposer, RavenFiles, RavenPick } from '../kit/raven'
 import { RAVEN_KEY, addToThread, refreshRavenUnread, useRaven, useRavenDraft, type DraftSnap } from '../kit/ravenStore'
+import { openFind, useFindProvider } from '../kit/findApi'
+import { addMenu, copyWithToast } from '../kit/menuApi'
 import { Markdown } from '../../components/Markdown'
-import { apiErrorText } from '../../lib/api'
+import { api, apiErrorText } from '../../lib/api'
+import { isTauri } from '../../lib/auth'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
   RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
-  replyMetaTitle, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
+  replyMetaTitle, searchRaven, sendRaven, stopRaven, type Proposal, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -73,6 +76,21 @@ const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home
 const reducedMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches
 /** a row's top against the list's visible top */
 const rowY = (list: Element, row: Element) => row.getBoundingClientRect().top - list.getBoundingClientRect().top
+/** an older page the find bar or a link loads to a line at a time: the API's most */
+const REACH_PAGE = 200
+
+/** A link to a place in the app that opens from another device: the desktop app's own origin is its webview's. */
+function appLink(path: string): string {
+  const b = api.defaults.baseURL ?? ''
+  if (isTauri() && /^https?:\/\//.test(b)) return b.replace(/\/api\/?$/, '') + path
+  return window.location.origin + path
+}
+
+/** The text a Quote puts in the box: each line under "> ", then a blank line for his answer. */
+function quoteText(text: string): string {
+  const body = text.trim().split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')
+  return body ? `${body}\n\n` : ''
+}
 
 export default function Messages({ active }: ScreenProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -283,6 +301,94 @@ export default function Messages({ active }: ScreenProps) {
     if (el.scrollTop < 160) void loadOlder()
   }
 
+  // ---- reaching an older line: the find bar (Ctrl+F) and a copied link (?msg=<id>) ----
+  const firstRef = useRef(firstId)
+  useLayoutEffect(() => { firstRef.current = firstId }, [firstId])
+  const loadTo = useCallback(async (id: number) => {
+    let first = firstRef.current
+    if (!first || id >= first) return
+    if (loadingOlder.current) {
+      // a scroll-up page in flight: wait for it, then go on from where it ends
+      for (let t = 0; t < 50 && loadingOlder.current; t++) await new Promise((r) => setTimeout(r, 100))
+      first = firstRef.current
+      if (id >= first) return
+    }
+    loadingOlder.current = true
+    stick.current = false
+    const got: RavenMsg[] = []
+    try {
+      while (first > id) {
+        const pg = await fetchRavenOlder(first, REACH_PAGE)
+        got.push(...pg)
+        if (pg.length < REACH_PAGE) setNoMore(true)
+        if (pg.length < REACH_PAGE) break
+        first = pg[0].id
+      }
+    } catch (e) {
+      toast(apiErrorText(e, 'Could not read older messages'), { ms: 4000 })
+    } finally {
+      loadingOlder.current = false
+    }
+    if (got.length) {
+      setOlder((cur) => [...new Map([...got, ...cur].map((m) => [m.id, m])).values()].sort((a, b) => a.id - b.id))
+    }
+  }, [])
+  useFindProvider({
+    root: () => colRef.current,
+    fromEnd: true,
+    search: searchRaven,
+    firstLoaded: () => firstRef.current || Infinity,
+    reveal: loadTo,
+    lineEl: (id) => listRef.current?.querySelector(`[data-mid="${id}"]`) ?? null,
+  }, active)
+
+  // ?msg=<id>: load to that line, bring it to the middle and light it a moment
+  const msgParam = Number(params.get('msg')) || 0
+  const hasPage = !!page
+  useEffect(() => {
+    if (!active || !hasPage || !msgParam) return
+    let gone = false
+    void (async () => {
+      await loadTo(msgParam)
+      for (let t = 0; t < 120 && !gone; t++) {
+        const row = listRef.current?.querySelector<HTMLElement>(`[data-mid="${msgParam}"]`)
+        if (row) {
+          stick.current = false
+          row.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior })
+          row.dataset.flash = ''
+          window.setTimeout(() => { delete row.dataset.flash }, 2400)
+          break
+        }
+        await new Promise((r) => requestAnimationFrame(r))
+      }
+      if (gone) return
+      setParams((cur) => {
+        const p = new URLSearchParams(cur)
+        p.delete('msg')
+        return p
+      }, { replace: true })
+    })()
+    return () => { gone = true }
+  }, [active, hasPage, msgParam, loadTo, setParams])
+
+  // a Raven line's Quote: its words in the box, his caret under them
+  const quote = useCallback((text: string) => {
+    const q = quoteText(text)
+    if (!q) return
+    const cur = draft.text
+    draft.setText(cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${q}` : q)
+    requestAnimationFrame(() => {
+      const t = ta.current
+      if (!t) return
+      t.focus({ preventScroll: true })
+      t.setSelectionRange(t.value.length, t.value.length)
+    })
+  }, [draft])
+
+  // files over the tab: say where they go
+  const [dragging, setDragging] = useState(false)
+  const dragDepth = useRef(0)
+
   // read what is on screen: the newest line in view, the page in front
   const unread = page?.unread ?? 0
   const shown = usePageShown()
@@ -367,8 +473,19 @@ export default function Messages({ active }: ScreenProps) {
       className="rv"
       ref={rootRef}
       data-wide={wide || undefined}
+      onDragEnter={(e) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return
+        dragDepth.current++
+        setDragging(true)
+      }}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (!dragDepth.current) setDragging(false)
+      }}
       onDragOver={(e) => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault() }}
       onDrop={(e) => {
+        dragDepth.current = 0
+        setDragging(false)
         // a drop on the composer attached them already (it bubbles here)
         if (e.defaultPrevented) return
         const files = Array.from(e.dataTransfer.files)
@@ -395,7 +512,7 @@ export default function Messages({ active }: ScreenProps) {
             {!page && !failed && <p className="rv-quiet">Reading Raven</p>}
             {page && !messages.length && <p className="rv-quiet rv-empty">Nothing yet. Write Raven anything: a question, a task, a file, a session to start.</p>}
             {page && noMore && messages.length > 0 && <p className="rv-quiet rv-top">The start of the conversation.</p>}
-            <Thread messages={messages} names={names} mark={mark} />
+            <Thread messages={messages} names={names} mark={mark} onQuote={quote} />
             {busy && (
               <div className="rv-working" aria-live="polite">
                 <span className="rv-pulse" aria-hidden />
@@ -419,6 +536,7 @@ export default function Messages({ active }: ScreenProps) {
         <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate(draft.snapshot())} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} voiceOn={active} />
       </section>
       {wide && connected && <aside className="rv-conn rv-side" aria-label="Connected">{connected}</aside>}
+      {dragging && <div className="rv-drop" aria-hidden><span>Drop to attach to your message</span></div>}
     </div>
   )
 }
@@ -426,7 +544,11 @@ export default function Messages({ active }: ScreenProps) {
 // ------------------------------------------------------------- the thread ---
 
 /** The thread as the Raven tab draws it; the desktop widget (RavenWidget.tsx) shows the same. */
-export function Thread({ messages, names, mark = null }: { messages: RavenMsg[]; names: Map<string, string>; mark?: { id: number; fading: boolean } | null }) {
+export function Thread({ messages, names, mark = null, onQuote }: {
+  messages: RavenMsg[]; names: Map<string, string>; mark?: { id: number; fading: boolean } | null
+  /** the context menu's Quote: the Raven tab puts the words in its box; the widget has none */
+  onQuote?: (text: string) => void
+}) {
   const now = useTick(60_000)
   return (
     <>
@@ -442,10 +564,10 @@ export function Thread({ messages, names, mark = null }: { messages: RavenMsg[];
         // two plain lines in a row on Raven's side get a hairline between them (a relay is a block of its own)
         const split = !newDay && !!prev && PLAIN.has(kind) && PLAIN.has(kindOf(prev))
         return (
-          <div key={m.id} className="rv-item">
+          <div key={m.id} className="rv-item" data-mid={m.id}>
             {newDay && <div className="rv-day"><span>{dayLabel(t, now)}</span></div>}
             {mark?.id === m.id && <div className="rv-new" role="separator" aria-label="New messages" data-fading={mark.fading || undefined}><div><span>New</span></div></div>}
-            <Row m={m} grouped={grouped} last={last} split={split} names={names} />
+            <Row m={m} grouped={grouped} last={last} split={split} names={names} onQuote={onQuote} />
           </div>
         )
       })}
@@ -482,7 +604,9 @@ function kindOf(m: RavenMsg): Kind {
  * hairline between two in a row; a relay (an agent, a session, a feed, the
  * brief) is a tinted block of its own with a lit edge and its source's name.
  */
-function Row({ m, grouped, last, split, names }: { m: RavenMsg; grouped: boolean; last: boolean; split: boolean; names: Map<string, string> }) {
+function Row({ m, grouped, last, split, names, onQuote }: {
+  m: RavenMsg; grouped: boolean; last: boolean; split: boolean; names: Map<string, string>; onQuote?: (text: string) => void
+}) {
   const navigate = useNavigate()
   const kind = kindOf(m)
   const relay = m.meta.relay
@@ -499,8 +623,31 @@ function Row({ m, grouped, last, split, names }: { m: RavenMsg; grouped: boolean
   const time = <time title={NY_DAY.format(Date.parse(m.createdAt))}>{etTime(m.createdAt)}</time>
   // his own lines: the bubble says who, the label is for screen readers, the time goes under the line
   const quiet = kind === 'me'
+  // the context menu on a line: its text, a link to it, Quote, Select, Find; Open for a session's line
+  const onContextMenu = (e: ReactMouseEvent<HTMLElement>) => {
+    const sel = window.getSelection()
+    const picked = sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode) ? sel.toString().trim() : ''
+    const text = m.text.trim()
+    const art = e.currentTarget
+    addMenu(e, [
+      text && !picked && { label: 'Copy text', icon: Copy, run: () => void copyWithToast(text) },
+      { label: 'Copy link to this message', icon: Link2, run: () => void copyWithToast(appLink(`/m/raven?msg=${m.id}`), 'Link copied') },
+      onQuote && (picked || text) && { label: picked ? 'Quote the selection' : kind === 'me' ? 'Quote' : 'Quote and reply', icon: Quote, run: () => onQuote(picked || text) },
+      text && !picked && { label: 'Select text', icon: TextSelect, run: () => {
+        const body = art.querySelector('.rv-md')
+        const s = window.getSelection()
+        if (!body || !s) return
+        const r = document.createRange()
+        r.selectNodeContents(body)
+        s.removeAllRanges()
+        s.addRange(r)
+      } },
+      termPath && { label: `Open ${label}`, icon: ExternalLink, run: () => navigate(termPath) },
+      { label: 'Find in the thread', icon: Search, hint: 'Ctrl F', run: () => openFind(picked && picked.length <= 120 && !picked.includes('\n') ? picked : undefined) },
+    ])
+  }
   return (
-    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-split={split || undefined} data-error={m.meta.error ? '' : undefined}>
+    <article className="rv-msg" data-kind={kind} data-relay={relay?.kind} data-grouped={grouped || undefined} data-split={split || undefined} data-error={m.meta.error ? '' : undefined} onContextMenu={onContextMenu}>
       {!grouped && (
         <div className="rv-msg-head" data-sr={quiet || undefined}>
           <b>{label}</b>
@@ -738,6 +885,12 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
   const open = (pane: string) => (
     <a className="rv-open" href={v2TermPath(pane)} onClick={(e) => { e.preventDefault(); onOpen(v2TermPath(pane)) }}>Open</a>
   )
+  // a session's card: Open, a link to it, its name
+  const sessionMenu = (e: ReactMouseEvent, pane: string | null, name: string) => addMenu(e, [
+    pane && { label: `Open ${name}`, icon: ExternalLink, run: () => onOpen(v2TermPath(pane)) },
+    pane && { label: 'Copy link to the session', icon: Link2, run: () => void copyWithToast(appLink(v2TermPath(pane)), 'Link copied') },
+    { label: 'Copy name', icon: Copy, run: () => void copyWithToast(name) },
+  ])
   // a closed session leaves Watching at once (the API lists none either)
   const watching = page.watching.filter((w) => w.state !== 'closed')
   const empty = !page.mains.length && !watching.length && !page.agents.length && !feeds.length
@@ -748,7 +901,7 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
         <div className="rv-group">
           <h3>Main terminals</h3>
           {page.mains.map((t) => (
-            <div key={t.target} className="rv-crow" data-state={t.state}>
+            <div key={t.target} className="rv-crow" data-state={t.state} onContextMenu={(e) => sessionMenu(e, t.pane && t.state !== 'dead' ? t.pane : null, t.label)}>
               <span className="rv-dot" data-state={t.state === 'working' ? 'working' : t.state === 'idle' ? 'idle' : 'off'} aria-hidden />
               <span className="rv-crow-name">{t.label}</span>
               <span className="rv-crow-note">{MAIN_WORD[t.state] ?? t.state}</span>
@@ -765,7 +918,7 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
               const state = w.state ?? null
               const at = w.lastAt || w.since
               return (
-                <div key={w.pane || w.sessionId} className="rv-wcard" data-state={state ?? 'unknown'}>
+                <div key={w.pane || w.sessionId} className="rv-wcard" data-state={state ?? 'unknown'} onContextMenu={(e) => sessionMenu(e, w.pane || null, w.title || w.label)}>
                   <div className="rv-wcard-top">
                     <span className="rv-dot" data-state={state === 'working' ? 'working' : state === 'idle' ? 'idle' : state === 'closed' ? 'off' : 'watch'} aria-hidden />
                     <span className="rv-wcard-name" title={w.title || w.label}>{w.title || w.label}</span>
@@ -794,7 +947,9 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
           {asking === 'all' && <DeclineAll count={waiting} who={plural(withPending, 'agent')} onDone={() => setAsking(null)} />}
           {page.agents.map((a) => (
             <div key={a.id} className="rv-crow-wrap">
-              <div className="rv-crow" data-state={a.status}>
+              <div className="rv-crow" data-state={a.status} onContextMenu={(e) => addMenu(e, [
+                a.pending > 0 && { label: `Decline all from ${a.name}`, icon: X, danger: true, run: () => setAsking(a.id) },
+              ])}>
                 <span className="rv-dot" data-state={page.paused ? 'off' : a.status} aria-hidden />
                 <span className="rv-crow-name">{a.name}</span>
                 <span className="rv-crow-note">{AGENT_WORD[a.status] ?? a.status}</span>

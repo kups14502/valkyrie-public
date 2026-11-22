@@ -1520,7 +1520,7 @@ function systemRows() {
     name: (r.querySelector('.hm-hrow-name')?.textContent || '').trim(),
     car: r.hasAttribute('data-car'),
     off: r.hasAttribute('data-off'),
-    minis: [...r.querySelectorAll('.hm-mini')].map((m) => `${m.getAttribute('title')}=${(m.querySelector('.hm-mini-v')?.textContent || '').trim()}${m.querySelector('.hm-mini-bar') ? '' : ' (no bar)'}`),
+    minis: [...r.querySelectorAll('.hm-mini')].map((m) => `${m.getAttribute('title') ?? m.getAttribute('data-vk-title')}=${(m.querySelector('.hm-mini-v')?.textContent || '').trim()}${m.querySelector('.hm-mini-bar') ? '' : ' (no bar)'}`),
     aria: r.getAttribute('aria-label') || '',
   }))
 }

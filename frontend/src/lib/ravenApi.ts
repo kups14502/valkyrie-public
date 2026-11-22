@@ -140,6 +140,10 @@ export const fetchRaven = async (): Promise<RavenPage> => normalize((await api.g
 export const fetchRavenOlder = async (before: number, limit = RAVEN_OLDER): Promise<RavenMsg[]> =>
   ((await api.get<{ messages: RavenMsg[] }>('/raven/messages', { params: { before, limit } })).data.messages ?? []).map(normMsg)
 
+/** The find bar over the whole thread: the lines that hold `q`, oldest first, and how often each holds it. */
+export const searchRaven = async (q: string): Promise<{ id: number; n: number }[]> =>
+  (await api.get<{ hits: { id: number; n: number }[] }>('/raven/search', { params: { q } })).data.hits ?? []
+
 export const sendRaven = async (body: { text: string; files?: string[]; source?: RavenMeta['source'] }): Promise<RavenMsg> =>
   normMsg((await api.post<{ message: RavenMsg }>('/raven/messages', body)).data.message)
 

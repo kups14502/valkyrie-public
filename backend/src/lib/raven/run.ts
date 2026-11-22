@@ -15,6 +15,7 @@ import { listTasks, nyToday } from '../tasksStore.js'
 import { workConf } from '../workConfig.js'
 import { setRavenNoticeHandler, setRavenPoster, setRavenWaker, type NoticeOpts } from './hooks.js'
 import { ensureRavenChannel } from './channel.js'
+import { threadAuthor } from './history.js'
 import { ravenBrief } from './brief.js'
 import { humanSize, pruneRavenFiles, ravenFilesFor } from './files.js'
 import {
@@ -645,17 +646,10 @@ function renderEvent(e: AgentEvent, cut = 0): string {
   }
 }
 
-function author(m: Message): string {
-  if (m.author === 'brendon') return 'Brendon'
-  const relay = m.meta.relay
-  if (relay) {
-    const what = relay.kind === 'agent' ? `@${relay.from}` : relay.kind === 'session' ? 'session' : relay.kind
-    return `${relay.label} (${what})`
-  }
-  if (m.author === RAVEN_ID) return 'Raven'
-  if (m.author === 'system') return 'Valkyrie'
-  return `@${m.author}`
-}
+/** A message's text for the thread in the prompt, cut at 700 characters with the way to read the rest. */
+const cutText = (m: Message): string => (m.text.length > 700
+  ? `${m.text.slice(0, 699)}… [cut at 700 of ${m.text.length} characters: thread_read id ${m.id} reads all of it]`
+  : m.text)
 
 function renderThread(): string {
   const msgs = listMessages(RAVEN_CHANNEL, { limit: HISTORY })
@@ -664,7 +658,7 @@ function renderThread(): string {
     const files = m.meta.files?.length ? ` [files: ${m.meta.files.map((f) => `${f.name} (id ${f.id})`).join(', ')}]` : ''
     const prop = m.proposalId ? ` [proposal #${m.proposalId}]` : ''
     const err = m.meta.error ? ' [failed]' : ''
-    return `[${m.id} · ${etLabel(m.createdAt)}] ${author(m)}: ${clip(m.text, 700)}${files}${prop}${err}`
+    return `[${m.id} · ${etLabel(m.createdAt)}] ${threadAuthor(m)}: ${cutText(m)}${files}${prop}${err}`
   }).join('\n')
 }
 

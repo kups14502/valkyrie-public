@@ -27,34 +27,53 @@ const sync = createScreenSync({
 
 const blue = { rgb: [0, 64, 255] as [number, number, number], sat: 0.4, level: 0.4 }
 
-// 1. The first frame starts the session with the bulbs that were on, and each gets a command.
+// 1. The first frame starts the session with the bulbs that were on. The hub
+//    takes one command at a time, so the second bulb gets its command one hub gap later.
 await sync.frame(blue)
 assert.deepEqual(sync.status().bulbs, ['light.office_lamp', 'light.tv_strip'])
-assert.equal(sent.length, 2)
-const lamp = sent.find((s) => s.id === 'light.office_lamp')!.p
+assert.equal(sent.length, 1)
+const lamp = sent[0].p
+assert.equal(sent[0].id, 'light.office_lamp')
 assert.deepEqual(lamp.color, { rgb: [0, 64, 255] })
 // ceiling is its own 50%: 50 * (0.3 + 0.7 * 0.64) = 37.4
 assert.equal(lamp.pct, 37)
-
-// 2. Frames inside the 1 s gap send nothing, even for a big change.
-clock += 250; await sync.frame({ ...blue, rgb: [255, 0, 0] })
-clock += 250; await sync.frame({ ...blue, rgb: [255, 0, 0] })
+clock += 200; await sync.frame(blue)
+assert.equal(sent.length, 1, 'inside the hub gap')
+clock += 300; await sync.frame(blue)
 assert.equal(sent.length, 2)
+assert.equal(sent[1].id, 'light.tv_strip')
 
-// 3. After the gap, the big change goes out.
-clock += 600; await sync.frame({ ...blue, rgb: [255, 0, 0] })
+// 2. A big change waits for the hub gap, then goes out one bulb at a time,
+//    never inside a bulb's own gap, each with the newest frame.
+clock += 100; await sync.frame({ ...blue, rgb: [255, 0, 0] })
+assert.equal(sent.length, 2, 'hub still busy')
+clock += 350; await sync.frame({ ...blue, rgb: [255, 0, 0] })
+assert.equal(sent.length, 3)
+assert.equal(sent[2].id, 'light.office_lamp', 'the strip is inside its own 600 ms gap')
+clock += 450; await sync.frame({ ...blue, rgb: [255, 0, 40] })
 assert.equal(sent.length, 4)
+assert.deepEqual(sent[3], { id: 'light.tv_strip', p: { state: 'on', pct: 75, color: { rgb: [255, 0, 40] } }, at: clock })
 
-// 4. A small change waits for the settle time, then lands once.
-clock += 1_200; await sync.frame({ ...blue, rgb: [255, 10, 0] })
+// 3. A small change waits for the settle time, then lands once per bulb.
+clock += 1_200; await sync.frame({ ...blue, rgb: [255, 10, 20] })
 assert.equal(sent.length, 4)
-clock += 2_000; await sync.frame({ ...blue, rgb: [255, 10, 0] })
+clock += 2_000; await sync.frame({ ...blue, rgb: [255, 10, 20] })
+assert.equal(sent.length, 5)
+clock += 450; await sync.frame({ ...blue, rgb: [255, 10, 20] })
 assert.equal(sent.length, 6)
-clock += 3_500; await sync.frame({ ...blue, rgb: [255, 10, 0] })
+clock += 3_500; await sync.frame({ ...blue, rgb: [255, 10, 20] })
 assert.equal(sent.length, 6, 'an unchanged screen sends nothing more')
+
+// 4. The bulb furthest from the screen goes first.
+clock += 1_000; await sync.frame({ ...blue, rgb: [255, 10, 20], level: 0.9 })
+assert.equal(sent.length, 7)
+assert.equal(sent[6].id, 'light.tv_strip', 'the strip has the higher ceiling, so the bigger brightness step')
+clock += 450; await sync.frame({ ...blue, rgb: [255, 10, 20], level: 0.9 })
+assert.equal(sent.length, 8)
 
 // 5. A neutral screen shows the bulb's own white: the lamp was 2700 K, the strip gets 4000 K.
 clock += 1_100; await sync.frame({ rgb: [255, 255, 250], sat: 0.02, level: 0.5 })
+clock += 450; await sync.frame({ rgb: [255, 255, 250], sat: 0.02, level: 0.5 })
 const last = (id: string) => [...sent].reverse().find((s) => s.id === id)!.p
 assert.deepEqual(last('light.office_lamp').color, { kelvin: 2700 })
 assert.deepEqual(last('light.tv_strip').color, { kelvin: 4000 })

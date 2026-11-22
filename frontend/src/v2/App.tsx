@@ -4,6 +4,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import { applyFont, applyPalette, storedFont, storedMode } from './kit/theme'
 import { V2Shell, desktopWindow, type LegacyMap, type ScreenDef, type ScreenProps } from './kit/shell'
 import { Palette } from './kit/palette'
+import { FindBar } from './kit/find'
+import { ContextMenuHost } from './kit/menu'
+import { Tooltips } from './kit/tooltip'
+import { useDropGuard } from './kit/dropGuard'
 import { RavenBadge, RavenFab, RavenQuick } from './kit/raven'
 import { isWidgetPage } from '../lib/ravenWidget'
 import { toast } from './kit/ui'
@@ -26,6 +30,7 @@ import TasksPage from './screens/Tasks'
 import Messages from './screens/Messages'
 import Desk, { DeskBadge } from './screens/Desk'
 import './v2.css'
+import './kit/chrome.css'
 
 // AI > Terminal preview (/m/ai/skin): Claude Code in a Valkyrie skin, playing a
 // recorded sample. Its own chunk, since it carries xterm.
@@ -207,6 +212,7 @@ function OpenFromAlert() {
 
 export default function V2App() {
   useV2Document()
+  useDropGuard()
   const screens = useScreens()
   const widget = isWidgetPage()
   return (
@@ -232,6 +238,10 @@ export default function V2App() {
       {!widget && <Palette screens={screens} />}
       {/* Raven's quick sheet: the corner button, Ctrl+Shift+Space and the palette open it on every v2 screen */}
       {!widget && <RavenQuick />}
+      {/* the app's own find bar (Ctrl+F), context menu (right click, a long press) and tooltips, in place of the browser's */}
+      {!widget && <FindBar />}
+      <ContextMenuHost />
+      <Tooltips />
     </>
   )
 }

@@ -481,6 +481,23 @@ export function listMessages(channelId: string, opts: { before?: number; after?:
   return rows.reverse().map(toMessage)
 }
 
+/**
+ * Every line in a channel whose text holds `q` (case-insensitive, ASCII case only, as SQLite's lower()), oldest
+ * first, with how many times it holds it: the Raven tab's find bar reaches lines it has not loaded yet with this.
+ */
+export function searchMessages(channelId: string, q: string, limit = 2000): { id: number; n: number }[] {
+  const needle = q.trim().toLowerCase()
+  if (!needle) return []
+  const rows = db.prepare('SELECT id, text FROM messages WHERE channelId = ? AND instr(lower(text), ?) > 0 ORDER BY id DESC LIMIT ?')
+    .all(channelId, needle, Math.min(5000, Math.max(1, limit))) as { id: number; text: string }[]
+  return rows.reverse().map((r) => {
+    const t = r.text.toLowerCase()
+    let n = 0
+    for (let i = t.indexOf(needle); i !== -1; i = t.indexOf(needle, i + needle.length)) n++
+    return { id: r.id, n: Math.max(1, n) }
+  })
+}
+
 export function lastReadId(channelId: string): number {
   return (db.prepare('SELECT lastReadId FROM reads WHERE channelId = ?').get(channelId) as { lastReadId: number } | undefined)?.lastReadId ?? 0
 }
@@ -490,6 +507,36 @@ export function markChannelRead(channelId: string, upTo?: number): void {
   db.prepare(`INSERT INTO reads (channelId, lastReadId) VALUES (?, ?)
     ON CONFLICT(channelId) DO UPDATE SET lastReadId = MAX(lastReadId, excluded.lastReadId)`).run(channelId, last)
   bump()
+}
+
+/** A channel's messages from id `from` to id `to` (both included), oldest first. */
+export function messagesBetween(channelId: string, from: number, to: number, limit = 200): Message[] {
+  return (db.prepare('SELECT * FROM messages WHERE channelId = ? AND id >= ? AND id <= ? ORDER BY id LIMIT ?')
+    .all(channelId, from, to, Math.min(500, Math.max(1, limit))) as MessageRow[]).map(toMessage)
+}
+
+/**
+ * The messages of a channel whose text (or a file name on them) has the terms, lowercase, as plain substrings:
+ * every term, newest first; with any, at least one term, the most terms first. sessions also searches what the
+ * watched sessions wrote that is kept under a message (meta.sessions). Every match, in that order.
+ */
+export function findMessages(channelId: string, terms: string[], opts: {
+  any?: boolean; sessions?: boolean; author?: string; before?: number; after?: number
+} = {}): { id: number; score: number }[] {
+  if (!terms.length) return []
+  const files = "CASE WHEN json_valid(meta) THEN COALESCE((SELECT group_concat(json_extract(f.value, '$.name'), ' ') FROM json_each(meta, '$.files') f), '') ELSE '' END"
+  const hay = opts.sessions ? `lower(text || ' ' || ${files} || ' ' || meta)` : `lower(text || ' ' || ${files})`
+  const where = ['channelId = ?']
+  const args: (string | number)[] = [channelId]
+  if (opts.author) { where.push('author = ?'); args.push(opts.author) }
+  if (opts.before) { where.push('id < ?'); args.push(opts.before) }
+  if (opts.after) { where.push('id > ?'); args.push(opts.after) }
+  const score = terms.map(() => '(instr(hay, ?) > 0)').join(' + ')
+  const need = opts.any ? 1 : terms.length
+  const sql = `WITH m AS (SELECT id, ${hay} AS hay FROM messages WHERE ${where.join(' AND ')}),
+    s AS (SELECT id, ${score} AS score FROM m)
+    SELECT id, score FROM s WHERE score >= ? ORDER BY score DESC, id DESC`
+  return db.prepare(sql).all(...args, ...terms, need) as { id: number; score: number }[]
 }
 
 /** Unread messages per channel: anything not Brendon's own past his read mark. */

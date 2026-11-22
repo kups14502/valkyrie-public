@@ -13,6 +13,10 @@
 //            message to Raven kept per thread on the device (text, words and
 //            files through a reload, cleared only by what a send carried, an
 //            upload a reload cut off, another window's write).
+//   find     e2e/find-unit.mjs: src/v2/kit/findCore.ts, the find bar's
+//            arithmetic (matches in text, steps with wrap-around, the first
+//            match, the Raven count past the loaded lines, the word under
+//            the pointer for the context menu's Find).
 //
 // The backend half of the lights (routes/lights.ts, the engine that holds each
 // bulb to its target) is backend/scripts/lightsEngine.test.mts, run on odin.
@@ -75,6 +79,20 @@ export function unitTests() {
         t.note(`raven-draft-unit: ${pass} passed, ${fail} failed`)
         t.check(code === 0, `e2e/raven-draft-unit.mjs exited ${code}`)
         t.check(fail === 0 && pass >= 13, `raven-draft-unit: ${pass} passed, ${fail} failed`)
+        for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
+      },
+    },
+    {
+      name: 'unit:find',
+      group: 'unit',
+      timeout: 60_000,
+      async run(t) {
+        const { code, out } = await runNode(resolve(HERE, '..', 'find-unit.mjs'), 50_000)
+        const pass = Number(/ℹ pass (\d+)/.exec(out)?.[1] ?? NaN)
+        const fail = Number(/ℹ fail (\d+)/.exec(out)?.[1] ?? NaN)
+        t.note(`find-unit: ${pass} passed, ${fail} failed`)
+        t.check(code === 0, `e2e/find-unit.mjs exited ${code}`)
+        t.check(fail === 0 && pass >= 9, `find-unit: ${pass} passed, ${fail} failed`)
         for (const line of out.split(/\r?\n/).filter((l) => /^\s*✖/.test(l)).slice(0, 8)) t.check(false, line.trim())
       },
     },
