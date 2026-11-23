@@ -18,7 +18,7 @@ import { AREAS } from './projectAreas.js'
 import { MIXABLE_AREAS } from './projectTypes.js'
 import { RAVEN_CHANNEL, type RavenNotice } from './raven/types.js'
 import { notifyRaven, wakeRavenWith } from './raven/hooks.js'
-import { featureAgent, featureAgents } from './featureAgents.js'
+import { featureAgent, featureAgents, featureEvent } from './featureAgents.js'
 import { ravenPush } from './raven/push.js'
 import { ensureRavenChannel } from './raven/channel.js'
 
@@ -363,7 +363,7 @@ function triggerLine(events: AgentEvent[]): string {
   const counts = new Map<string, number>()
   for (const e of events) counts.set(e.kind.replace(/^retry:/, ''), (counts.get(e.kind.replace(/^retry:/, '')) ?? 0) + 1)
   return [...counts].map(([k, n]) => {
-    const [one, many] = TRIGGER_WORDS[k] ?? [k, k]
+    const [one, many] = TRIGGER_WORDS[k] ?? featureEvent(k)?.words ?? [k, k]
     return n > 1 && one !== many && !many.startsWith('morning') ? `${n} ${many}` : one
   }).join(', ')
 }
@@ -487,8 +487,13 @@ function renderEvent(e: AgentEvent): string {
     case 'notice':
       return `- Problem notice from ${s('label') || s('source')} (${s('level')}), ${etLabel(s('at'))}: ${s('title')}${p.body ? `. ${s('body')}` : ''}${p.url ? ` Link: ${s('url')}` : ''}. `
         + `Brendon hears about it only through you: find the cause with your tools, then post him one message (your channel, notify true) or a proposal.${retry}`
-    default:
+    default: {
+      const fe = featureEvent(kind)
+      if (fe?.render) {
+        try { return `- ${fe.render(p)}${retry}` } catch { /* the raw payload below */ }
+      }
       return `- ${kind}: ${clip(JSON.stringify(p), 400)}`
+    }
   }
 }
 

@@ -14,7 +14,7 @@ import { toast } from './kit/ui'
 import { fetchSessionList, fetchTermSessions } from '../lib/api'
 import { v2TermPath } from '../lib/term'
 import { useProfile } from '../lib/deviceMode'
-import { featureRoutes, useFeatureScreens, withFeatures } from '../features/apply'
+import { featureOverlays, featureRoutes, useFeatureScreens, withFeatures } from '../features/apply'
 import Dashboard from './screens/Dashboard'
 import Today from './screens/Today'
 import Hotkeys from './screens/Hotkeys'
@@ -162,6 +162,7 @@ function useScreens(): ScreenDef[] {
 }
 
 const FEATURE_ROUTES = featureRoutes()
+const FEATURE_OVERLAYS = featureOverlays()
 
 function V2({ screens }: { screens: ScreenDef[] }) {
   return <V2Shell screens={screens} initial="dashboard" settings={SettingsScreen} legacy={LEGACY} corner={<RavenFab />} />
@@ -240,6 +241,8 @@ export default function V2App() {
       {!widget && <RavenQuick />}
       {/* the app's own find bar (Ctrl+F), context menu (right click, a long press) and tooltips, in place of the browser's */}
       {!widget && <FindBar />}
+      {/* what features keep in view on every screen (a persistent alert) */}
+      {!widget && FEATURE_OVERLAYS.map((Overlay, i) => <Overlay key={i} />)}
       <ContextMenuHost />
       <Tooltips />
     </>

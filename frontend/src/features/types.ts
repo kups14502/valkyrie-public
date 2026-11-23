@@ -66,4 +66,9 @@ export type FeatureDef = {
   routes?: FeatureRoute[]
   windows?: FeatureWindow[]
   classic?: FeatureClassicPage[]
+  /**
+   * Drawn over every v2 screen (not the Raven widget), for something that must stay in view wherever Brendon is:
+   * a persistent alert. Each renders nothing when it has nothing to show, and positions itself.
+   */
+  overlays?: ComponentType[]
 }

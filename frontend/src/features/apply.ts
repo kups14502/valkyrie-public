@@ -75,6 +75,9 @@ export const featureRoutes = (): FeatureRoute[] => all((f) => f.routes)
 /** A feature's pop-out window by id. */
 export const featureWindow = (id: string): FeatureWindow | undefined => all((f) => f.windows).find((w) => w.id === id)
 
+/** What features draw over every v2 screen (V2App mounts them beside the palette). */
+export const featureOverlays = () => all((f) => f.overlays)
+
 /** Classic pages features add (src/App.tsx routes, lib/nav.ts, lib/vr.ts, the home tiles, the v2 palette, Settings). */
 export const classicPages = (): FeatureClassicPage[] => all((f) => f.classic)
 

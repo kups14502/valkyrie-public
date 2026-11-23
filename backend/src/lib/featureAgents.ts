@@ -36,6 +36,14 @@ export type FeatureAction = {
   apply: (args: Record<string, unknown>) => string | Promise<string>
 }
 
+/** An event kind a feature adds to its own agent's queue (addEvent, then wake): how runs name it, and its line in the prompt. */
+export type FeatureEvent = {
+  /** one, many: the status line and the run log ("a thing to check", "things to check") */
+  words: [string, string]
+  /** the line under "What woke you"; the raw payload when unset */
+  render?: (payload: Record<string, unknown>) => string
+}
+
 export type FeatureAgentDef = {
   /** the agent's id (@id), unique across every agent */
   id: string
@@ -63,6 +71,8 @@ export type FeatureAgentDef = {
    * to the thread as before, and so does one it did not post about or that its run failed on.
    */
   takesNotice?: (n: RavenNotice) => boolean
+  /** the feature's own event kinds, by kind (the feature queues them itself) */
+  events?: Record<string, FeatureEvent>
 }
 
 /** A feature agent with the feature it came from. */
@@ -87,3 +97,5 @@ export function setFeatureAgents(list: FeatureAgent[]): void {
 
 export const featureAgents = (): FeatureAgent[] => defs
 export const featureAgent = (id: string): FeatureAgent | null => defs.find((d) => d.id === id) ?? null
+/** The feature event of this kind, whichever feature agent declares it. */
+export const featureEvent = (kind: string): FeatureEvent | null => defs.map((d) => d.events?.[kind]).find((e) => e !== undefined) ?? null
