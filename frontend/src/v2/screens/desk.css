@@ -150,10 +150,10 @@
   position: relative;
   flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   min-width: 0;
-  min-height: var(--dk-strip-h);
+  height: var(--dk-strip-h);
   border-radius: 12px;
 }
 /* a pane's title dragged here leaves the grid */
@@ -175,44 +175,36 @@
 .dk[data-coarse] .dk-list-btn { height: 38px; padding: 0 9px 0 12px; }
 .dk-list-btn[aria-expanded='true'] { color: var(--text); background: var(--dk-plain-hi); border-color: var(--dk-plain-edge-hi); }
 .dk-list-btn[data-pressed] { background: var(--dk-plain-hi); }
-/* the tabs: rows that wrap from the Desk's left edge, up to three before they scroll; the phone's one row scrolls sideways */
+/* the tabs: one row from the Desk's left edge that never wraps; it scrolls sideways (a swipe, a trackpad,
+   the wheel, a mouse drag: Desk.tsx stripDown) */
 .dk-tabs {
-  --dk-row-gap: 4px;
   --dk-tab-h: 30px;
   /* the tabs' offsetParent, so their offsets are in the strip's own (scrolled) space */
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: var(--dk-row-gap) 3px;
-  min-height: var(--dk-strip-h);
-  max-height: calc(3 * var(--dk-tab-h) + 2 * var(--dk-row-gap) + (var(--dk-strip-h) - var(--dk-tab-h)));
-  padding: calc((var(--dk-strip-h) - var(--dk-tab-h)) / 2) 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  gap: 3px;
+  height: var(--dk-strip-h);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+  touch-action: pan-x;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .dk-tabs::-webkit-scrollbar { display: none; }
 .dk[data-coarse] .dk-tabs { --dk-tab-h: 38px; }
-.dk[data-phone] .dk-tabs {
-  flex-wrap: nowrap;
-  max-height: none;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior: auto;
-  overscroll-behavior-x: contain;
-  touch-action: pan-x;
-}
-/* the phone's row: "Sessions" and "+" stay at its ends while the tabs scroll under them */
-.dk[data-phone] .dk-tabs > .dk-list-btn { position: sticky; left: 0; z-index: 1; box-shadow: 6px 0 6px #000; }
-.dk[data-phone] .dk-tabs > .dk-add { position: sticky; right: 0; z-index: 1; background: #000; box-shadow: -6px 0 6px #000; }
+/* "Sessions" and "+" stay at the row's ends while the tabs scroll under them */
+.dk-tabs > .dk-list-btn { position: sticky; left: 0; z-index: 1; box-shadow: 6px 0 6px #000; }
+.dk-tabs > .dk-add { position: sticky; right: 0; z-index: 1; background: #000; box-shadow: -6px 0 6px #000; }
 
 /* a section: its head, then its tabs, in the strip's flow */
 .dk-tg { display: contents; }
-.dk-tg-lead { flex: none; display: flex; align-items: center; gap: 3px; max-width: 100%; }
+.dk-tg-lead { flex: none; display: flex; align-items: center; gap: 3px; }
 .dk-gh {
   position: relative;
   flex: none;
@@ -229,8 +221,7 @@
   color: var(--dim);
   border-radius: 8px;
 }
-/* a quiet line between two sections: the room is after the last item of the one before, so a head that
-   wraps to a new row still starts at the strip's left edge (the line falls outside it there, clipped) */
+/* a quiet line between two sections, in the room after the last item of the one before */
 .dk-tg[data-sep] > :last-child { margin-right: 6px; }
 .dk-tg + .dk-tg .dk-gh::before {
   content: '';
@@ -264,6 +255,8 @@
 .dk-gh[data-tone='ask'] { color: var(--acc2); }
 .dk-gh[data-tone='ask'] .dk-gh-n { background: var(--acc2); box-shadow: 0 0 8px color-mix(in srgb, var(--acc2) calc(var(--glow-k) * 60%), transparent); }
 .dk-gh[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+/* on the grid a head drags onto a pane: all its tabs open on that side */
+.dk-gh[data-grab] { cursor: grab; }
 
 /* a tab never squeezes below its title: up to 20 characters show, then the ellipsis (the tooltip has it all) */
 .dk-tab {
@@ -409,6 +402,50 @@
 
 /* while a drag is on: a target over each pane, above its terminal; the half (or the whole) it would take lights */
 .dk-drop { position: absolute; z-index: 5; }
+/* a section dragged: the side of the Desk it would take (or the edge where a new side opens) */
+.dk-side-drop { position: absolute; z-index: 6; pointer-events: none; }
+.dk-side-t {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 24px);
+  padding: 6px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  background: #000;
+  border: 1px solid var(--fg);
+  border-radius: 10px;
+}
+.dk-side-t[data-zone='left'] { left: 25%; max-width: calc(50% - 16px); }
+.dk-side-t[data-zone='right'] { left: 75%; max-width: calc(50% - 16px); }
+/* the section under the pointer while it drags */
+.dk-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--dk-plain-hi);
+  border: 1px solid var(--dk-edge-hi);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .6);
+  pointer-events: none;
+}
 .dk-drop-hint {
   position: absolute;
   inset: 0;

@@ -14,11 +14,19 @@
 //            the bare terminal (no composer, keys, activity column or bar), on a touch screen with
 //            the terminal page's own controls; nothing wider than the screen, no lights button
 //   sections (desktop, iPad, phone) after a Recover all: a big section with nothing waiting starts
-//            collapsed, a press on its head expands it; long titles keep 14 to 20 characters, the rows
-//            wrap from the left edge (three at most before they scroll), the phone keeps one row that
-//            scrolls; his choice survives a reload; collapsed, the tab in view stays and the head lights
-//            for a hidden question; with no choice kept a big section with a question starts expanded;
-//            Ctrl+Tab skips the hidden tabs
+//            collapsed, a press on its head expands it; long titles keep 14 to 20 characters, the strip
+//            stays one row from the left edge that scrolls sideways (never a second row); his choice
+//            survives a reload; collapsed, the tab in view stays and the head lights for a hidden
+//            question; with no choice kept a big section with a question starts expanded; Ctrl+Tab
+//            skips the hidden tabs
+//   scroll   (desktop, iPad) the one row scrolls: the mouse wheel and a sideways mouse drag on a tab
+//            (no drag of the tab, no tab opened, a click still opens one), a pan pulled down onto a
+//            pane becoming the tab's drag, a finger's swipe on the iPad; the focused tab kept in view
+//            clear of "Sessions" and "+"
+//   sectiondrop  a section's head dragged onto the grid opens all its tabs together: a mouse onto a
+//            pane's edge opens them as a new side, onto a side's middle they take that side, a finger
+//            drags a head too; a tab dropped in a side stays in it, a closed tab closes its side up,
+//            the sides are kept across a reload, a press on the head still collapses it
 //   done     a hidden tab going working to idle, and another working to asking, lights its title;
 //            opening it clears it; a whole run between two reads lights too; an API restart and
 //            empty lists change nothing; the badge counts them (asking tone) from any screen
@@ -552,14 +560,9 @@ function sectionTests() {
         t.check(s.ch > 0 && !narrow.length, `titles cut to under 14 characters (${s.ch.toFixed(1)} px each): ${JSON.stringify(narrow)}`)
         const wide = s.cut.filter((c) => c.w > 20 * s.ch + 1)
         t.check(!wide.length, `titles wider than 20 characters: ${JSON.stringify(wide)}`)
-        if (device === 'phone') {
-          t.check(s.rows.length === 1 && s.sw > s.cw + 20, `the phone's strip is not one row that scrolls sideways: ${JSON.stringify({ rows: s.rows, sw: s.sw, cw: s.cw })}`)
-        } else {
-          t.check(s.rows.length >= 2, `the tabs did not wrap to more rows: ${JSON.stringify(s.rows)}`)
-          const off = s.rows.filter((r) => r.y >= s.rows[0].y && r.y <= s.rows[0].y + s.h).filter((r) => Math.abs(r.x - s.left) > 1)
-          t.check(!off.length, `rows that do not start at the strip's left edge (${s.left}): ${JSON.stringify(off)}`)
-          t.check(s.h <= 3 * s.tabH + 2 * 4 + 16, `the strip is ${s.h} px high, more than three rows of ${s.tabH}`)
-        }
+        // every device: one row that scrolls sideways, never a second row
+        t.check(s.rows.length === 1 && s.sw > s.cw + 20, `the strip is not one row that scrolls sideways: ${JSON.stringify({ rows: s.rows, sw: s.sw, cw: s.cw })}`)
+        t.check(s.sh <= s.h + 1 && s.h <= s.tabH + 16, `the strip is ${s.h} px high (${s.sh} with its overflow), more than one row of ${s.tabH}`)
         await t.shot(page, 'expanded')
       })
       await t.step('his choice is kept across a reload', async () => {
@@ -607,6 +610,273 @@ function sectionTests() {
       }
     },
   }))
+}
+
+// ---------- the one row scrolls: wheel, a mouse drag, a finger; a section's head dragged onto the grid ----------
+
+/** The strip's scroll and box, and which tab has the keyboard. */
+const stripNow = (page) => page.eval(() => {
+  const row = document.querySelector('.vl-page[data-active] .dk-tabs')
+  const r = row?.getBoundingClientRect()
+  return {
+    left: row?.scrollLeft ?? 0, sw: row?.scrollWidth ?? 0, cw: row?.clientWidth ?? 0,
+    x: r?.left ?? 0, y: r ? r.top + r.height / 2 : 0, r: r?.right ?? 0, b: r?.bottom ?? 0,
+    focus: document.querySelector('.vl-page[data-active] .dk-tab[data-focus]')?.getAttribute('data-name') ?? null,
+  }
+})
+
+/** A box on the page by selector, in viewport px. */
+const boxOf = (page, sel) => page.eval((s) => {
+  const r = document.querySelector(s)?.getBoundingClientRect()
+  return r ? { l: r.left, t: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 } : null
+}, sel)
+
+/**
+ * A mouse press at `from`, moves through `path` (button held), release at the last point. Chrome hands
+ * any drag of its own it starts to the test (Input.setInterceptDrags): returns whether one started.
+ */
+async function mousePath(page, from, path) {
+  await page.send('Input.setInterceptDrags', { enabled: true })
+  let dragged = false
+  const off = page.on((m) => { if (m.method === 'Input.dragIntercepted') dragged = true })
+  try {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y })
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 })
+    for (const p of path) {
+      await sleep(p.wait ?? 25)
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'left', buttons: 1 })
+    }
+    const end = path[path.length - 1] ?? from
+    await sleep(150)
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: end.x, y: end.y, button: 'left', buttons: 0, clickCount: 1 })
+    await sleep(150)
+    return dragged
+  } finally {
+    off()
+    await page.send('Input.setInterceptDrags', { enabled: false }).catch(() => {})
+  }
+}
+
+/** Points from a to b in `n` steps (a left out). */
+const line = (a, b, n = 10, wait) => Array.from({ length: n }, (_, k) => ({ x: a.x + ((b.x - a.x) * (k + 1)) / n, y: a.y + ((b.y - a.y) * (k + 1)) / n, wait }))
+
+/** A section's head dragged by pointer: down out of the strip first, then over to `to`, held there, released. */
+async function dragHead(page, key, to, { touch = false } = {}) {
+  const h = await boxOf(page, `.vl-page[data-active] .dk-tg[data-key="${key}"] .dk-gh`)
+  if (!h) throw new Error(`no head for the ${key} section`)
+  const from = { x: h.cx, y: h.cy }
+  const down = { x: from.x, y: from.y + 70 }
+  const path = [...line(from, down, 6), ...line(down, to, 12), { ...to, wait: 300 }, { x: to.x + 1, y: to.y, wait: 120 }]
+  if (!touch) return mousePath(page, from, path)
+  const tp = (p) => [{ x: p.x, y: p.y, radiusX: 4, radiusY: 4, force: 1, id: 1 }]
+  await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: tp(from) })
+  for (const p of path) {
+    await sleep(p.wait ?? 25)
+    await page.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: tp(p) })
+  }
+  await sleep(150)
+  await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await sleep(150)
+  return false
+}
+
+/** The panes in view by column: their names left to right, each column top to bottom, with each pane's box. */
+const columns = (d) => {
+  const cols = []
+  for (const f of [...d.frames].sort((a, b) => a.x - b.x || a.y - b.y)) {
+    const c = cols.find((k) => Math.abs(k.x - f.x) <= 2)
+    if (c) c.panes.push(f)
+    else cols.push({ x: f.x, panes: [f] })
+  }
+  return cols.map((c) => c.panes.sort((a, b) => a.y - b.y))
+}
+const colNames = (d) => columns(d).map((c) => c.map((f) => f.name).join(' ')).join(' | ')
+
+function scrollTests() {
+  return ['desktop', 'ipad'].map((device) => ({
+    name: `desk:scroll:${device}`,
+    group: 'desk',
+    device,
+    timeout: 180_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      // every section expanded: the row runs far past the Desk's width
+      const page = await t.page({ stubFrames: true, storage: { 'v2.desk.sections': JSON.stringify({ personal: false }) } })
+      const st = deskBackend(page)
+      addRecovered(st)
+      await page.goto('/m/desk')
+      await deskUp(page, N + EXTRA)
+      let s = await page.eval(stripShape)
+      t.check(s.rows.length === 1 && s.sw > s.cw * 1.5, `the strip is not one long row: ${JSON.stringify({ rows: s.rows, sw: s.sw, cw: s.cw })}`)
+      if (device === 'desktop') {
+        await t.step('the mouse wheel scrolls the row sideways', async () => {
+          const a = await stripNow(page)
+          await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: a.x + a.cw / 2, y: a.y, deltaX: 0, deltaY: 400 })
+          await sleep(400)
+          const b = await stripNow(page)
+          t.check(b.left > a.left + 100, `a wheel turn moved the strip from ${a.left} to ${b.left}`)
+          await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: a.x + a.cw / 2, y: a.y, deltaX: 0, deltaY: -2000 })
+          await sleep(400)
+          t.check((await stripNow(page)).left === 0, 'a wheel turn back did not reach the row\'s start')
+        })
+        await t.step('a mouse dragged sideways on a tab pans the row: no drag of the tab, no tab opened', async () => {
+          const a = await stripNow(page)
+          // a tab well inside the strip's right half, so the drag stays on the strip
+          const from = await page.eval(() => {
+            const row = document.querySelector('.vl-page[data-active] .dk-tabs').getBoundingClientRect()
+            const r = [...document.querySelectorAll('.vl-page[data-active] .dk-tab .dk-tab-t')].map((e) => e.getBoundingClientRect())
+              .find((b) => b.left > row.left + row.width * 0.6 && b.right < row.right - 80)
+            return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+          })
+          t.check(!!from, 'no tab in the right half of the strip to drag')
+          const dragged = await mousePath(page, from, line(from, { x: from.x - 320, y: from.y + 3 }, 16))
+          const b = await stripNow(page)
+          t.check(!dragged, 'the sideways drag started the browser\'s drag of the tab')
+          t.check(b.left >= a.left + 250, `a 320 px drag moved the strip from ${a.left} to ${b.left}`)
+          t.check(b.focus === a.focus, `the pan opened a tab: the focus went from ${a.focus} to ${b.focus}`)
+          await t.shot(page, 'panned')
+        })
+        await t.step('a click on a tab still opens it', async () => {
+          await tap(page, `.dk-tab[data-name="${xName(7)}"] .dk-tab-main`)
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'a click did not open the tab', [xName(7)])
+        })
+        await t.step('a pan pulled down onto a pane becomes the tab\'s drag: the Desk splits', async () => {
+          const tab = await boxOf(page, `.vl-page[data-active] .dk-tab[data-name="${xName(8)}"] .dk-tab-t`)
+          const pane = await boxOf(page, `.vl-page[data-active] .dk-pane[data-name="${xName(7)}"]`)
+          const from = { x: tab.cx, y: tab.cy }
+          const side = { x: from.x - 60, y: from.y }
+          const to = { x: pane.l + pane.w * 0.93, y: pane.cy }
+          await mousePath(page, from, [...line(from, side, 6), ...line(side, to, 14), { ...to, wait: 300 }, { x: to.x - 1, y: to.y, wait: 120 }])
+          await inView(page, [xName(7), xName(8)])
+        })
+        await t.step('Ctrl+Tab to the last tab keeps it in view, clear of "+"', async () => {
+          await tap(page, `.dk-tab[data-name="${P.s1}"] .dk-tab-main`)
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'the Odin tab did not open', [P.s1])
+          await page.eval(() => { document.querySelector('.vl-page[data-active] .dk-tabs').scrollLeft = 0 })
+          await sleep(200)
+          await page.eval(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+          await page.key('Tab', { ctrl: true })
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'Ctrl+Tab did not reach the last tab', [P.sh])
+          await sleep(300)
+          const clear = await page.eval((n) => {
+            const tab = document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`).getBoundingClientRect()
+            const add = document.querySelector('.vl-page[data-active] .dk-add').getBoundingClientRect()
+            const row = document.querySelector('.vl-page[data-active] .dk-tabs').getBoundingClientRect()
+            return { tabR: tab.right, addL: add.left, tabL: tab.left, rowL: row.left }
+          }, P.sh)
+          t.check(clear.tabR <= clear.addL + 1 && clear.tabL >= clear.rowL - 1, `the focused last tab is not in view clear of "+": ${JSON.stringify(clear)}`)
+        })
+      } else {
+        await t.step('a finger\'s swipe scrolls the row, not the page', async () => {
+          const a = await stripNow(page)
+          await page.swipe(a.r - 40, a.y, a.x + 60, a.y)
+          await sleep(500)
+          const b = await stripNow(page)
+          t.check(b.left > a.left + 100, `a swipe moved the strip from ${a.left} to ${b.left}`)
+          t.check((await page.path()) === '/m/desk', `the swipe moved the page to ${await page.path()}`)
+          s = await page.eval(stripShape)
+          t.check(s.rows.length === 1, `the iPad's strip wrapped: ${JSON.stringify(s.rows)}`)
+          await t.shot(page, 'swiped')
+        })
+      }
+    },
+  }))
+}
+
+function sectionDropTests() {
+  return [{
+    name: 'desk:sectiondrop:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 200_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      deskBackend(page)
+      await page.goto('/m/desk')
+      await deskUp(page)
+      const stage = await boxOf(page, '.vl-page[data-active] .dk-stage')
+      const pane = (name) => boxOf(page, `.vl-page[data-active] .dk-pane[data-name="${name}"]`)
+      const thor = [P.p1, P.d1, P.pj]
+      await t.step('the Thor head dragged onto the pane\'s right edge opens its three tabs as a new right side', async () => {
+        const p = await pane(P.w1)
+        const t0 = Date.now()
+        const dragged = await dragHead(page, 'personal', { x: p.l + p.w * 0.93, y: p.cy })
+        t.check(!dragged, 'the head started the browser\'s drag')
+        await until(page, (want) => {
+          const on = [...document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]')].map((f) => f.getAttribute('data-name'))
+          return want.every((n) => on.includes(n)) && on.length === want.length
+        }, 'the three Thor tabs never opened beside the pane', [[P.w1, ...thor]])
+        const d = await page.eval(desk)
+        const cols = columns(d)
+        t.check(colNames(d) === `${P.w1} | ${thor.join(' ')}`, `the grid reads ${colNames(d)}, want the pane left and Thor's three stacked on the right`)
+        const [l, r] = cols
+        t.check(l?.[0] && Math.abs(l[0].w - stage.w / 2) < stage.w * 0.05 && l[0].h > stage.h * 0.9, `the left side is not half the Desk, full height: ${JSON.stringify(l)}`)
+        t.check(r?.length === 3 && r.every((f) => f.h < stage.h * 0.4 && Math.abs(f.w - stage.w / 2) < stage.w * 0.05), `the right side is not three stacked halves: ${JSON.stringify(r)}`)
+        t.check(thor.includes(focusOf(d)), `the keyboard went to ${focusOf(d)}, want one of Thor's`)
+        t.check(!(await page.eval(() => !!document.querySelector('.dk-ghost, .dk-side-drop, .dk-drop'))), 'the drag\'s ghost or targets stayed up after the drop')
+        t.note(`the drop took ${Date.now() - t0} ms`)
+        await t.shot(page, 'thor-right')
+      })
+      await t.step('the Odin head dropped on the right side\'s middle takes that side; the left keeps its pane', async () => {
+        const p = await pane(P.d1)
+        await dragHead(page, 'server', { x: p.cx, y: p.cy })
+        await inView(page, [P.w1, P.s1])
+        const d = await page.eval(desk)
+        t.check(colNames(d) === `${P.w1} | ${P.s1}`, `the grid reads ${colNames(d)}, want the pane left and Odin right`)
+        t.check(thor.every((n) => tabNames(d).includes(n) && !tabOf(d, n)?.on), 'the Thor tabs it replaced are not tabs out of the grid')
+      })
+      await t.step('a finger drags the Thor head onto the left pane\'s left edge: a new side on the left', async () => {
+        await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+        try {
+          const p = await pane(P.w1)
+          const before = (await stripNow(page)).left
+          await dragHead(page, 'personal', { x: p.l + p.w * 0.06, y: p.cy }, { touch: true })
+          await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 5, 'the finger\'s drop never opened the Thor tabs')
+          const after = (await stripNow(page)).left
+          t.check(Math.abs(after - before) <= 1, `the strip scrolled under the finger's drag, from ${before} to ${after}`)
+        } finally {
+          await page.send('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {})
+        }
+        const d = await page.eval(desk)
+        t.check(colNames(d) === `${thor.join(' ')} | ${P.w1} | ${P.s1}`, `the grid reads ${colNames(d)}, want Thor's three, then the two panes`)
+        await t.shot(page, 'finger-left')
+      })
+      await t.step('a tab dropped on a pane in a side stays in that side', async () => {
+        await dragOnto(page, P.w3, P.s1, 0.5, 0.95)
+        await until(page, (n) => !!document.querySelector(`.vl-page[data-active] .dk-frame[data-on][data-name="${n}"]`), 'the dropped tab never opened', [P.w3])
+        const d = await page.eval(desk)
+        t.check(colNames(d) === `${thor.join(' ')} | ${P.w1} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}, want the tab under Odin on the right side`)
+      })
+      await t.step('the sides are kept across a reload', async () => {
+        const before = colNames(await page.eval(desk))
+        await sleep(300)
+        await page.goto('/m/desk')
+        await deskUp(page)
+        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 6, 'the six panes did not come back')
+        const after = colNames(await page.eval(desk))
+        t.check(after === before, `after a reload the grid reads ${after}, want ${before}`)
+      })
+      await t.step('a tab closed in a side closes that side up', async () => {
+        await page.eval((n) => document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`)
+          ?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })), P.w1)
+        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 5, 'the closed tab\'s pane stayed')
+        const d = await page.eval(desk)
+        t.check(colNames(d) === `${thor.join(' ')} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}, want the middle side gone`)
+      })
+      await t.step('a press on a head still collapses it, and a single tab still drags', async () => {
+        const head = '.vl-page[data-active] .dk-tg[data-key="work"] .dk-gh'
+        await tap(page, head)
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="work"][data-folded]'), 'a press on the Work head did not collapse it')
+        await tap(page, head)
+        await until(page, () => !document.querySelector('.vl-page[data-active] .dk-tg[data-key="work"][data-folded]'), 'a second press did not expand it')
+        await dragOnto(page, P.w2, P.p1, 0.5, 0.5)
+        await until(page, (n) => !!document.querySelector(`.vl-page[data-active] .dk-frame[data-on][data-name="${n}"]`), 'the tab dropped on a pane\'s middle did not take its place', [P.w2])
+        const d = await page.eval(desk)
+        t.check(colNames(d) === `${P.w2} ${P.d1} ${P.pj} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}`)
+      })
+    },
+  }]
 }
 
 function doneTests() {
@@ -1484,5 +1754,5 @@ function ravenTests() {
 }
 
 export function deskTests() {
-  return [...layoutTests(), ...sectionTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests(), ...ravenTests()]
+  return [...layoutTests(), ...sectionTests(), ...scrollTests(), ...sectionDropTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests(), ...ravenTests()]
 }

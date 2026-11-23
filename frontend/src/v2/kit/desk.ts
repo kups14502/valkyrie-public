@@ -247,17 +247,62 @@ export function setDeskInView(names: string[]): void {
 // put them back). focus: the pane with the keyboard; a tab picked from the
 // strip opens there. raven: the panes Raven started that he opened; every
 // other pane Raven started stays off the Desk, minimized in Raven's list. The tab order is not kept here: the Desk sorts the tabs
-// by area, then project, every time.
+// by area, then project, every time. sides: set once he drops a whole section on the grid, the
+// panes on each side of the Desk, left to right (view holds them side after side); each side lays
+// its own out. Absent, the grid goes by count alone.
 
 export type DeskLayout = {
   view: string[]
   off: string[]
   focus: string | null
   raven: string[]
+  sides?: number[]
 }
 
 /** The most panes the grid shows (3x3). */
 export const MAX_VIEW = 9
+/** The most sides a section drop splits the Desk into. */
+export const MAX_SIDES = 3
+
+/** The sides' counts when they still describe `n` panes (two or more sides, each holding one or more), else undefined. */
+export function fitSides(sides: unknown, n: number): number[] | undefined {
+  if (!Array.isArray(sides) || sides.length < 2 || sides.length > MAX_SIDES) return undefined
+  if (!sides.every((k) => Number.isInteger(k) && k >= 1)) return undefined
+  return sides.reduce((a: number, k: number) => a + k, 0) === n ? [...(sides as number[])] : undefined
+}
+
+/** The side that holds view index i (0 without sides). */
+export function sideAt(sides: readonly number[] | undefined, i: number): number {
+  if (!sides) return 0
+  let end = 0
+  for (let s = 0; s < sides.length; s++) {
+    end += sides[s]
+    if (i < end) return s
+  }
+  return sides.length - 1
+}
+
+/** Takes panes out of the view; each side keeps the rest of its own, an emptied side closes, one side left is the plain grid. */
+export function dropFromView(l: DeskLayout, names: Iterable<string>): void {
+  const gone = new Set(names)
+  if (l.sides) {
+    const out: number[] = []
+    let i = 0
+    for (const k of l.sides) {
+      const keep = l.view.slice(i, i + k).filter((x) => !gone.has(x)).length
+      if (keep) out.push(keep)
+      i += k
+    }
+    l.sides = out.length > 1 ? out : undefined
+  }
+  l.view = l.view.filter((x) => !gone.has(x))
+}
+
+/** Puts pane `name` into the view at index `at`, on the side of index `side`'s panes. */
+export function addToView(l: DeskLayout, name: string, at: number, side: number): void {
+  l.view.splice(at, 0, name)
+  if (l.sides) l.sides[Math.min(Math.max(side, 0), l.sides.length - 1)] += 1
+}
 
 const LAYOUT_KEY = 'v2.desk.grid'
 
@@ -268,11 +313,14 @@ function loadLayout(): DeskLayout {
   } catch { /* storage unavailable */ }
   const raw = read<Partial<DeskLayout>>(LAYOUT_KEY) ?? {}
   const names = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((n): n is string => typeof n === 'string' && TERM_NAME_RE.test(n)))] : [])
+  const view = names(raw.view).slice(0, MAX_VIEW)
+  const sides = fitSides(raw.sides, view.length)
   return {
-    view: names(raw.view).slice(0, MAX_VIEW),
+    view,
     off: names(raw.off),
     raven: names(raw.raven),
     focus: typeof raw.focus === 'string' && TERM_NAME_RE.test(raw.focus) ? raw.focus : null,
+    ...(sides ? { sides } : {}),
   }
 }
 
@@ -282,9 +330,13 @@ export const deskLayout = (): DeskLayout => layout
 
 /** Changes the layout (a new object, so memos see it), saves it and re-renders the Desk and the badge. */
 export function editLayout(fn: (l: DeskLayout) => DeskLayout | void): void {
-  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off], raven: [...layout.raven] }
+  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off], raven: [...layout.raven], ...(layout.sides ? { sides: [...layout.sides] } : {}) }
   const next = fn(draft) ?? draft
   next.view = [...new Set(next.view)].slice(0, MAX_VIEW)
+  // sides that no longer add up to the view (an edit that did not keep them) give way to the plain grid
+  const sides = fitSides(next.sides, next.view.length)
+  if (sides) next.sides = sides
+  else delete next.sides
   if (JSON.stringify(next) === JSON.stringify(layout)) return
   layout = next
   write(LAYOUT_KEY, layout)
@@ -316,7 +368,7 @@ export function syncLayout(list: TermSession[]): void {
     || (!!layout.focus && !open.has(layout.focus))
   if (!gone) return
   editLayout((l) => {
-    l.view = l.view.filter((n) => open.has(n))
+    dropFromView(l, l.view.filter((n) => !open.has(n)))
     l.off = l.off.filter((n) => open.has(n))
     l.raven = l.raven.filter((n) => open.has(n))
     if (l.focus && !open.has(l.focus)) l.focus = null
