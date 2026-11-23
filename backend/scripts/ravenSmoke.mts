@@ -102,6 +102,7 @@ fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, e
     const j = await r.json().catch(() => ({ status: r.status }))
     const content = (j.result && j.result.content) || []
     return { tool, status: r.status, isError: j.result ? j.result.isError : undefined, text: (content.find((c) => c.type === 'text') || {}).text,
+      texts: content.filter((c) => c.type === 'text').map((c) => c.text),
       types: content.map((c) => c.type), mime: (content.find((c) => c.type === 'image') || {}).mimeType, error: j.error }
   }
   if (kind === 'agent') {
@@ -122,14 +123,40 @@ fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, e
   fs.writeFileSync(path.join(dir, 'raven-count.json'), JSON.stringify(n))
   fs.writeFileSync(path.join(dir, 'last-raven.json'), JSON.stringify({ prompt, sys, model, effort }))
   const results = []
-  for (const s of entry.steps || []) {
-    if (s.sleep) { await sleep(s.sleep); continue }
-    results.push(await call(s.tool, s.args || {}))
+  const steps = async (list) => {
+    for (const s of list || []) {
+      if (s.sleep) { await sleep(s.sleep); continue }
+      results.push(await call(s.tool, s.args || {}))
+    }
   }
+  await steps(entry.steps)
   fs.writeFileSync(path.join(dir, 'results-raven-' + n + '.json'), JSON.stringify(results))
   if (entry.stderrOnly) { process.stderr.write(entry.stderrOnly + '\\n'); process.exit(1) }
   if (entry.exit) { process.stdout.write('boom'); process.exit(entry.exit) }
-  out({ type: 'result', is_error: false, result: entry.result === undefined ? 'ok' : entry.result, total_cost_usd: 0.01, num_turns: 1 })
+  // the Stop hook from --settings, run the way the CLI runs it (the hook input on stdin): a block hands back a reason
+  // and the run goes on with the next of entry.then, whose answer is the result
+  let final = entry.result === undefined ? 'ok' : entry.result
+  const settingsFile = val('--settings')
+  const stopCmd = settingsFile ? ((((JSON.parse(fs.readFileSync(settingsFile, 'utf8')).hooks || {}).Stop || [])[0] || {}).hooks || [])[0]?.command : null
+  const then = [...(entry.then || [])]
+  const stops = []
+  for (let i = 0; stopCmd && i < 5; i++) {
+    let o = {}
+    try {
+      const input = JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: i > 0, last_assistant_message: final })
+      o = JSON.parse(require('child_process').execSync(stopCmd, { input, shell: '/bin/bash' }).toString() || '{}')
+    } catch (e) { o = { failed: String(e.message).slice(0, 300) } }
+    stops.push(o)
+    if (o.decision !== 'block') break
+    const next = then.shift() || {}
+    await steps(next.steps)
+    final = next.result === undefined ? 'ok' : next.result
+  }
+  fs.writeFileSync(path.join(dir, 'results-raven-' + n + '.json'), JSON.stringify(results))
+  fs.writeFileSync(path.join(dir, 'stops-raven-' + n + '.json'), JSON.stringify(stops))
+  // the CLI still up after its last answer: what he writes now is too late for this run
+  if (entry.afterStop) await sleep(entry.afterStop)
+  out({ type: 'result', is_error: false, result: final, total_cost_usd: 0.01, num_turns: 1 })
 })()
 `, 0o755)
 w('accounts.json', JSON.stringify([{ id: 'smoke', label: 'Smoke', configDir: path.join(stub, 'cfg') }]))
@@ -155,7 +182,7 @@ Object.assign(process.env, {
   RAVEN_ROUTER_TIMEOUT_MS: '5000',
   RAVEN_SAY_WAIT_MS: '10000',
   RAVEN_PUSH_THROTTLE_MS: '300',
-  RAVEN_HOURLY_CAP: '60',
+  RAVEN_HOURLY_CAP: '80',
   VALKYRIE_CONF_DIR: conf,
   CLAUDE_CLI_PATH: path.join(stub, 'claude'),
   CLAUDE_ACCOUNTS_FILE: path.join(stub, 'accounts.json'),
@@ -278,6 +305,7 @@ check('run flags: locked down', f1.includes('--strict-mcp-config') && /--mcp-con
 // the deny list alone leaves Monitor (a shell) and the tools that message other sessions: --tools names the only built-ins
 const fl1: string[] = run1?.flags ?? []
 check('run flags: the only built-in tools are WebSearch and WebFetch', fl1.includes('--tools') && fl1[fl1.indexOf('--tools') + 1] === 'WebSearch,WebFetch', fl1)
+check('run flags: a run he started gets the Stop hook that hands it his follow-ups', fl1.includes('--settings') && /settings\.json$/.test(fl1[fl1.indexOf('--settings') + 1] ?? ''), fl1)
 const deny1 = (fl1[fl1.indexOf('--disallowed-tools') + 1] ?? '').split(',')
 check('run flags: web tools not denied, the shell and file tools are', !deny1.includes('WebSearch') && !deny1.includes('WebFetch') && ['Bash', 'Edit', 'Write', 'Read'].every((t) => deny1.includes(t)), deny1)
 let lr = lastRaven()
@@ -524,10 +552,19 @@ check('a run he did not start follows the background rule', bgRoute.tier === 'op
 check('settings: back to Automatic with the default rules', kst === 200 && sv.settings.model === 'auto' && sv.settings.effort === 'auto' && sv.settings.rules.voice.model === 'sonnet', sv.settings)
 router({})
 
-// ------------------------------------------------------------ queueing ---
+// ---------------------------------------------- what he writes during a run ---
+// A run he started takes his follow-ups in: in its next tool result, or at its Stop hook, which keeps the run going
+// to answer them under the answer it had. Each is claimed for that run. One sent after the run's last answer, or
+// during a run he did not start, gets a run of its own, as before.
 
-queue({ steps: [{ sleep: 1500 }], result: 'first' }, { result: 'second' })
-const runsBefore = runsOf()
+const evDb = new Database(path.join(dataDir, 'agents.sqlite'), { readonly: true })
+const runOfMessage = (id: number): string | null => (evDb.prepare("SELECT runId FROM events WHERE agentId = 'raven' AND kind = 'message' AND json_extract(payload, '$.messageId') = ?").get(id) as { runId: string | null } | undefined)?.runId ?? null
+const stopsOf = (n = ravenCount()): any[] => rj(`stops-raven-${n}.json`, [])
+const wokeBy = () => (lastRaven().prompt ?? '').split('## Your notebook')[0]
+
+// at the Stop hook: two follow-ups sent while it works, one run, one reply
+queue({ steps: [{ sleep: 1500 }], result: 'first', then: [{ result: 'second' }] }, { result: 'never used' })
+let runsBefore = runsOf()
 const [, q1] = await j('POST', '/raven/messages', { text: 'first ask' })
 await until(() => raven.ravenState().status === 'working')
 check('working while it runs, with the model and effort', raven.ravenState().statusNote.startsWith('Thinking · Sonnet 5') && raven.ravenState().effort === 'low', raven.ravenState())
@@ -536,11 +573,84 @@ check('GET /raven shows working', rv.status === 'working' && rv.tier === 'sonnet
 const [, q2] = await j('POST', '/raven/messages', { text: 'second ask' })
 const [, q3] = await j('POST', '/raven/messages', { text: 'third ask' })
 await ravenIdle()
-check('two runs for three messages', runsOf() - runsBefore === 2, runsOf() - runsBefore)
-const replies = thread().filter((m) => m.author === 'raven').slice(-2)
-check('first reply answers the first', replies[0]?.text === 'first' && replies[0].meta.replyTo === q1.message.id, replies)
-check('second run handled both queued messages', replies[1]?.text === 'second' && replies[1].meta.replyTo === q3.message.id
-  && lastRaven().prompt.includes('second ask') && lastRaven().prompt.includes('third ask') && q2.message.id < q3.message.id, lastRaven().prompt?.slice(0, 600))
+let stops = stopsOf()
+check('mid-run: one run for three messages', runsOf() - runsBefore === 1, runsOf() - runsBefore)
+check('mid-run: its prompt held only the first', wokeBy().includes('first ask') && !wokeBy().includes('second ask'), wokeBy().slice(0, 600))
+check('mid-run: the Stop hook hands both over and keeps the run going', stops.length === 2 && stops[0].decision === 'block'
+  && stops[0].reason.includes(`message ${q2.message.id}`) && stops[0].reason.includes('second ask') && stops[0].reason.includes('third ask')
+  && stops[0].reason.includes('Your answer above stands') && JSON.stringify(stops[1]) === '{}', stops)
+reply = lastRavenMsg()
+check('mid-run: one reply, its first answer with the next under it, to the newest message', reply?.text === 'first\n\nsecond' && reply.meta.replyTo === q3.message.id, reply)
+const runQ = store.listRuns('raven', 1)[0]
+check('mid-run: both follow-ups marked handled by that run, nothing left open', runOfMessage(q2.message.id) === runQ?.id && runOfMessage(q3.message.id) === runQ?.id
+  && runOfMessage(q1.message.id) === runQ?.id && !store.openEvents('raven').length && runQ?.summary === 'first\n\nsecond', { runQ, q2: runOfMessage(q2.message.id) })
+await sleep(300)
+check('mid-run: no second run follows', runsOf() - runsBefore === 1 && lastRavenMsg()?.id === reply?.id, runsOf() - runsBefore)
+
+// in the next tool result: shown there, so the Stop hook lets the run end
+queue({ steps: [{ sleep: 800 }, { tool: 'now' }], result: 'backups fine, NAS fine' })
+runsBefore = runsOf()
+const [, t1] = await j('POST', '/raven/messages', { text: 'check the backups' })
+await until(() => raven.ravenState().status === 'working')
+const [, t2] = await j('POST', '/raven/messages', { text: 'and the NAS too' })
+await ravenIdle()
+let tr = ravenResults()
+check('mid-run: the next tool result carries his new message under its own text', tr[0]?.texts?.length === 2 && tr[0].texts[0].includes('Agents')
+  && tr[0].texts[1].startsWith('Brendon wrote again while you work') && tr[0].texts[1].includes(`message ${t2.message.id}`) && tr[0].texts[1].includes('and the NAS too'), tr[0])
+check('mid-run: shown in a tool result, so the Stop hook lets it end', JSON.stringify(stopsOf()) === '[{}]', stopsOf())
+check('mid-run: one run, the reply to the newest', runsOf() - runsBefore === 1 && lastRavenMsg()?.text === 'backups fine, NAS fine'
+  && lastRavenMsg()?.meta.replyTo === t2.message.id && runOfMessage(t2.message.id) === runOfMessage(t1.message.id), { runs: runsOf() - runsBefore, last: lastRavenMsg() })
+
+// from Siri, at the Stop hook: the spoken rule goes with it, and Siri gets the part written for it
+queue({ steps: [{ sleep: 1200 }], result: 'Typed answer:\n\n- one\n- two', then: [{ result: 'It is **sunny** today.' }] })
+runsBefore = runsOf()
+const [, s1] = await j('POST', '/raven/messages', { text: 'list the two things' })
+await until(() => raven.ravenState().status === 'working')
+const [sayMidSt, sayMid] = await j('POST', '/raven/say', { text: 'what is the weather', wait: true, source: 'siri' })
+await ravenIdle()
+stops = stopsOf()
+check('mid-run siri: the hand-over keeps the spoken rule', stops[0]?.decision === 'block' && stops[0].reason.includes('by voice through Siri') && stops[0].reason.includes('spoken aloud'), stops)
+check('mid-run siri: Siri gets only the part written after it, speakable', sayMidSt === 200 && sayMid.done === true && sayMid.reply === 'It is sunny today.', sayMid)
+check('mid-run siri: the thread gets the whole reply from one run', runsOf() - runsBefore === 1 && lastRavenMsg()?.text === 'Typed answer:\n\n- one\n- two\n\nIt is **sunny** today.'
+  && lastRavenMsg()?.meta.replyTo === sayMid.id && s1.message.id < sayMid.id, lastRavenMsg())
+
+// a run that repeats its held answer in full: posted once
+queue({ steps: [{ sleep: 900 }], result: 'Lights off.', then: [{ result: 'Lights off.\n\nFan on too.' }] })
+const [, r1] = await j('POST', '/raven/messages', { text: 'lights off' })
+await until(() => raven.ravenState().status === 'working')
+await j('POST', '/raven/messages', { text: 'and the fan on' })
+await ravenIdle()
+check('mid-run: an answer repeated in full is posted once', lastRavenMsg()?.text === 'Lights off.\n\nFan on too.' && runOfMessage(r1.message.id) !== null, lastRavenMsg()?.text)
+
+// too late: sent after the run's last answer (its Stop hook passed) while the CLI is still up
+queue({ steps: [{ sleep: 200 }], result: 'answer one', afterStop: 1500 }, { result: 'answer two' })
+runsBefore = runsOf()
+const nLate = ravenCount() + 1
+const [, l1] = await j('POST', '/raven/messages', { text: 'first question' })
+await until(() => fs.existsSync(path.join(stub, `stops-raven-${nLate}.json`)))
+const [, l2] = await j('POST', '/raven/messages', { text: 'too late question' })
+await ravenIdle()
+const lateReplies = thread().filter((m) => m.author === 'raven').slice(-2)
+check('late: the run that already answered does not take it', JSON.stringify(stopsOf(nLate)) === '[{}]' && lateReplies[0]?.text === 'answer one'
+  && lateReplies[0].meta.replyTo === l1.message.id && runOfMessage(l2.message.id) !== runOfMessage(l1.message.id), { stops: stopsOf(nLate), lateReplies })
+check('late: the next run answers it, as before', runsOf() - runsBefore === 2 && lateReplies[1]?.text === 'answer two' && lateReplies[1].meta.replyTo === l2.message.id
+  && wokeBy().includes('too late question') && !wokeBy().includes('first question'), { runs: runsOf() - runsBefore, woke: wokeBy().slice(0, 500) })
+
+// a run he did not start never takes his message: it gets a run of its own, on his rules
+queue({ steps: [{ sleep: 800 }, { tool: 'now' }], result: '(no reply)' }, { result: 'his own run' })
+runsBefore = runsOf()
+hooks.wakeRavenWith('session_progress', { pane: 'vk-0123456789', label: 'Server work', turnEnded: false, said: [{ at: Date.now(), from: 'claude', text: 'Building.' }] })
+await until(() => raven.ravenState().status === 'working')
+const [, relayMsg] = await j('POST', '/raven/messages', { text: 'during a relay' })
+await ravenIdle()
+const bgN = ravenCount() - 1
+const bgCalls = calls().filter((c) => c.kind === 'raven').slice(-2)
+tr = ravenResults(bgN)
+check('relay run: no Stop hook, and his message stays out of its tool results', !bgCalls[0]?.flags.includes('--settings') && bgCalls[1]?.flags.includes('--settings')
+  && tr[0]?.texts?.length === 1 && JSON.stringify(stopsOf(bgN)) === '[]', { bgCalls, tr })
+check('relay run: his message gets its own run and reply', runsOf() - runsBefore === 2 && lastRavenMsg()?.text === 'his own run' && lastRavenMsg()?.meta.replyTo === relayMsg.message.id,
+  { runs: runsOf() - runsBefore, last: lastRavenMsg()?.text })
+queue()
 
 // ---------------------------------------------------------------- stop ---
 
@@ -985,8 +1095,8 @@ check('restart: its message runs once more, as his (router ran, replyTo kept)', 
 // a run he did not start stops short of the cap: the last runs of the hour stay his
 {
   const now0 = store.runsSince('raven', new Date(Date.now() - 3_600_000).toISOString())
-  check('reserve: the smoke reaches the cap share from below', now0 < 45, now0)
-  for (let i = now0; i < 45; i++) store.startRun(`bg-${i}`, 'raven', 'cap filler')
+  check('reserve: the smoke reaches the cap share from below', now0 < 65, now0)
+  for (let i = now0; i < 65; i++) store.startRun(`bg-${i}`, 'raven', 'cap filler')
   runsAt = runsOf()
   const m0 = thread().length
   hooks.wakeRavenWith('session_reply', { pane: 'vk-0123456789', label: 'Server work', turnEnded: true, said: [{ at: Date.now(), from: 'claude', text: 'HELD-LINE shipped v9.9.9.' }] })
@@ -1002,11 +1112,11 @@ check('restart: its message runs once more, as his (router ran, replyTo kept)', 
 }
 
 const have = store.runsSince('raven', new Date(Date.now() - 3_600_000).toISOString())
-for (let i = have; i < 60; i++) store.startRun(`cap-${i}`, 'raven', 'cap filler')
+for (let i = have; i < 80; i++) store.startRun(`cap-${i}`, 'raven', 'cap filler')
 runsAt = runsOf()
 await j('POST', '/raven/messages', { text: 'over the cap' })
 await until(() => thread().some((m) => m.text.startsWith('Resting:')), 3000)
-check('hourly cap: one resting line, no run', thread().some((m) => m.text.startsWith('Resting: I hit the hourly cap of 60 runs') && m.text.endsWith('ET.')) && runsOf() === runsAt, thread().slice(-2))
+check('hourly cap: one resting line, no run', thread().some((m) => m.text.startsWith('Resting: I hit the hourly cap of 80 runs') && m.text.endsWith('ET.')) && runsOf() === runsAt, thread().slice(-2))
 
 console.log(`ravenSmoke: ${pass} passed, ${fail} failed`)
 srv.close()

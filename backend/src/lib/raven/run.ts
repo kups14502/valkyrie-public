@@ -225,6 +225,12 @@ type RavenRun = {
   runId: string; fromBrendon: boolean; acted: number; ctx: RavenToolCtx; ac: AbortController; stopped: boolean; hop: number
   /** the second try after a run Brendon started ended with no reply */
   mustAnswer?: boolean
+  /** what the run answers: the events that woke it, then his messages taken in while it ran */
+  events: AgentEvent[]
+  /** the events the CLI process going now was shown: its prompt, a tool result, its Stop hook */
+  seen: Set<number>
+  /** that process's answers its Stop hook held back for a new message, each with the messages handed over then */
+  said: { text: string; ids: number[] }[]
 }
 const RUN_TOKENS = new Map<string, RavenRun>()
 /** The run a raven-mcp request belongs to, by its token. */
@@ -368,12 +374,15 @@ async function runOnce(): Promise<boolean> {
   const runId = randomUUID()
   claimEvents(RAVEN_ID, runId, events.map((e) => e.id))
   const fromBrendon = events.some(isBrendonEvent)
-  const ids = brendonIds(events)
-  const replyTo = ids.length ? Math.max(...ids) : undefined
   startRun(runId, RAVEN_ID, triggerLine(events))
   const run: RavenRun = {
     runId, fromBrendon, acted: 0, ac: new AbortController(), stopped: false, hop: Math.max(0, ...events.map((e) => e.hop)),
-    ctx: null as unknown as RavenToolCtx,
+    ctx: null as unknown as RavenToolCtx, events: [...events], seen: new Set(), said: [],
+  }
+  // his messages this run answers, those taken in while it ran included: read when it ends
+  const answered = () => {
+    const ids = brendonIds(run.events)
+    return { ids, replyTo: ids.length ? Math.max(...ids) : undefined }
   }
   run.ctx = {
     runId,
@@ -407,30 +416,33 @@ async function runOnce(): Promise<boolean> {
       route = await chooseRoute(settings, { fromBrendon, voice, text, files: nFiles, signal: run.ac.signal })
       if (run.ac.signal.aborted) throw new ClaudeCliError('stopped')
     }
-    let result = await runModel(run, route, events, (u) => { used = u })
+    let result = await runModel(run, route, (u) => { used = u })
     // he wrote: he always gets an answer. A run that ends with none goes again once, on a stronger model.
-    if (fromBrendon && isSilent(result.text) && !run.ac.signal.aborted) {
+    if (fromBrendon && isSilent(replyOf(run, result.text)) && !run.ac.signal.aborted) {
       console.warn(`[raven] ${modelLabel(used.model ?? '')} gave Brendon no reply; trying again`)
       run.mustAnswer = true
       // what the first try did stays done: the second only looks and answers
       if (run.acted > 0) run.ctx.fromBrendon = false
       if (route.tier === 'haiku') route = { ...route, tier: 'sonnet', effort: 'medium', why: `${route.why} (again: no reply)` }
-      result = await runModel(run, route, events, (u) => { used = u })
+      result = await runModel(run, route, (u) => { used = u })
     }
-    endRun(runId, { status: 'done', summary: result.text.trim(), cred: result.cred, costUsd: result.costUsd, turns: result.turns, durationMs: Date.now() - t0 })
-    let reply = result.text.trim()
+    let reply = replyOf(run, result.text)
+    endRun(runId, { status: 'done', summary: reply, cred: result.cred, costUsd: result.costUsd, turns: result.turns, durationMs: Date.now() - t0 })
     if (fromBrendon && isSilent(reply)) reply = 'I have no answer for that. Ask me again in other words.'
+    const { ids, replyTo } = answered()
     if (reply && !NO_REPLY_RE.test(reply)) {
       const meta: RavenMeta = { tier: route.tier, model: used.model ?? undefined, effort: used.effort ?? undefined, why: route.why, ...pickMeta(route, used.model) }
       if (replyTo) meta.replyTo = replyTo
       const msg = ravenMessage(reply, { meta: withCopies(meta), push: true, force: fromBrendon })
-      settle(ids, { reply: msg.text, done: true })
+      // a message the Stop hook handed over waits (Siri) for the part written after it
+      for (const id of ids) settle([id], { reply: answerFor(run, id, result.text) || msg.text, done: true })
     } else {
       settle(ids, { reply: '', done: true })
     }
   } catch (e) {
     const stopped = run.stopped || run.ac.signal.aborted
     const raw = errorText(e).trim()
+    const { ids, replyTo } = answered()
     endRun(runId, { status: 'failed', error: stopped ? 'stopped' : raw.slice(0, 400), durationMs: Date.now() - t0 })
     if (stopped) {
       ravenMessage('Stopped.', { meta: withCopies({ error: 'stopped', ...(replyTo ? { replyTo } : {}) }) })
@@ -461,7 +473,7 @@ function pickMeta(route: Route, model: string | null): Pick<RavenMeta, 'rule' | 
 }
 
 /** The CLI run itself, with one retry on the fallback model and one on a refused effort. */
-async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse: (u: { model: string; effort: RavenEffort | null }) => void): Promise<CliRun> {
+async function runModel(run: RavenRun, route: Route, onUse: (u: { model: string; effort: RavenEffort | null }) => void): Promise<CliRun> {
   const dir = await mkdtemp(path.join(tmpdir(), 'valkyrie-raven-'))
   const token = randomBytes(24).toString('hex')
   RUN_TOKENS.set(token, run)
@@ -470,10 +482,17 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
     await mkdir(work)
     const mcpFile = path.join(dir, 'mcp.json')
     await writeFile(mcpFile, JSON.stringify({ mcpServers: { raven: { type: 'http', url: MCP_URL, headers: { 'X-Raven-Token': token } } } }), { mode: 0o600 })
-    const { system, prompt } = await buildPrompt(events, run.fromBrendon, run.mustAnswer)
+    // what he wrote since the run started (while it chose a model, or before this second try) goes in the prompt
+    takeNews(run)
+    const inPrompt = run.events.map((e) => e.id)
+    // each CLI process starts from this prompt alone: one that replaces a failed one is shown his later messages again
+    const fresh = () => { run.seen = new Set(inPrompt); run.said = [] }
+    const { system, prompt } = await buildPrompt(run.events, run.fromBrendon, run.mustAnswer)
+    const hooks = run.fromBrendon ? await writeStopHook(dir, token) : []
     let model = modelFor(route.tier)
     let effort = effortFor(route.effort)
     for (let attempt = 0; ; attempt++) {
+      fresh()
       onUse({ model, effort })
       setState({
         status: 'working', tier: route.tier, model, effort,
@@ -494,9 +513,14 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
           '--tools', RAVEN_BUILTIN,
           '--disallowed-tools', DISALLOWED,
           '--no-session-persistence',
+          ...hooks,
         ], {
           cwd: work, scratch: dir, timeoutMs: RUN_TIMEOUT_MS, signal: run.ac.signal,
-          retryable: (why) => run.acted === 0 && !isUnknownModelError(why) && !isEffortError(why),
+          retryable: (why) => {
+            const again = run.acted === 0 && !isUnknownModelError(why) && !isEffortError(why)
+            if (again) fresh()
+            return again
+          },
         })
       } catch (e) {
         const msg = errorText(e)
@@ -520,6 +544,94 @@ async function runModel(run: RavenRun, route: Route, events: AgentEvent[], onUse
     RUN_TOKENS.delete(token)
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+// ------------------------------------------- what he writes during a run ----
+// Brendon, 2026-11-23: a follow-up he sends while Raven works is answered by that run. A run he started takes his
+// next messages in as they come: the next raven tool result carries them (routes/ravenMcp.ts), and so does the
+// run's Stop hook when it is about to end, which keeps it going to answer them. Each is claimed for the run, so it
+// gets no run of its own. One that comes after the run's last answer waits for the next run, as before. A run he
+// did not start never takes one: its model and its tools were picked for a relay.
+
+const STOP_URL = `${MCP_URL.replace(/\/+$/, '')}/stop`
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/** His messages the CLI process going now was not shown yet. Those that came since the run started are claimed for it here. */
+function takeNews(run: RavenRun): AgentEvent[] {
+  if (!run.fromBrendon || run.stopped || run.ac.signal.aborted) return []
+  const open = openEvents(RAVEN_ID).filter(isBrendonEvent)
+  if (open.length) {
+    claimEvents(RAVEN_ID, run.runId, open.map((e) => e.id))
+    run.events.push(...open)
+    console.log(`[raven] message${open.length === 1 ? '' : 's'} ${brendonIds(open).join(', ')} taken into the run going now`)
+  }
+  const news = run.events.filter((e) => isBrendonEvent(e) && !run.seen.has(e.id))
+  for (const e of news) run.seen.add(e.id)
+  return news
+}
+
+const newsLines = (news: AgentEvent[]) => news.map((e) => renderEvent(e)).join('\n')
+
+/** Under a raven tool's result: his messages since the run started, or ''. */
+export function ravenNewsForToken(token: string): string {
+  const run = RUN_TOKENS.get(token)
+  const news = run ? takeNews(run) : []
+  if (!news.length) return ''
+  return `Brendon wrote again while you work:\n${newsLines(news)}\n`
+    + 'Take it in now: your final answer is your one reply to all he asked in this run, this as well.'
+}
+
+/**
+ * The run's Stop hook (POST /api/raven-mcp/stop): why it must keep going when he wrote since it was shown his
+ * messages, or null to let it end. lastAnswer is the answer it was about to end with: it is kept, and the reply is
+ * that answer with the next one under it.
+ */
+export function ravenStopForToken(token: string, lastAnswer: unknown): string | null {
+  const run = RUN_TOKENS.get(token)
+  const news = run ? takeNews(run) : []
+  if (!run || !news.length) return null
+  const text = typeof lastAnswer === 'string' ? lastAnswer.trim() : ''
+  const kept = Boolean(text) && !isSilent(text)
+  run.said.push({ text: kept ? text : '', ids: brendonIds(news) })
+  return `Brendon wrote again before your answer was posted:\n${newsLines(news)}\n`
+    + (kept
+      ? 'Your answer above stands: it is posted as you wrote it, so never repeat it. Do what this new message asks with your tools, '
+        + 'then give as your final answer only what it needs. That goes right under your answer above, in the same reply.'
+      : 'Nothing is posted yet: only your next final answer is. Do what he asked with your tools, then make that answer your whole reply to him.')
+}
+
+/** The --settings flags of a run he started: a Stop hook that asks this process whether he wrote meanwhile. */
+async function writeStopHook(dir: string, token: string): Promise<string[]> {
+  const headers = path.join(dir, 'stop-headers')
+  // the token in a file, never on a command line other users can read in ps
+  await writeFile(headers, `X-Raven-Token: ${token}\nContent-Type: application/json\n`, { mode: 0o600 })
+  // a hook that fails lets the run end as before: what he wrote then waits for the next run
+  const command = `curl -sf --max-time 20 -H @${shq(headers)} --data-binary @- ${shq(STOP_URL)} || true`
+  const file = path.join(dir, 'settings.json')
+  await writeFile(file, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command, timeout: 30 }] }] } }), { mode: 0o600 })
+  return ['--settings', file]
+}
+
+/** Answers that are not silent, in order; one that repeats the answer before it in full replaces it. */
+function joinAnswers(parts: string[]): string {
+  const out: string[] = []
+  for (const raw of parts) {
+    const t = raw.trim()
+    if (!t || isSilent(t)) continue
+    const prev = out.at(-1)
+    if (prev !== undefined && t.startsWith(prev)) out[out.length - 1] = t
+    else out.push(t)
+  }
+  return out.join('\n\n')
+}
+
+/** The reply: the answers the Stop hook held back, then the final one. */
+const replyOf = (run: RavenRun, final: string): string => joinAnswers([...run.said.map((s) => s.text), final])
+
+/** What a waiter on message id gets: one the Stop hook handed over, the part written after it; any other, '' (the whole reply). */
+function answerFor(run: RavenRun, id: number, final: string): string {
+  const k = run.said.findIndex((s) => s.ids.includes(id))
+  return k < 0 ? '' : joinAnswers([...run.said.slice(k + 1).map((s) => s.text), final])
 }
 
 // ------------------------------------------------------------ prompts ----

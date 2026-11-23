@@ -7,7 +7,9 @@ import { isLoopbackReq } from '../middleware/auth.js'
 import { AgentError, type Ref } from '../lib/agentsStore.js'
 import { etLabel } from '../lib/agents.js'
 import { attachmentContent, humanSize, listRavenFiles } from '../lib/raven/files.js'
-import { ravenFeatures, ravenLiveSnapshot, ravenMessage, ravenRunForToken, setRavenNotebook } from '../lib/raven/run.js'
+import {
+  ravenFeatures, ravenLiveSnapshot, ravenMessage, ravenNewsForToken, ravenRunForToken, ravenStopForToken, setRavenNotebook,
+} from '../lib/raven/run.js'
 import { registerRavenTools } from '../lib/raven/tools/index.js'
 import type { RavenToolCtx } from '../lib/raven/types.js'
 
@@ -99,6 +101,22 @@ function registerCore(server: McpServer, ctx: RavenToolCtx): void {
   }))))
 }
 
+type ToolCb = (...args: unknown[]) => CallToolResult | Promise<CallToolResult>
+
+/**
+ * Every tool's result carries what Brendon wrote since the run started (lib/raven/run.ts ravenNewsForToken), so a
+ * run he started answers a follow-up he sends while it works. Set before any tool registers.
+ */
+function newsUnderResults(server: McpServer, token: string): void {
+  const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: ToolCb) => unknown
+  const wrapped = (name: string, config: unknown, cb: ToolCb) => register(name, config, async (...args: unknown[]) => {
+    const r = await cb(...args)
+    const news = ravenNewsForToken(token)
+    return news ? { ...r, content: [...(r.content ?? []), { type: 'text', text: news }] } : r
+  })
+  ;(server as unknown as { registerTool: typeof wrapped }).registerTool = wrapped
+}
+
 async function serve(req: Request, res: Response) {
   const ctx = res.locals.ctx as RavenToolCtx
   try {
@@ -106,6 +124,7 @@ async function serve(req: Request, res: Response) {
       instructions: "You are Raven, Brendon's assistant. These tools reach his agents, his Claude sessions, his vault, his work and his media. "
         + 'Your final answer is posted in his thread as your reply.',
     })
+    newsUnderResults(server, String(req.headers['x-raven-token'] ?? ''))
     registerCore(server, ctx)
     try {
       registerRavenTools(server, ctx)
@@ -131,6 +150,13 @@ async function serve(req: Request, res: Response) {
 }
 
 router.post('/raven-mcp', guard, serve)
+// The Stop hook of a run Brendon started (lib/raven/run.ts writes it; the body is the CLI's hook input): when he wrote
+// again before its answer was posted, the run keeps going to answer that too.
+router.post('/raven-mcp/stop', guard, (req: Request, res: Response) => {
+  const input = (req.body ?? {}) as { last_assistant_message?: unknown }
+  const reason = ravenStopForToken(String(req.headers['x-raven-token'] ?? ''), input.last_assistant_message)
+  res.json(reason ? { decision: 'block', reason } : {})
+})
 const notAllowed = (_req: Request, res: Response) => {
   res.status(405).set('Allow', 'POST').json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null })
 }
