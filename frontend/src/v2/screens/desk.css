@@ -1,6 +1,7 @@
 /* The Desk (Desk.tsx) at /m/desk inside the v2 shell's .vl-page. It fills the page instead of
    scrolling it: "Sessions" at the top left, right of it the Raven card (the sessions Raven started;
-   folded, a chip at the strip's right end) over his strip of tabs, then the grid of terminals. The Raven card alone wears the
+   folded, a chip at the strip's right end), then his strip of tabs across the whole Desk (each area a
+   section under a head that collapses it), then the grid of terminals. The Raven card alone wears the
    Raven tab's look (the composer's accent-tinted rounded box, the glowing uppercase label); the Desk's own controls
    ("Sessions", its list, the empty Desk's Recover box and buttons) are plain grey, so only Raven's sessions look like
    Raven. Bubbles for the tabs in view, the Connected column's rows and small uppercase headings. The terminals are one layer
@@ -134,24 +135,26 @@
   border-radius: 9px;
 }
 
-/* ---------- the top: "Sessions" at the left; right of it the Raven card (open) over the strip ---------- */
+/* ---------- the top: the Raven card (open) with "Sessions" left of it, then the strip across the whole Desk ---------- */
 
-/* "Sessions" keeps its place at the top left whatever opens beside it: the card grows the right column only */
-.dk-top { flex: none; display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
-.dk-top-l { flex: none; display: flex; align-items: center; height: var(--dk-strip-h); }
-.dk-top-r { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* "Sessions" keeps its place at the top left: beside the open card, else the strip's first item */
+.dk-top { flex: none; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dk-top-row { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.dk-top-row > .dk-list-btn { margin-top: calc((var(--dk-strip-h) - 30px) / 2); }
+.dk[data-coarse] .dk-top-row > .dk-list-btn { margin-top: calc((var(--dk-strip-h) - 38px) / 2); }
+.dk-top-row > .dk-raven { flex: 1; min-width: 0; }
 
-/* ---------- the strip: his tabs, "+" (and the folded Raven chip) ---------- */
+/* ---------- the strip: "Sessions", each area's head and tabs, "+" (and the folded Raven chip) ---------- */
 
 .dk-bar {
   position: relative;
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
-  height: var(--dk-strip-h);
-  border-radius: 999px;
+  min-height: var(--dk-strip-h);
+  border-radius: 12px;
 }
 /* a pane's title dragged here leaves the grid */
 .dk-bar[data-drop] { background: color-mix(in srgb, var(--fg) 6%, transparent); box-shadow: inset 0 0 0 1px var(--fg); }
@@ -172,49 +175,110 @@
 .dk[data-coarse] .dk-list-btn { height: 38px; padding: 0 9px 0 12px; }
 .dk-list-btn[aria-expanded='true'] { color: var(--text); background: var(--dk-plain-hi); border-color: var(--dk-plain-edge-hi); }
 .dk-list-btn[data-pressed] { background: var(--dk-plain-hi); }
-/* the tabs: a row that scrolls sideways when they do not fit, "+" right after it */
+/* the tabs: rows that wrap from the Desk's left edge, up to three before they scroll; the phone's one row scrolls sideways */
 .dk-tabs {
-  /* the tabs' offsetParent, so their offsets are in the row's own (scrolled) space */
+  --dk-row-gap: 4px;
+  --dk-tab-h: 30px;
+  /* the tabs' offsetParent, so their offsets are in the strip's own (scrolled) space */
   position: relative;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
+  gap: var(--dk-row-gap) 3px;
+  min-height: var(--dk-strip-h);
+  max-height: calc(3 * var(--dk-tab-h) + 2 * var(--dk-row-gap) + (var(--dk-strip-h) - var(--dk-tab-h)));
+  padding: calc((var(--dk-strip-h) - var(--dk-tab-h)) / 2) 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: none;
-  touch-action: pan-x;
 }
 .dk-tabs::-webkit-scrollbar { display: none; }
-
-/* a crowded strip squeezes its tabs (a mouse), then scrolls; a touch strip keeps them readable and scrolls sideways */
-.dk-tab {
-  position: relative;
-  flex: 0 1 auto;
-  display: flex;
-  align-items: center;
-  height: 30px;
-  min-width: 76px;
-  max-width: 240px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  transition: background-color .15s, border-color .15s;
+.dk[data-coarse] .dk-tabs { --dk-tab-h: 38px; }
+.dk[data-phone] .dk-tabs {
+  flex-wrap: nowrap;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: auto;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
-.dk[data-coarse] .dk-tab { flex-shrink: 0; max-width: 210px; height: 38px; }
-/* where the area changes: a quiet line */
-.dk-tab[data-split] { margin-left: 9px; }
-.dk-tab[data-split]::before {
+/* the phone's row: "Sessions" and "+" stay at its ends while the tabs scroll under them */
+.dk[data-phone] .dk-tabs > .dk-list-btn { position: sticky; left: 0; z-index: 1; box-shadow: 6px 0 6px #000; }
+.dk[data-phone] .dk-tabs > .dk-add { position: sticky; right: 0; z-index: 1; background: #000; box-shadow: -6px 0 6px #000; }
+
+/* a section: its head, then its tabs, in the strip's flow */
+.dk-tg { display: contents; }
+.dk-tg-lead { flex: none; display: flex; align-items: center; gap: 3px; max-width: 100%; }
+.dk-gh {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--dk-tab-h);
+  padding: 0 7px 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--dim);
+  border-radius: 8px;
+}
+/* a quiet line between two sections: the room is after the last item of the one before, so a head that
+   wraps to a new row still starts at the strip's left edge (the line falls outside it there, clipped) */
+.dk-tg[data-sep] > :last-child { margin-right: 6px; }
+.dk-tg + .dk-tg .dk-gh::before {
   content: '';
   position: absolute;
-  left: -7px;
+  left: -5px;
   top: 8px;
   bottom: 8px;
   width: 1px;
   background: var(--line-strong);
 }
+.dk-gh-i { flex: none; transition: transform .12s; }
+.dk-gh[aria-expanded='false'] .dk-gh-i { transform: rotate(-90deg); }
+.dk-gh-t { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }
+.dk-gh-mark { flex: none; width: 14px; height: 14px; }
+.dk-gh-n {
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  letter-spacing: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: rgba(255, 255, 255, .08);
+  border-radius: 5px;
+}
+/* collapsed over a tab that waits on him: the count lights, in the second accent for a question */
+.dk-gh[data-lit] { color: var(--fg); }
+.dk-gh[data-lit] .dk-gh-n { color: #000; background: var(--fg); box-shadow: var(--glow); }
+.dk-gh[data-tone='ask'] { color: var(--acc2); }
+.dk-gh[data-tone='ask'] .dk-gh-n { background: var(--acc2); box-shadow: 0 0 8px color-mix(in srgb, var(--acc2) calc(var(--glow-k) * 60%), transparent); }
+.dk-gh[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+
+/* a tab never squeezes below its title: up to 20 characters show, then the ellipsis (the tooltip has it all) */
+.dk-tab {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  min-width: 76px;
+  max-width: 100%;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  transition: background-color .15s, border-color .15s;
+}
+.dk[data-coarse] .dk-tab { height: 38px; }
 /* in the grid: a soft pill; the one with the keyboard is a bubble, as his lines on the Raven tab */
 .dk-tab[data-on] { background: var(--dk-fill); border-color: var(--line); }
 .dk-tab[data-focus] { background: var(--dk-fill-hi); border-color: var(--dk-edge); }
@@ -232,7 +296,7 @@
   text-align: left;
   border-radius: 999px;
 }
-.dk-tab-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-tab-t { min-width: 0; max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the mark carries the state; the title is quiet, brighter in the grid, and lit only for a finish not seen yet */
 .dk-tab[data-on] .dk-tab-main { color: var(--text); }
 .dk-tab[data-focus] .dk-tab-main { color: var(--fg); }
@@ -286,6 +350,8 @@
   .dk-add:hover { border-color: var(--dk-edge-hi); }
   .dk-add:hover .vl-icon { color: var(--fg); }
   .dk-list-btn:hover { color: var(--text); border-color: var(--dk-plain-edge-hi); }
+  .dk-gh:hover { color: var(--text); background: color-mix(in srgb, var(--fg) 5%, transparent); }
+  .dk-gh:hover .dk-gh-i { color: var(--fg); }
   .dk-rchip:hover { border-color: var(--dk-edge-hi); }
   .dk-rrow:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-rrow[data-here]:hover { background: var(--dk-fill-hi); }
@@ -558,6 +624,7 @@
   position: absolute;
   top: 0;
   min-width: 190px;
+  max-width: 260px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -566,6 +633,17 @@
   border: 1px solid var(--dk-edge);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .8);
+}
+/* the menu's first line: the tab's whole title */
+.dk-menu-t {
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
 }
 .dk-mi { min-height: 36px; padding: 0 12px; text-align: left; font-size: 13px; color: var(--text); border-radius: 10px; }
 .dk[data-coarse] .dk-mi { min-height: 46px; }

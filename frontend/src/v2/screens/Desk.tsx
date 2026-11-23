@@ -25,7 +25,16 @@ import './desk.css'
 //
 // One strip of tabs on top: every open Valkyrie pane on odin (the tmux list),
 // sorted by area (the client areas in odin's order, then personal and server)
-// and then by project. A tab shows the session's state with the AI > Sessions
+// and then by project. Each area is a section under a head with its name and
+// count (the tabs Raven started that he opened are one more, last): a press on
+// the head collapses its tabs (the ones in view stay) or expands them. His
+// choice is kept per device; a section he never touched starts collapsed when
+// it is big (BIG_SECTION tabs or more) and none of them waits on him, so a
+// Recover all does not bury the ones asking. The strip spans the Desk from its
+// left edge ("Sessions" is its first item) and wraps to more rows, up to three
+// before it scrolls; the phone keeps one row that scrolls sideways. A tab never
+// squeezes below its title: up to 20 characters show, the tooltip (and a long
+// press's menu on a touch screen) has all of it. A tab shows the session's state with the AI > Sessions
 // icons (kit/icons StateIcon: working the bolt, asking the bubble in the second
 // accent, idle the pause circle) and its title, which also lights when the
 // session finished while it was out of view (kit/desk.ts), so a glance tells
@@ -84,6 +93,8 @@ const HOME_HOST = 'thor'
 const RECOVER_GAP = 700
 /** ms a resumed session stays out of the closed list while the board catches up */
 const REOPEN_GRACE = 15_000
+/** tabs in a section that make it big: it starts collapsed unless one of them waits on him */
+const BIG_SECTION = 5
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const statusOf = (e: unknown) => (e as { response?: { status?: number } } | null)?.response?.status
@@ -179,6 +190,32 @@ function useRavenOpen(): [boolean, (open: boolean) => void] {
     try { localStorage.setItem(RAVEN_OPEN_KEY, v ? '1' : '0') } catch { /* storage off */ }
   }, [])
   return [open, set]
+}
+
+/** A section of the strip: one area's tabs, or the ones Raven started that he opened. */
+type Section = { key: string; label: string; raven: boolean; rows: TermSession[] }
+
+/** Finished while out of view, or asking: the tab waits on him. */
+const waits = (s: TermSession) => unseenDone(s.name) || paneState(s) === 'asking'
+
+/** The sections he collapsed (true) or expanded (false) himself, kept per device; the rest follow the default. */
+const FOLD_KEY = 'v2.desk.sections'
+function useSectionFolds(): [Readonly<Record<string, boolean>>, (key: string, folded: boolean) => void] {
+  const [folds, setFolds] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem(FOLD_KEY) ?? '{}')
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+      return Object.fromEntries(Object.entries(raw).filter((e): e is [string, boolean] => typeof e[1] === 'boolean'))
+    } catch { return {} }
+  })
+  const set = useCallback((key: string, folded: boolean) => {
+    setFolds((f) => {
+      const next = { ...f, [key]: folded }
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify(next)) } catch { /* storage off */ }
+      return next
+    })
+  }, [])
+  return [folds, set]
 }
 
 /** A long press on a touch screen opens the menu; the tap that ends it then does nothing. */
@@ -361,6 +398,28 @@ export default function Desk({ active }: ScreenProps) {
   const focus = focusName && view.includes(focusName) ? focusName : view[0] ?? null
   const viewKey = view.join(',')
 
+  // ---------- the strip's sections: one per area, then the Raven ones he opened; each collapses ----------
+
+  const [folds, setFold] = useSectionFolds()
+  const sections = useMemo(() => {
+    const by = new Map<string, Section>()
+    for (const s of tabs) {
+      const raven = byRaven(s)
+      const area = raven ? '' : meta.get(s.name)?.area ?? ''
+      const key = raven ? 'raven' : area || 'other'
+      let g = by.get(key)
+      if (!g) by.set(key, (g = { key, label: raven ? 'Raven' : areaName(area), raven, rows: [] }))
+      g.rows.push(s)
+    }
+    return [...by.values()]
+  }, [tabs, meta, areaName])
+  const foldedOf = (g: Section) => folds[g.key] ?? (g.rows.length >= BIG_SECTION && !g.rows.some(waits))
+  /** A section's tabs in the strip: all of them, or (collapsed) the ones in view. */
+  const rowsOf = (g: Section) => (foldedOf(g) ? g.rows.filter((s) => view.includes(s.name)) : g.rows)
+  // the tabs he sees, in order: Ctrl+Tab and Alt+N go by these
+  const shown = sections.flatMap(rowsOf)
+  const foldKey = sections.map((g) => `${g.key}:${foldedOf(g) ? 1 : 0}`).join(',')
+
   // the panes in view count as seen while the Desk shows
   useEffect(() => {
     setDeskInView(onScreen ? view : [])
@@ -404,8 +463,8 @@ export default function Desk({ active }: ScreenProps) {
   const [busy, setBusy] = useState(false)
   const focusRef = useRef<string | null>(null)
   // what the callbacks below (keys, the terminals' requests) read: the Desk as last drawn
-  const cur = useRef({ view, focus, tabs, grid, ravenNames })
-  useLayoutEffect(() => { cur.current = { view, focus, tabs, grid, ravenNames } })
+  const cur = useRef({ view, focus, tabs, shown, grid, ravenNames })
+  useLayoutEffect(() => { cur.current = { view, focus, tabs, shown, grid, ravenNames } })
 
   const focusFrame = useCallback((name: string) => {
     if (coarse) return
@@ -656,12 +715,12 @@ export default function Desk({ active }: ScreenProps) {
   // ---------- keys: here, and handed up by a terminal (DeskHost.key) ----------
 
   const onChord = useCallback((chord: DeskChord, from?: string) => {
-    const { view: v, focus: f, tabs: ts } = cur.current
+    const { view: v, focus: f, tabs: ts, shown: sh } = cur.current
     const here = from ?? f
     if (chord === 'next' || chord === 'prev') {
-      if (!ts.length) return
-      const i = Math.max(0, ts.findIndex((s) => s.name === here))
-      openTab(ts[(i + (chord === 'next' ? 1 : -1) + ts.length) % ts.length].name)
+      if (!sh.length) return
+      const i = Math.max(0, sh.findIndex((s) => s.name === here))
+      openTab(sh[(i + (chord === 'next' ? 1 : -1) + sh.length) % sh.length].name)
     } else if (chord === 'left' || chord === 'right') {
       if (v.length < 2) return
       const i = Math.max(0, v.indexOf(here ?? ''))
@@ -676,7 +735,7 @@ export default function Desk({ active }: ScreenProps) {
       else toast('No session is waiting for you')
     } else {
       const k = Number(chord.slice(3)) - 1
-      if (ts[k]) openTab(ts[k].name)
+      if (sh[k]) openTab(sh[k].name)
     }
   }, [openTab])
 
@@ -720,23 +779,30 @@ export default function Desk({ active }: ScreenProps) {
     return () => { if (w.valkyrieDesk === host) delete w.valkyrieDesk }
   }, [openTab, place, closeTab, onChord])
 
-  // the strip keeps the focused tab in view when it scrolls sideways (the phone, many tabs)
+  // the strip keeps the focused tab in view when it scrolls: sideways on the phone (clear of "Sessions"
+  // and "+", which stay at its ends), up and down past three rows elsewhere
   const titleKey = tabs.map((s) => metaOf(s).title).join('\n')
   useLayoutEffect(() => {
     const keep = () => {
       const row = stripRef.current
-      const el = focus && row ? row.querySelector<HTMLElement>(`[data-name="${focus}"]`) : null
+      const el = focus && row ? row.querySelector<HTMLElement>(`.dk-tab[data-name="${focus}"]`) : null
       if (!row || !el) return
-      const l = el.offsetLeft
-      const r = l + el.offsetWidth
+      const padL = phone ? row.querySelector<HTMLElement>('.dk-list-btn')?.offsetWidth ?? 0 : 0
+      const padR = phone ? row.querySelector<HTMLElement>('.dk-add')?.offsetWidth ?? 0 : 0
+      const l = el.offsetLeft - padL
+      const r = el.offsetLeft + el.offsetWidth + padR
       if (l < row.scrollLeft) row.scrollLeft = Math.max(0, l - 8)
       else if (r > row.scrollLeft + row.clientWidth) row.scrollLeft = r - row.clientWidth + 8
+      const t = el.offsetTop
+      const b = t + el.offsetHeight
+      if (t < row.scrollTop) row.scrollTop = Math.max(0, t - 4)
+      else if (b > row.scrollTop + row.clientHeight) row.scrollTop = b - row.clientHeight + 4
     }
     keep()
     let live = true
     void document.fonts?.ready.then(() => { if (live) keep() })
     return () => { live = false }
-  }, [focus, titleKey])
+  }, [focus, titleKey, foldKey, phone])
 
   // ---------- drag a tab or a pane's title (a mouse) ----------
 
@@ -841,28 +907,52 @@ export default function Desk({ active }: ScreenProps) {
   // the tabs' row; an empty Desk with the card open would leave it blank
   const bar = strip && !(empty && card)
 
+  /** One tab in the strip. */
+  const tabFor = (s: TermSession) => (
+    <Tab
+      key={s.name}
+      s={s}
+      title={metaOf(s).title}
+      tip={tooltip(s)}
+      raven={byRaven(s)}
+      on={view.includes(s.name)}
+      focused={focus === s.name}
+      coarse={coarse}
+      draggable={grid}
+      onOpen={(el) => {
+        if (focus === s.name && coarse) openMenu(s.name, el)
+        else openTab(s.name)
+      }}
+      onMenu={(el) => openMenu(s.name, el)}
+      onClose={() => closeTab(s.name)}
+      onDragStart={beginDrag(s.name, 'tab')}
+      onDragEnd={endDrag}
+    />
+  )
+
+  const sessionsBtn = (
+    <Press
+      className="dk-list-btn"
+      aria-expanded={listOpen}
+      aria-label="All sessions"
+      title="All sessions, by area and project"
+      onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
+    >
+      <Icon name={ListTree} size={coarse ? 17 : 14} tone="dim" />
+      {!phone && <span>Sessions</span>}
+      <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
+    </Press>
+  )
+
   return (
-    <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-n={n}>
-      {/* "Sessions" at the top left, and right of it the Raven card (open) over the strip: opening the card never moves "Sessions" */}
+    <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-phone={phone || undefined} data-n={n}>
+      {/* "Sessions" at the top left: beside the Raven card while it is open, else the strip's first item, so it never moves.
+          The strip spans the Desk from its left edge, under the card. */}
       {(strip || card) && (
         <div className="dk-top">
-          {strip && (
-            <div className="dk-top-l">
-              <Press
-                className="dk-list-btn"
-                aria-expanded={listOpen}
-                aria-label="All sessions"
-                title="All sessions, by area and project"
-                onPress={() => { setMenu(null); setPicker(false); setListOpen((v) => !v) }}
-              >
-                <Icon name={ListTree} size={coarse ? 17 : 14} tone="dim" />
-                {!phone && <span>Sessions</span>}
-                <Icon name={ChevronDown} size={coarse ? 14 : 11} tone="dim" />
-              </Press>
-            </div>
-          )}
-          <div className="dk-top-r">
-            {card && (
+          {card && (
+            <div className="dk-top-row">
+              {strip && sessionsBtn}
               <RavenCard
                 rows={ravens}
                 meta={metaOf}
@@ -876,39 +966,37 @@ export default function Desk({ active }: ScreenProps) {
                 onMenu={(name, el) => openMenu(name, el)}
                 onFold={() => setRavenOpen(false)}
               />
-            )}
-            {bar && (
-              <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
-                <div ref={stripRef} className="dk-tabs" role="tablist" aria-label="Your sessions">
-                  {tabs.map((s, i) => {
-                    const m = metaOf(s)
-                    // a quiet line where the area changes, and before Raven's
-                    const prev = tabs[i - 1]
-                    const split = !!prev && ((meta.get(prev.name)?.area ?? '') !== m.area || byRaven(prev) !== byRaven(s))
-                    return (
-                      <Tab
-                        key={s.name}
-                        s={s}
-                        title={m.title}
-                        tip={tooltip(s)}
-                        split={split}
-                        raven={byRaven(s)}
-                        on={view.includes(s.name)}
-                        focused={focus === s.name}
-                        coarse={coarse}
-                        draggable={grid}
-                        onOpen={(el) => {
-                          if (focus === s.name && coarse) openMenu(s.name, el)
-                          else openTab(s.name)
-                        }}
-                        onMenu={(el) => openMenu(s.name, el)}
-                        onClose={() => closeTab(s.name)}
-                        onDragStart={beginDrag(s.name, 'tab')}
-                        onDragEnd={endDrag}
-                      />
-                    )
-                  })}
-                </div>
+            </div>
+          )}
+          {bar && (
+            <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
+              <div ref={stripRef} className="dk-tabs" role="tablist" aria-label="Your sessions">
+                {!card && sessionsBtn}
+                {sections.map((g, i) => {
+                  const folded = foldedOf(g)
+                  const hidden = folded ? g.rows.filter((s) => !view.includes(s.name)) : []
+                  const rows = rowsOf(g)
+                  return (
+                    <div key={g.key} className="dk-tg" role="group" aria-label={g.label} data-key={g.key} data-folded={folded || undefined} data-sep={i < sections.length - 1 || undefined}>
+                      {/* the head keeps its first tab beside it, so a wrap never leaves it at a row's end */}
+                      <span className="dk-tg-lead">
+                        <SectionHead
+                          label={g.label}
+                          n={g.rows.length}
+                          folded={folded}
+                          raven={g.raven}
+                          waiting={hidden.filter(waits).length}
+                          asking={hidden.some((s) => paneState(s) === 'asking')}
+                          working={hidden.some((s) => paneState(s) === 'working')}
+                          coarse={coarse}
+                          onToggle={() => setFold(g.key, !folded)}
+                        />
+                        {rows[0] && tabFor(rows[0])}
+                      </span>
+                      {rows.slice(1).map(tabFor)}
+                    </div>
+                  )
+                })}
                 {!empty && (
                   <Press
                     className="dk-add"
@@ -920,25 +1008,25 @@ export default function Desk({ active }: ScreenProps) {
                     <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
                   </Press>
                 )}
-                {!ravenOpen && ravens.length > 0 && (
-                  <Press
-                    className="dk-rchip"
-                    data-lit={ravenLit > 0 || undefined}
-                    data-tone={ravenAsking ? 'ask' : undefined}
-                    data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
-                    aria-expanded={false}
-                    aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
-                    title="Show the sessions Raven started"
-                    onPress={() => { setMenu(null); setRavenOpen(true) }}
-                  >
-                    <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
-                    <span>Raven</span>
-                    <span className="dk-rchip-n">{ravens.length}</span>
-                  </Press>
-                )}
               </div>
-            )}
-          </div>
+              {!ravenOpen && ravens.length > 0 && (
+                <Press
+                  className="dk-rchip"
+                  data-lit={ravenLit > 0 || undefined}
+                  data-tone={ravenAsking ? 'ask' : undefined}
+                  data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
+                  aria-expanded={false}
+                  aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
+                  title="Show the sessions Raven started"
+                  onPress={() => { setMenu(null); setRavenOpen(true) }}
+                >
+                  <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
+                  <span>Raven</span>
+                  <span className="dk-rchip-n">{ravens.length}</span>
+                </Press>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1084,7 +1172,7 @@ export default function Desk({ active }: ScreenProps) {
           beside={grid && !view.includes(menuTab.name) && n < MAX_VIEW}
           closable={tabNames.has(menuTab.name)}
           closeLabel={byRaven(menuTab) ? 'Minimize into Raven' : 'Close tab'}
-          x={Math.min(menu.x, Math.max(0, stage.w - 210))}
+          x={Math.min(menu.x, Math.max(0, stage.w - 270))}
           y={menu.y}
           arm={menu.arm}
           onBeside={() => {
@@ -1217,14 +1305,52 @@ function RavenRow({ s, m, tip, here, on, off, now, onOpen, onMenu }: {
   )
 }
 
+// ---------- a section's head in the strip ----------
+
+/**
+ * A section's name and how many tabs it holds; a press collapses it (its tabs
+ * in view stay) or expands it. Collapsed, it lights while a tab it hides waits
+ * on him (the second accent for a question), and shows the bolt while one works.
+ */
+function SectionHead({ label, n, folded, raven, waiting, asking, working, coarse, onToggle }: {
+  label: string
+  n: number
+  folded: boolean
+  /** the tabs Raven started: the bird before the name */
+  raven: boolean
+  /** hidden tabs that finished unseen or ask */
+  waiting: number
+  asking: boolean
+  working: boolean
+  coarse: boolean
+  onToggle: () => void
+}) {
+  const what = `${n} ${label} ${n === 1 ? 'tab' : 'tabs'}`
+  return (
+    <Press
+      className="dk-gh"
+      aria-expanded={!folded}
+      data-lit={waiting > 0 || undefined}
+      data-tone={asking ? 'ask' : undefined}
+      aria-label={`${label}: ${n} ${n === 1 ? 'tab' : 'tabs'}${folded ? ', collapsed' : ''}${waiting ? `, ${waiting} waiting on you` : ''}`}
+      title={folded ? `Expand the ${what}${waiting ? ` (${waiting} waiting on you)` : ''}` : `Collapse the ${what}`}
+      onPress={onToggle}
+    >
+      <Icon name={ChevronDown} size={coarse ? 13 : 11} tone="dim" className="dk-gh-i" />
+      {raven && <Icon name="raven" size={coarse ? 13 : 11} tone="fg" />}
+      <span className="dk-gh-t">{label}</span>
+      {folded && working && !waiting && <StateIcon a="working" size={coarse ? 13 : 12} className="dk-gh-mark" />}
+      <span className="dk-gh-n">{n}</span>
+    </Press>
+  )
+}
+
 // ---------- a tab ----------
 
-function Tab({ s, title, tip, split, raven, on, focused, coarse, draggable, onOpen, onMenu, onClose, onDragStart, onDragEnd }: {
+function Tab({ s, title, tip, raven, on, focused, coarse, draggable, onOpen, onMenu, onClose, onDragStart, onDragEnd }: {
   s: TermSession
   title: string
   tip: string
-  /** the first tab of another area: a quiet line before it */
-  split: boolean
   /** Raven started it: the bird before its title, and its close minimizes it into Raven */
   raven: boolean
   /** in the grid */
@@ -1252,7 +1378,6 @@ function Tab({ s, title, tip, split, raven, on, focused, coarse, draggable, onOp
       data-name={s.name}
       data-on={on || undefined}
       data-focus={focused || undefined}
-      data-split={split || undefined}
       data-state={st}
       data-lit={lit || undefined}
       title={tip}
@@ -1325,7 +1450,9 @@ function TabMenu({ title, live, beside, closable, closeLabel, x, y, arm, onBesid
     <>
       <div className="dk-scrim" onPointerDown={onDismiss} />
       <div className="dk-menu" role="menu" aria-label={`${title}: tab`} style={{ left: x, top: y }}>
-        {beside && <Press role="menuitem" className="dk-mi" onPress={onBeside}>Open beside</Press>}
+        {/* the whole title: a touch screen has no tooltip */}
+        <div className="dk-menu-t">{title}</div>
+        {beside &&<Press role="menuitem" className="dk-mi" onPress={onBeside}>Open beside</Press>}
         {closable && <Press role="menuitem" className="dk-mi" onPress={onCloseTab}>{closeLabel}</Press>}
         {live && (
           <Press role="menuitem" className="dk-mi" data-tone="hot" data-arm={arm || undefined} onPress={onStop}>

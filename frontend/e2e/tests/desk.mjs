@@ -4,14 +4,21 @@
 // so a pane's terminal (the pop-out page in an iframe) never attaches (its socket is refused in the
 // page), and every write (a new session, a stop, an upload) is answered in the browser too.
 //
-//   layout   per device (phone, both iPads, 1600x900, 2560x1440 at 1.2): one strip, the tabs sorted
-//            by area (the client area first, then personal and server, then the unknown) and then
-//            project, a quiet line where the area changes, a mark per state (working the bolt,
+//   layout   per device (phone, both iPads, 1600x900, 2560x1440 at 1.2): one strip flush with the
+//            Desk's left edge, "Sessions" first, the tabs sorted by area (the client area first, then
+//            personal and server, then the unknown) and then project, each area a section under a head
+//            with its name and count, no short title cut, a mark per state (working the bolt,
 //            asking the bubble, idle the pause circle, an ended pane faint, a shell none), the
 //            title from the pane or the board, the tooltip, 44 px tabs on a touch screen, one
 //            session filling the stage, on a desktop under a title row (title and folder) and as
 //            the bare terminal (no composer, keys, activity column or bar), on a touch screen with
 //            the terminal page's own controls; nothing wider than the screen, no lights button
+//   sections (desktop, iPad, phone) after a Recover all: a big section with nothing waiting starts
+//            collapsed, a press on its head expands it; long titles keep 14 to 20 characters, the rows
+//            wrap from the left edge (three at most before they scroll), the phone keeps one row that
+//            scrolls; his choice survives a reload; collapsed, the tab in view stays and the head lights
+//            for a hidden question; with no choice kept a big section with a question starts expanded;
+//            Ctrl+Tab skips the hidden tabs
 //   done     a hidden tab going working to idle, and another working to asking, lights its title;
 //            opening it clears it; a whole run between two reads lights too; an API restart and
 //            empty lists change nothing; the badge counts them (asking tone) from any screen
@@ -196,7 +203,6 @@ function desk() {
         name: t.getAttribute('data-name'),
         on: t.hasAttribute('data-on'),
         focus: t.hasAttribute('data-focus'),
-        split: t.hasAttribute('data-split'),
         lit: t.hasAttribute('data-lit'),
         state: t.getAttribute('data-state'),
         mark: t.querySelector('.vl-sicon')?.getAttribute('data-a') ?? null,
@@ -204,6 +210,20 @@ function desk() {
         tip: t.getAttribute('title') || t.getAttribute('data-vk-title') || '',
         h: r.height,
         inView: !!sr && r.left >= sr.left - 1 && r.right <= sr.right + 1,
+      }
+    }),
+    // the strip's sections: each area's head (its name, count, collapsed or not) and the tabs it shows
+    sections: [...(root?.querySelectorAll('.dk-tg') ?? [])].map((g) => {
+      const head = g.querySelector('.dk-gh')
+      return {
+        key: g.getAttribute('data-key'),
+        folded: g.hasAttribute('data-folded'),
+        expanded: head?.getAttribute('aria-expanded') === 'true',
+        label: head?.querySelector('.dk-gh-t')?.textContent ?? '',
+        n: head?.querySelector('.dk-gh-n')?.textContent ?? '',
+        lit: !!head?.hasAttribute('data-lit'),
+        tone: head?.getAttribute('data-tone') ?? null,
+        tabs: [...g.querySelectorAll('.dk-tab')].map((x) => x.getAttribute('data-name')),
       }
     }),
     // the terminals in view, in the grid's reading order
@@ -216,6 +236,49 @@ function desk() {
       focus: p.hasAttribute('data-focus'),
       ...box(p),
     })).sort((a, b) => a.y - b.y || a.x - b.x),
+  }
+}
+
+/** The strip's shape (in the page): its first item, where it starts, its rows, the titles the ellipsis cuts. */
+function stripShape() {
+  const root = document.querySelector('.vl-page[data-active] .dk')
+  const row = root?.querySelector('.dk-tabs')
+  const stage = root?.querySelector('.dk-stage')
+  if (!row || !stage) return { first: null, left: -1, stageLeft: 0, rows: [], cut: [], ch: 0, h: 0, sh: 0, sw: 0, cw: 0, tabH: 0 }
+  // one character of the tab titles' font
+  const t0 = row.querySelector('.dk-tab-t')
+  let ch = 0
+  if (t0) {
+    const s = document.createElement('span')
+    s.textContent = '0'.repeat(20)
+    s.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${getComputedStyle(t0).font}`
+    document.body.appendChild(s)
+    ch = s.getBoundingClientRect().width / 20
+    s.remove()
+  }
+  // the strip's rows: its items by their middle, each row's leftmost x
+  const items = [...row.querySelectorAll(':scope > .dk-list-btn, .dk-gh, .dk-tab, :scope > .dk-add')]
+    .map((el) => el.getBoundingClientRect()).map((r) => ({ y: r.top + r.height / 2, x: r.left })).sort((a, b) => a.y - b.y)
+  const rows = []
+  for (const it of items) {
+    const last = rows[rows.length - 1]
+    if (last && Math.abs(it.y - last.y) <= 8) last.x = Math.min(last.x, it.x)
+    else rows.push({ ...it })
+  }
+  const first = row.firstElementChild
+  return {
+    first: first?.classList.contains('dk-list-btn') ? 'dk-list-btn' : first?.className ?? null,
+    left: Math.round(row.getBoundingClientRect().left),
+    stageLeft: Math.round(stage.getBoundingClientRect().left),
+    rows: rows.map((r) => ({ y: Math.round(r.y), x: Math.round(r.x) })),
+    cut: [...row.querySelectorAll('.dk-tab-t')].filter((e) => e.scrollWidth > e.clientWidth + 1)
+      .map((e) => ({ title: e.textContent, w: Math.round(e.getBoundingClientRect().width) })),
+    ch,
+    h: row.clientHeight,
+    sh: row.scrollHeight,
+    sw: row.scrollWidth,
+    cw: row.clientWidth,
+    tabH: row.querySelector('.dk-tab')?.getBoundingClientRect().height ?? 0,
   }
 }
 
@@ -337,8 +400,13 @@ function layoutTests() {
       await deskUp(page)
       const d = await page.eval(desk)
       t.check(JSON.stringify(tabNames(d)) === JSON.stringify(ORDER), `the tabs read ${JSON.stringify(tabNames(d))}, want by area then project ${JSON.stringify(ORDER)}`)
-      const splits = d.tabs.filter((x) => x.split).map((x) => x.name)
-      t.check(splits.join() === [P.p1, P.s1, P.sh].join(), `the area lines sit before ${JSON.stringify(splits)}, want personal, server and the unknown`)
+      const secs = d.sections.map((g) => `${g.label} ${g.n}${g.folded ? ' collapsed' : ''}: ${g.tabs.join(' ')}`)
+      const wantSecs = [`Work 3: ${P.w1} ${P.w3} ${P.w2}`, `Thor 3: ${P.p1} ${P.d1} ${P.pj}`, `Odin 1: ${P.s1}`, `Other 1: ${P.sh}`]
+      t.check(secs.join('|') === wantSecs.join('|'), `the strip's sections read ${JSON.stringify(secs)}, want ${JSON.stringify(wantSecs)}`)
+      const strip = await page.eval(stripShape)
+      t.check(strip.first === 'dk-list-btn', `the strip starts with ${strip.first}, want "Sessions"`)
+      t.check(Math.abs(strip.left - strip.stageLeft) <= 1, `the strip starts at x ${strip.left}, the terminals at ${strip.stageLeft}: want it flush with the Desk's left edge`)
+      t.check(!strip.cut.length, `short titles cut off: ${JSON.stringify(strip.cut)}`)
       const marks = Object.fromEntries(d.tabs.map((x) => [x.name, x.mark]))
       t.check(marks[P.w1] === 'working' && marks[P.w2] === 'asking' && marks[P.p1] === 'idle' && marks[P.d1] === 'closed' && marks[P.sh] === null,
         `the marks read ${JSON.stringify(marks)}: want working, asking, idle, an ended pane's faint mark, and no mark on a shell`)
@@ -425,6 +493,118 @@ function layoutTests() {
         }
       })
       await t.shot(page)
+    },
+  }))
+}
+
+// ---------- the strip's sections after a Recover all: a big quiet one collapsed, readable titles ----------
+
+/** Extra panes for the personal area (Thor), as a Recover all leaves them: idle resumes with long titles. */
+const EXTRA = 14
+const xName = (i) => `vk-e2e0000d${i.toString(16).padStart(2, '0')}`
+const xSid = (i) => `0e2e0000-0000-4000-8000-00000000d0${i.toString(16).padStart(2, '0')}`
+const xTitle = (i) => `Recovered item ${i} for the quarterly license review`
+
+function addRecovered(st) {
+  const base = st.panes.find((p) => p.name === P.p1)
+  const row = st.board.sessions.find((r) => r.sessionId === SID.p1)
+  for (let i = 1; i <= EXTRA; i++) {
+    st.panes.push({ ...base, name: xName(i), mode: 'resume', target: xSid(i), sessionId: xSid(i), title: xTitle(i), createdAt: base.createdAt + i })
+    st.board.sessions.push({ ...row, sessionId: xSid(i), title: xTitle(i) })
+  }
+}
+
+const SECTION_DEVICES = ['desktop', 'ipad', 'phone']
+
+function sectionTests() {
+  return SECTION_DEVICES.map((device) => ({
+    name: `desk:sections:${device}`,
+    group: 'desk',
+    device,
+    timeout: 180_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      addRecovered(st)
+      const thor = (d) => d.sections.find((g) => g.label === 'Thor') ?? null
+      const head = `.vl-page[data-active] .dk-tg[data-key="personal"] .dk-gh`
+      await page.goto('/m/desk')
+      // Work 3 (one asking), Odin 1 and Other 1 show; Thor's 17 start collapsed
+      await deskUp(page, 5)
+      await t.step('a big section with nothing waiting starts collapsed; the others are expanded', async () => {
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"][data-folded]'), 'the Thor section did not start collapsed', [], 20_000)
+        const d = await page.eval(desk)
+        const g = thor(d)
+        t.check(g?.n === String(3 + EXTRA) && !g.expanded && !g.tabs.length, `the Thor section reads ${JSON.stringify(g)}, want 17, collapsed, no tab`)
+        const rest = d.sections.filter((x) => x.label !== 'Thor').map((x) => `${x.label} ${x.n}${x.folded ? ' collapsed' : ''}`)
+        t.check(rest.join('|') === 'Work 3|Odin 1|Other 1', `the other sections read ${JSON.stringify(rest)}`)
+        await t.shot(page, 'collapsed')
+      })
+      await t.step('a press on its head expands it: every tab readable, the strip flush left', async () => {
+        await tap(page, head)
+        await until(page, (k) => document.querySelectorAll('.vl-page[data-active] .dk-tg[data-key="personal"] .dk-tab').length === k, 'the Thor section did not expand', [3 + EXTRA])
+        await sleep(400)
+        const s = await page.eval(stripShape)
+        t.check(Math.abs(s.left - s.stageLeft) <= 1, `the strip starts at x ${s.left}, the terminals at ${s.stageLeft}`)
+        t.check(s.cut.length >= EXTRA, `the long titles are not cut by the ellipsis: ${JSON.stringify(s.cut)}`)
+        const narrow = s.cut.filter((c) => c.w < 14 * s.ch - 1)
+        t.check(s.ch > 0 && !narrow.length, `titles cut to under 14 characters (${s.ch.toFixed(1)} px each): ${JSON.stringify(narrow)}`)
+        const wide = s.cut.filter((c) => c.w > 20 * s.ch + 1)
+        t.check(!wide.length, `titles wider than 20 characters: ${JSON.stringify(wide)}`)
+        if (device === 'phone') {
+          t.check(s.rows.length === 1 && s.sw > s.cw + 20, `the phone's strip is not one row that scrolls sideways: ${JSON.stringify({ rows: s.rows, sw: s.sw, cw: s.cw })}`)
+        } else {
+          t.check(s.rows.length >= 2, `the tabs did not wrap to more rows: ${JSON.stringify(s.rows)}`)
+          const off = s.rows.filter((r) => r.y >= s.rows[0].y && r.y <= s.rows[0].y + s.h).filter((r) => Math.abs(r.x - s.left) > 1)
+          t.check(!off.length, `rows that do not start at the strip's left edge (${s.left}): ${JSON.stringify(off)}`)
+          t.check(s.h <= 3 * s.tabH + 2 * 4 + 16, `the strip is ${s.h} px high, more than three rows of ${s.tabH}`)
+        }
+        await t.shot(page, 'expanded')
+      })
+      await t.step('his choice is kept across a reload', async () => {
+        await sleep(300)
+        await page.goto('/m/desk')
+        await deskUp(page, 5 + 3 + EXTRA)
+        const g = thor(await page.eval(desk))
+        t.check(g?.expanded && g.tabs.length === 3 + EXTRA, `after a reload the Thor section reads ${JSON.stringify(g)}`)
+      })
+      await t.step('collapsed again, the tab in view stays and the head lights for a hidden question', async () => {
+        await tap(page, `.dk-tab[data-name="${P.p1}"] .dk-tab-main`)
+        await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'the Thor tab did not open', [P.p1])
+        await tap(page, head)
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"][data-folded]'), 'the Thor section did not collapse')
+        let g = thor(await page.eval(desk))
+        t.check(g?.tabs.join() === P.p1, `the collapsed Thor section shows ${JSON.stringify(g?.tabs)}, want the tab in view alone`)
+        st.set(xName(3), 'asking', ASK)
+        await until(page, () => document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"] .dk-gh')?.getAttribute('data-tone') === 'ask', 'the collapsed head did not light for the hidden question', [], 9000)
+        g = thor(await page.eval(desk))
+        t.check(g?.folded && g.lit && g.tabs.join() === P.p1, `with a hidden question his collapsed section reads ${JSON.stringify(g)}: want it collapsed and lit`)
+        await t.shot(page, 'lit')
+      })
+      await t.step('with no choice kept, a big section with a tab asking starts expanded', async () => {
+        await page.eval(() => localStorage.removeItem('v2.desk.sections'))
+        await page.goto('/m/desk')
+        await deskUp(page, 5 + 3 + EXTRA)
+        const g = thor(await page.eval(desk))
+        t.check(g?.expanded && g.tabs.length === 3 + EXTRA, `a big section with a question reads ${JSON.stringify(g)}, want expanded`)
+      })
+      if (device === 'desktop') {
+        await t.step('Ctrl+Tab goes by the tabs he sees', async () => {
+          // collapse Thor again (the asking tab is hidden), then step from Work's last tab
+          await tap(page, head)
+          await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"][data-folded]'), 'the Thor section did not collapse')
+          await tap(page, `.dk-tab[data-name="${P.w2}"] .dk-tab-main`)
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), 'the Work tab did not open', [P.w2])
+          const before = (await page.eval(desk)).tabs.map((x) => x.name)
+          const next = before[before.indexOf(P.w2) + 1]
+          // the Desk's own keys: the focus out of the (stub) terminal
+          await sleep(300)
+          await page.eval(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+          await page.key('Tab', { ctrl: true })
+          await until(page, (n) => !!document.querySelector(`.dk-tab[data-name="${n}"][data-focus]`), `Ctrl+Tab did not go to the next tab shown (${next})`, [next])
+        })
+      }
     },
   }))
 }
@@ -1087,6 +1267,11 @@ function closedTests() {
         const c = await closedList(page)
         t.check(c.n === '0' && c.all === null && /marked done/.test(c.quiet), `the emptied closed list reads ${JSON.stringify(c)}`)
         await page.eval(() => document.querySelector('.dk-scrim')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+        // Thor now holds five quiet tabs: its section starts collapsed with the one in view, its head expands it
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"][data-folded]'), 'the Thor section of five quiet tabs did not collapse')
+        const c0 = (await page.eval(desk)).sections.find((g) => g.label === 'Thor')
+        t.check(c0?.n === '5' && c0.tabs.join() === 'vk-e2e0000a01', `the collapsed Thor section reads ${JSON.stringify(c0)}, want 5 with the tab in view alone`)
+        await tap(page, '.vl-page[data-active] .dk-tg[data-key="personal"] .dk-gh')
         await deskUp(page, N + 3)
         const d = await page.eval(desk)
         t.check(['vk-e2e0000a01', 'vk-e2e0000b02', 'vk-e2e0000b03'].every((n) => tabNames(d).includes(n)), `the tabs read ${JSON.stringify(tabNames(d))}`)
@@ -1299,5 +1484,5 @@ function ravenTests() {
 }
 
 export function deskTests() {
-  return [...layoutTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests(), ...ravenTests()]
+  return [...layoutTests(), ...sectionTests(), ...doneTests(), ...keyTests(), ...gridTests(), ...realDragTests(), ...closeTests(), ...listTests(), ...closedTests(), ...touchTests(), ...phoneTests(), ...ravenTests()]
 }
