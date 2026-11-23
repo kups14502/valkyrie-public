@@ -84,9 +84,22 @@ export type Ref =
 
 export type ProposalStatus = 'pending' | 'running' | 'done' | 'failed' | 'declined'
 
+/**
+ * The mail a proposal sends, as it goes out (backend lib/mailDraft.ts): the card shows all of it above Send.
+ * closing ("Thank you,") goes under the body unless its last line matches closingRe; the signature follows.
+ */
+export type MailDraft = {
+  from: string; to: string[]; cc: string[]; ccNote?: string; subject: string
+  body: string; closing: string; closingRe: string; signature: string
+  /** no body stored: the card offers no Send */
+  missing: boolean
+}
+
 export type Proposal = {
   id: number; kind: string; title: string; payload: unknown; status: ProposalStatus | string
   result: string | null; decidedAt: string | null
+  /** set on every proposal that sends mail */
+  draft?: MailDraft
 }
 
 export type RavenMsg = {

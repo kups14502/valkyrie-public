@@ -16,6 +16,9 @@
 //              state, one removed, the ids sent with the line (phone, desktop)
 //   proposal   the draft edited then Send; Save to drafts; Decline with a reason; Approve on a
 //              ticket note (desktop)
+//   mail-card  every mail card shows the whole mail before Send: From, To, Cc, Subject, the body at full
+//              height (nothing scrolls inside it), the closing and signature; no body stored says Draft
+//              missing with no Send; a kind this app does not know offers no Approve (phone, ipad, desktop)
 //   older      scrolling to the top reads the page before the oldest line and keeps the view
 //   links      ?compose=1 focuses the box; an old ?c=<channel> push lands on the conversation; the old
 //              /m/messages address (and its ?compose=1) lands on /m/raven with the box focused
@@ -47,10 +50,29 @@ const MIN = 60_000
 const iso = (ms) => new Date(ms).toISOString()
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#0a3"/><circle cx="80" cy="60" r="30" fill="#fd0"/></svg>'
 
+// the mail as it goes out (backend lib/mailDraft.ts): every mail card carries one
+const SIGNATURE = 'Sam Sender\nSupport desk\n\nBook a time'
+const CLOSINGS_RE = '^(thank you|thanks|best|regards|cheers)\\s*[,.!]?$'
+const draftOf = (over) => ({
+  from: 'me@example.com', to: ['Pat Example <pat@example.com>'], cc: ['help@example.com'], subject: 'RE: Printer offline',
+  body: 'Hi Pat,\n\nThe printer is back online.', closing: 'Thank you,', closingRe: CLOSINGS_RE, signature: SIGNATURE, missing: false, ...over,
+})
 const PROPOSAL_MAIL = {
   id: 7, kind: 'mail_reply', title: 'Reply to Pat Example', status: 'pending', result: null, decidedAt: null,
   payload: { to: 'pat@example.com', toName: 'Pat Example', subject: 'Printer offline', body: 'Hi Pat,\n\nThe printer is back online.' },
+  draft: draftOf({}),
 }
+// a long new mail (the whole of it on screen), one with no body stored, and a kind this app does not know
+const LONG_BODY = ['Hi Pat,', ...Array.from({ length: 9 }, (_, i) => `Step ${i + 1}: this paragraph is long enough to wrap on a phone and keeps going so the draft is taller than any fixed box would be.`)].join('\n\n')
+const PROPOSALS_MORE = [
+  { id: 21, kind: 'mail_new', title: 'New mail to pat@example.com: Sign-in steps', status: 'pending', result: null, decidedAt: null,
+    payload: { to: ['pat@example.com'], subject: 'Sign-in steps', body: LONG_BODY },
+    draft: draftOf({ to: ['pat@example.com'], subject: 'Sign-in steps', body: LONG_BODY }) },
+  { id: 22, kind: 'mail_new', title: 'New mail to lee@example.com: Empty', status: 'pending', result: null, decidedAt: null,
+    payload: { to: ['lee@example.com'], subject: 'Empty', body: '' },
+    draft: draftOf({ to: ['lee@example.com'], cc: [], subject: 'Empty', body: '', missing: true }) },
+  { id: 23, kind: 'mail_forward', title: 'Forward the invoice', status: 'pending', result: null, decidedAt: null, payload: { body: 'x' } },
+]
 const PROPOSAL_NOTE = {
   id: 8, kind: 'ticket_note', title: 'Note on T20261119.0002', status: 'pending', result: null, decidedAt: null,
   payload: { title: 'Checked the backup', text: 'The nightly job ran clean.' },
@@ -686,6 +708,66 @@ export function ravenTests() {
       await fits(t, page, `${ROUTE} proposals @phone`)
     },
   })
+
+  for (const device of ['phone', 'ipad', 'desktop']) {
+    tests.push({
+      name: `raven:mail-card:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { replyMs: -1 })
+        st.messages.push(...PROPOSALS_MORE.map((p, i) => ({
+          id: 150 + i, author: 'triage', text: 'For your approval.', createdAt: iso(Date.now() - (3 - i) * MIN), refs: [],
+          meta: { relay: { kind: 'agent', from: 'triage', label: 'Triage agent' } }, proposal: p,
+        })))
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => document.querySelectorAll('.rv-prop').length === 5, 'the five cards did not show')
+        const cards = await page.eval(() => [...document.querySelectorAll('.rv-prop')].map((p) => {
+          const ta = p.querySelector('.rv-prop-edit')
+          return {
+            title: p.querySelector('.rv-prop-head b')?.textContent ?? '',
+            meta: [...p.querySelectorAll('.rv-prop-meta dt')].map((dt) => `${dt.textContent}: ${dt.nextElementSibling?.textContent ?? ''}`),
+            body: ta ? ta.value : null,
+            inner: ta ? ta.scrollHeight - ta.clientHeight : null,
+            sig: p.querySelector('.rv-prop-sig')?.textContent ?? null,
+            missing: p.querySelector('.rv-prop-missing')?.textContent ?? null,
+            acts: [...p.querySelectorAll('.rv-prop-acts button')].map((b) => b.textContent),
+          }
+        }))
+        const by = (s) => cards.find((c) => c.title.startsWith(s))
+        const reply = by('Reply to Pat')
+        t.check(JSON.stringify(reply?.meta) === JSON.stringify(['From: me@example.com', 'To: Pat Example <pat@example.com>', 'Cc: help@example.com', 'Subject: RE: Printer offline']),
+          `the reply card heads ${JSON.stringify(reply?.meta)}`)
+        t.check(reply?.sig === `Thank you,\n${SIGNATURE}`, `the reply card ends ${JSON.stringify(reply?.sig)}`)
+        const long = by('New mail to pat')
+        t.check(long?.body === LONG_BODY, 'the long draft is not all in the box')
+        t.check(long?.inner !== null && long.inner <= 1, `the long draft scrolls inside its box by ${long?.inner}px`)
+        t.check(JSON.stringify(long?.acts) === JSON.stringify(['Send', 'Save to Outlook drafts', 'Decline']), `the long card offers ${JSON.stringify(long?.acts)}`)
+        const empty = by('New mail to lee')
+        t.check(/Draft missing/.test(empty?.missing ?? '') && JSON.stringify(empty?.acts) === JSON.stringify(['Decline']) && empty?.body === null,
+          `the card with no body: ${JSON.stringify(empty)}`)
+        const odd = by('Forward the invoice')
+        t.check(JSON.stringify(odd?.acts) === JSON.stringify(['Decline']) && /cannot show this card/.test(odd?.missing ?? ''), `the unknown card: ${JSON.stringify(odd)}`)
+        // typing a line grows the box with it, and the closing goes once the body signs off itself
+        await page.eval(() => {
+          const ta = [...document.querySelectorAll('.rv-prop')].find((p) => /Reply to Pat/.test(p.innerText))?.querySelector('.rv-prop-edit')
+          ta.focus()
+          ta.setSelectionRange(ta.value.length, ta.value.length)
+        })
+        await page.type('\n\nThanks,')
+        await until(page, () => {
+          const p = [...document.querySelectorAll('.rv-prop')].find((x) => /Reply to Pat/.test(x.innerText))
+          const ta = p?.querySelector('.rv-prop-edit')
+          return ta && ta.scrollHeight - ta.clientHeight <= 1 && !/^Thank you,/.test(p.querySelector('.rv-prop-sig')?.textContent ?? '')
+        }, 'the box did not grow, or "Thank you," stayed under a body that signs off')
+        await fits(t, page, `${ROUTE} mail cards @${device}`)
+        await t.shot(page, 'mail-cards')
+      },
+    })
+  }
 
   tests.push({
     name: 'raven:older:desktop',

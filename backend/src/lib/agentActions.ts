@@ -10,6 +10,7 @@ import { agentPost, etLabel, systemPost, wake } from './agents.js'
 import { franchiseConf, workConf } from './workConfig.js'
 import { featureAgent } from './featureAgents.js'
 import { kickThor, mailboxRead } from './thorMail.js'
+import { draftBody, isMissing } from './mailDraft.js'
 
 // Proposals: what an agent wants done in the outside world, waiting on
 // Brendon. Each one is approved by itself (approval of one email is never
@@ -133,6 +134,8 @@ export async function proposeMailReply(agent: Agent, a: MailReplyArgs, hop: numb
     franchise: f, body, note, replyAll: replyAll && !own, cc,
     mailbox: address, messageId: m.messageId, fromSupport: address === boxes.support && !own, followUp: own,
     to: to.join(', '), toList: to, toName: own ? '' : m.fromName, subject: m.subject, received: m.received,
+    // the message's own people, so a reply-all card lists who it reaches (lib/mailDraft.ts)
+    threadTo: m.to, threadCc: m.cc,
     ...(held ? { n: held.n } : {}),
   }
   const who = own ? to.join(', ') : m.fromName || m.from
@@ -211,7 +214,7 @@ export async function proposeTicketUpdate(agent: Agent, a: { ticketId: number; n
   const plan = await planTicketUpdate(f, a.ticketId, patch)
   if (!plan.changes.length) throw new AgentError(400, `nothing to change: ${plan.number} already is that way`)
   const t = ticketRef(f, a.ticketId, plan.number)
-  const payload = { franchise: f, ticketId: a.ticketId, number: plan.number, patch, changes: plan.changes }
+  const payload = { franchise: f, ticketId: a.ticketId, number: plan.number, patch, changes: plan.changes, closes: plan.closes }
   return post(agent, 'ticket_update', `${plan.number}: ${changeSummary(plan.changes)}`, payload,
     `${a.why.trim()}${plan.closes ? '\n\nCompleting it emails the contact the resolution.' : ''}`, [t.ref], hop)
 }
@@ -306,7 +309,14 @@ export async function approveProposal(id: number, opts: { how?: 'send' | 'draft'
   if (!cur) throw new AgentError(404, `no proposal ${id}`)
   const payload = { ...cur.payload }
   if (MAIL_KINDS.includes(cur.kind)) {
-    if (typeof opts.body === 'string' && opts.body.trim()) payload.body = opts.body.trim()
+    // He approves only the draft he read: a card with no body stored is never approvable, and the card sends back
+    // the text it showed. An approval without it came from an app that never showed the draft (before v0.3.228 a
+    // new mail card was a bare title), so it is refused.
+    if (isMissing(draftBody(cur.payload.body))) throw new AgentError(409, `draft missing: proposal ${id} has no mail body, so there is nothing to approve`)
+    if (typeof opts.body !== 'string') throw new AgentError(409, 'this app did not show the draft; update Valkyrie and approve it from the card')
+    const edited = draftBody(opts.body)
+    if (isMissing(edited)) throw new AgentError(400, 'the draft is empty: nothing to send')
+    payload.body = edited
     if (Array.isArray(opts.cc)) {
       for (const x of opts.cc) if (!EMAIL_RE.test(x)) throw new AgentError(400, `not an address: ${x}`)
       payload.cc = opts.cc

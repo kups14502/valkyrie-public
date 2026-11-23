@@ -24,8 +24,13 @@ import { homedir } from 'node:os'
 //   "mailboxRoutes": { "<mailbox key>": "<franchise key>" },
 //   "defaultFranchise": "<franchise for mail nobody can place>",
 //   "teamsFranchise": "<franchise the Teams feed belongs to>",
-//   "skipDomains": ["<senders the agents never need>"]
+//   "skipDomains": ["<senders the agents never need>"],
+//   "mailOut": {
+//     "from": "<the address thor sends new mail, support-box replies and follow-ups from (clientmail.ps1)>",
+//     "signature": "<clientmail.ps1's signature block as the reader sees it, lines split by \n>"
+//   }
 // }
+// mailOut is what a mail proposal card shows under the draft (lib/mailDraft.ts): the mail as it goes out.
 
 export type FranchiseConf = {
   key: string
@@ -52,13 +57,16 @@ export type WorkConf = {
   defaultFranchise: string | null
   teamsFranchise: string | null
   skipDomains: string[]
+  /** what thor's send path adds to every mail: its own address and the signature ('' when not set) */
+  mailOut: { from: string; signature: string }
 }
 
 export const CONF_DIR = process.env.VALKYRIE_CONF_DIR || path.join(homedir(), '.config', 'valkyrie')
 const FILE = process.env.WORK_AGENTS_FILE || path.join(CONF_DIR, 'work-agents.json')
 const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-const EMPTY: WorkConf = { franchises: [], self: [], mailboxRoutes: {}, defaultFranchise: null, teamsFranchise: null, skipDomains: [] }
+const EMPTY: WorkConf = { franchises: [], self: [], mailboxRoutes: {}, defaultFranchise: null, teamsFranchise: null, skipDomains: [], mailOut: { from: '', signature: '' } }
+const ADDRESS_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[a-z]{2,}$/i
 let cache: { mtime: number; conf: WorkConf } | null = null
 let warned = false
 
@@ -81,7 +89,7 @@ function parse(raw: unknown): WorkConf {
       supportCc: typeof f.supportCc === 'string' ? f.supportCc : '',
       ownDomains: strs(f.ownDomains),
       teams: f.teams === true,
-      mailbox: typeof f.mailbox === 'string' && /^[^\s@<>,;]+@[^\s@<>,;]+\.[a-z]{2,}$/i.test(f.mailbox) ? f.mailbox.toLowerCase() : undefined,
+      mailbox: typeof f.mailbox === 'string' && ADDRESS_RE.test(f.mailbox) ? f.mailbox.toLowerCase() : undefined,
       agent: { id, name: String(agent.name ?? id), role: String(agent.role ?? ''), topic: String(agent.topic ?? '') },
       brief: typeof f.brief === 'string' ? f.brief : '',
     })
@@ -92,9 +100,14 @@ function parse(raw: unknown): WorkConf {
     if (KEY_RE.test(k) && typeof v === 'string' && keys.has(v)) routes[k] = v
   }
   const pick = (v: unknown) => (typeof v === 'string' && keys.has(v) ? v : null)
+  const mo = (o.mailOut && typeof o.mailOut === 'object' ? o.mailOut : {}) as Record<string, unknown>
+  const mailOut = {
+    from: typeof mo.from === 'string' && ADDRESS_RE.test(mo.from) ? mo.from.toLowerCase() : '',
+    signature: typeof mo.signature === 'string' ? mo.signature.replace(/\r\n/g, '\n').trim().slice(0, 2000) : '',
+  }
   return {
     franchises, self: strs(o.self), mailboxRoutes: routes,
-    defaultFranchise: pick(o.defaultFranchise), teamsFranchise: pick(o.teamsFranchise), skipDomains: strs(o.skipDomains),
+    defaultFranchise: pick(o.defaultFranchise), teamsFranchise: pick(o.teamsFranchise), skipDomains: strs(o.skipDomains), mailOut,
   }
 }
 

@@ -351,7 +351,7 @@ check('tracker counts on triage channel', fch.tracker?.open === 1, fch.tracker)
 const pid = pm.proposal.id
 let [ast, ap] = await j('POST', `/msg/proposals/${pid}/approve`, { how: 'send', body: 'Hi Jane,\n\nThe printer is back online.' })
 check('approve queues for thor', ast === 200 && ap.proposal.status === 'running', ap)
-check('second approve refused', (await j('POST', `/msg/proposals/${pid}/approve`, {}))[0] === 409)
+check('second approve refused', (await j('POST', `/msg/proposals/${pid}/approve`, { how: 'send', body: 'Hi Jane,\n\nThe printer is back online.' }))[0] === 409)
 let [, claim] = await j('POST', '/msg/actions/claim', { runner: 'thor' })
 check('thor claims the send', claim.actions.length === 1 && claim.actions[0].kind === 'mail_send' && claim.actions[0].payload.graphId === 'AAA1' && claim.actions[0].payload.body.startsWith('Hi Jane,\n\nThe printer is back online.'), claim)
 ;[, claim] = await j('POST', '/msg/actions/claim', { runner: 'thor' })
@@ -495,9 +495,21 @@ check('next prompt carries the notebook', true)
   const nm = byKind('mail_new')[0]
   check('new mail card', (nm.payload.to as string[]).join() === 'dpark@beta.example' && (nm.payload.cc as string[]).join() === 'help@east.example' && nm.payload.from === 'me@east.example' && nm.title.startsWith('New mail to dpark@beta.example'), nm.payload)
 
+  // every mail card carries the mail as it goes out: who, the subject, the body, the closing and signature
+  const [, chv] = await j('GET', '/msg/channels/east-triage?limit=200')
+  const view = (id: number) => chv.messages.find((m: any) => m.proposal?.id === id)?.proposal
+  const dc = view(rClient.id)?.draft
+  check('reply card carries its draft', dc && dc.to.join() === 'Dana Park <dpark@beta.example>' && dc.cc.join() === 'help@east.example'
+    && dc.subject === 'RE: The PDF app asks me to sign in' && dc.body === rClient.payload.body && dc.closing === 'Thank you,' && dc.missing === false, dc)
+  const dn = view(nm.id)?.draft
+  check('new mail card carries its draft', dn && dn.from === 'me@east.example' && dn.to.join() === 'dpark@beta.example' && dn.subject === 'Your PDF app sign-in (T20991231.0004)' && dn.body.startsWith('Hi Dana,'), dn)
+  check('ticket cards carry no draft', !view(upd.id)?.draft, view(upd.id))
+  check('a mail approval without the draft it showed is refused', (await j('POST', `/msg/proposals/${rClient.id}/approve`, { how: 'send' }))[0] === 409 && store.getProposal(rClient.id)?.status === 'pending')
+  check('an emptied draft is refused', (await j('POST', `/msg/proposals/${rClient.id}/approve`, { how: 'send', body: '  ' }))[0] === 400 && store.getProposal(rClient.id)?.status === 'pending')
+
   const k0 = kicks
-  await j('POST', `/msg/proposals/${rClient.id}/approve`, { how: 'send' })
-  await j('POST', `/msg/proposals/${rOwn.id}/approve`, { how: 'send' })
+  await j('POST', `/msg/proposals/${rClient.id}/approve`, { how: 'send', body: String(dc?.body ?? rClient.payload.body) })
+  await j('POST', `/msg/proposals/${rOwn.id}/approve`, { how: 'send', body: String(rOwn.payload.body) })
   await j('POST', `/msg/proposals/${nm.id}/approve`, { how: 'draft', body: 'Hi Dana,\n\nSign out of the PDF app, then sign back in. Edited.' })
   await until(() => kicks >= k0 + 3, 3000)
   check('each mail approval starts thor at once', kicks === k0 + 3, { kicks, k0 })

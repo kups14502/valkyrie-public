@@ -16,7 +16,7 @@ import { isTauri } from '../../lib/auth'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
   RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
-  replyMetaTitle, searchRaven, sendRaven, stopRaven, type Proposal, type RavenFeed, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
+  replyMetaTitle, searchRaven, sendRaven, stopRaven, type MailDraft, type Proposal, type RavenFeed, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -818,24 +818,75 @@ function Refs({ refs }: { refs: Ref[] }) {
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v))
 
 /** A ticket proposal's change lines (ticket_update, ticket_time, ticket_complete), or null for an older card without them. */
-const changeLines = (pl: Record<string, unknown>): string | null =>
-  Array.isArray(pl.changes) && pl.changes.length ? (pl.changes as unknown[]).map(str).join('\n') : null
+const changeLines = (pl: Record<string, unknown>): string[] | null =>
+  Array.isArray(pl.changes) && pl.changes.length ? (pl.changes as unknown[]).map(str) : null
 
-/** An agent's proposal inline: a mail draft he can edit, then Send, Save to drafts or Decline; anything else Approve or Decline. */
+/** The kinds this app shows in full. A card of any other kind came from a newer Valkyrie: it offers no Approve here. */
+const SHOWN_KINDS = new Set(['ticket_note', 'ticket_create', 'ticket_update', 'ticket_time', 'ticket_complete', 'feature'])
+const MAIL_KINDS = new Set(['mail_reply', 'mail_new'])
+
+/** "Thank you," under the body, unless its last line already signs off (as clientmail.ps1 on thor does). */
+function closingFor(body: string, d: MailDraft): string {
+  const last = body.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? ''
+  try {
+    return new RegExp(d.closingRe, 'i').test(last) ? '' : d.closing
+  } catch {
+    return d.closing
+  }
+}
+
+const fitHeight = (el: HTMLTextAreaElement) => {
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight + 2}px`
+}
+
+/** The draft, editable, always as tall as its text: nothing scrolls inside it and nothing is folded away. */
+function DraftEdit({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => { if (ref.current) fitHeight(ref.current) }, [value])
+  // a narrower column (a phone turned, the Raven panel resized) wraps more lines: refit on a width change only
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let w = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === w) return
+      w = el.clientWidth
+      fitHeight(el)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return <textarea ref={ref} className="rv-prop-edit" value={value} onChange={(e) => onChange(e.target.value)} rows={3} aria-label="The draft" />
+}
+
+/**
+ * An agent's proposal inline. A mail card shows the whole mail as it goes out (From, To, Cc, Subject, the body he
+ * can edit, then the closing and signature thor adds) above Send, Save to drafts or Decline; with no body stored it
+ * says "Draft missing" and offers no Send. Anything else: what it changes, then Approve or Decline.
+ */
 function ProposalCard({ p }: { p: Proposal }) {
   const qc = useQueryClient()
   const pl = (p.payload && typeof p.payload === 'object' ? p.payload : {}) as Record<string, unknown>
-  const fresh = p.kind === 'mail_new'
-  const mail = p.kind === 'mail_reply' || fresh
-  const changes = changeLines(pl)
-  const toLine = Array.isArray(pl.to) ? (pl.to as unknown[]).map(str).join(', ')
-    : str(pl.toName) ? `${str(pl.toName)} <${str(pl.to)}>` : str(pl.to)
-  const [body, setBody] = useState(str(pl.body))
+  const draft = p.draft ?? null
+  const mail = draft !== null || MAIL_KINDS.has(p.kind)
+  // a mail card from an API that sent no draft, or one with no body stored, is never sendable
+  const missing = mail && (!draft || draft.missing)
+  const shown = mail || SHOWN_KINDS.has(p.kind)
+  // completing a ticket emails the contact its resolution: the card shows all of it, not the 600-character line
+  const resolution = p.kind === 'ticket_complete' ? str(pl.resolution)
+    : p.kind === 'ticket_update' && pl.patch && typeof pl.patch === 'object' ? str((pl.patch as Record<string, unknown>).resolution) : ''
+  const changes = changeLines(pl)?.map((l) => (resolution && l.startsWith('Resolution: ') ? `Resolution: ${resolution}` : l)).join('\n') ?? null
+  const [body, setBody] = useState(draft?.body ?? '')
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState('')
   const pending = p.status === 'pending' || p.status === 'failed'
+  const text = pending ? body : draft?.body ?? ''
+  const closing = draft ? closingFor(text, draft) : ''
+  const empty = body.trim().length < 10
   const refresh = () => qc.invalidateQueries({ queryKey: RAVEN_KEY })
   const approve = useMutation({
+    // a mail approval carries the text he read here: the API refuses one without it
     mutationFn: (how: 'send' | 'draft') => approveProposal(p.id, mail ? { how, body } : {}),
     onSuccess: (_r, how) => { toast(mail ? (how === 'draft' ? 'Saving to Outlook drafts' : 'Sending from thor') : 'Done'); void refresh() },
     onError: (e) => toast(apiErrorText(e, 'Valkyrie did not answer'), { ms: 5000 }),
@@ -845,7 +896,7 @@ function ProposalCard({ p }: { p: Proposal }) {
     onSuccess: () => { setDeclining(false); void refresh() },
     onError: (e) => toast(apiErrorText(e, 'Valkyrie did not answer'), { ms: 5000 }),
   })
-  const cc = Array.isArray(pl.cc) ? (pl.cc as string[]) : []
+  const ccLine = draft ? [...draft.cc, ...(draft.ccNote ? [draft.ccNote] : [])].join(', ') : ''
 
   return (
     <div className="rv-prop" data-status={p.status}>
@@ -857,29 +908,34 @@ function ProposalCard({ p }: { p: Proposal }) {
               : p.status === 'done' ? 'done' : p.status === 'declined' ? 'declined' : 'failed'
         }</span>
       </div>
-      {mail && (
+      {draft && (
         <dl className="rv-prop-meta">
-          <dt>To</dt><dd>{toLine}</dd>
-          {pl.replyAll ? <><dt>Cc</dt><dd>everyone on the thread</dd></> : cc.length > 0 && <><dt>Cc</dt><dd>{cc.join(', ')}</dd></>}
-          <dt>Subject</dt><dd>{fresh ? str(pl.subject) : `RE: ${str(pl.subject).replace(/^re:\s*/i, '')}`}</dd>
+          <dt>From</dt><dd>{draft.from}</dd>
+          <dt>To</dt><dd>{draft.to.join(', ') || '?'}</dd>
+          {ccLine && <><dt>Cc</dt><dd>{ccLine}</dd></>}
+          <dt>Subject</dt><dd>{draft.subject || '(no subject)'}</dd>
         </dl>
       )}
+      {missing && pending && <p className="rv-prop-missing" role="alert">Draft missing: this card holds no mail text, so it cannot be sent.</p>}
+      {draft && !missing && (
+        <div className="rv-prop-mail">
+          {pending ? <DraftEdit value={body} onChange={setBody} /> : <pre className="rv-prop-body">{text}</pre>}
+          <pre className="rv-prop-sig" data-closing={closing ? '' : undefined} aria-label="Closing and signature, added when it goes out">{closing ? `${closing}\n` : ''}{draft.signature || '(your signature: not set in work-agents.json on odin)'}</pre>
+        </div>
+      )}
+      {!shown && pending && <p className="rv-prop-missing" role="alert">This version of Valkyrie cannot show this card in full. Update the app to approve it.</p>}
       {p.kind === 'ticket_note' && <pre className="rv-prop-body">{str(pl.title)}{'\n\n'}{str(pl.text)}</pre>}
       {p.kind === 'ticket_create' && <pre className="rv-prop-body">{str(pl.company)}: {str(pl.title)}{'\n\n'}{str(pl.description)}</pre>}
       {changes && <pre className="rv-prop-body">{changes}</pre>}
-      {mail && (pending
-        ? <textarea className="rv-prop-edit" value={body} onChange={(e) => setBody(e.target.value)} rows={Math.min(16, Math.max(5, body.split('\n').length + 1))} aria-label="The draft" />
-        : <pre className="rv-prop-body">{str(pl.body)}</pre>)}
-      {mail && pending && <p className="rv-prop-hint">"Thank you," and your signature are added when it goes out.</p>}
       {p.result && p.status !== 'pending' && <p className="rv-prop-result">{p.result}</p>}
       {pending && !declining && (
         <div className="rv-prop-acts">
-          {mail ? (
+          {mail ? (!missing && (
             <>
-              <Button kind="line" lit disabled={approve.isPending} onPress={() => approve.mutate('send')}>{p.status === 'failed' ? 'Try sending again' : 'Send'}</Button>
-              <Button kind="link" disabled={approve.isPending} onPress={() => approve.mutate('draft')}>Save to Outlook drafts</Button>
+              <Button kind="line" lit disabled={approve.isPending || empty} onPress={() => approve.mutate('send')}>{p.status === 'failed' ? 'Try sending again' : 'Send'}</Button>
+              <Button kind="link" disabled={approve.isPending || empty} onPress={() => approve.mutate('draft')}>Save to Outlook drafts</Button>
             </>
-          ) : (
+          )) : shown && (
             <Button kind="line" lit disabled={approve.isPending} onPress={() => approve.mutate('send')}>{p.status === 'failed' ? 'Try again' : 'Approve'}</Button>
           )}
           <Button kind="link" onPress={() => setDeclining(true)}>Decline</Button>

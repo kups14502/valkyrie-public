@@ -332,7 +332,8 @@ function register(server: McpServer, loc: Loc): void {
         + (boxNames ? ' or messageId (any message in his mailbox, from mailbox_search; mailbox "support" for the support box). Replying to a message Brendon '
           + 'sent himself follows it up to the people it went to, in the same thread' : '')
         + `. cc defaults to ${franchiseConf(f)?.supportCc || 'nobody'}; replyAll keeps everyone on the thread instead. `
-        + 'body is the plain-text draft from "Hi <name>," to the last sentence, with no sign-off and no signature. note tells Brendon anything he must check.',
+        + 'body is the complete plain-text draft, every paragraph written out, from "Hi <name>," to the last sentence, with no sign-off and no signature: '
+        + 'Brendon reads it on the card and that exact text goes out, so never a summary. note tells Brendon anything he must check.',
       inputSchema: {
         n: z.number().int().optional(), ...(boxNames ? { messageId: z.string().min(20).max(400).optional(), mailbox: z.enum(['mine', 'support']).optional() } : {}),
         body: z.string().min(10).max(8000), replyAll: z.boolean().optional(), cc: z.array(z.string().max(200)).max(6).optional(), note: z.string().max(600).optional(),
@@ -344,7 +345,7 @@ function register(server: McpServer, loc: Loc): void {
         description: `Propose a NEW mail from Brendon's address (${boxNames.mine}), for when there is no thread to reply in: a ticket that came from `
           + 'monitoring or a phone call, a person who never wrote. If they wrote about it, use propose_mail_reply in their thread instead '
           + '(this refuses when they wrote in the last 14 days, unless newThread is true for a different matter). '
-          + `cc defaults to ${boxNames.support || 'nobody'}. ticketId links the ticket. Same draft rules as a reply.`,
+          + `cc defaults to ${boxNames.support || 'nobody'}. ticketId links the ticket. body is the complete draft, as for a reply: every paragraph written out, never a summary.`,
         inputSchema: {
           to: z.array(z.string().max(200)).min(1).max(8), cc: z.array(z.string().max(200)).max(6).optional(), subject: z.string().min(3).max(250),
           body: z.string().min(10).max(8000), note: z.string().max(600).optional(), ticketId: z.number().int().optional(), number: z.string().max(20).optional(),

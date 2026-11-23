@@ -284,10 +284,21 @@ html[data-motion='reduced'] .rv-pulse { animation: none; }
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   border: 1px solid var(--line);
   border-radius: 2px;
-  resize: vertical;
+  /* as tall as the draft (Messages.tsx DraftEdit): the whole mail is on screen, nothing scrolls inside it */
+  resize: none;
+  overflow: hidden;
 }
 .rv-prop-edit:focus { outline: none; border-color: color-mix(in srgb, var(--fg) 60%, transparent); }
-.rv-prop-hint { margin: 0; font-size: 11px; color: var(--dim); }
+/* the mail as it goes out: the body, then the closing and signature thor adds, a step quieter */
+.rv-prop-mail { display: flex; flex-direction: column; gap: 0; max-width: 760px; }
+.rv-prop-mail > .rv-prop-body { font-size: 13px; line-height: 19px; }
+.rv-prop-sig { margin: 0; padding: 0 11px; font: inherit; font-size: 12.5px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+.rv-prop-mail > .rv-prop-body + .rv-prop-sig { padding: 0; }
+/* "Thank you," follows a blank line, the way thor's send path spaces it */
+.rv-prop-sig[data-closing] { margin-top: 18px; }
+.rv-prop-edit + .rv-prop-sig { margin-top: 6px; }
+.rv-prop-edit + .rv-prop-sig[data-closing] { margin-top: 12px; }
+.rv-prop-missing { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--hot); }
 .rv-prop-result { margin: 0; font-size: 12px; color: var(--text); }
 .rv-prop-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .rv-prop-acts .vl-btn-line { min-height: 32px; font-size: 12.5px; }

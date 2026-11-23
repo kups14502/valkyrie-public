@@ -5,6 +5,7 @@ import {
   AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, searchMessages, unreadCounts, type Message,
 } from '../lib/agentsStore.js'
 import { hiddenAreas, isPaused } from '../lib/agents.js'
+import { proposalView } from '../lib/mailDraft.js'
 import { getRavenFile, MAX_FILE_BYTES, RavenFileError, saveRavenFile } from '../lib/raven/files.js'
 import { clearNotice, ravenFeeds } from '../lib/raven/notices.js'
 import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenState, stopRaven, waitForReply, withTimeout } from '../lib/raven/run.js'
@@ -51,7 +52,7 @@ router.use('/raven', (req: Request, res: Response, next: NextFunction) => {
 
 export type RavenMsgView = {
   id: number; author: string; text: string; createdAt: string; refs: Message['refs']; meta: Message['meta']
-  proposal: { id: number; kind: string; title: string; payload: unknown; status: string; result: string | null; decidedAt: string | null } | null
+  proposal: ReturnType<typeof proposalView> | null
   /** every proposal when a relay folded in more than one (proposal is the first) */
   proposals?: NonNullable<RavenMsgView['proposal']>[]
 }
@@ -73,7 +74,7 @@ function messagesView(msgs: Message[]): RavenMsgView[] {
   return msgs.map((m) => {
     const list: ProposalView[] = proposalIdsOf(m).flatMap((id) => {
       const p = props.get(id)
-      return p ? [{ id: p.id, kind: p.kind, title: p.title, payload: p.payload, status: p.status, result: p.result || null, decidedAt: p.decidedAt }] : []
+      return p ? [proposalView(p)] : []
     })
     return {
       id: m.id, author: m.author, text: m.text, createdAt: m.createdAt, refs: m.refs, meta: withTitle(m, title),

@@ -6,6 +6,7 @@ import {
   type Agent, type Channel, type Message,
 } from '../lib/agentsStore.js'
 import { brendonPost, checkNow, hiddenAreas, isPaused, setPaused, AGENT_MODEL } from '../lib/agents.js'
+import { proposalView } from '../lib/mailDraft.js'
 import { actionResult, approveProposal, declineAllProposals, declineProposal } from '../lib/agentActions.js'
 import { feedStatus, ingestMail, ingestTeams } from '../lib/workFeeds.js'
 import { PsaError, type Franchise } from '../lib/psa.js'
@@ -53,7 +54,7 @@ function messagesView(msgs: Message[]) {
     const p = m.proposalId ? props.get(m.proposalId) : undefined
     return {
       ...m,
-      proposal: p ? { id: p.id, kind: p.kind, title: p.title, payload: p.payload, status: p.status, result: p.result, decidedAt: p.decidedAt } : null,
+      proposal: p ? proposalView(p) : null,
     }
   })
 }
@@ -146,7 +147,7 @@ router.post('/msg/proposals/:id/approve', h(async (req, res) => {
     body: typeof b.body === 'string' ? b.body : undefined,
     cc: Array.isArray(b.cc) ? b.cc.map(String) : undefined,
   })
-  res.json({ ok: true, proposal: done })
+  res.json({ ok: true, proposal: proposalView(done) })
 }))
 
 // Decline all: { agentId?, count, reason? }. Declines the oldest `count` pending proposals of that agent (or of every
@@ -167,7 +168,7 @@ router.post('/msg/proposals/decline-all', h((req, res) => {
 
 router.post('/msg/proposals/:id/decline', h((req, res) => {
   const p = proposalFor(req)
-  res.json({ ok: true, proposal: declineProposal(p.id, typeof req.body?.reason === 'string' ? req.body.reason : '') })
+  res.json({ ok: true, proposal: proposalView(declineProposal(p.id, typeof req.body?.reason === 'string' ? req.body.reason : '')) })
 }))
 
 function agentFor(req: Request): Agent {
