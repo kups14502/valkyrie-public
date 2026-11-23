@@ -246,62 +246,57 @@ export function setDeskInView(names: string[]): void {
 // (screens/Desk.tsx). off: panes he took off the Desk (the session list and "+"
 // put them back). focus: the pane with the keyboard; a tab picked from the
 // strip opens there. raven: the panes Raven started that he opened; every
-// other pane Raven started stays off the Desk, minimized in Raven's list. The tab order is not kept here: the Desk sorts the tabs
-// by area, then project, every time. sides: set once he drops a whole section on the grid, the
-// panes on each side of the Desk, left to right (view holds them side after side); each side lays
-// its own out. Absent, the grid goes by count alone.
+// other pane Raven started stays off the Desk, minimized in Raven's list. The
+// tab order is not kept here: the Desk sorts the tabs by area, then project,
+// every time. split: set once he drags a section's head onto the Desk, its
+// sides left to right; each side has its own strip of its sections' tabs and
+// shows one terminal (name). The grid (view) waits under it, as he left it, for
+// when the split closes.
+
+/** One side of a Desk split by sections. */
+export type DeskSide = {
+  /** the sections pinned to this side, in order (Desk.tsx Section.key: an area, 'other' or 'raven') */
+  keys: string[]
+  /** this side also holds every section no other side names (exactly one side does) */
+  rest?: true
+  /** the session its one terminal shows; null: the side picks one */
+  name: string | null
+}
 
 export type DeskLayout = {
   view: string[]
   off: string[]
   focus: string | null
   raven: string[]
-  sides?: number[]
+  split?: DeskSide[]
 }
 
 /** The most panes the grid shows (3x3). */
 export const MAX_VIEW = 9
-/** The most sides a section drop splits the Desk into. */
+/** The most sides a split has. */
 export const MAX_SIDES = 3
 
-/** The sides' counts when they still describe `n` panes (two or more sides, each holding one or more), else undefined. */
-export function fitSides(sides: unknown, n: number): number[] | undefined {
-  if (!Array.isArray(sides) || sides.length < 2 || sides.length > MAX_SIDES) return undefined
-  if (!sides.every((k) => Number.isInteger(k) && k >= 1)) return undefined
-  return sides.reduce((a: number, k: number) => a + k, 0) === n ? [...(sides as number[])] : undefined
-}
-
-/** The side that holds view index i (0 without sides). */
-export function sideAt(sides: readonly number[] | undefined, i: number): number {
-  if (!sides) return 0
-  let end = 0
-  for (let s = 0; s < sides.length; s++) {
-    end += sides[s]
-    if (i < end) return s
-  }
-  return sides.length - 1
-}
-
-/** Takes panes out of the view; each side keeps the rest of its own, an emptied side closes, one side left is the plain grid. */
-export function dropFromView(l: DeskLayout, names: Iterable<string>): void {
-  const gone = new Set(names)
-  if (l.sides) {
-    const out: number[] = []
-    let i = 0
-    for (const k of l.sides) {
-      const keep = l.view.slice(i, i + k).filter((x) => !gone.has(x)).length
-      if (keep) out.push(keep)
-      i += k
+/** A split that still holds: 2 or 3 sides, each section on one side at most, exactly one side for the rest; else undefined. */
+export function fitSplit(v: unknown): DeskSide[] | undefined {
+  if (!Array.isArray(v) || v.length < 2 || v.length > MAX_SIDES) return undefined
+  const seen = new Set<string>()
+  let rest = 0
+  const out: DeskSide[] = []
+  for (const x of v) {
+    if (!x || typeof x !== 'object') return undefined
+    const o = x as Partial<DeskSide>
+    const keys: string[] = []
+    for (const k of Array.isArray(o.keys) ? o.keys : []) {
+      if (typeof k !== 'string' || !k || seen.has(k)) continue
+      seen.add(k)
+      keys.push(k)
     }
-    l.sides = out.length > 1 ? out : undefined
+    if (o.rest) rest += 1
+    if (!keys.length && !o.rest) return undefined
+    const name = typeof o.name === 'string' && TERM_NAME_RE.test(o.name) ? o.name : null
+    out.push({ keys, ...(o.rest ? { rest: true as const } : {}), name })
   }
-  l.view = l.view.filter((x) => !gone.has(x))
-}
-
-/** Puts pane `name` into the view at index `at`, on the side of index `side`'s panes. */
-export function addToView(l: DeskLayout, name: string, at: number, side: number): void {
-  l.view.splice(at, 0, name)
-  if (l.sides) l.sides[Math.min(Math.max(side, 0), l.sides.length - 1)] += 1
+  return rest === 1 ? out : undefined
 }
 
 const LAYOUT_KEY = 'v2.desk.grid'
@@ -311,17 +306,22 @@ function loadLayout(): DeskLayout {
   try {
     for (const k of ['v2.desk.layout', 'v2.desk.panes', 'v2.desk.cols']) localStorage.removeItem(k)
   } catch { /* storage unavailable */ }
-  const raw = read<Partial<DeskLayout>>(LAYOUT_KEY) ?? {}
+  const raw = read<Partial<DeskLayout> & { sides?: unknown }>(LAYOUT_KEY) ?? {}
   const names = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((n): n is string => typeof n === 'string' && TERM_NAME_RE.test(n)))] : [])
-  const view = names(raw.view).slice(0, MAX_VIEW)
-  const sides = fitSides(raw.sides, view.length)
-  return {
+  let view = names(raw.view).slice(0, MAX_VIEW)
+  const focus = typeof raw.focus === 'string' && TERM_NAME_RE.test(raw.focus) ? raw.focus : null
+  // v0.3.225 opened a whole section's tabs as a grid of panes (its "sides"): only the pane with the keyboard stays
+  if (raw.sides !== undefined) view = focus && view.includes(focus) ? [focus] : view.slice(0, 1)
+  const split = fitSplit(raw.split)
+  const out: DeskLayout = {
     view,
     off: names(raw.off),
     raven: names(raw.raven),
-    focus: typeof raw.focus === 'string' && TERM_NAME_RE.test(raw.focus) ? raw.focus : null,
-    ...(sides ? { sides } : {}),
+    focus,
+    ...(split ? { split } : {}),
   }
+  if (raw.sides !== undefined) write(LAYOUT_KEY, out)
+  return out
 }
 
 let layout: DeskLayout = loadLayout()
@@ -330,13 +330,15 @@ export const deskLayout = (): DeskLayout => layout
 
 /** Changes the layout (a new object, so memos see it), saves it and re-renders the Desk and the badge. */
 export function editLayout(fn: (l: DeskLayout) => DeskLayout | void): void {
-  const draft: DeskLayout = { ...layout, view: [...layout.view], off: [...layout.off], raven: [...layout.raven], ...(layout.sides ? { sides: [...layout.sides] } : {}) }
+  const draft: DeskLayout = {
+    ...layout, view: [...layout.view], off: [...layout.off], raven: [...layout.raven],
+    ...(layout.split ? { split: layout.split.map((s) => ({ ...s, keys: [...s.keys] })) } : {}),
+  }
   const next = fn(draft) ?? draft
   next.view = [...new Set(next.view)].slice(0, MAX_VIEW)
-  // sides that no longer add up to the view (an edit that did not keep them) give way to the plain grid
-  const sides = fitSides(next.sides, next.view.length)
-  if (sides) next.sides = sides
-  else delete next.sides
+  const split = fitSplit(next.split)
+  if (split) next.split = split
+  else delete next.split
   if (JSON.stringify(next) === JSON.stringify(layout)) return
   layout = next
   write(LAYOUT_KEY, layout)
@@ -365,13 +367,14 @@ export function syncLayout(list: TermSession[]): void {
     else placed.delete(n)
   }
   const gone = layout.view.some((n) => !open.has(n)) || layout.off.some((n) => !open.has(n)) || layout.raven.some((n) => !open.has(n))
-    || (!!layout.focus && !open.has(layout.focus))
+    || (!!layout.focus && !open.has(layout.focus)) || !!layout.split?.some((s) => !!s.name && !open.has(s.name))
   if (!gone) return
   editLayout((l) => {
-    dropFromView(l, l.view.filter((n) => !open.has(n)))
+    l.view = l.view.filter((n) => open.has(n))
     l.off = l.off.filter((n) => open.has(n))
     l.raven = l.raven.filter((n) => open.has(n))
     if (l.focus && !open.has(l.focus)) l.focus = null
+    for (const s of l.split ?? []) if (s.name && !open.has(s.name)) s.name = null
   })
 }
 

@@ -11,8 +11,8 @@ import { seedTerminal } from '../../lib/sessionLaunch'
 import { errText } from '../../lib/term'
 import { ago, useAreaLabel, useLaunchTargets, useSessionIndex, useTick, type SessionBrief, type TargetVM } from '../kit/data'
 import {
-  MAX_SIDES, MAX_VIEW, addToView, deskLayout, doneAt, dropFromView, editLayout, fitSides, notePlaced, onDesk, paneState, setDeskInView, sideAt,
-  syncLayout, unseenDone, useDeskPanes, useDeskStore, type DeskLayout,
+  MAX_SIDES, MAX_VIEW, deskLayout, doneAt, editLayout, notePlaced, onDesk, paneState, setDeskInView,
+  syncLayout, unseenDone, useDeskPanes, useDeskStore, type DeskLayout, type DeskSide,
 } from '../kit/desk'
 import { ChevronDown, ListTree } from 'lucide-react'
 import { Icon, StateIcon } from '../kit/icons'
@@ -52,13 +52,19 @@ import './desk.css'
 // Under it, the grid: one session fills the Desk at first. On a desktop he
 // drags a tab (or a pane's title) onto a pane: its middle puts it in that
 // pane's place, an edge puts it beside it, so the grid grows from one to a
-// split, 2x2 and 3x3 (kit/desk.ts view). A section's head dragged onto a pane
-// (a mouse or a finger) opens every tab of that section together: its middle
-// gives them that pane's side of the Desk (its column, or the whole Desk for
-// one pane), an edge opens them as a new side beside it (kit/desk.ts sides,
-// three at most); each side lays its own panes out. Each pane is the bare terminal under
+// split, 2x2 and 3x3 (kit/desk.ts view). Each pane is the bare terminal under
 // a title row: the session's title and the folder it runs in. A touch screen
 // shows one session at a time, with the terminal page's composer and keys.
+//
+// A section's head dragged onto the Desk (a mouse or a finger) splits it by
+// sections (kit/desk.ts split): that section takes the half it was dropped on
+// and the rest of the tabs the other. Each side then has its own strip, one
+// row of only its sections' tabs that scrolls on its own, over ONE terminal: a
+// tab pressed in a side's strip switches that side's terminal. Dropped on a
+// side's edge, a head opens a new side there (three at most); on a side's
+// middle it takes that side, and what was there goes to the side it came from.
+// A side's x closes it, its tabs joining the side beside it; one side left is
+// the grid again, as he left it. The split is kept per device.
 //
 // A pane's session is the pop-out terminal page (/m/w/term/<name>) in an
 // iframe. The panes in view and the most recent others stay mounted, so a
@@ -125,16 +131,13 @@ function shortFolder(cwd: string): string {
 
 // ---------- the grid ----------
 
-/** A layout edit starts from the grid as drawn: the panes shown and their sides. */
-function fromDrawn(l: DeskLayout, d: { view: readonly string[]; sides?: readonly number[] }): void {
+/** A layout edit starts from the grid as drawn. */
+function fromDrawn(l: DeskLayout, d: { view: readonly string[] }): void {
   l.view = [...d.view]
-  l.sides = d.sides ? [...d.sides] : undefined
 }
 
 /** Columns for n panes: one, a split side by side, 2x2, 3x3. */
 const gridCols = (n: number) => (n <= 1 ? 1 : n <= 4 ? 2 : 3)
-/** Columns for n panes on one side of a split Desk (narrow and tall): stacked up to three, then two or three across. */
-const sideCols = (n: number) => (n <= 3 ? 1 : n <= 6 ? 2 : 3)
 
 type Box = { x: number; y: number; w: number; h: number }
 /** Pane i of n in c columns, as fractions of the stage: a short last row's panes share its width. */
@@ -147,31 +150,9 @@ function cellBox(i: number, n: number, c = gridCols(n)): Box {
 const FULL: Box = { x: 0, y: 0, w: 1, h: 1 }
 /** Side s of k, as a fraction of the stage: the sides share its width. */
 const sideBox = (s: number, k: number): Box => ({ x: s / k, y: 0, w: 1 / k, h: 1 })
-/** The panes on each side of the Desk: the sides he made, else the grid's columns (one side for a single pane). */
-function sideLists(view: readonly string[], sides: readonly number[] | undefined): string[][] {
-  if (sides) {
-    let i = 0
-    return sides.map((k) => {
-      const xs = view.slice(i, i + k)
-      i += k
-      return xs
-    })
-  }
-  const c = gridCols(view.length)
-  return Array.from({ length: c }, (_, k) => view.filter((_, i) => i % c === k))
-}
-/** Every pane's box in view order: by count, or (a split into sides) each side's panes inside that side. */
-function viewBoxes(n: number, sides: readonly number[] | undefined): Box[] {
-  if (!sides) return Array.from({ length: n }, (_, i) => cellBox(i, n))
-  const out: Box[] = []
-  sides.forEach((k, s) => {
-    const sb = sideBox(s, sides.length)
-    for (let j = 0; j < k; j++) {
-      const b = cellBox(j, k, sideCols(k))
-      out.push({ x: sb.x + b.x * sb.w, y: b.y, w: b.w * sb.w, h: b.h })
-    }
-  })
-  return out
+/** The strips' columns over a split's k sides: each side's width as boxStyle gives it, GAP apart. */
+function sideColumns(k: number): string {
+  return Array.from({ length: k }, (_, s) => `calc(${100 / k}% - ${(s > 0 ? GAP / 2 : 0) + (s < k - 1 ? GAP / 2 : 0)}px)`).join(' ')
 }
 /** A box as CSS: GAP apart inside the stage, flush with its edges, `top` px kept clear at the top (the title row). */
 function boxStyle(b: Box, top = 0): CSSProperties {
@@ -192,6 +173,8 @@ type Zone = 'left' | 'right' | 'top' | 'bottom' | 'center'
 /** A press on the strip being followed: waiting to see where it goes, panning the strip, or dragging by pointer. */
 type Gesture = {
   id: number
+  /** the strip it started on (a split Desk has one per side) */
+  row: HTMLDivElement
   mouse: boolean
   x0: number
   y0: number
@@ -261,6 +244,74 @@ type Section = { key: string; label: string; raven: boolean; rows: TermSession[]
 /** Finished while out of view, or asking: the tab waits on him. */
 const waits = (s: TermSession) => unseenDone(s.name) || paneState(s) === 'asking'
 
+/** The tab a side shows when nothing says which: one asking, else one done and not seen, else the first. */
+const pickOf = (rows: TermSession[]): string =>
+  (rows.find((s) => paneState(s) === 'asking') ?? rows.find((s) => unseenDone(s.name)) ?? rows[0]).name
+
+/** One side of a split as drawn: its place in kit/desk.ts split, its sections (with their tabs on this side), its tabs, the one it shows. */
+type SideVM = { at: number; sections: Section[]; rows: TermSession[]; name: string }
+
+/**
+ * The sides of a split that have a tab, left to right. A tab sits on the side that shows it, else on
+ * the side its section is pinned to, else on the rest's side. A side with no name of its own shows
+ * the first of `prefer` it holds (the focus, the grid's panes, the ones opened last), else pickOf.
+ */
+function drawSides(split: readonly DeskSide[], sections: Section[], prefer: readonly (string | null)[], labelOf: (key: string) => string): SideVM[] {
+  const home = new Map<string, number>()
+  split.forEach((sd, i) => sd.keys.forEach((k) => home.set(k, i)))
+  const rest = split.findIndex((sd) => !!sd.rest)
+  const names = new Set(sections.flatMap((g) => g.rows.map((r) => r.name)))
+  // the tab a side shows stays on it: after a reload its area is not read yet
+  const claim = new Map<string, number>()
+  split.forEach((sd, i) => { if (sd.name && names.has(sd.name) && !claim.has(sd.name)) claim.set(sd.name, i) })
+  const per = split.map(() => new Map<string, Section>())
+  const add = (i: number, g: Section, r: TermSession) => {
+    let x = per[i].get(g.key)
+    if (!x) per[i].set(g.key, (x = { ...g, rows: [] }))
+    x.rows.push(r)
+  }
+  for (const g of sections) {
+    const h = home.get(g.key) ?? rest
+    for (const r of g.rows) {
+      const i = claim.get(r.name) ?? h
+      if (i < 0) continue
+      const k = split[i].keys[0]
+      // a tab whose area is not known yet, kept on a pinned side: under that side's section
+      if (i !== h && g.key === 'other' && k) add(i, { key: k, label: labelOf(k), raven: k === 'raven', rows: [] }, r)
+      else add(i, g, r)
+    }
+  }
+  const out: SideVM[] = []
+  split.forEach((sd, at) => {
+    const secs = [...per[at].values()]
+    const rows = secs.flatMap((g) => g.rows)
+    if (!rows.length) return
+    const has = (x: string | null | undefined): x is string => !!x && rows.some((r) => r.name === x)
+    out.push({ at, sections: secs, rows, name: [sd.name, ...prefer].find(has) ?? pickOf(rows) })
+  })
+  return out
+}
+
+/**
+ * A split after an edit: a pinned side with no tab goes; a rest side with no tab hands the rest to the
+ * side left of it (or right). Fewer than two sides left: no split.
+ */
+function tidySplit(next: DeskSide[], sections: Section[], labelOf: (key: string) => string): DeskSide[] | undefined {
+  const xs = next.filter((sd) => sd.keys.length || sd.rest)
+  const drawn = new Set(drawSides(xs, sections, [], labelOf).map((sd) => sd.at))
+  const keep: DeskSide[] = []
+  let restAt = -1
+  xs.forEach((sd, i) => {
+    if (drawn.has(i)) keep.push(sd)
+    else if (sd.rest) restAt = keep.length
+  })
+  if (restAt >= 0 && keep.length) {
+    const i = restAt > 0 ? restAt - 1 : 0
+    keep[i] = { ...keep[i], rest: true }
+  }
+  return keep.length >= 2 ? keep : undefined
+}
+
 /** The sections he collapsed (true) or expanded (false) himself, kept per device; the rest follow the default. */
 const FOLD_KEY = 'v2.desk.sections'
 function useSectionFolds(): [Readonly<Record<string, boolean>>, (key: string, folded: boolean) => void] {
@@ -323,7 +374,6 @@ export default function Desk({ active }: ScreenProps) {
 
   const rootRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const stripRef = useRef<HTMLDivElement>(null)
   const frames = useRef(new Map<string, HTMLIFrameElement>())
   // the stage's size in layout px (the UI zoom hides from media queries)
   const [stage, setStage] = useState({ w: 0, h: 0 })
@@ -451,30 +501,6 @@ export default function Desk({ active }: ScreenProps) {
     return [...n].sort((a, b) => rankOf(a[0]) - rankOf(b[0])).map(([area, k]): RecoverArea => ({ area, label: areaName(area), n: k }))
   }, [closed, rankOf, areaName])
 
-  // the grid: the panes he placed that are still on the Desk; before he placed any, the first tab fills it
-  const placedView = L.view.filter((n) => tabNames.has(n))
-  const focusName = L.focus && tabNames.has(L.focus) ? L.focus : null
-  const view: string[] = !grid
-    ? [focusName ?? placedView[0] ?? tabs[0]?.name].filter((x): x is string => !!x)
-    : placedView.length ? placedView : tabs[0] ? [tabs[0].name] : []
-  const n = view.length
-  const focus = focusName && view.includes(focusName) ? focusName : view[0] ?? null
-  // the sides he split the Desk into by dropping a section, counted over the panes shown (one not loaded yet leaves its side)
-  let sides: number[] | undefined
-  if (grid && L.sides && placedView.length) {
-    const out: number[] = []
-    let i = 0
-    for (const k of L.sides) {
-      const keep = L.view.slice(i, i + k).filter((x) => tabNames.has(x)).length
-      if (keep) out.push(keep)
-      i += k
-    }
-    sides = fitSides(out, n)
-  }
-  const boxes = viewBoxes(n, sides)
-  const viewKey = view.join(',')
-  const shapeKey = `${viewKey}|${sides?.join('.') ?? ''}`
-
   // ---------- the strip's sections: one per area, then the Raven ones he opened; each collapses ----------
 
   const [folds, setFold] = useSectionFolds()
@@ -490,12 +516,37 @@ export default function Desk({ active }: ScreenProps) {
     }
     return [...by.values()]
   }, [tabs, meta, areaName])
-  const foldedOf = (g: Section) => folds[g.key] ?? (g.rows.length >= BIG_SECTION && !g.rows.some(waits))
+  const labelOf = useCallback((key: string) => (key === 'raven' ? 'Raven' : areaName(key === 'other' ? '' : key)), [areaName])
+
+  // ---------- the grid, or the Desk split by sections (one terminal per side) ----------
+
+  // the terminals opened last, newest first: they stay mounted, and a side with no name of its own shows one of them
+  const [recent, setRecent] = useState<string[]>([])
+  // the grid: the panes he placed that are still on the Desk; before he placed any, the first tab fills it
+  const placedView = L.view.filter((n) => tabNames.has(n))
+  const focusName = L.focus && tabNames.has(L.focus) ? L.focus : null
+  const drawn = grid && L.split ? drawSides(L.split, sections, [focusName, ...placedView, ...recent], labelOf) : []
+  // two sides with tabs make a split; else the grid shows, as he left it
+  const split = drawn.length >= 2 ? drawn : null
+  const view: string[] = split
+    ? split.map((sd) => sd.name)
+    : !grid
+      ? [focusName ?? placedView[0] ?? tabs[0]?.name].filter((x): x is string => !!x)
+      : placedView.length ? placedView : tabs[0] ? [tabs[0].name] : []
+  const n = view.length
+  const focus = focusName && view.includes(focusName) ? focusName : view[0] ?? null
+  const boxes: Box[] = split ? split.map((_, s) => sideBox(s, split.length)) : Array.from({ length: n }, (_, i) => cellBox(i, n))
+  const viewKey = view.join(',')
+  const shapeKey = `${viewKey}|${split?.length ?? ''}`
+
+  // a section alone on its side shows all its tabs: that strip is the section
+  const sole = new Set(split ? split.filter((sd) => sd.sections.length === 1).map((sd) => sd.sections[0].key) : [])
+  const foldedOf = (g: Section) => !sole.has(g.key) && (folds[g.key] ?? (g.rows.length >= BIG_SECTION && !g.rows.some(waits)))
   /** A section's tabs in the strip: all of them, or (collapsed) the ones in view. */
   const rowsOf = (g: Section) => (foldedOf(g) ? g.rows.filter((s) => view.includes(s.name)) : g.rows)
-  // the tabs he sees, in order: Ctrl+Tab and Alt+N go by these
-  const shown = sections.flatMap(rowsOf)
-  const foldKey = sections.map((g) => `${g.key}:${foldedOf(g) ? 1 : 0}`).join(',')
+  // the tabs he sees, per strip (each side of a split has its own): Ctrl+Tab and Alt+N go by the focused one's
+  const strips = split ? split.map((sd) => sd.sections.flatMap(rowsOf)) : [sections.flatMap(rowsOf)]
+  const foldKey = (split ? split.flatMap((sd) => sd.sections) : sections).map((g) => `${g.key}:${foldedOf(g) ? 1 : 0}`).join(',')
 
   // the panes in view count as seen while the Desk shows
   useEffect(() => {
@@ -508,7 +559,6 @@ export default function Desk({ active }: ScreenProps) {
 
   const [woke, setWoke] = useState(active)
   if (active && !woke) setWoke(true)
-  const [recent, setRecent] = useState<string[]>([])
   const max = coarse ? MAX_MOUNTED_TOUCH : MAX_MOUNTED
   const mounted = woke ? [...new Set([...view, ...recent])].filter((x) => tabNames.has(x)).slice(0, Math.max(max, n)) : []
   // a stable DOM order: moving an iframe in the DOM reloads it
@@ -540,8 +590,8 @@ export default function Desk({ active }: ScreenProps) {
   const [busy, setBusy] = useState(false)
   const focusRef = useRef<string | null>(null)
   // what the callbacks below (keys, the terminals' requests) read: the Desk as last drawn
-  const cur = useRef({ view, sides, focus, tabs, shown, sections, grid, ravenNames })
-  useLayoutEffect(() => { cur.current = { view, sides, focus, tabs, shown, sections, grid, ravenNames } })
+  const cur = useRef({ view, split, focus, tabs, strips, sections, grid, ravenNames, recent, labelOf })
+  useLayoutEffect(() => { cur.current = { view, split, focus, tabs, strips, sections, grid, ravenNames, recent, labelOf } })
 
   const focusFrame = useCallback((name: string) => {
     if (coarse) return
@@ -560,17 +610,21 @@ export default function Desk({ active }: ScreenProps) {
 
   /**
    * Opens a session: in view already, it takes the keyboard; else it takes the focused pane's place (that one stays a tab).
-   * One Raven started comes onto the Desk as a tab.
+   * On a split Desk the side that holds it shows it. One Raven started comes onto the Desk as a tab.
    */
   const openTab = useCallback((name: string) => {
-    const { view: v, focus: f, grid: g, ravenNames: rn } = cur.current
+    const { view: v, focus: f, grid: g, ravenNames: rn, split: sp } = cur.current
     const was = f && f !== name ? f : null
+    // a tab on no side yet (a new session): the side its section lands on picks it up as the focus
+    const side = sp?.find((sd) => sd.rows.some((r) => r.name === name))
     editLayout((l) => {
       l.off = l.off.filter((x) => x !== name)
       if (rn.has(name) && !l.raven.includes(name)) l.raven.push(name)
       if (!g) {
         l.view = [name]
-        l.sides = undefined
+      } else if (sp) {
+        const at = side ? l.split?.[side.at] : undefined
+        if (at) at.name = name
       } else {
         fromDrawn(l, cur.current)
         if (!v.includes(name)) {
@@ -582,14 +636,15 @@ export default function Desk({ active }: ScreenProps) {
       }
       l.focus = name
     })
-    setRecent((r) => [...new Set([name, ...(was ? [was] : []), ...r])].slice(0, 16))
+    const left = side && side.name !== name ? [side.name] : []
+    setRecent((r) => [...new Set([name, ...left, ...(was ? [was] : []), ...r])].slice(0, 16))
     keyboardTo(name)
   }, [keyboardTo])
 
   /** A drop on pane `target`: its middle swaps the two (or puts the dragged one in its place), an edge puts it beside. */
   const dropOn = useCallback((name: string, target: string, zone: Zone) => {
     const v = cur.current.view
-    if (name === target || !v.includes(target)) return
+    if (cur.current.split || name === target || !v.includes(target)) return
     editLayout((l) => {
       l.off = l.off.filter((x) => x !== name)
       fromDrawn(l, cur.current)
@@ -599,10 +654,8 @@ export default function Desk({ active }: ScreenProps) {
         if (from >= 0) l.view[from] = target
         l.view[ti] = name
       } else {
-        // beside the target, on its side of a split Desk
-        dropFromView(l, [name])
-        const at = l.view.indexOf(target)
-        addToView(l, name, at + (zone === 'right' || zone === 'bottom' ? 1 : 0), sideAt(l.sides, at))
+        l.view = l.view.filter((x) => x !== name)
+        l.view.splice(l.view.indexOf(target) + (zone === 'right' || zone === 'bottom' ? 1 : 0), 0, name)
       }
       l.focus = name
     })
@@ -611,76 +664,142 @@ export default function Desk({ active }: ScreenProps) {
   }, [keyboardTo])
 
   /**
-   * A whole section dropped on pane `target`: its middle gives that pane's side of the Desk (its column
-   * before a split into sides, the whole Desk for one pane) to every tab of the section, an edge opens them as a new side beside it. The
-   * section's tabs leave the other sides; past the grid's 9 panes the ones in view and the ones waiting
-   * on him go first.
+   * A section's head dropped on the Desk. Not split yet (`at` -1): the section takes the half it was
+   * dropped on and every other tab the other half. Split (`at` a side's place in kit/desk.ts split): on
+   * that side's edge it opens as a new side there (three at most); on its middle it takes that side, and
+   * what was there goes to the side the section came from. Its side shows one of its tabs: the one he had
+   * open, else one in view or opened last, else one waiting on him, else the first.
    */
-  const dropSection = useCallback((key: string, target: string, zone: Zone) => {
-    const { view: v, sides: sd, sections: gs, focus: f } = cur.current
+  const dropSection = useCallback((key: string, at: number, zone: Zone) => {
+    const { sections: gs, split: sp, focus: f, tabs: ts, view: v, recent: rc, labelOf: lo } = cur.current
     const g = gs.find((x) => x.key === key)
-    // before a split into sides, each of the grid's columns is a side
-    const lists = sideLists(v, sd)
-    const s = lists.findIndex((xs) => xs.includes(target))
-    if (!g || s < 0) return
+    if (!g) return
     const mine = new Set(g.rows.map((r) => r.name))
-    const keep = lists.map((xs) => xs.filter((x) => !mine.has(x)))
-    let beside = (zone === 'left' || zone === 'right') && lists.length < MAX_SIDES
-    // a full grid has no room for a new side: the drop takes the target's side
-    if (beside && MAX_VIEW - keep.flat().length < 1) beside = false
-    if (!beside) keep[s] = []
-    const room = MAX_VIEW - keep.flat().length
-    const first = (r: TermSession) => (r.name === f ? 0 : v.includes(r.name) ? 1 : paneState(r) === 'asking' ? 2 : unseenDone(r.name) ? 3 : 4)
-    const pick = new Set([...g.rows].sort((a, b) => first(a) - first(b)).slice(0, room).map((r) => r.name))
-    const group = g.rows.filter((r) => pick.has(r.name)).map((r) => r.name)
-    if (beside) keep.splice(zone === 'left' ? s : s + 1, 0, group)
-    else keep[s] = group
-    const out = keep.filter((xs) => xs.length)
-    const to = f && pick.has(f) ? f : group[0]
+    const shown = sp?.map((sd) => sd.name) ?? []
+    const pick = [f, ...shown, ...v, ...rc].find((x): x is string => !!x && mine.has(x)) ?? pickOf(g.rows)
+    let next: DeskSide[] | undefined
+    if (!sp) {
+      const others = ts.filter((r) => !mine.has(r.name))
+      if (!others.length) {
+        toast(`Only ${g.label} is open: there is nothing to split it from`)
+        return
+      }
+      const restName = [f, ...v, ...rc].find((x): x is string => !!x && others.some((r) => r.name === x)) ?? null
+      const own: DeskSide = { keys: [key], name: pick }
+      const rest: DeskSide = { keys: [], rest: true, name: restName }
+      next = zone === 'right' ? [rest, own] : [own, rest]
+    } else {
+      const data = deskLayout().split
+      if (!data?.[at]) return
+      const xs = data.map((sd) => ({ ...sd, keys: [...sd.keys] }))
+      // the side it comes from: the one it is pinned to, else the rest's
+      const pinned = xs.findIndex((sd) => sd.keys.includes(key))
+      const o = pinned >= 0 ? pinned : xs.findIndex((sd) => sd.rest)
+      if (o < 0) return
+      if ((zone === 'left' || zone === 'right') && sp.length < MAX_SIDES) {
+        xs[o].keys = xs[o].keys.filter((k) => k !== key)
+        if (xs[o].name && mine.has(xs[o].name)) xs[o].name = null
+        xs.splice(zone === 'left' ? at : at + 1, 0, { keys: [key], name: pick })
+      } else {
+        if (o === at) return
+        const from = xs[o]
+        const to = xs[at]
+        // what was on the target side goes to the side the section came from, its terminal with it
+        from.keys = [...from.keys.filter((k) => k !== key), ...to.keys]
+        if (to.rest) {
+          from.rest = true
+          delete to.rest
+        }
+        if (from.name && mine.has(from.name)) from.name = to.name
+        to.keys = [key]
+        to.name = pick
+      }
+      next = tidySplit(xs, gs, lo)
+    }
     editLayout((l) => {
-      l.off = l.off.filter((x) => !pick.has(x))
-      l.view = out.flat()
-      l.sides = out.length > 1 ? out.map((xs) => xs.length) : undefined
+      l.split = next
+      l.focus = pick
+    })
+    setRecent((r) => [...new Set([pick, ...r])].slice(0, 16))
+    keyboardTo(pick)
+  }, [keyboardTo])
+
+  /**
+   * Closes side `at` of a split: its sections join the side left of it (the first side's, the one right
+   * of it). One side left is no split: the grid comes back, the terminal he had in it.
+   */
+  const closeSide = useCallback((at: number) => {
+    const { sections: gs, split: sp, focus: f, labelOf: lo } = cur.current
+    const data = deskLayout().split
+    if (!data?.[at] || !sp) return
+    const xs = data.map((sd) => ({ ...sd, keys: [...sd.keys] }))
+    const [gone] = xs.splice(at, 1)
+    const nb = xs[Math.max(0, at - 1)]
+    nb.keys.push(...gone.keys)
+    if (gone.rest) nb.rest = true
+    const next = tidySplit(xs, gs, lo)
+    // the keyboard on the side that closes: it goes to the terminal beside it, which stays
+    const here = sp.find((sd) => sd.at === at)?.name === f
+    const to = next && here ? sp.find((sd) => sd.at === (at > 0 ? at - 1 : at + 1))?.name ?? null : f
+    editLayout((l) => {
+      l.split = next
+      // the grid again, with the terminal he had the keyboard in
+      if (!next && f && !l.view.includes(f)) {
+        if (l.view.length) l.view[0] = f
+        else l.view = [f]
+      }
       l.focus = to
     })
-    setRecent((r) => [...new Set([...group, ...r])].slice(0, 16))
-    keyboardTo(to)
-    if (group.length < g.rows.length) toast(`${group.length} of ${g.rows.length} ${g.label} sessions opened: the Desk holds ${MAX_VIEW}`)
+    if (to) keyboardTo(to)
   }, [keyboardTo])
 
   /** Takes a pane out of the grid (it stays a tab); its neighbor takes the keyboard. */
   const unview = useCallback((name: string) => {
     const v = cur.current.view
-    if (v.length < 2 || !v.includes(name)) return
+    if (cur.current.split || v.length < 2 || !v.includes(name)) return
     const i = v.indexOf(name)
     const next = v.filter((x) => x !== name)
     const to = next[Math.min(i, next.length - 1)]
     editLayout((l) => {
       fromDrawn(l, cur.current)
-      dropFromView(l, [name])
+      l.view = l.view.filter((x) => x !== name)
       if (cur.current.focus === name || !l.focus) l.focus = to
     })
     if (cur.current.focus === name) keyboardTo(to)
   }, [keyboardTo])
 
   /**
-   * Takes a tab off the Desk ("+" and the session list put it back); its neighbor fills its pane.
-   * One Raven started goes back to Raven's list, minimized.
+   * Takes a tab off the Desk ("+" and the session list put it back); its neighbor fills its pane (on a
+   * split Desk, the next tab of its side). One Raven started goes back to Raven's list, minimized.
    */
   const closeTab = useCallback((name: string) => {
-    const { view: v, tabs: ts, ravenNames: rn } = cur.current
+    const { view: v, tabs: ts, ravenNames: rn, split: sp } = cur.current
     const i = ts.findIndex((s) => s.name === name)
     const rest = ts.filter((s) => s.name !== name && !v.includes(s.name))
     const fill = rest.find((_, k) => k >= i)?.name ?? rest[rest.length - 1]?.name ?? null
     editLayout((l) => {
       if (rn.has(name)) l.raven = l.raven.filter((x) => x !== name)
       else if (!l.off.includes(name)) l.off.push(name)
+      if (sp) {
+        // the grid under the split forgets it; the side that showed it shows its next tab
+        l.view = l.view.filter((x) => x !== name)
+        const side = sp.find((sd) => sd.name === name)
+        if (side) {
+          const k = side.rows.findIndex((r) => r.name === name)
+          const others = side.rows.filter((r) => r.name !== name)
+          const to = others[Math.min(k, others.length - 1)]?.name ?? null
+          const at = l.split?.[side.at]
+          if (at) at.name = to
+          if (l.focus === name) l.focus = to ?? sp.find((sd) => sd !== side)?.name ?? null
+        }
+        return
+      }
       const at = v.indexOf(name)
       fromDrawn(l, cur.current)
       if (at >= 0) {
-        // the only pane: the next tab takes its place; one of several: the grid (or its side) closes up
+        // the only pane: the next tab takes its place; one of several: the grid closes up
         if (l.view.length === 1 && fill) l.view[0] = fill
-        else dropFromView(l, [name])
+        else l.view = l.view.filter((x) => x !== name)
       }
       if (l.focus === name) l.focus = l.view[Math.min(Math.max(at, 0), l.view.length - 1)] ?? null
     })
@@ -834,8 +953,10 @@ export default function Desk({ active }: ScreenProps) {
   // ---------- keys: here, and handed up by a terminal (DeskHost.key) ----------
 
   const onChord = useCallback((chord: DeskChord, from?: string) => {
-    const { view: v, focus: f, tabs: ts, shown: sh } = cur.current
+    const { view: v, focus: f, tabs: ts, strips } = cur.current
     const here = from ?? f
+    // the strip the keyboard is in: a split Desk's side has its own
+    const sh = strips.find((xs) => xs.some((s) => s.name === here)) ?? strips[0] ?? []
     if (chord === 'next' || chord === 'prev') {
       if (!sh.length) return
       const i = Math.max(0, sh.findIndex((s) => s.name === here))
@@ -898,52 +1019,57 @@ export default function Desk({ active }: ScreenProps) {
     return () => { if (w.valkyrieDesk === host) delete w.valkyrieDesk }
   }, [openTab, place, closeTab, onChord])
 
-  // the strip is one row: it keeps the focused tab in view when it scrolls sideways, clear of
-  // "Sessions" and "+", which stay at its ends
+  // each strip is one row: it keeps its tab with the keyboard (or the one its side shows) in view when
+  // that changes or the strips' shape does, clear of "Sessions" and "+", which stay at its ends. A strip
+  // he scrolled himself holds while another side's tab changes.
   const titleKey = tabs.map((s) => metaOf(s).title).join('\n')
+  const shapeSeen = useRef('')
   useLayoutEffect(() => {
-    const keep = () => {
-      const row = stripRef.current
-      const el = focus && row ? row.querySelector<HTMLElement>(`.dk-tab[data-name="${focus}"]`) : null
-      if (!row || !el) return
-      const padL = row.querySelector<HTMLElement>(':scope > .dk-list-btn')?.offsetWidth ?? 0
-      const padR = row.querySelector<HTMLElement>(':scope > .dk-add')?.offsetWidth ?? 0
-      const l = el.offsetLeft - padL
-      const r = el.offsetLeft + el.offsetWidth + padR
-      if (l < row.scrollLeft) row.scrollLeft = Math.max(0, l - 8)
-      else if (r > row.scrollLeft + row.clientWidth) row.scrollLeft = r - row.clientWidth + 8
+    const shape = `${titleKey}|${foldKey}|${phone}|${stage.w}|${split?.length ?? 0}`
+    const all = shapeSeen.current !== shape
+    shapeSeen.current = shape
+    const keep = (force: boolean) => {
+      for (const row of rootRef.current?.querySelectorAll<HTMLElement>('.dk-tabs') ?? []) {
+        const el = row.querySelector<HTMLElement>('.dk-tab[data-focus]') ?? row.querySelector<HTMLElement>('.dk-tab[data-on]')
+        const name = el?.dataset.name ?? ''
+        if (!el || (!force && row.dataset.kept === name)) continue
+        row.dataset.kept = name
+        const padL = row.querySelector<HTMLElement>(':scope > .dk-list-btn')?.offsetWidth ?? 0
+        const padR = row.querySelector<HTMLElement>(':scope > .dk-add')?.offsetWidth ?? 0
+        const l = el.offsetLeft - padL
+        const r = el.offsetLeft + el.offsetWidth + padR
+        if (l < row.scrollLeft) row.scrollLeft = Math.max(0, l - 8)
+        else if (r > row.scrollLeft + row.clientWidth) row.scrollLeft = r - row.clientWidth + 8
+      }
     }
-    keep()
+    keep(all)
     let live = true
-    void document.fonts?.ready.then(() => { if (live) keep() })
+    void document.fonts?.ready.then(() => { if (live) keep(all) })
     return () => { live = false }
-  }, [focus, titleKey, foldKey, phone, stage.w])
+  }, [focus, viewKey, titleKey, foldKey, phone, stage.w, split?.length])
 
-  // a mouse wheel over the strip scrolls it sideways (a trackpad's sideways swipe and Shift+wheel already do)
-  const [stripEl, setStripEl] = useState<HTMLDivElement | null>(null)
-  const setStrip = useCallback((el: HTMLDivElement | null) => {
-    stripRef.current = el
-    setStripEl(el)
-  }, [])
+  // a mouse wheel over a strip scrolls it sideways (a trackpad's sideways swipe and Shift+wheel already do)
   useEffect(() => {
-    const row = stripEl
-    if (!row) return
+    const root = rootRef.current
+    if (!root) return
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || row.scrollWidth <= row.clientWidth + 1) return
+      const row = (e.target as Element | null)?.closest?.<HTMLElement>('.dk-tabs')
+      if (!row || e.ctrlKey || row.scrollWidth <= row.clientWidth + 1) return
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
       e.preventDefault()
       row.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? row.clientWidth : 1)
     }
-    row.addEventListener('wheel', onWheel, { passive: false })
-    return () => row.removeEventListener('wheel', onWheel)
-  }, [stripEl])
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
+  }, [])
 
   // ---------- drag a tab, a section's head or a pane's title ----------
   //
   // A tab and a pane's title are the browser's drag (a mouse). A section's head is the Desk's own,
-  // by pointer, so a finger drags it too. On a strip wider than the Desk, a mouse that sets off
-  // sideways on a tab or a head pans the strip instead; pulled down out of the strip, that pan
-  // becomes the drag of what it started on.
+  // by pointer, so a finger drags it too. On a strip wider than its room, a mouse that sets off
+  // sideways on a tab or a head pans that strip instead; pulled down out of the strip, that pan
+  // becomes the drag of what it started on. On a split Desk only a head drags: each side shows one
+  // terminal, its tabs switch it.
 
   const [drag, setDrag] = useState<{ name: string; from: 'tab' | 'pane' | 'section' } | null>(null)
   const [dropAt, setDropAt] = useState<{ target: string; zone: Zone } | null>(null)
@@ -970,15 +1096,26 @@ export default function Desk({ active }: ScreenProps) {
     if (el && g) placeGhost(g.x, g.y)
   }
 
-  /** The pane under a drop by pointer, and where in it: a section takes a side, or opens a new one at an edge. */
+  /**
+   * Where a drop by pointer lands. A tab: the pane under it, and where in that pane. A section: the
+   * stage's left or right half (not split yet; target '-1'), or a side and its edge or middle (target
+   * its place in kit/desk.ts split). A split of three sides has no room for a new one.
+   */
   const aimAt = (x: number, y: number, d: { name: string; from: 'tab' | 'section' }): { target: string; zone: Zone } | null => {
     const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.dk-drop')
-    const target = el?.dataset.name
+    const target = d.from === 'section' ? el?.dataset.side : el?.dataset.name
     if (!el || !target || (d.from === 'tab' && target === d.name)) return null
+    if (d.from === 'section') {
+      const r = el.getBoundingClientRect()
+      const fx = (x - r.left) / Math.max(1, r.width)
+      const sp = cur.current.split
+      if (!sp) return { target, zone: fx < 0.5 ? 'left' : 'right' }
+      const room = sp.length < MAX_SIDES
+      return { target, zone: room && fx < 0.25 ? 'left' : room && fx > 0.75 ? 'right' : 'center' }
+    }
     let zone = zoneAt({ clientX: x, clientY: y }, el)
-    if (d.from === 'section') zone = zone === 'left' || zone === 'right' ? zone : 'center'
     // a full 3x3 grid takes no pane beside another: the drop puts it in that pane's place
-    else if (zone !== 'center' && cur.current.view.length >= MAX_VIEW && !cur.current.view.includes(d.name)) zone = 'center'
+    if (zone !== 'center' && cur.current.view.length >= MAX_VIEW && !cur.current.view.includes(d.name)) zone = 'center'
     return { target, zone }
   }
 
@@ -991,6 +1128,7 @@ export default function Desk({ active }: ScreenProps) {
 
   const stripDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || gest.current) return
+    const row = e.currentTarget
     const t = e.target as HTMLElement
     if (t.closest('.dk-tab-x, .dk-add, .dk-list-btn')) return
     const section = t.closest<HTMLElement>('.dk-gh')?.closest<HTMLElement>('.dk-tg')?.dataset.key ?? null
@@ -1001,8 +1139,7 @@ export default function Desk({ active }: ScreenProps) {
     const id = e.pointerId
     const move = (ev: PointerEvent) => {
       const g = gest.current
-      const row = stripRef.current
-      if (!g || ev.pointerId !== id || !row) return
+      if (!g || ev.pointerId !== id) return
       g.x = ev.clientX
       g.y = ev.clientY
       const dx = g.x - g.x0
@@ -1026,7 +1163,7 @@ export default function Desk({ active }: ScreenProps) {
         row.scrollLeft = g.left - dx
         if (grid && g.y > row.getBoundingClientRect().bottom + 24) {
           if (g.section) startDrag(g, 'section', g.section)
-          else if (g.tab) startDrag(g, 'tab', g.tab)
+          else if (g.tab && !cur.current.split) startDrag(g, 'tab', g.tab)
         }
       }
       if (g.mode === 'drag' && pdrag.current) {
@@ -1044,7 +1181,7 @@ export default function Desk({ active }: ScreenProps) {
         const at = d && ev.type === 'pointerup' ? aimAt(ev.clientX, ev.clientY, d) : null
         endDrag()
         if (d && at) {
-          if (d.from === 'section') dropSection(d.name, at.target, at.zone)
+          if (d.from === 'section') dropSection(d.name, Number(at.target), at.zone)
           else dropOn(d.name, at.target, at.zone)
         }
       }
@@ -1060,7 +1197,7 @@ export default function Desk({ active }: ScreenProps) {
       window.removeEventListener('touchmove', still)
       if (gest.current?.mode === 'wait') gest.current = null
     }
-    gest.current = { id, mouse, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, left: stripRef.current?.scrollLeft ?? 0, section, tab, mode: 'wait', off }
+    gest.current = { id, row, mouse, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, left: row.scrollLeft, section, tab, mode: 'wait', off }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
@@ -1070,12 +1207,12 @@ export default function Desk({ active }: ScreenProps) {
   const beginDrag = (name: string, from: 'tab' | 'pane') => (e: ReactDragEvent) => {
     const g = gest.current
     if (from === 'tab' && g) {
-      // a mouse setting off sideways on a strip wider than the Desk pans it (stripDown) instead
-      const row = stripRef.current
-      if (g.mode === 'pan' || (g.mouse && g.mode === 'wait' && !!row && row.scrollWidth > row.clientWidth + 1 && Math.abs(g.x - g.x0) > Math.abs(g.y - g.y0))) {
+      // a mouse setting off sideways on a strip wider than its room pans it (stripDown) instead
+      const row = g.row
+      if (g.mode === 'pan' || (g.mouse && g.mode === 'wait' && row.scrollWidth > row.clientWidth + 1 && Math.abs(g.x - g.x0) > Math.abs(g.y - g.y0))) {
         e.preventDefault()
         g.mode = 'pan'
-        if (row) hold(row, g.id)
+        hold(row, g.id)
         return
       }
       g.off()
@@ -1189,7 +1326,7 @@ export default function Desk({ active }: ScreenProps) {
       on={view.includes(s.name)}
       focused={focus === s.name}
       coarse={coarse}
-      draggable={grid}
+      draggable={grid && !split}
       onOpen={(el) => {
         if (moved()) return
         if (focus === s.name && coarse) openMenu(s.name, el)
@@ -1216,10 +1353,69 @@ export default function Desk({ active }: ScreenProps) {
     </Press>
   )
 
+  /** A section in a strip: its head, then its tabs. `sep`: a quiet line after it, before the next section. */
+  const sectionFor = (g: Section, sep: boolean) => {
+    const folded = foldedOf(g)
+    const hidden = folded ? g.rows.filter((s) => !view.includes(s.name)) : []
+    const rows = rowsOf(g)
+    const fixed = sole.has(g.key)
+    return (
+      <div key={g.key} className="dk-tg" role="group" aria-label={g.label} data-key={g.key} data-folded={folded || undefined} data-sep={sep || undefined}>
+        {/* the head keeps its first tab beside it */}
+        <span className="dk-tg-lead">
+          <SectionHead
+            label={g.label}
+            n={g.rows.length}
+            folded={folded}
+            fixed={fixed}
+            raven={g.raven}
+            waiting={hidden.filter(waits).length}
+            asking={hidden.some((s) => paneState(s) === 'asking')}
+            working={hidden.some((s) => paneState(s) === 'working')}
+            coarse={coarse}
+            grab={grid ? (split ? 'side' : 'split') : null}
+            onToggle={() => { if (!moved() && !fixed) setFold(g.key, !folded) }}
+          />
+          {rows[0] && tabFor(rows[0])}
+        </span>
+        {rows.slice(1).map(tabFor)}
+      </div>
+    )
+  }
+
+  const addBtn = (
+    <Press
+      className="dk-add"
+      aria-label="New session"
+      title="New session, or put one back"
+      aria-expanded={picker}
+      onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}
+    >
+      <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
+    </Press>
+  )
+
+  const ravenChip = !ravenOpen && ravens.length > 0 && (
+    <Press
+      className="dk-rchip"
+      data-lit={ravenLit > 0 || undefined}
+      data-tone={ravenAsking ? 'ask' : undefined}
+      data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
+      aria-expanded={false}
+      aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
+      title="Show the sessions Raven started"
+      onPress={() => { setMenu(null); setRavenOpen(true) }}
+    >
+      <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
+      <span>Raven</span>
+      <span className="dk-rchip-n">{ravens.length}</span>
+    </Press>
+  )
+
   return (
-    <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-phone={phone || undefined} data-n={n}>
-      {/* "Sessions" at the top left: beside the Raven card while it is open, else the strip's first item, so it never moves.
-          The strip spans the Desk from its left edge, under the card. */}
+    <div ref={rootRef} className="dk" style={vars} data-grid={grid || undefined} data-coarse={coarse || undefined} data-phone={phone || undefined} data-n={n} data-split={split?.length}>
+      {/* "Sessions" at the top left: beside the Raven card while it is open, else the (first) strip's first item, so it never moves.
+          The strip spans the Desk from its left edge, under the card; split by sections, one strip over each side. */}
       {(strip || card) && (
         <div className="dk-top">
           {card && (
@@ -1240,64 +1436,41 @@ export default function Desk({ active }: ScreenProps) {
               />
             </div>
           )}
-          {bar && (
+          {bar && !split && (
             <div className="dk-bar" data-drop={stripDrop || undefined} onDragOver={overStrip} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setStripDrop(false) }} onDrop={dropStrip}>
-              <div ref={setStrip} className="dk-tabs" role="tablist" aria-label="Your sessions" onPointerDown={stripDown}>
+              <div className="dk-tabs" role="tablist" aria-label="Your sessions" onPointerDown={stripDown}>
                 {!card && sessionsBtn}
-                {sections.map((g, i) => {
-                  const folded = foldedOf(g)
-                  const hidden = folded ? g.rows.filter((s) => !view.includes(s.name)) : []
-                  const rows = rowsOf(g)
-                  return (
-                    <div key={g.key} className="dk-tg" role="group" aria-label={g.label} data-key={g.key} data-folded={folded || undefined} data-sep={i < sections.length - 1 || undefined}>
-                      {/* the head keeps its first tab beside it, so a wrap never leaves it at a row's end */}
-                      <span className="dk-tg-lead">
-                        <SectionHead
-                          label={g.label}
-                          n={g.rows.length}
-                          folded={folded}
-                          raven={g.raven}
-                          waiting={hidden.filter(waits).length}
-                          asking={hidden.some((s) => paneState(s) === 'asking')}
-                          working={hidden.some((s) => paneState(s) === 'working')}
-                          coarse={coarse}
-                          grab={grid}
-                          onToggle={() => { if (!moved()) setFold(g.key, !folded) }}
-                        />
-                        {rows[0] && tabFor(rows[0])}
-                      </span>
-                      {rows.slice(1).map(tabFor)}
-                    </div>
-                  )
-                })}
-                {!empty && (
-                  <Press
-                    className="dk-add"
-                    aria-label="New session"
-                    title="New session, or put one back"
-                    aria-expanded={picker}
-                    onPress={() => { setMenu(null); setListOpen(false); setPicker((p) => !p) }}
-                  >
-                    <Icon name="add" size={coarse ? 18 : 15} tone={picker ? 'fg' : 'dim'} glow={picker} />
-                  </Press>
-                )}
+                {sections.map((g, i) => sectionFor(g, i < sections.length - 1))}
+                {!empty && addBtn}
               </div>
-              {!ravenOpen && ravens.length > 0 && (
-                <Press
-                  className="dk-rchip"
-                  data-lit={ravenLit > 0 || undefined}
-                  data-tone={ravenAsking ? 'ask' : undefined}
-                  data-on={(!!focus && ravens.some((s) => s.name === focus)) || undefined}
-                  aria-expanded={false}
-                  aria-label={`Raven started ${ravens.length} ${ravens.length === 1 ? 'session' : 'sessions'}${ravenLit ? `, ${ravenLit} waiting on you` : ''}. Show them.`}
-                  title="Show the sessions Raven started"
-                  onPress={() => { setMenu(null); setRavenOpen(true) }}
-                >
-                  <Icon name="raven" size={coarse ? 15 : 13} tone={ravenAsking ? 'acc2' : 'fg'} glow />
-                  <span>Raven</span>
-                  <span className="dk-rchip-n">{ravens.length}</span>
-                </Press>
-              )}
+              {ravenChip}
+            </div>
+          )}
+          {/* split by sections: one strip over each side, as wide as its terminal, that scrolls on its own */}
+          {bar && split && (
+            <div className="dk-bar" data-split={split.length} style={{ gridTemplateColumns: sideColumns(split.length) }}>
+              {split.map((sd, i) => {
+                const what = sd.sections.map((g) => g.label).join(', ')
+                const last = i === split.length - 1
+                return (
+                  <div key={sd.at} className="dk-side" data-side={sd.at} data-focus={sd.name === focus || undefined}>
+                    <div className="dk-tabs" role="tablist" aria-label={`${what} sessions`} onPointerDown={stripDown}>
+                      {i === 0 && !card && sessionsBtn}
+                      {sd.sections.map((g, k) => sectionFor(g, k < sd.sections.length - 1))}
+                      {last && !empty && addBtn}
+                    </div>
+                    <Press
+                      className="dk-side-x"
+                      aria-label={`Close the ${what} side`}
+                      title={`Close this side: its tabs join the side ${i > 0 ? 'left' : 'right'} of it`}
+                      onPress={() => closeSide(sd.at)}
+                    >
+                      <Icon name="stop" size={11} tone="dim" />
+                    </Press>
+                    {last && ravenChip}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1351,7 +1524,7 @@ export default function Desk({ active }: ScreenProps) {
               <div
                 className="dk-head"
                 data-state={st}
-                draggable={n > 1}
+                draggable={n > 1 && !split}
                 title={tooltip(s)}
                 onDragStart={beginDrag(name, 'pane')}
                 onDragEnd={endDrag}
@@ -1361,7 +1534,7 @@ export default function Desk({ active }: ScreenProps) {
                 <span className="dk-head-t">{m.title}</span>
                 {byRaven(s) && <RavenTag />}
                 {m.folder && <span className="dk-head-f">{m.folder}</span>}
-                {n > 1 && (
+                {n > 1 && !split && (
                   <Press className="dk-head-x" aria-label={`Take ${m.title} out of the grid`} title="Take it out of the grid (it stays a tab)" onPointerDown={(e) => e.stopPropagation()} onPress={() => unview(name)}>
                     <Icon name="stop" size={11} tone="dim" />
                   </Press>
@@ -1371,16 +1544,16 @@ export default function Desk({ active }: ScreenProps) {
           )
         })}
 
-        {/* while a drag is on: one target over each pane (a terminal's iframe would swallow the drag), lit where it would land */}
-        {drag && grid && view.map((name, i) => {
-          const z = drag.from !== 'section' && dropAt?.target === name ? dropAt.zone : null
+        {/* while a tab or a pane's title drags: one target over each pane (a terminal's iframe would swallow the drag), lit where it would land */}
+        {drag && grid && drag.from !== 'section' && !split && view.map((name, i) => {
+          const z = dropAt?.target === name ? dropAt.zone : null
           return (
             <div
               key={name}
               className="dk-drop"
               data-name={name}
               style={boxStyle(boxes[i])}
-              data-self={(drag.from !== 'section' && drag.name === name) || undefined}
+              data-self={drag.name === name || undefined}
               onDragOver={overPane(name)}
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt((d) => (d?.target === name ? null : d)) }}
               onDrop={dropPane(name)}
@@ -1389,18 +1562,24 @@ export default function Desk({ active }: ScreenProps) {
             </div>
           )
         })}
-        {/* a section dragged by pointer: the side it would take (or the edge a new side opens at), lit */}
+        {/* a section's head dragging: one target over the whole stage, or one over each side of a split */}
+        {drag?.from === 'section' && grid && (split
+          ? split.map((sd, i) => <div key={sd.at} className="dk-drop" data-side={sd.at} style={boxStyle(boxes[i])} />)
+          : <div className="dk-drop" data-side="-1" style={boxStyle(FULL)} />)}
+        {/* where it would land, lit: a half of the Desk, a side's edge (a new side) or a side (it takes that side) */}
         {drag?.from === 'section' && grid && dropAt && (() => {
-          const ls = sideLists(view, sides)
-          const s = ls.findIndex((xs) => xs.includes(dropAt.target))
           const g = sections.find((x) => x.key === drag.name)
-          if (s < 0 || !g) return null
-          const k = Math.min(g.rows.length, MAX_VIEW)
-          const where = dropAt.zone === 'left' ? ' on the left' : dropAt.zone === 'right' ? ' on the right' : ' here'
+          const at = Number(dropAt.target)
+          const i = split ? split.findIndex((sd) => sd.at === at) : -1
+          if (!g || (split && i < 0)) return null
+          const home = split?.findIndex((sd) => sd.sections.some((x) => x.key === g.key)) ?? -1
+          // onto its own side's middle: nothing changes
+          if (split && dropAt.zone === 'center' && home === i) return null
+          const text = !split ? `${g.label} on the ${dropAt.zone}` : dropAt.zone === 'center' ? `${g.label} here` : `${g.label} as a new side`
           return (
-            <div className="dk-side-drop" style={boxStyle(sideBox(s, ls.length))}>
+            <div className="dk-side-drop" style={boxStyle(split ? boxes[i] : FULL)}>
               <div className="dk-drop-hint" data-zone={dropAt.zone} />
-              <span className="dk-side-t" data-zone={dropAt.zone}>{`Open ${k} ${g.label} ${k === 1 ? 'session' : 'sessions'}${where}`}</span>
+              <span className="dk-side-t" data-zone={dropAt.zone}>{text}</span>
             </div>
           )
         })()}
@@ -1469,7 +1648,7 @@ export default function Desk({ active }: ScreenProps) {
         <TabMenu
           title={metaOf(menuTab).title}
           live={!menuTab.dead}
-          beside={grid && !view.includes(menuTab.name) && n < MAX_VIEW}
+          beside={grid && !split && !view.includes(menuTab.name) && n < MAX_VIEW}
           closable={tabNames.has(menuTab.name)}
           closeLabel={byRaven(menuTab) ? 'Minimize into Raven' : 'Close tab'}
           x={Math.min(menu.x, Math.max(0, stage.w - 270))}
@@ -1611,11 +1790,14 @@ function RavenRow({ s, m, tip, here, on, off, now, onOpen, onMenu }: {
  * A section's name and how many tabs it holds; a press collapses it (its tabs
  * in view stay) or expands it. Collapsed, it lights while a tab it hides waits
  * on him (the second accent for a question), and shows the bolt while one works.
+ * Alone on a side of a split Desk it is that side's name: it never collapses.
  */
-function SectionHead({ label, n, folded, raven, waiting, asking, working, coarse, grab, onToggle }: {
+function SectionHead({ label, n, folded, fixed, raven, waiting, asking, working, coarse, grab, onToggle }: {
   label: string
   n: number
   folded: boolean
+  /** alone on its side: no collapse */
+  fixed: boolean
   /** the tabs Raven started: the bird before the name */
   raven: boolean
   /** hidden tabs that finished unseen or ask */
@@ -1623,24 +1805,27 @@ function SectionHead({ label, n, folded, raven, waiting, asking, working, coarse
   asking: boolean
   working: boolean
   coarse: boolean
-  /** on the grid: dragged onto a pane it opens all its tabs on that side (Desk.tsx stripDown) */
-  grab: boolean
+  /** on the grid it drags onto the Desk (Desk.tsx stripDown): 'split' splits the Desk by it, 'side' moves it to a side */
+  grab: 'split' | 'side' | null
   onToggle: () => void
 }) {
   const what = `${n} ${label} ${n === 1 ? 'tab' : 'tabs'}`
-  const drag = grab ? `. Drag it onto a pane to open ${n === 1 ? 'it' : 'them all'} there` : ''
+  const drag = grab === 'split' ? `. Drag it onto the Desk to give ${label} a side of its own`
+    : grab === 'side' ? '. Drag it onto a side to put it there, or onto a side\'s edge for a new side' : ''
+  const press = fixed ? what : folded ? `Expand the ${what}${waiting ? ` (${waiting} waiting on you)` : ''}` : `Collapse the ${what}`
   return (
     <Press
       className="dk-gh"
-      aria-expanded={!folded}
+      aria-expanded={fixed ? undefined : !folded}
+      data-fixed={fixed || undefined}
       data-lit={waiting > 0 || undefined}
       data-tone={asking ? 'ask' : undefined}
       aria-label={`${label}: ${n} ${n === 1 ? 'tab' : 'tabs'}${folded ? ', collapsed' : ''}${waiting ? `, ${waiting} waiting on you` : ''}`}
       data-grab={grab || undefined}
-      title={`${folded ? `Expand the ${what}${waiting ? ` (${waiting} waiting on you)` : ''}` : `Collapse the ${what}`}${drag}`}
+      title={`${press}${drag}`}
       onPress={onToggle}
     >
-      <Icon name={ChevronDown} size={coarse ? 13 : 11} tone="dim" className="dk-gh-i" />
+      {!fixed && <Icon name={ChevronDown} size={coarse ? 13 : 11} tone="dim" className="dk-gh-i" />}
       {raven && <Icon name="raven" size={coarse ? 13 : 11} tone="fg" />}
       <span className="dk-gh-t">{label}</span>
       {folded && working && !waiting && <StateIcon a="working" size={coarse ? 13 : 12} className="dk-gh-mark" />}

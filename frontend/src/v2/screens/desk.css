@@ -1,7 +1,8 @@
 /* The Desk (Desk.tsx) at /m/desk inside the v2 shell's .vl-page. It fills the page instead of
    scrolling it: "Sessions" at the top left, right of it the Raven card (the sessions Raven started;
    folded, a chip at the strip's right end), then his strip of tabs across the whole Desk (each area a
-   section under a head that collapses it), then the grid of terminals. The Raven card alone wears the
+   section under a head that collapses it), then the grid of terminals. Split by sections, each side has a strip of
+   its own over its one terminal. The Raven card alone wears the
    Raven tab's look (the composer's accent-tinted rounded box, the glowing uppercase label); the Desk's own controls
    ("Sessions", its list, the empty Desk's Recover box and buttons) are plain grey, so only Raven's sessions look like
    Raven. Bubbles for the tabs in view, the Connected column's rows and small uppercase headings. The terminals are one layer
@@ -156,6 +157,14 @@
   height: var(--dk-strip-h);
   border-radius: 12px;
 }
+/* split by sections: one strip over each side, each column as wide as the terminal under it (Desk.tsx sideColumns) */
+.dk-bar[data-split] { display: grid; column-gap: var(--dk-gap); }
+.dk-side { display: flex; align-items: center; gap: 4px; min-width: 0; height: var(--dk-strip-h); }
+.dk-side > .dk-rchip { margin-left: 2px; }
+/* a side's x: it closes, its tabs join the side beside it */
+.dk-side-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; opacity: .6; }
+.dk[data-coarse] .dk-side-x { width: 36px; height: 36px; }
+.dk-side-x[data-pressed] { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
 /* a pane's title dragged here leaves the grid */
 .dk-bar[data-drop] { background: color-mix(in srgb, var(--fg) 6%, transparent); box-shadow: inset 0 0 0 1px var(--fg); }
 .dk-list-btn {
@@ -255,7 +264,9 @@
 .dk-gh[data-tone='ask'] { color: var(--acc2); }
 .dk-gh[data-tone='ask'] .dk-gh-n { background: var(--acc2); box-shadow: 0 0 8px color-mix(in srgb, var(--acc2) calc(var(--glow-k) * 60%), transparent); }
 .dk-gh[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
-/* on the grid a head drags onto a pane: all its tabs open on that side */
+/* alone on a side of a split Desk the head is that side's name: no chevron, it never collapses */
+.dk-gh[data-fixed] { padding-left: 8px; color: var(--text); }
+/* on the grid a head drags onto the Desk: its section gets a side */
 .dk-gh[data-grab] { cursor: grab; }
 
 /* a tab never squeezes below its title: up to 20 characters show, then the ellipsis (the tooltip has it all) */
@@ -346,6 +357,8 @@
   .dk-gh:hover { color: var(--text); background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-gh:hover .dk-gh-i { color: var(--fg); }
   .dk-rchip:hover { border-color: var(--dk-edge-hi); }
+  .dk-side-x:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 10%, transparent); }
+  .dk-side-x:hover .vl-icon { color: var(--fg); }
   .dk-rrow:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
   .dk-rrow[data-here]:hover { background: var(--dk-fill-hi); }
   .dk-raven-fold:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
@@ -402,7 +415,7 @@
 
 /* while a drag is on: a target over each pane, above its terminal; the half (or the whole) it would take lights */
 .dk-drop { position: absolute; z-index: 5; }
-/* a section dragged: the side of the Desk it would take (or the edge where a new side opens) */
+/* a section dragged: the half or side of the Desk it would take (or the edge where a new side opens) */
 .dk-side-drop { position: absolute; z-index: 6; pointer-events: none; }
 .dk-side-t {
   position: absolute;

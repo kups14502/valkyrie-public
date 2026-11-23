@@ -23,10 +23,17 @@
 //            (no drag of the tab, no tab opened, a click still opens one), a pan pulled down onto a
 //            pane becoming the tab's drag, a finger's swipe on the iPad; the focused tab kept in view
 //            clear of "Sessions" and "+"
-//   sectiondrop  a section's head dragged onto the grid opens all its tabs together: a mouse onto a
-//            pane's edge opens them as a new side, onto a side's middle they take that side, a finger
-//            drags a head too; a tab dropped in a side stays in it, a closed tab closes its side up,
-//            the sides are kept across a reload, a press on the head still collapses it
+//   split    a section's head dragged onto the Desk's left half splits it: that section alone on the
+//            left (its head fixed, every tab shown), the rest on the right, each side its own one-row
+//            strip as wide as its ONE terminal; each strip scrolls on its own; a tab pressed in a strip
+//            switches only that side's terminal; a head on a side's edge opens a third side, on a side's
+//            middle it trades sides with what was there; kept across a reload; Ctrl+Tab stays in the
+//            focused strip, Alt+Right goes to the next side; a side's x closes it into its neighbor and
+//            the last one closes the split; a single tab still drags on the grid
+//   sectiondrop  the grid of a whole section v0.3.225 kept comes back as one pane; a finger drags a head
+//            onto the right half; on a split Desk no tab drags and no menu offers Open beside; a closed
+//            tab's side shows its next tab, an emptied side goes and comes back with a tab put back; a
+//            head in a side of several still collapses
 //   done     a hidden tab going working to idle, and another working to asking, lights its title;
 //            opening it clears it; a whole run between two reads lights too; an API restart and
 //            empty lists change nothing; the badge counts them (asking tone) from any screen
@@ -662,7 +669,11 @@ const line = (a, b, n = 10, wait) => Array.from({ length: n }, (_, k) => ({ x: a
 
 /** A section's head dragged by pointer: down out of the strip first, then over to `to`, held there, released. */
 async function dragHead(page, key, to, { touch = false } = {}) {
-  const h = await boxOf(page, `.vl-page[data-active] .dk-tg[data-key="${key}"] .dk-gh`)
+  const sel = `.vl-page[data-active] .dk-tg[data-key="${key}"] .dk-gh`
+  // a head past the strip's end: scrolled into view first, as he would
+  await page.eval((s) => document.querySelector(s)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' }), sel)
+  await sleep(150)
+  const h = await boxOf(page, sel)
   if (!h) throw new Error(`no head for the ${key} section`)
   const from = { x: h.cx, y: h.cy }
   const down = { x: from.x, y: from.y + 70 }
@@ -679,18 +690,6 @@ async function dragHead(page, key, to, { touch = false } = {}) {
   await sleep(150)
   return false
 }
-
-/** The panes in view by column: their names left to right, each column top to bottom, with each pane's box. */
-const columns = (d) => {
-  const cols = []
-  for (const f of [...d.frames].sort((a, b) => a.x - b.x || a.y - b.y)) {
-    const c = cols.find((k) => Math.abs(k.x - f.x) <= 2)
-    if (c) c.panes.push(f)
-    else cols.push({ x: f.x, panes: [f] })
-  }
-  return cols.map((c) => c.panes.sort((a, b) => a.y - b.y))
-}
-const colNames = (d) => columns(d).map((c) => c.map((f) => f.name).join(' ')).join(' | ')
 
 function scrollTests() {
   return ['desktop', 'ipad'].map((device) => ({
@@ -783,97 +782,256 @@ function scrollTests() {
   }))
 }
 
+// ---------- a section's head splits the Desk: a strip of its own over each side, one terminal under it ----------
+
+/** Extra panes for the client area (Work), so both sides' strips run past their width. */
+const WX = 6
+const wName = (i) => `vk-e2e0000e${i.toString(16).padStart(2, '0')}`
+const wSid = (i) => `0e2e0000-0000-4000-8000-00000000e0${i.toString(16).padStart(2, '0')}`
+const wTitle = (i) => `Client mailbox audit number ${i}`
+
+function addWork(st) {
+  const base = st.panes.find((p) => p.name === P.w1)
+  const row = st.board.sessions.find((r) => r.sessionId === SID.w1)
+  for (let i = 1; i <= WX; i++) {
+    st.panes.push({ ...base, name: wName(i), sessionId: wSid(i), state: 'idle', title: wTitle(i), createdAt: base.createdAt + i })
+    st.board.sessions.push({ ...row, sessionId: wSid(i), title: wTitle(i) })
+  }
+}
+
+/** The split Desk (in the page): each side's strip (its sections, heads, tabs, scroll, box) and the terminals in view, left to right. */
+function splitNow() {
+  const root = document.querySelector('.vl-page[data-active] .dk')
+  const box = (el) => {
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.left), w: Math.round(r.width), r: Math.round(r.right), y: Math.round(r.top), b: Math.round(r.bottom) }
+  }
+  return {
+    split: root?.getAttribute('data-split') ?? null,
+    bars: root?.querySelectorAll('.dk-bar').length ?? 0,
+    strips: root?.querySelectorAll('.dk-tabs').length ?? 0,
+    focus: root?.querySelector('.dk-tab[data-focus]')?.getAttribute('data-name') ?? null,
+    frames: [...(root?.querySelectorAll('.dk-frame[data-on]') ?? [])].map((f) => ({ name: f.getAttribute('data-name'), ...box(f) })).sort((a, b) => a.x - b.x),
+    sides: [...(root?.querySelectorAll('.dk-side') ?? [])].map((sd) => {
+      const row = sd.querySelector('.dk-tabs')
+      const tops = new Set([...sd.querySelectorAll('.dk-tab')].map((t) => Math.round(t.getBoundingClientRect().top)))
+      return {
+        at: sd.getAttribute('data-side'),
+        ...box(sd),
+        left: row?.scrollLeft ?? 0,
+        sw: row?.scrollWidth ?? 0,
+        cw: row?.clientWidth ?? 0,
+        cy: row ? Math.round(row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2) : 0,
+        keys: [...sd.querySelectorAll('.dk-tg')].map((g) => g.getAttribute('data-key')),
+        heads: [...sd.querySelectorAll('.dk-gh')].map((h) => ({ label: h.querySelector('.dk-gh-t')?.textContent ?? '', n: h.querySelector('.dk-gh-n')?.textContent ?? '', fixed: h.hasAttribute('data-fixed'), chevron: !!h.querySelector('.dk-gh-i') })),
+        tabs: [...sd.querySelectorAll('.dk-tab')].map((t) => t.getAttribute('data-name')),
+        on: [...sd.querySelectorAll('.dk-tab[data-on]')].map((t) => t.getAttribute('data-name')),
+        rows: tops.size,
+      }
+    }),
+  }
+}
+
+const sidesRead = (d) => d.sides.map((s) => s.keys.join('+')).join(' | ')
+const framesRead = (d) => d.frames.map((f) => f.name).join(' | ')
+/** Waits until the Desk shows these sides (their section keys) over these terminals, left to right. */
+const splitIs = (page, keys, names, message) => until(page, (k, nm) => {
+  const root = document.querySelector('.vl-page[data-active] .dk')
+  const got = [...(root?.querySelectorAll('.dk-side') ?? [])].map((sd) => [...sd.querySelectorAll('.dk-tg')].map((g) => g.getAttribute('data-key')).join('+')).join(' | ')
+  const on = [...(root?.querySelectorAll('.dk-frame[data-on]') ?? [])].sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map((f) => f.getAttribute('data-name'))
+  return got === k && (!nm || on.join(' | ') === nm)
+}, message, [keys, names], 12_000)
+
+const THOR = () => [P.p1, ...Array.from({ length: EXTRA }, (_, i) => xName(i + 1)), P.d1, P.pj]
+const WORK = () => [P.w1, ...Array.from({ length: WX }, (_, i) => wName(i + 1)), P.w3, P.w2]
+
 function sectionDropTests() {
   return [{
+    name: 'desk:split:desktop',
+    group: 'desk',
+    device: 'desktop',
+    timeout: 240_000,
+    async run(t) {
+      t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
+      const page = await t.page({ stubFrames: true })
+      const st = deskBackend(page)
+      addRecovered(st)
+      addWork(st)
+      await page.goto('/m/desk')
+      // Thor's 17 start collapsed: Work 9, Odin 1 and Other 1 show
+      await deskUp(page, WX + 5)
+      await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="personal"][data-folded]'), 'the Thor section did not start collapsed', [], 20_000)
+      const stage = await boxOf(page, '.vl-page[data-active] .dk-stage')
+      await t.step('the Thor head dragged onto the Desk\'s left half: Thor alone on the left, the rest on the right, one terminal each', async () => {
+        const t0 = Date.now()
+        const dragged = await dragHead(page, 'personal', { x: stage.l + stage.w * 0.2, y: stage.cy })
+        t.check(!dragged, 'the head started the browser\'s drag')
+        await splitIs(page, 'personal | work+server+other', `${P.p1} | ${P.w1}`, 'the Desk did not split into Thor on the left and the rest on the right')
+        t.note(`the drop took ${Date.now() - t0} ms`)
+        await sleep(400)
+        const d = await page.eval(splitNow)
+        const [l, r] = d.sides
+        t.check(d.frames.length === 2, `${d.frames.length} terminals show, want one per side: ${framesRead(d)}`)
+        t.check(l.tabs.join() === THOR().join(), `the left strip holds ${JSON.stringify(l.tabs)}, want every Thor tab and nothing else`)
+        t.check(l.heads.length === 1 && l.heads[0].fixed && !l.heads[0].chevron && l.heads[0].n === String(3 + EXTRA), `the left strip's head reads ${JSON.stringify(l.heads)}: want Thor 17, no collapse`)
+        t.check(r.tabs.join() === [...WORK(), P.s1, P.sh].join(), `the right strip holds ${JSON.stringify(r.tabs)}, want the Work, Odin and Other tabs`)
+        t.check(l.on.join() === P.p1 && r.on.join() === P.w1, `the tabs lit as shown: left ${JSON.stringify(l.on)}, right ${JSON.stringify(r.on)}`)
+        for (const [i, s] of d.sides.entries()) {
+          const f = d.frames[i]
+          t.check(!!f && Math.abs(f.x - s.x) <= 1 && Math.abs(f.r - s.r) <= 1, `side ${i}'s strip runs ${s.x} to ${s.r}, its terminal ${f?.x} to ${f?.r}`)
+          t.check(!!f && Math.abs(f.w - stage.w / 2) < stage.w * 0.03, `side ${i}'s terminal is ${f?.w} px wide on a ${stage.w} px Desk, want half`)
+          t.check(s.rows === 1, `side ${i}'s strip has ${s.rows} rows of tabs, want one`)
+          t.check(s.sw > s.cw + 20, `side ${i}'s strip does not run past its width (${s.sw} in ${s.cw})`)
+        }
+        t.check(d.bars === 1 && d.strips === 2, `${d.bars} bars and ${d.strips} strips, want one bar of two strips`)
+        t.check(!(await page.eval(() => !!document.querySelector('.dk-ghost, .dk-side-drop, .dk-drop'))), 'the drag\'s ghost or targets stayed up after the drop')
+        await t.shot(page, 'thor-left')
+      })
+      await t.step('each strip scrolls on its own under the wheel', async () => {
+        let d = await page.eval(splitNow)
+        const [l0, r0] = d.sides
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: l0.x + l0.w / 2, y: l0.cy, deltaX: 0, deltaY: 400 })
+        await sleep(400)
+        d = await page.eval(splitNow)
+        t.check(d.sides[0].left > l0.left + 100 && d.sides[1].left === r0.left, `a wheel turn over the left strip moved it ${l0.left} to ${d.sides[0].left} and the right ${r0.left} to ${d.sides[1].left}`)
+        const l1 = d.sides[0].left
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: r0.x + r0.w / 2, y: r0.cy, deltaX: 0, deltaY: 400 })
+        await sleep(400)
+        d = await page.eval(splitNow)
+        t.check(d.sides[1].left > r0.left + 100 && d.sides[0].left === l1, `a wheel turn over the right strip moved it ${r0.left} to ${d.sides[1].left} and the left ${l1} to ${d.sides[0].left}`)
+        await t.shot(page, 'scrolled')
+      })
+      await t.step('a tab pressed in a side\'s strip switches that side\'s one terminal; the other side holds', async () => {
+        await tap(page, `.dk-side .dk-tab[data-name="${xName(5)}"] .dk-tab-main`)
+        await splitIs(page, 'personal | work+server+other', `${xName(5)} | ${P.w1}`, 'the left terminal did not switch to the tab pressed')
+        t.check((await page.eval(splitNow)).focus === xName(5), 'the tab pressed does not have the keyboard')
+        await tap(page, `.dk-side .dk-tab[data-name="${P.s1}"] .dk-tab-main`)
+        await splitIs(page, 'personal | work+server+other', `${xName(5)} | ${P.s1}`, 'the right terminal did not switch to the Odin tab')
+        const d = await page.eval(splitNow)
+        t.check(d.frames.length === 2 && d.sides[0].on.join() === xName(5) && d.sides[1].on.join() === P.s1, `after two presses: ${framesRead(d)}, lit ${JSON.stringify(d.sides.map((s) => s.on))}`)
+      })
+      await t.step('the Work head onto the right side\'s right edge: a third side, Work alone', async () => {
+        const f = (await page.eval(splitNow)).frames[1]
+        await dragHead(page, 'work', { x: f.x + f.w * 0.92, y: stage.cy })
+        // Work shows the tab it showed last; the middle side keeps Odin's
+        await splitIs(page, 'personal | server+other | work', `${xName(5)} | ${P.s1} | ${P.w1}`, 'Work did not open as a third side on the right')
+        const d = await page.eval(splitNow)
+        t.check(d.sides[2].tabs.join() === WORK().join() && d.sides[2].heads[0]?.fixed, `the right strip reads ${JSON.stringify(d.sides[2])}`)
+        t.check(d.frames.every((x) => Math.abs(x.w - stage.w / 3) < stage.w * 0.03), `three terminals, not a third each: ${JSON.stringify(d.frames)}`)
+        await t.shot(page, 'three-sides')
+      })
+      await t.step('the Odin head onto the left side\'s middle: Odin takes the left, Thor goes where Odin was', async () => {
+        const f = (await page.eval(splitNow)).frames[0]
+        await dragHead(page, 'server', { x: f.x + f.w / 2, y: stage.cy })
+        await splitIs(page, 'server | personal+other | work', `${P.s1} | ${xName(5)} | ${P.w1}`, 'the Odin and Thor sections did not trade sides')
+        const d = await page.eval(splitNow)
+        t.check(d.sides[0].tabs.join() === P.s1, `the left strip holds ${JSON.stringify(d.sides[0].tabs)}, want Odin's tab alone`)
+      })
+      await t.step('the split is kept across a reload', async () => {
+        const before = await page.eval(splitNow)
+        await sleep(300)
+        await page.goto('/m/desk')
+        await splitIs(page, sidesRead(before), framesRead(before), `after a reload the Desk does not read ${sidesRead(before)} over ${framesRead(before)}`)
+      })
+      await t.step('Ctrl+Tab steps through the focused side\'s strip; Alt+Right goes to the next side', async () => {
+        await tap(page, `.dk-side .dk-tab[data-name="${P.w3}"] .dk-tab-main`)
+        await splitIs(page, 'server | personal+other | work', `${P.s1} | ${xName(5)} | ${P.w3}`, 'the Work terminal did not switch to the tab pressed')
+        await sleep(300)
+        await page.eval(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+        await page.key('Tab', { ctrl: true })
+        await splitIs(page, 'server | personal+other | work', `${P.s1} | ${xName(5)} | ${P.w2}`, 'Ctrl+Tab did not go to the next tab of the Work strip')
+        await page.key('ArrowRight', { alt: true })
+        await until(page, (n) => document.querySelector('.vl-page[data-active] .dk-tab[data-focus]')?.getAttribute('data-name') === n, 'Alt+Right from the last side did not go round to the first', [P.s1])
+        t.check(framesRead(await page.eval(splitNow)) === `${P.s1} | ${xName(5)} | ${P.w2}`, 'Alt+Right changed a terminal')
+      })
+      await t.step('a side\'s x closes it: its tabs join the side beside it; the last split closes to one strip', async () => {
+        await tap(page, '.vl-page[data-active] .dk-side[data-side="0"] .dk-side-x')
+        await splitIs(page, 'personal+server+other | work', `${xName(5)} | ${P.w2}`, 'closing the Odin side did not hand its tab to the side right of it')
+        t.check((await page.eval(splitNow)).focus === xName(5), 'the keyboard did not go to the terminal beside the closed side')
+        await tap(page, '.vl-page[data-active] .dk-side[data-side="1"] .dk-side-x')
+        await until(page, () => !document.querySelector('.vl-page[data-active] .dk-side'), 'the last split did not close')
+        const d = await page.eval(splitNow)
+        t.check(d.bars === 1 && d.strips === 1 && !d.split, `after the split closed: ${d.bars} bars, ${d.strips} strips, data-split ${d.split}`)
+        t.check(d.frames.length === 1 && d.frames[0].name === xName(5), `the grid shows ${framesRead(d)}, want the terminal that had the keyboard`)
+      })
+      await t.step('a single tab still drags onto a pane\'s edge and splits the grid', async () => {
+        await dragOnto(page, P.w3, xName(5), 0.95, 0.5)
+        await inView(page, [xName(5), P.w3])
+        t.check(!(await page.eval(() => !!document.querySelector('.vl-page[data-active] .dk-side'))), 'a tab\'s drag split the Desk by sections')
+      })
+    },
+  }, {
     name: 'desk:sectiondrop:desktop',
     group: 'desk',
     device: 'desktop',
     timeout: 200_000,
     async run(t) {
       t.allowSockets.push(/\/ws\/terminal\?s=vk-e2e/)
-      const page = await t.page({ stubFrames: true })
+      // what v0.3.225 kept after a section drop: four panes in two "sides"
+      const legacy = { view: [P.p1, P.d1, P.pj, P.w1], off: [], raven: [], focus: P.w1, sides: [3, 1] }
+      // seeded once, in the page itself: the storage option sets it again in every terminal's frame as it loads
+      const seed = `if (window === window.top && !sessionStorage.getItem('e2e-legacy')) { sessionStorage.setItem('e2e-legacy', '1'); localStorage.setItem('v2.desk.grid', ${JSON.stringify(JSON.stringify(legacy))}) }`
+      const page = await t.page({ stubFrames: true, scripts: [seed] })
       deskBackend(page)
       await page.goto('/m/desk')
       await deskUp(page)
       const stage = await boxOf(page, '.vl-page[data-active] .dk-stage')
-      const pane = (name) => boxOf(page, `.vl-page[data-active] .dk-pane[data-name="${name}"]`)
-      const thor = [P.p1, P.d1, P.pj]
-      await t.step('the Thor head dragged onto the pane\'s right edge opens its three tabs as a new right side', async () => {
-        const p = await pane(P.w1)
-        const t0 = Date.now()
-        const dragged = await dragHead(page, 'personal', { x: p.l + p.w * 0.93, y: p.cy })
-        t.check(!dragged, 'the head started the browser\'s drag')
-        await until(page, (want) => {
-          const on = [...document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]')].map((f) => f.getAttribute('data-name'))
-          return want.every((n) => on.includes(n)) && on.length === want.length
-        }, 'the three Thor tabs never opened beside the pane', [[P.w1, ...thor]])
-        const d = await page.eval(desk)
-        const cols = columns(d)
-        t.check(colNames(d) === `${P.w1} | ${thor.join(' ')}`, `the grid reads ${colNames(d)}, want the pane left and Thor's three stacked on the right`)
-        const [l, r] = cols
-        t.check(l?.[0] && Math.abs(l[0].w - stage.w / 2) < stage.w * 0.05 && l[0].h > stage.h * 0.9, `the left side is not half the Desk, full height: ${JSON.stringify(l)}`)
-        t.check(r?.length === 3 && r.every((f) => f.h < stage.h * 0.4 && Math.abs(f.w - stage.w / 2) < stage.w * 0.05), `the right side is not three stacked halves: ${JSON.stringify(r)}`)
-        t.check(thor.includes(focusOf(d)), `the keyboard went to ${focusOf(d)}, want one of Thor's`)
-        t.check(!(await page.eval(() => !!document.querySelector('.dk-ghost, .dk-side-drop, .dk-drop'))), 'the drag\'s ghost or targets stayed up after the drop')
-        t.note(`the drop took ${Date.now() - t0} ms`)
-        await t.shot(page, 'thor-right')
+      await t.step('the grid of a whole section that v0.3.225 kept comes back as the one pane he had', async () => {
+        await inView(page, [P.w1])
+        const saved = JSON.parse((await page.eval(() => localStorage.getItem('v2.desk.grid'))) ?? '{}')
+        t.check(saved.sides === undefined, `the old sides are still kept: ${JSON.stringify(saved)}`)
       })
-      await t.step('the Odin head dropped on the right side\'s middle takes that side; the left keeps its pane', async () => {
-        const p = await pane(P.d1)
-        await dragHead(page, 'server', { x: p.cx, y: p.cy })
-        await inView(page, [P.w1, P.s1])
-        const d = await page.eval(desk)
-        t.check(colNames(d) === `${P.w1} | ${P.s1}`, `the grid reads ${colNames(d)}, want the pane left and Odin right`)
-        t.check(thor.every((n) => tabNames(d).includes(n) && !tabOf(d, n)?.on), 'the Thor tabs it replaced are not tabs out of the grid')
-      })
-      await t.step('a finger drags the Thor head onto the left pane\'s left edge: a new side on the left', async () => {
+      await t.step('a finger drags the Work head onto the right half: Work alone on the right, the rest on the left', async () => {
         await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
         try {
-          const p = await pane(P.w1)
           const before = (await stripNow(page)).left
-          await dragHead(page, 'personal', { x: p.l + p.w * 0.06, y: p.cy }, { touch: true })
-          await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 5, 'the finger\'s drop never opened the Thor tabs')
-          const after = (await stripNow(page)).left
-          t.check(Math.abs(after - before) <= 1, `the strip scrolled under the finger's drag, from ${before} to ${after}`)
+          await dragHead(page, 'work', { x: stage.l + stage.w * 0.8, y: stage.cy }, { touch: true })
+          await splitIs(page, 'personal+server+other | work', `${P.p1} | ${P.w1}`, 'the finger\'s drop did not split the Desk')
+          t.check((await page.path()) === '/m/desk', `the finger's drag moved the page to ${await page.path()}`)
+          t.note(`the strip was at ${before} before the finger's drag`)
         } finally {
           await page.send('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {})
         }
-        const d = await page.eval(desk)
-        t.check(colNames(d) === `${thor.join(' ')} | ${P.w1} | ${P.s1}`, `the grid reads ${colNames(d)}, want Thor's three, then the two panes`)
-        await t.shot(page, 'finger-left')
+        const d = await page.eval(splitNow)
+        t.check(d.sides[1].tabs.join() === [P.w1, P.w3, P.w2].join(), `the right strip holds ${JSON.stringify(d.sides[1].tabs)}, want Work's three`)
+        t.check(d.sides[0].heads.every((h) => !h.fixed && h.chevron), `the left side's three heads lost their collapse: ${JSON.stringify(d.sides[0].heads)}`)
+        await t.shot(page, 'finger-right')
       })
-      await t.step('a tab dropped on a pane in a side stays in that side', async () => {
-        await dragOnto(page, P.w3, P.s1, 0.5, 0.95)
-        await until(page, (n) => !!document.querySelector(`.vl-page[data-active] .dk-frame[data-on][data-name="${n}"]`), 'the dropped tab never opened', [P.w3])
-        const d = await page.eval(desk)
-        t.check(colNames(d) === `${thor.join(' ')} | ${P.w1} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}, want the tab under Odin on the right side`)
+      await t.step('on a split Desk a tab is no drag, and its menu has no Open beside', async () => {
+        const n = await page.eval(() => document.querySelectorAll('.vl-page[data-active] .dk-tab[draggable="true"]').length)
+        t.check(n === 0, `${n} tabs still drag on a split Desk`)
+        const at = await page.locate(`.vl-page[data-active] .dk-tab[data-name="${P.w3}"] .dk-tab-main`)
+        await page.mouse(at.x, at.y, { button: 'right' })
+        await until(page, () => !!document.querySelector('.dk-menu'), 'a right-click did not open the tab menu')
+        const items = await page.eval(() => [...document.querySelectorAll('.dk-menu .dk-mi')].map((e) => e.textContent))
+        t.check(!items.includes('Open beside'), `the menu offers ${JSON.stringify(items)}`)
+        await page.key('Escape')
+        await until(page, () => !document.querySelector('.dk-menu'), 'Escape did not close the menu')
       })
-      await t.step('the sides are kept across a reload', async () => {
-        const before = colNames(await page.eval(desk))
-        await sleep(300)
-        await page.goto('/m/desk')
-        await deskUp(page)
-        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 6, 'the six panes did not come back')
-        const after = colNames(await page.eval(desk))
-        t.check(after === before, `after a reload the grid reads ${after}, want ${before}`)
-      })
-      await t.step('a tab closed in a side closes that side up', async () => {
+      await t.step('a tab closed in a side: the side shows its next tab', async () => {
         await page.eval((n) => document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${n}"]`)
           ?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })), P.w1)
-        await until(page, () => document.querySelectorAll('.vl-page[data-active] .dk-frame[data-on]').length === 5, 'the closed tab\'s pane stayed')
-        const d = await page.eval(desk)
-        t.check(colNames(d) === `${thor.join(' ')} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}, want the middle side gone`)
+        await splitIs(page, 'personal+server+other | work', `${P.p1} | ${P.w3}`, 'the Work side did not show its next tab')
       })
-      await t.step('a press on a head still collapses it, and a single tab still drags', async () => {
-        const head = '.vl-page[data-active] .dk-tg[data-key="work"] .dk-gh'
+      await t.step('its last tabs closed, the side goes and the strip is whole again; one put back brings the split back', async () => {
+        for (const n of [P.w3, P.w2]) {
+          await page.eval((x) => document.querySelector(`.vl-page[data-active] .dk-tab[data-name="${x}"]`)
+            ?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })), n)
+          await sleep(300)
+        }
+        await until(page, () => !document.querySelector('.vl-page[data-active] .dk-side'), 'the empty Work side did not go')
+        const d = await page.eval(splitNow)
+        t.check(d.strips === 1 && d.frames.length === 1, `with Work's tabs closed: ${d.strips} strips, ${framesRead(d)}`)
+        await tap(page, '.vl-page[data-active] .dk-add')
+        await tap(page, { sel: '.dk-pick .dk-row', text: /Fix the login page/ })
+        await splitIs(page, 'personal+server+other | work', `${P.p1} | ${P.w1}`, 'the Work tab put back did not open on its own side again')
+      })
+      await t.step('a press on a head in a side of several still collapses it', async () => {
+        const head = '.vl-page[data-active] .dk-side .dk-tg[data-key="personal"] .dk-gh'
         await tap(page, head)
-        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-tg[data-key="work"][data-folded]'), 'a press on the Work head did not collapse it')
+        await until(page, () => !!document.querySelector('.vl-page[data-active] .dk-side .dk-tg[data-key="personal"][data-folded]'), 'a press on the Thor head did not collapse it')
         await tap(page, head)
-        await until(page, () => !document.querySelector('.vl-page[data-active] .dk-tg[data-key="work"][data-folded]'), 'a second press did not expand it')
-        await dragOnto(page, P.w2, P.p1, 0.5, 0.5)
-        await until(page, (n) => !!document.querySelector(`.vl-page[data-active] .dk-frame[data-on][data-name="${n}"]`), 'the tab dropped on a pane\'s middle did not take its place', [P.w2])
-        const d = await page.eval(desk)
-        t.check(colNames(d) === `${P.w2} ${P.d1} ${P.pj} | ${P.s1} ${P.w3}`, `the grid reads ${colNames(d)}`)
+        await until(page, () => !document.querySelector('.vl-page[data-active] .dk-side .dk-tg[data-key="personal"][data-folded]'), 'a second press did not expand it')
       })
     },
   }]
