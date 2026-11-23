@@ -47,7 +47,9 @@ at.get('/Tickets/entityInformation/fields', (_q, r) => r.json({ fields: [
   { name: 'priority', picklistValues: [[1, 'High'], [2, 'Medium'], [3, 'Low'], [4, 'Critical']].map(([v, l]) => ({ value: String(v), label: l, isActive: true })) },
   { name: 'queueID', picklistValues: [[8, 'Monitoring Alert'], [14046773, 'Help Desk']].map(([v, l]) => ({ value: String(v), label: l, isActive: true })) },
 ] }))
-const matches = (t: Record<string, unknown>, filter: { op: string; field: string; value: unknown }[]) => filter.every((f) => {
+type F = { op: string; field: string; value: unknown; items?: F[] }
+const matches = (t: Record<string, unknown>, filter: F[]): boolean => filter.every((f) => {
+  if (f.op === 'or') return (f.items ?? []).some((i) => matches(t, [i]))
   const v = t[f.field]
   if (f.op === 'eq') return v === f.value
   if (f.op === 'noteq') return v !== f.value
@@ -57,14 +59,27 @@ const matches = (t: Record<string, unknown>, filter: { op: string; field: string
   return true
 })
 at.post('/Tickets/query', (q, r) => r.json({ items: tickets.filter((t) => matches(t as unknown as Record<string, unknown>, q.body.filter)), pageDetails: { nextPageUrl: null } }))
-at.post('/Companies/query', (_q, r) => r.json({ items: [{ id: 7, companyName: 'Acme Legal', webAddress: 'acmelegal.com', isActive: true }], pageDetails: {} }))
-at.post('/Resources/query', (_q, r) => r.json({ items: [{ id: 1001, firstName: 'Brendon', lastName: 'Kupsch' }, { id: 1002, firstName: 'Brendon', lastName: 'K' }], pageDetails: {} }))
-const contacts = [{ id: 70, companyID: 7, firstName: 'Jane', lastName: 'Doe', emailAddress: 'jane@acmelegal.com', isActive: 1 }]
+at.post('/Companies/query', (_q, r) => r.json({ items: [
+  { id: 0, companyName: 'East IT', webAddress: '', isActive: true }, { id: 7, companyName: 'Acme Legal', webAddress: 'acmelegal.com', isActive: true },
+  { id: 8, companyName: 'Beta Org', webAddress: 'beta.example', isActive: true }, { id: 9, companyName: 'Gone Co', webAddress: '', isActive: false },
+], pageDetails: {} }))
+at.post('/Resources/query', (_q, r) => r.json({ items: [{ id: 1001, firstName: 'Brendon', lastName: 'Kupsch' }, { id: 1002, firstName: 'Brendon', lastName: 'K' }, { id: 1003, firstName: 'Sam', lastName: 'Tech' }, { id: 1004, firstName: 'No', lastName: 'Role' }], pageDetails: {} }))
+const contacts = [
+  { id: 70, companyID: 7, firstName: 'Jane', lastName: 'Doe', emailAddress: 'jane@acmelegal.com', isActive: 1 },
+  { id: 80, companyID: 8, firstName: 'Dana', lastName: 'Park', emailAddress: 'dpark@beta.example', isActive: 1 },
+  { id: 81, companyID: 8, firstName: 'Old', lastName: 'Contact', emailAddress: 'old@beta.example', isActive: 0 },
+]
 at.post('/Contacts/query', (q, r) => r.json({ items: contacts.filter((c) => matches(c as unknown as Record<string, unknown>, q.body.filter)), pageDetails: {} }))
 at.post('/TicketNotes/query', (q, r) => r.json({ items: notes.filter((n) => n.ticketID === q.body.filter[0].value).map((n, i) => ({ id: i + 1, title: n.title, description: n.description, createDateTime: now, creatorResourceID: 1001, publish: 2 })), pageDetails: {} }))
-at.post('/ResourceServiceDeskRoles/query', (_q, r) => r.json({ items: [{ roleID: 555, isDefault: true, isActive: true }], pageDetails: {} }))
+at.post('/ResourceServiceDeskRoles/query', (q, r) => r.json({ items: q.body.filter[0].value === 1004 ? [] : [{ roleID: 555, isDefault: true, isActive: true }], pageDetails: {} }))
+at.post('/CompanyLocations/query', (q, r) => r.json({ items: q.body.filter[0].value === 8 ? [{ id: 21, name: 'Annex', isPrimary: false, isActive: true }, { id: 22, name: 'Primary Address', isPrimary: true, isActive: true }] : [], pageDetails: {} }))
+at.post('/BillingCodes/query', (_q, r) => r.json({ items: [{ id: 14046761, name: 'Remote Support', useType: 1, isActive: true }, { id: 14046762, name: 'On-Site Service ', useType: 1, isActive: true }], pageDetails: {} }))
+const timeEntries: Record<string, unknown>[] = []
+at.post('/TimeEntries', (q, r) => { timeEntries.push(q.body); r.json({ itemId: 900 + timeEntries.length }) })
+let failPatchOnce = false
 at.post('/Tickets/:id/Notes', (q, r) => { notes.push({ ...q.body, impersonate: q.header('ImpersonationResourceId') }); r.json({ itemId: notes.length }) })
 at.patch('/Tickets', (q, r) => {
+  if (failPatchOnce) { failPatchOnce = false; return r.status(500).json({ errors: ['simulated outage'] }) }
   patches.push(q.body)
   const t = tickets.find((x) => x.id === q.body.id)!
   Object.assign(t, q.body, { lastActivityDate: new Date().toISOString() })
@@ -77,9 +92,30 @@ at.post('/Tickets', (q, r) => {
   r.json({ itemId: t.id })
 })
 const atSrv = at.listen(0); const atPort = (atSrv.address() as { port: number }).port
+
+// ---------------------------------------------------------------- fake thor ---
+// project-files' /mail routes: search and read of Brendon's mailbox, and the kick.
+
+const thorCalls: { path: string; body: any }[] = []
+let kicks = 0
+const thorMsgs: Record<string, any> = {
+  'MSG-CLIENT-0000000000001': { from: 'dpark@beta.example', from_name: 'Dana Park', to: ['me@east.example'], cc: ['boss@beta.example'], subject: 'The PDF app asks me to sign in' },
+  'MSG-OWN-00000000000000001': { from: 'me@east.example', from_name: 'Brendon', to: ['dpark@beta.example', 'boss@beta.example'], cc: ['help@east.example', 'me@east.example'], subject: 'RE: PDF app update' },
+}
+const thor = express(); thor.use(express.json())
+thor.use((q, r, next) => (q.headers.authorization === 'Bearer thor-token' ? next() : r.status(401).json({ error: 'unauthorized' })))
+thor.post('/mail/search', (q, r) => { thorCalls.push({ path: 'search', body: q.body }); r.json({ ok: true, mailbox: q.body.mailbox, count: 2, messages: Object.entries(thorMsgs).map(([id, m]) => ({ message_id: id, received: '2026-11-23 9:00 AM ET', from: m.from, to: m.to.join(', '), subject: m.subject, is_read: true, has_attachments: false, preview: 'p' })) }) })
+thor.post('/mail/read', (q, r) => {
+  thorCalls.push({ path: 'read', body: q.body })
+  const m = thorMsgs[q.body.message_id]
+  if (!m) return r.status(400).json({ error: 'The specified object was not found in the store.' })
+  r.json({ ok: true, message_id: q.body.message_id, conversation_id: 'conv-9', received: '2026-11-23 9:00 AM ET', body: 'text', attachments: [], ...m })
+})
+thor.post('/mail/kick', (_q, r) => { kicks += 1; r.json({ ok: true }) })
+const thorSrv = thor.listen(0); const thorPort = (thorSrv.address() as { port: number }).port
 const workConf = {
   franchises: [
-    { key: 'east', label: 'East', company: 'East IT', envFile: 'autotask-east.env', web: 'https://ww5.autotask.net', brendonResource: 1001, brendonRole: 77, ticketCategory: 3, supportCc: 'help@east.example', ownDomains: ['east.example'], teams: true, agent: { id: 'east-triage', name: 'East Triage', role: 'Tickets for East', topic: 'East tickets' }, brief: 'Your franchise: East IT.' },
+    { key: 'east', label: 'East', company: 'East IT', envFile: 'autotask-east.env', web: 'https://ww5.autotask.net', brendonResource: 1001, brendonRole: 77, ticketCategory: 3, supportCc: 'help@east.example', ownDomains: ['east.example'], teams: true, mailbox: 'me@east.example', agent: { id: 'east-triage', name: 'East Triage', role: 'Tickets for East', topic: 'East tickets' }, brief: 'Your franchise: East IT.' },
     { key: 'north', label: 'North', company: 'North IT', envFile: 'autotask-north.env', web: 'https://ww22.autotask.net', brendonResource: 1002, supportCc: 'help@north.example', ownDomains: ['north.example'], agent: { id: 'north-triage', name: 'North Triage', role: 'Tickets for North', topic: 'North tickets' }, brief: 'Your franchise: North IT.' },
   ],
   self: ['me@east.example'], mailboxRoutes: { 'east-shared': 'east' }, defaultFranchise: 'east', teamsFranchise: 'east', skipDomains: [],
@@ -138,6 +174,8 @@ Object.assign(process.env, {
   PROJECT_AREAS_FILE: path.join(stub, 'areas.json'),
   LILKUPS_BIN: '/bin/true',
   LILKUPS_STORE: path.join(stub, 'reminders.json'),
+  PROJECT_FILES_URL: `http://127.0.0.1:${thorPort}`,
+  PROJECT_FILES_TOKEN: 'thor-token',
 })
 const projects = await import('../src/lib/projectsStore.ts')
 const store = await import('../src/lib/agentsStore.ts')
@@ -339,7 +377,7 @@ const props = store.pendingProposals('east-triage')
 check('three pending', props.length === 3, props.map((p) => p.kind))
 for (const p of props) await j('POST', `/msg/proposals/${p.id}/approve`, {})
 check('note posted as Brendon, internal', notes.length === 1 && notes[0].impersonate === '1001' && (notes[0] as any).publish === 2, notes)
-check('update sent with role', patches.some((x) => x.status === 7 && x.assignedResourceID === 1001 && x.assignedResourceRoleID === 77), patches)
+check('update sends only what changes (already assigned to Brendon)', patches.some((x) => x.status === 7 && !('assignedResourceID' in x)), patches)
 check('ticket created without contact', created.length === 1 && created[0].companyID === 7 && !('contactID' in created[0]), created)
 check('all three done', props.every((p) => store.getProposal(p.id)?.status === 'done'), props.map((p) => store.getProposal(p.id)))
 check('self touch suppresses the echo', store.trackedTicket('east', 101)?.selfTouchAt !== null)
@@ -356,6 +394,149 @@ const decPrompt = JSON.parse(fs.readFileSync(path.join(stub, 'last-east-triage.j
 check('decline reason reaches the agent', decPrompt.includes('too trivial for a note'), decPrompt.slice(0, 500))
 check('notebook saved', store.getAgent('east-triage')?.notebook.includes('no notes for trivial'))
 check('next prompt carries the notebook', true)
+
+// ------------------------------------- 2026-11-23: any field, time, complete, any mail ---
+// An email-intake ticket on the franchise's own company (0) with no contact, as email intake leaves them.
+
+{
+  tickets.push({ id: 104, ticketNumber: 'T20991231.0004', title: 'Help request from Beta / PDF app', description: 'auto intake', status: 15, priority: 2, queueID: 14046773, companyID: 0, contactID: null, assignedResourceID: 1001, createDate: now, lastActivityDate: now, dueDateTime: null, completedDate: null, companyLocationID: 1, contractID: 55, configurationItemID: null, billingCodeID: 14046761, resolution: null } as unknown as T)
+  const nyWall = (ms: number) => {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(ms)
+    const g = (t: string) => parts.find((x) => x.type === t)!.value
+    return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}`
+  }
+  const twoHoursAgo = Date.now() - 2 * 3_600_000
+  script('east-triage', [
+    { tool: 'contact_find', args: { name: 'Dana Park' } },
+    { tool: 'contact_find', args: { companyId: 8 } },
+    { tool: 'resource_find', args: { name: 'sam' } },
+    { tool: 'autotask_labels', args: {} },
+    { tool: 'propose_ticket_update', args: { ticketId: 104, contactId: 80, why: 'wrong company' } },
+    { tool: 'propose_ticket_update', args: { ticketId: 104, companyId: 8, contactId: 80, assignTo: 1003, why: 'Came in on our own company; Dana Park at Beta Org asked.' } },
+    { tool: 'propose_ticket_update', args: { ticketId: 104, assignTo: 1004, why: 'x' } },
+    { tool: 'propose_ticket_update', args: { ticketId: 104, status: 'In Progress', why: 'x' } },
+    { tool: 'propose_time_entry', args: { ticketId: 104, hours: 0.5, summary: 'Walked Dana through the PDF app sign-in', start: nyWall(twoHoursAgo), workType: 'Remote Support' } },
+    { tool: 'propose_time_entry', args: { ticketId: 104, hours: 1, summary: 'something', workType: 'Bogus' } },
+    { tool: 'propose_ticket_complete', args: { ticketId: 104, note: 'Dana signed in with the shared mailbox; the PDF app works.', hours: 0.25 } },
+    { tool: 'mailbox_search', args: { query: 'PDF app', folder: 'inbox' } },
+    { tool: 'mailbox_read', args: { messageId: 'MSG-CLIENT-0000000000001' } },
+    { tool: 'propose_mail_reply', args: { messageId: 'MSG-CLIENT-0000000000001', body: 'Hi Dana,\n\nSign out of the PDF app and sign back in with the shared mailbox.' } },
+    { tool: 'propose_mail_reply', args: { messageId: 'MSG-OWN-00000000000000001', replyAll: true, body: 'Hi Dana,\n\nChecking in: did the sign-in work?' } },
+    { tool: 'propose_mail_new', args: { to: ['jane@acmelegal.com'], subject: 'Printer', body: 'Hi Jane,\n\nThe printer is fixed now.' } },
+    { tool: 'propose_mail_new', args: { to: ['Dana Park <dpark@beta.example>'], subject: 'Your PDF app sign-in (T20991231.0004)', body: 'Hi Dana,\n\nSign out of the PDF app, then sign back in with the shared mailbox.', ticketId: 104, number: 'T20991231.0004' } },
+    { tool: 'propose_mail_new', args: { to: ['x@y.example'], subject: 'Subject', body: 'Hi X,\n\nThis has an em dash — here.' } },
+    { tool: 'propose_mail_reply', args: { messageId: 'MSG-MISSING-000000000001', body: 'Hi there,\n\nA reply to nothing.' } },
+  ])
+  agents.checkNow('east-triage')
+  await idle('east-triage')
+  const x = results('east-triage') ?? []
+  script('east-triage', []) // a failed card wakes the agent; it must not run the list above again
+  const txt = (i: number) => String(x[i]?.text ?? '')
+  const ok = (i: number) => x[i] && !x[i].isError && !x[i].error
+  check('contact by name', ok(0) && JSON.parse(txt(0))[0]?.id === 80 && JSON.parse(txt(0))[0]?.company === 'Beta Org', x[0])
+  check('contacts of a company, active first', ok(1) && JSON.parse(txt(1)).map((c: any) => c.id).join() === '80,81', x[1])
+  check('resource by name', ok(2) && JSON.parse(txt(2))[0]?.id === 1003, x[2])
+  check('labels carry work types', ok(3) && JSON.parse(txt(3)).workTypes.includes('On-Site Service'), x[3])
+  check('contact of another company refused', x[4]?.isError && /Beta Org/.test(txt(4)) && /companyId 8/.test(txt(4)), x[4])
+  check('company and contact fix proposed', ok(5), x[5])
+  check('tech without a role refused', x[6]?.isError && /no service desk role/.test(txt(6)), x[6])
+  check('no-op change refused', x[7]?.isError && /nothing to change/.test(txt(7)), x[7])
+  check('time entry proposed', ok(8), x[8])
+  check('unknown work type refused', x[9]?.isError && /no work type "Bogus"/.test(txt(9)), x[9])
+  check('complete proposed', ok(10), x[10])
+  check('mailbox search reaches thor', ok(11) && JSON.parse(txt(11)).length === 2 && thorCalls.some((c) => c.path === 'search' && c.body.mailbox === 'me@east.example' && c.body.folder === 'inbox'), { r: x[11], thorCalls })
+  check('mailbox read', ok(12) && JSON.parse(txt(12)).fromName === 'Dana Park', x[12])
+  check('reply to any message proposed', ok(13), x[13])
+  check('follow-up on his own message proposed', ok(14), x[14])
+  check('new mail to someone who wrote is sent to their thread', x[15]?.isError && /mail #1/.test(txt(15)) && /newThread/.test(txt(15)), x[15])
+  check('new mail proposed', ok(16), x[16])
+  check('new mail em dash refused', x[17]?.isError && /em dash/.test(txt(17)), x[17])
+  check('a missing message refused', x[18]?.isError && /not found/.test(txt(18)), x[18])
+
+  const mine = store.pendingProposals('east-triage')
+  const byKind = (k: string) => mine.filter((p) => p.kind === k)
+  check('six cards', mine.length === 6 && byKind('mail_reply').length === 2, mine.map((p) => p.kind))
+  const upd = byKind('ticket_update')[0]
+  const lines = (upd?.payload.changes ?? []) as string[]
+  check('update card names each change', lines.includes('Company: Beta Org (was East IT)') && lines.includes('Contact: Dana Park <dpark@beta.example> (was none)')
+    && lines.some((l) => l.startsWith('Contract: cleared')), lines)
+  check('update title is the summary', /^T20991231\.0004: company Beta Org, contact Dana Park/.test(upd?.title ?? ''), upd?.title)
+
+  // approve: each one done at once
+  const nPatch = patches.length
+  let [st2, ap2] = await j('POST', `/msg/proposals/${upd.id}/approve`, {})
+  const pb = patches[nPatch] as Record<string, unknown> | undefined
+  check('update approved and done', st2 === 200 && ap2.proposal.status === 'done' && /Beta Org/.test(ap2.proposal.result), ap2)
+  check('PATCH moves company, location, contract and contact together', pb?.companyID === 8 && pb?.contactID === 80 && pb?.companyLocationID === 22 && pb?.contractID === null && !('status' in (pb ?? {})), pb)
+  check('reassigned with the role of that tech', pb?.assignedResourceID === 1003 && pb?.assignedResourceRoleID === 555 && lines.includes('Assigned: Sam Tech (was Brendon Kupsch)'), { pb, lines })
+
+  const tm = byKind('ticket_time')[0]
+  ;[st2, ap2] = await j('POST', `/msg/proposals/${tm.id}/approve`, {})
+  const te = timeEntries[0] as Record<string, any> | undefined
+  check('time entry logged as Brendon', ap2.proposal.status === 'done' && te?.ticketID === 104 && te?.resourceID === 1001 && te?.roleID === 77 && te?.hoursWorked === 0.5 && te?.billingCodeID === 14046761, { te, p: ap2.proposal })
+  check('time entry times', /T00:00:00Z$/.test(te?.dateWorked) && Math.abs(Date.parse(te?.startDateTime) - twoHoursAgo) < 61_000
+    && Date.parse(te?.endDateTime) - Date.parse(te?.startDateTime) === 30 * 60_000, te)
+
+  const cp = byKind('ticket_complete')[0]
+  const nNotes = notes.length
+  failPatchOnce = true
+  ;[st2, ap2] = await j('POST', `/msg/proposals/${cp.id}/approve`, {})
+  check('complete fails at the last step and says what got done', ap2.proposal.status === 'failed' && /note added, 0.25 h logged; then/.test(ap2.proposal.result), ap2.proposal)
+  check('note and time written once', notes.length === nNotes + 1 && timeEntries.length === 2 && notes[nNotes].title === 'Resolution', { notes: notes.slice(nNotes), timeEntries })
+  ;[st2, ap2] = await j('POST', `/msg/proposals/${cp.id}/approve`, {})
+  const lp = patches[patches.length - 1] as Record<string, unknown>
+  check('try again completes without a second note or time entry', ap2.proposal.status === 'done' && notes.length === nNotes + 1 && timeEntries.length === 2, { p: ap2.proposal, n: notes.length, t: timeEntries.length })
+  check('completed with the resolution', lp.status === 5 && lp.resolution === 'Dana signed in with the shared mailbox; the PDF app works.', lp)
+
+  const [rClient, rOwn] = byKind('mail_reply').sort((a, b) => a.id - b.id)
+  check('reply card shows the live sender', rClient.payload.to === 'dpark@beta.example' && rClient.payload.toName === 'Dana Park' && (rClient.payload.cc as string[])[0] === 'help@east.example', rClient.payload)
+  check('follow-up goes to its recipients, cc kept minus Brendon', rOwn.payload.followUp === true && (rOwn.payload.toList as string[]).join() === 'dpark@beta.example,boss@beta.example'
+    && (rOwn.payload.cc as string[]).join() === 'help@east.example' && rOwn.payload.replyAll === false, rOwn.payload)
+  const nm = byKind('mail_new')[0]
+  check('new mail card', (nm.payload.to as string[]).join() === 'dpark@beta.example' && (nm.payload.cc as string[]).join() === 'help@east.example' && nm.payload.from === 'me@east.example' && nm.title.startsWith('New mail to dpark@beta.example'), nm.payload)
+
+  const k0 = kicks
+  await j('POST', `/msg/proposals/${rClient.id}/approve`, { how: 'send' })
+  await j('POST', `/msg/proposals/${rOwn.id}/approve`, { how: 'send' })
+  await j('POST', `/msg/proposals/${nm.id}/approve`, { how: 'draft', body: 'Hi Dana,\n\nSign out of the PDF app, then sign back in. Edited.' })
+  await until(() => kicks >= k0 + 3, 3000)
+  check('each mail approval starts thor at once', kicks === k0 + 3, { kicks, k0 })
+  const [, cl] = await j('POST', '/msg/actions/claim', { runner: 'thor' })
+  const act = (pid: number) => cl.actions.find((a: any) => a.proposalId === pid)
+  check('reply queued for thor by message id', act(rClient.id)?.kind === 'mail_send' && act(rClient.id)?.payload.graphId === 'MSG-CLIENT-0000000000001' && act(rClient.id)?.payload.mailbox === 'me@east.example' && act(rClient.id)?.payload.followUp === false, act(rClient.id))
+  check('follow-up queued with its recipients', act(rOwn.id)?.payload.followUp === true && act(rOwn.id)?.payload.to.join() === 'dpark@beta.example,boss@beta.example', act(rOwn.id))
+  check('new mail draft queued with the edited body', act(nm.id)?.kind === 'mail_new_draft' && act(nm.id)?.payload.body.endsWith('Edited.') && act(nm.id)?.payload.subject === 'Your PDF app sign-in (T20991231.0004)', act(nm.id))
+  await j('POST', `/msg/actions/${act(rClient.id).id}/result`, { ok: true, result: 'sent at 2026-11-23 1:05 PM ET' })
+  await j('POST', `/msg/actions/${act(nm.id).id}/result`, { ok: true, result: 'draft saved' })
+  await j('POST', `/msg/actions/${act(rOwn.id).id}/result`, { ok: false, result: 'DUPLICATE BLOCKED: already sent' })
+  check('reply result on the card', store.getProposal(rClient.id)?.result === 'Sent to Dana Park (sent at 2026-11-23 1:05 PM ET)', store.getProposal(rClient.id))
+  check('new mail draft result on the card', store.getProposal(nm.id)?.result === 'Saved to Outlook drafts: new mail to dpark@beta.example', store.getProposal(nm.id))
+  check('a refused send fails the card with thor\'s words', store.getProposal(rOwn.id)?.status === 'failed' && /DUPLICATE BLOCKED/.test(store.getProposal(rOwn.id)?.result ?? ''), store.getProposal(rOwn.id))
+  await idle('east-triage')
+
+  // the agent without Brendon's mailbox gets no mailbox tools, and its brief says so
+  script('north-triage', [{ tool: 'mailbox_search', args: { query: 'x' } }, { tool: 'propose_mail_new', args: { to: ['a@b.example'], subject: 'Hello', body: 'Hi A,\n\nHello there.' } }])
+  agents.checkNow('north-triage')
+  await idle('north-triage')
+  const nr = results('north-triage') ?? []
+  check('no mailbox, no mailbox tools', nr.length === 2 && nr.every((y: any) => y.isError || y.error), nr)
+  const northSys = (() => { const a = JSON.parse(fs.readFileSync(path.join(stub, 'last-north-triage.json'), 'utf8')).args as string[]; return a[a.indexOf('--append-system-prompt') + 1] })()
+  check('brief without mailbox names replies only', /a reply to the work mail routed to you/.test(northSys) && !/propose_mail_new/.test(northSys), northSys.slice(0, 200))
+  const eastSys = (() => { const a = JSON.parse(fs.readFileSync(path.join(stub, 'last-east-triage.json'), 'utf8')).args as string[]; return a[a.indexOf('--append-system-prompt') + 1] })()
+  check('brief lists the new abilities', /propose_ticket_update: company, contact/.test(eastSys) && /me@east\.example/.test(eastSys) && /Never tell Brendon to do one of these himself/.test(eastSys), eastSys.slice(0, 300))
+
+  // the one-time note: an agent with a notebook hears once that its tools grew
+  store.setKv('tools-seen:east-triage', 'before')
+  script('east-triage', [])
+  agents.noteToolChanges()
+  await idle('east-triage')
+  const tp = JSON.parse(fs.readFileSync(path.join(stub, 'last-east-triage.json'), 'utf8')).prompt as string
+  check('tools note reaches the agent', /your tools grew/.test(tp) && /Rewrite every notebook line/.test(tp), tp.slice(0, 600))
+  const runsBefore = store.listRuns('east-triage').length
+  agents.noteToolChanges()
+  await sleep(400)
+  check('tools note is told once', store.listRuns('east-triage').length === runsBefore && store.getKv('tools-seen:east-triage') !== 'before', store.listRuns('east-triage').length)
+}
 
 // --------------------------------------------------------- failure path ---
 
@@ -411,5 +592,5 @@ agents.syncRoster()
 check('archived project stops its agent', store.getAgent('smoke-ai')?.enabled === false && store.getChannel('smoke-ai')?.archivedAt, store.getAgent('smoke-ai'))
 
 console.log(`agentsSmoke: ${pass} passed, ${fail} failed`)
-srv.close(); atSrv.close()
+srv.close(); atSrv.close(); thorSrv.close()
 process.exit(fail ? 1 : 0)

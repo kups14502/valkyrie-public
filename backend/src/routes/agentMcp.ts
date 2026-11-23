@@ -10,11 +10,14 @@ import {
   patchAgent, routeMail, setMailState, trackedTicket, trackNote, type Agent, type Channel, type Ref,
 } from '../lib/agentsStore.js'
 import { agentPost, canPost, dmChannel, etLabel, runForToken, type RunCtx } from '../lib/agents.js'
-import { proposeFeature, proposeMailReply, proposeTicketCreate, proposeTicketNote, proposeTicketUpdate } from '../lib/agentActions.js'
+import {
+  proposeFeature, proposeMailNew, proposeMailReply, proposeTicketComplete, proposeTicketCreate, proposeTicketNote, proposeTicketUpdate, proposeTimeEntry,
+} from '../lib/agentActions.js'
 import { featureAgent } from '../lib/featureAgents.js'
 import {
-  contactsByEmail, findCompanies, franchiseLabel, getTicket, labels, PsaError, searchTickets, ticketNotes, type Franchise,
+  findCompanies, findContacts, findResources, franchiseLabel, getContact, getTicket, labels, PsaError, searchTickets, ticketNotes, type Franchise,
 } from '../lib/psa.js'
+import { mailboxRead, mailboxSearch } from '../lib/thorMail.js'
 import { getProject, getProjectDoc, getTab, tabItem, updateProject, updateTab } from '../lib/projectsStore.js'
 import { addTask } from '../lib/tasksStore.js'
 import { ProjError, type Ctx } from '../lib/projectTypes.js'
@@ -177,10 +180,14 @@ function register(server: McpServer, loc: Loc): void {
       inputSchema: { ticket: z.string().max(20), notes: z.number().int().min(0).max(30).optional() },
     }, (a) => toolRun(async () => {
       const t = await getTicket(f, a.ticket)
-      const notes = a.notes === 0 ? [] : await ticketNotes(f, t.id, a.notes ?? 12)
+      const [notes, contact] = await Promise.all([
+        a.notes === 0 ? [] : ticketNotes(f, t.id, a.notes ?? 12),
+        t.contactId ? getContact(f, t.contactId).catch(() => null) : null,
+      ])
       const tr = trackedTicket(f, t.id)
       return {
         ...t, created: etLabel(t.created), lastActivity: etLabel(t.lastActivity), due: etLabel(t.due),
+        contact: contact ? { id: contact.id, name: contact.name, email: contact.email } : null,
         notes: notes.map((n) => ({ ...n, at: etLabel(n.at) })),
         tracker: tr ? { summary: tr.summary, next: tr.next, needsBrendon: tr.needsBrendon, waitingOn: tr.waitingOn } : null,
       }
@@ -234,12 +241,18 @@ function register(server: McpServer, loc: Loc): void {
     }, (a) => toolRun(() => findCompanies(f, a.name)))
 
     server.registerTool('contact_find', {
-      description: `${franchiseLabel(f)} Autotask contacts with this email address, with their company.`,
-      inputSchema: { email: z.string().email().max(200) },
-    }, (a) => toolRun(() => contactsByEmail(f, a.email)))
+      description: `${franchiseLabel(f)} Autotask contacts, with their id, company and email: by email, by name (first, last, or both), `
+        + 'or every contact of a company (companyId). Name plus companyId narrows to that company.',
+      inputSchema: { email: z.string().email().max(200).optional(), name: z.string().min(2).max(80).optional(), companyId: z.number().int().optional() },
+    }, (a) => toolRun(() => findContacts(f, a)))
+
+    server.registerTool('resource_find', {
+      description: `${franchiseLabel(f)} Autotask techs (resources) whose name contains the text, with their id, for assigning a ticket. Empty text lists them all.`,
+      inputSchema: { name: z.string().max(80).optional() },
+    }, (a) => toolRun(() => findResources(f, a.name ?? '')))
 
     server.registerTool('autotask_labels', {
-      description: `The ${franchiseLabel(f)} Autotask status, priority and queue names, for proposals.`,
+      description: `The ${franchiseLabel(f)} Autotask status, priority, queue and work type names, for proposals.`,
       inputSchema: {},
     }, () => toolRun(() => labels(f)))
 
@@ -287,14 +300,58 @@ function register(server: McpServer, loc: Loc): void {
       }, (a) => toolRun(() => listTeams(a.days ?? 2).map((t) => ({ chat: t.chatTopic, from: t.fromName, at: etLabel(t.createdAt), text: t.text }))))
     }
 
+    // ---------------------------------------------------- mailbox ---
+    // Brendon's own mailbox and the support box, read live on thor: any thread, not only the mail routed here.
+
+    const box = franchiseConf(f)?.mailbox
+    const boxNames = box ? { mine: box, support: (franchiseConf(f)?.supportCc ?? '').toLowerCase() } : null
+    if (boxNames) {
+      server.registerTool('mailbox_search', {
+        description: `Search Brendon's mailbox (${boxNames.mine}) or the support box (mailbox "support", ${boxNames.support}) live, every folder or `
+          + 'only inbox or sent. query is Outlook search text (words, a subject, a ticket number); from narrows to a sender. Newest first, '
+          + 'with each messageId for mailbox_read and propose_mail_reply.',
+        inputSchema: {
+          query: z.string().max(200).optional(), from: z.string().max(200).optional(), mailbox: z.enum(['mine', 'support']).optional(),
+          folder: z.enum(['all', 'inbox', 'sent']).optional(), top: z.number().int().min(1).max(25).optional(),
+        },
+      }, (a) => toolRun(async () => {
+        return mailboxSearch({ mailbox: a.mailbox === 'support' ? boxNames.support : boxNames.mine, query: a.query, from: a.from, folder: a.folder, top: a.top })
+      }))
+
+      server.registerTool('mailbox_read', {
+        description: 'One message from Brendon\'s mailbox (or mailbox "support") by its messageId from mailbox_search: sender, recipients, subject, the text, attachment names.',
+        inputSchema: { messageId: z.string().min(20).max(400), mailbox: z.enum(['mine', 'support']).optional() },
+      }, (a) => toolRun(() => mailboxRead(a.mailbox === 'support' ? boxNames.support : boxNames.mine, a.messageId)))
+    }
+
     // ------------------------------------------------- proposals ---
+    // Each one is a card Brendon approves; the moment he does, Valkyrie does it (Autotask from odin, mail from thor).
 
     server.registerTool('propose_mail_reply', {
-      description: 'Propose a reply to a mail, for Brendon to approve, edit or decline. It replies in the sender\'s own thread. '
-        + `cc defaults to ${franchiseConf(f)?.supportCc || 'nobody'}; replyAll keeps everyone on the thread instead. `
+      description: 'Propose a reply in someone\'s own thread, for Brendon to approve, edit or decline. Name the message: n (a work mail Valkyrie holds)'
+        + (boxNames ? ' or messageId (any message in his mailbox, from mailbox_search; mailbox "support" for the support box). Replying to a message Brendon '
+          + 'sent himself follows it up to the people it went to, in the same thread' : '')
+        + `. cc defaults to ${franchiseConf(f)?.supportCc || 'nobody'}; replyAll keeps everyone on the thread instead. `
         + 'body is the plain-text draft from "Hi <name>," to the last sentence, with no sign-off and no signature. note tells Brendon anything he must check.',
-      inputSchema: { n: z.number().int(), body: z.string().min(10).max(8000), replyAll: z.boolean().optional(), cc: z.array(z.string().max(200)).max(6).optional(), note: z.string().max(600).optional() },
-    }, (a) => toolRun(() => { const p = proposeMailReply(agent, a, run.hop); return acted({ proposal: p.id, status: p.status }) }))
+      inputSchema: {
+        n: z.number().int().optional(), ...(boxNames ? { messageId: z.string().min(20).max(400).optional(), mailbox: z.enum(['mine', 'support']).optional() } : {}),
+        body: z.string().min(10).max(8000), replyAll: z.boolean().optional(), cc: z.array(z.string().max(200)).max(6).optional(), note: z.string().max(600).optional(),
+      },
+    }, (a) => toolRun(async () => { const p = await proposeMailReply(agent, a, run.hop); return acted({ proposal: p.id, status: p.status }) }))
+
+    if (boxNames) {
+      server.registerTool('propose_mail_new', {
+        description: `Propose a NEW mail from Brendon's address (${boxNames.mine}), for when there is no thread to reply in: a ticket that came from `
+          + 'monitoring or a phone call, a person who never wrote. If they wrote about it, use propose_mail_reply in their thread instead '
+          + '(this refuses when they wrote in the last 14 days, unless newThread is true for a different matter). '
+          + `cc defaults to ${boxNames.support || 'nobody'}. ticketId links the ticket. Same draft rules as a reply.`,
+        inputSchema: {
+          to: z.array(z.string().max(200)).min(1).max(8), cc: z.array(z.string().max(200)).max(6).optional(), subject: z.string().min(3).max(250),
+          body: z.string().min(10).max(8000), note: z.string().max(600).optional(), ticketId: z.number().int().optional(), number: z.string().max(20).optional(),
+          newThread: z.boolean().optional(),
+        },
+      }, (a) => toolRun(() => { const p = proposeMailNew(agent, a, run.hop); return acted({ proposal: p.id, status: p.status }) }))
+    }
 
     server.registerTool('propose_ticket_note', {
       description: 'Propose an internal note (techs only, never the client) on a ticket.',
@@ -302,12 +359,42 @@ function register(server: McpServer, loc: Loc): void {
     }, (a) => toolRun(() => { const p = proposeTicketNote(agent, a, run.hop); return acted({ proposal: p.id }) }))
 
     server.registerTool('propose_ticket_update', {
-      description: 'Propose a ticket change: status or priority by name (autotask_labels), assign to Brendon, a due time. Complete emails the contact the resolution.',
+      description: 'Propose a change to a ticket\'s fields, checked live against Autotask so the card shows each change and what it was. '
+        + 'Any of: status, priority, queue (names from autotask_labels); companyId (company_find) and contactId (contact_find; it must be a contact '
+        + 'of the company the ticket ends up in, and 0 clears it); assignTo (a resource id from resource_find) or assignToBrendon; due (New York time, '
+        + 'YYYY-MM-DD or YYYY-MM-DDTHH:mm); title; description; resolution. Moving a ticket to another company also moves its location and clears '
+        + 'the old company\'s contract and contact. Status Complete emails the contact the resolution: to close a ticket with a note, use propose_ticket_complete.',
       inputSchema: {
-        ticketId: z.number().int(), number: z.string().max(20).optional(), status: z.string().max(40).optional(), priority: z.string().max(20).optional(),
-        assignToBrendon: z.boolean().optional(), due: z.string().max(30).optional(), why: z.string().min(1).max(400),
+        ticketId: z.number().int(), number: z.string().max(20).optional(),
+        status: z.string().max(40).optional(), priority: z.string().max(20).optional(), queue: z.string().max(60).optional(),
+        companyId: z.number().int().min(0).optional(), contactId: z.number().int().min(0).optional(),
+        assignTo: z.number().int().optional(), assignToBrendon: z.boolean().optional(), due: z.string().max(30).optional(),
+        title: z.string().max(255).optional(), description: z.string().max(8000).optional(), resolution: z.string().max(8000).optional(),
+        why: z.string().min(1).max(400),
       },
-    }, (a) => toolRun(() => { const p = proposeTicketUpdate(agent, a, run.hop); return acted({ proposal: p.id }) }))
+    }, (a) => toolRun(async () => { const p = await proposeTicketUpdate(agent, a, run.hop); return acted({ proposal: p.id, title: p.title }) }))
+
+    server.registerTool('propose_time_entry', {
+      description: 'Propose a time entry on a ticket, as Brendon: hours (0.05 to 12), summary (what was done; the client can see it), '
+        + 'internalNotes (techs only), workType by name (autotask_labels; default the ticket\'s own), start in New York time '
+        + '(YYYY-MM-DDTHH:mm; default: it ends now), nonBillable.',
+      inputSchema: {
+        ticketId: z.number().int(), number: z.string().max(20).optional(), hours: z.number().min(0.05).max(12), summary: z.string().min(3).max(8000),
+        internalNotes: z.string().max(8000).optional(), workType: z.string().max(60).optional(), start: z.string().max(30).optional(),
+        nonBillable: z.boolean().optional(), why: z.string().max(400).optional(),
+      },
+    }, (a) => toolRun(async () => { const p = await proposeTimeEntry(agent, a, run.hop); return acted({ proposal: p.id, title: p.title }) }))
+
+    server.registerTool('propose_ticket_complete', {
+      description: 'Propose completing a ticket in one card: note (what was done, posted as an internal note titled noteTitle, default "Resolution"), '
+        + 'resolution (what the contact reads in the completion email; default the note), and with hours a time entry with the note as its summary '
+        + '(workType, start as in propose_time_entry). On approval: the note, the time, then status Complete.',
+      inputSchema: {
+        ticketId: z.number().int(), number: z.string().max(20).optional(), note: z.string().min(10).max(8000), noteTitle: z.string().max(250).optional(),
+        resolution: z.string().max(8000).optional(), hours: z.number().min(0.05).max(12).optional(), workType: z.string().max(60).optional(),
+        start: z.string().max(30).optional(), why: z.string().max(400).optional(),
+      },
+    }, (a) => toolRun(async () => { const p = await proposeTicketComplete(agent, a, run.hop); return acted({ proposal: p.id, title: p.title }) }))
 
     server.registerTool('propose_ticket_create', {
       description: 'Propose a new ticket, assigned to Brendon. With contactId Autotask emails that contact; without it the ticket is internal. n links the mail it came from.',

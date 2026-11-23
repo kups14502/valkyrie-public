@@ -817,11 +817,19 @@ function Refs({ refs }: { refs: Ref[] }) {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v))
 
+/** A ticket proposal's change lines (ticket_update, ticket_time, ticket_complete), or null for an older card without them. */
+const changeLines = (pl: Record<string, unknown>): string | null =>
+  Array.isArray(pl.changes) && pl.changes.length ? (pl.changes as unknown[]).map(str).join('\n') : null
+
 /** An agent's proposal inline: a mail draft he can edit, then Send, Save to drafts or Decline; anything else Approve or Decline. */
 function ProposalCard({ p }: { p: Proposal }) {
   const qc = useQueryClient()
   const pl = (p.payload && typeof p.payload === 'object' ? p.payload : {}) as Record<string, unknown>
-  const mail = p.kind === 'mail_reply'
+  const fresh = p.kind === 'mail_new'
+  const mail = p.kind === 'mail_reply' || fresh
+  const changes = changeLines(pl)
+  const toLine = Array.isArray(pl.to) ? (pl.to as unknown[]).map(str).join(', ')
+    : str(pl.toName) ? `${str(pl.toName)} <${str(pl.to)}>` : str(pl.to)
   const [body, setBody] = useState(str(pl.body))
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState('')
@@ -851,13 +859,14 @@ function ProposalCard({ p }: { p: Proposal }) {
       </div>
       {mail && (
         <dl className="rv-prop-meta">
-          <dt>To</dt><dd>{str(pl.toName) ? `${str(pl.toName)} <${str(pl.to)}>` : str(pl.to)}</dd>
+          <dt>To</dt><dd>{toLine}</dd>
           {pl.replyAll ? <><dt>Cc</dt><dd>everyone on the thread</dd></> : cc.length > 0 && <><dt>Cc</dt><dd>{cc.join(', ')}</dd></>}
-          <dt>Subject</dt><dd>RE: {str(pl.subject).replace(/^re:\s*/i, '')}</dd>
+          <dt>Subject</dt><dd>{fresh ? str(pl.subject) : `RE: ${str(pl.subject).replace(/^re:\s*/i, '')}`}</dd>
         </dl>
       )}
       {p.kind === 'ticket_note' && <pre className="rv-prop-body">{str(pl.title)}{'\n\n'}{str(pl.text)}</pre>}
       {p.kind === 'ticket_create' && <pre className="rv-prop-body">{str(pl.company)}: {str(pl.title)}{'\n\n'}{str(pl.description)}</pre>}
+      {changes && <pre className="rv-prop-body">{changes}</pre>}
       {mail && (pending
         ? <textarea className="rv-prop-edit" value={body} onChange={(e) => setBody(e.target.value)} rows={Math.min(16, Math.max(5, body.split('\n').length + 1))} aria-label="The draft" />
         : <pre className="rv-prop-body">{str(pl.body)}</pre>)}

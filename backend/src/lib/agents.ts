@@ -11,7 +11,7 @@ import {
 import { runClaude, nyNowLine } from './claudeCli.js'
 import { listProjects, getProject } from './projectsStore.js'
 import { listTasks, nyToday } from './tasksStore.js'
-import { briefFor } from './agentBriefs.js'
+import { briefFor, triageAbilities } from './agentBriefs.js'
 import type { Franchise } from './psa.js'
 import { franchiseConf, workConf } from './workConfig.js'
 import { AREAS } from './projectAreas.js'
@@ -478,6 +478,11 @@ function renderEvent(e: AgentEvent): string {
       return `- Brendon declined ${s('count')} of your waiting proposals at once with Decline all${span}. Nothing was sent or applied.`
         + `${p.reason ? ` His reason: ${s('reason')}.` : ''} Do not propose them again unless something new happens on that ticket or mail.`
     }
+    case 'tools_changed':
+      return `- Valkyrie update (${s('version')}): your tools grew. ${s('text')}\n`
+        + '  Rewrite every notebook line this makes wrong (one that says Autotask cannot change a field, or that Brendon must email someone himself because there is no thread). '
+        + 'Where an open item waited only on one of these, propose it now, at most 5 cards. Skip what Brendon declined for any reason other than a missing ability. '
+        + 'The cards speak for themselves: post nothing else unless you need his answer.'
     case 'daily_review':
       return '- Weekday morning review: post one message in your channel with what needs Brendon today.'
     case 'daily_check':
@@ -635,6 +640,23 @@ function tickSchedule(): void {
 
 let started = false
 
+// When the triage tools grow, each triage agent that already has a notebook is told once, so it
+// rewrites what its notebook says it cannot do. Change TRIAGE_TOOLS when the tools change again.
+const TRIAGE_TOOLS = '2026-11-23'
+
+export function noteToolChanges(): void {
+  for (const a of listAgents()) {
+    if (a.kind !== 'triage' || !a.enabled) continue
+    const key = `tools-seen:${a.id}`
+    if (getKv(key) === TRIAGE_TOOLS) continue
+    setKv(key, TRIAGE_TOOLS)
+    // a new agent learns it all from its brief; there is nothing to unlearn
+    if (!a.notebook.trim()) continue
+    addEvent(a.id, 'tools_changed', { version: TRIAGE_TOOLS, text: triageAbilities(a) })
+    wake(a.id, 90_000, 'tools changed')
+  }
+}
+
 export function startAgents(): void {
   if (started) return
   started = true
@@ -642,6 +664,7 @@ export function startAgents(): void {
   if (stale) console.warn(`[agents] closed ${stale} run(s) cut off by the restart`)
   for (const a of listAgents()) if (a.status === 'working' || a.status === 'queued') patchAgent(a.id, { status: 'idle', statusNote: '' })
   try { syncRoster() } catch (e) { console.error('[agents] roster:', (e as Error).message) }
+  try { noteToolChanges() } catch (e) { console.error('[agents] tool note:', (e as Error).message) }
   const roster = setInterval(() => {
     try { syncRoster() } catch (e) { console.error('[agents] roster:', (e as Error).message) }
   }, 5 * 60_000)

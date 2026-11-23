@@ -11,7 +11,7 @@ import type { RavenMeta } from './raven/types.js'
 export type AgentKind = 'triage' | 'project' | 'shopping' | 'feature'
 export type AgentStatus = 'idle' | 'queued' | 'working' | 'resting' | 'error'
 export type ChannelKind = 'home' | 'team' | 'dm'
-export type ProposalKind = 'mail_reply' | 'ticket_note' | 'ticket_update' | 'ticket_create' | 'feature'
+export type ProposalKind = 'mail_reply' | 'mail_new' | 'ticket_note' | 'ticket_update' | 'ticket_create' | 'ticket_time' | 'ticket_complete' | 'feature'
 export type ProposalStatus = 'pending' | 'running' | 'done' | 'failed' | 'declined'
 export type MailState = 'new' | 'handled' | 'ignored' | 'needs-brendon'
 
@@ -848,6 +848,20 @@ export function addMail(m: MailInput): MailItem | null {
 
 export function getMail(n: number): MailItem | null {
   const r = db.prepare('SELECT * FROM mail WHERE n = ?').get(n) as MailRow | undefined
+  return r ? toMail(r) : null
+}
+
+/** The newest mail Valkyrie holds from any of these senders in the last `days`. */
+export function recentMailFrom(addresses: string[], days = 14): MailItem | null {
+  if (!addresses.length) return null
+  const r = db.prepare(`SELECT * FROM mail WHERE lower(fromAddress) IN (${addresses.map(() => '?').join(',')}) AND receivedAt >= ? ORDER BY receivedAt DESC LIMIT 1`)
+    .get(...addresses.map((a) => a.toLowerCase()), new Date(Date.now() - days * 86_400_000).toISOString()) as MailRow | undefined
+  return r ? toMail(r) : null
+}
+
+/** The mail Valkyrie holds for one Graph message in one mailbox (by its address), if any. */
+export function mailByGraphId(address: string, graphId: string): MailItem | null {
+  const r = db.prepare('SELECT * FROM mail WHERE lower(address) = lower(?) AND graphId = ? ORDER BY n DESC LIMIT 1').get(address, graphId) as MailRow | undefined
   return r ? toMail(r) : null
 }
 

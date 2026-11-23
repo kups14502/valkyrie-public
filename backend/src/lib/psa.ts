@@ -135,10 +135,23 @@ export async function picklists(f: Franchise): Promise<Picklists> {
   if (hit && Date.now() - hit.at < PICK_TTL) return hit
   const info = await at<{ fields: { name: string; picklistValues?: Pick[] }[] }>(f, '/Tickets/entityInformation/fields')
   const map = (name: string) => new Map((info.fields.find((x) => x.name === name)?.picklistValues ?? [])
-    .map((v) => [Number(v.value), v.label] as const))
+    .map((v) => [Number(v.value), v.label.trim()] as const))
   const p: Picklists = { status: map('status'), priority: map('priority'), queue: map('queueID'), at: Date.now() }
   pickCache.set(f, p)
   return p
+}
+
+/** Work types (Autotask billing codes of use type 1), the labels a time entry takes. */
+const workCache = new Map<Franchise, { at: number; byId: Map<number, string> }>()
+export async function workTypes(f: Franchise): Promise<Map<number, string>> {
+  const hit = workCache.get(f)
+  if (hit && Date.now() - hit.at < PICK_TTL) return hit.byId
+  const rows = await query<{ id: number; name: string; useType: number; isActive: boolean }>(
+    f, 'BillingCodes', [{ op: 'eq', field: 'useType', value: 1 }, { op: 'eq', field: 'isActive', value: true }],
+    { fields: ['id', 'name', 'useType', 'isActive'], maxItems: 200 })
+  const byId = new Map(rows.map((r) => [r.id, (r.name ?? '').trim()] as const))
+  workCache.set(f, { at: Date.now(), byId })
+  return byId
 }
 
 const valueOf = (m: Map<number, string>, label: string): number | null => {
@@ -152,11 +165,48 @@ export async function statusValue(f: Franchise, label: string): Promise<number> 
   return v
 }
 
-/** The status and queue labels, so an agent can name them. */
-export async function labels(f: Franchise): Promise<{ statuses: string[]; priorities: string[]; queues: string[] }> {
-  const p = await picklists(f)
-  return { statuses: [...p.status.values()], priorities: [...p.priority.values()], queues: [...p.queue.values()] }
+/** The status, priority, queue and work type labels, so an agent can name them. */
+export async function labels(f: Franchise): Promise<{ statuses: string[]; priorities: string[]; queues: string[]; workTypes: string[] }> {
+  const [p, w] = await Promise.all([picklists(f), workTypes(f).catch(() => new Map<number, string>())])
+  return { statuses: [...p.status.values()], priorities: [...p.priority.values()], queues: [...p.queue.values()], workTypes: [...w.values()] }
 }
+
+// ------------------------------------------------------ New York time ----
+// Agents write times as New York wall time; Autotask stores UTC.
+
+const NY_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+})
+const NY_DATE = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+
+function nyOffsetMs(ms: number): number {
+  const parts = NY_PARTS.formatToParts(ms)
+  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0)
+  return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'), g('second')) - ms
+}
+
+/**
+ * An instant from what an agent wrote: an ISO time with a zone as it is, else New York wall time
+ * (YYYY-MM-DD HH:mm, or a bare date at `dateOnlyHour` o'clock).
+ */
+export function nyTimeToIso(s: string, dateOnlyHour = 17): string {
+  const t = s.trim()
+  if (/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(t)) {
+    const ms = Date.parse(t)
+    if (Number.isNaN(ms)) throw new PsaError(400, `not a time: ${s}`)
+    return new Date(ms).toISOString()
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2}))?$/.exec(t)
+  if (!m) throw new PsaError(400, `not a time: ${s} (write YYYY-MM-DD or YYYY-MM-DDTHH:mm, New York time)`)
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : dateOnlyHour, m[5] ? Number(m[5]) : 0)
+  let ms = wall - nyOffsetMs(wall)
+  ms = wall - nyOffsetMs(ms)
+  return new Date(ms).toISOString()
+}
+
+const nyDate = (ms: number) => NY_DATE.format(ms)
+const nyLabel = (iso: string | null | undefined) =>
+  iso ? `${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(Date.parse(iso))} ET` : 'none'
 
 // ------------------------------------------------------ names, cached ----
 
@@ -193,6 +243,15 @@ export async function findCompanies(f: Franchise, text: string): Promise<{ id: n
     .map(([id, c]) => ({ id, name: c.name, active: c.active }))
 }
 
+/** Techs (Autotask resources) whose name contains the text, for assigning a ticket. */
+export async function findResources(f: Franchise, text: string): Promise<{ id: number; name: string; brendon: boolean }[]> {
+  const needle = text.trim().toLowerCase()
+  return [...(await resources(f)).entries()]
+    .filter(([, n]) => !needle || n.toLowerCase().includes(needle))
+    .slice(0, 30)
+    .map(([id, name]) => ({ id, name, brendon: id === meta(f).brendon }))
+}
+
 export type Contact = { id: number; companyId: number; company: string; name: string; email: string; active: boolean }
 
 type ContactRow = { id: number; companyID: number; firstName: string; lastName: string; emailAddress: string | null; isActive: number | boolean }
@@ -205,12 +264,41 @@ async function toContacts(f: Franchise, rows: ContactRow[]): Promise<Contact[]> 
   }))
 }
 
+const CONTACT_FIELDS = ['id', 'companyID', 'firstName', 'lastName', 'emailAddress', 'isActive']
+
 export async function contactsByEmail(f: Franchise, email: string): Promise<Contact[]> {
   const e = email.trim()
   if (!e.includes('@')) return []
   const rows = await query<ContactRow>(f, 'Contacts', [{ op: 'eq', field: 'emailAddress', value: e }],
-    { fields: ['id', 'companyID', 'firstName', 'lastName', 'emailAddress', 'isActive'], maxItems: 10 })
+    { fields: CONTACT_FIELDS, maxItems: 10 })
   return toContacts(f, rows)
+}
+
+/**
+ * Contacts by name and/or company. One word matches a first or last name; two or more match the
+ * first word as first name and the last word as last name. With only a company, its contacts.
+ */
+export async function findContacts(f: Franchise, o: { name?: string; companyId?: number; email?: string }): Promise<Contact[]> {
+  if (o.email?.trim()) {
+    const hits = await contactsByEmail(f, o.email)
+    return o.companyId === undefined ? hits : hits.filter((c) => c.companyId === o.companyId)
+  }
+  const filter: Filter[] = []
+  if (o.companyId !== undefined) filter.push({ op: 'eq', field: 'companyID', value: o.companyId })
+  const words = (o.name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (words.length === 1) {
+    filter.push({ op: 'or', items: [{ op: 'contains', field: 'firstName', value: words[0] }, { op: 'contains', field: 'lastName', value: words[0] }] })
+  } else if (words.length > 1) {
+    filter.push({ op: 'contains', field: 'firstName', value: words[0] }, { op: 'contains', field: 'lastName', value: words[words.length - 1] })
+  }
+  if (!filter.length) throw new PsaError(400, 'name a contact, a company id or an email')
+  const rows = await query<ContactRow>(f, 'Contacts', filter, { fields: CONTACT_FIELDS, maxItems: 40 })
+  return (await toContacts(f, rows)).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
+}
+
+export async function getContact(f: Franchise, id: number): Promise<Contact | null> {
+  const rows = await query<ContactRow>(f, 'Contacts', [{ op: 'eq', field: 'id', value: id }], { fields: CONTACT_FIELDS, maxItems: 1 })
+  return rows.length ? (await toContacts(f, rows))[0] : null
 }
 
 /** Every active contact's email, for routing mail by sender (the poller refreshes it daily). */
@@ -335,39 +423,205 @@ export async function addInternalNote(f: Franchise, ticketId: number, title: str
   }
 }
 
-async function brendonRole(f: Franchise): Promise<number> {
-  const known = meta(f).role
+/** A tech's service desk role: Brendon's from the config when it is set, else the tech's default active role. */
+async function resourceRole(f: Franchise, resourceId: number): Promise<number> {
+  const known = resourceId === meta(f).brendon ? meta(f).role : undefined
   if (known) return known
   const rows = await query<{ roleID: number; isDefault: boolean; isActive: boolean }>(
-    f, 'ResourceServiceDeskRoles', [{ op: 'eq', field: 'resourceID', value: meta(f).brendon }], { maxItems: 20 })
+    f, 'ResourceServiceDeskRoles', [{ op: 'eq', field: 'resourceID', value: resourceId }], { maxItems: 20 })
   const role = rows.find((r) => r.isDefault && r.isActive) ?? rows.find((r) => r.isActive)
-  if (!role) throw new PsaError(400, `Brendon has no service desk role in ${meta(f).label} Autotask`)
+  if (!role) {
+    const who = (await resources(f)).get(resourceId) ?? `resource ${resourceId}`
+    throw new PsaError(400, `${who} has no service desk role in ${meta(f).label} Autotask, so a ticket cannot be assigned to them`)
+  }
   return role.roleID
 }
+const brendonRole = (f: Franchise) => resourceRole(f, meta(f).brendon)
 
-export type TicketPatch = { status?: string; priority?: string; assignToBrendon?: boolean; due?: string }
+/**
+ * A ticket change, by name where Autotask has names. companyId moves the ticket to another company:
+ * its location becomes the new company's primary one, and a contract, configuration item or contact
+ * of the old company is cleared. contactId null (or 0) clears the contact. due is New York time.
+ */
+export type TicketPatch = {
+  status?: string; priority?: string; queue?: string
+  assignToBrendon?: boolean; assignTo?: number
+  due?: string
+  companyId?: number; contactId?: number | null
+  title?: string; description?: string; resolution?: string
+}
 
-export async function updateTicket(f: Franchise, ticketId: number, patch: TicketPatch): Promise<Ticket> {
-  const p = await picklists(f)
+type TicketNow = TicketRow & {
+  companyLocationID: number | null; contractID: number | null; configurationItemID: number | null; billingCodeID: number | null; resolution: string | null
+}
+
+async function ticketNow(f: Franchise, id: number): Promise<TicketNow> {
+  const rows = await query<TicketNow>(f, 'Tickets', [{ op: 'eq', field: 'id', value: id }], {
+    fields: [...TICKET_FIELDS, 'companyLocationID', 'contractID', 'configurationItemID', 'billingCodeID', 'resolution'], maxItems: 1,
+  })
+  if (!rows.length) throw new PsaError(404, `no ${meta(f).label} ticket ${id}`)
+  return rows[0]
+}
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+
+export type TicketPlan = { body: Record<string, unknown>; changes: string[]; number: string; closes: boolean }
+
+/**
+ * What a change does to the ticket as it is now: the PATCH body, and one line per change for the
+ * proposal card. Everything is checked here (the names exist, the contact belongs to the company,
+ * the tech has a role), so a change that cannot work is refused before Brendon sees it. No changes
+ * means the ticket already is that way.
+ */
+export async function planTicketUpdate(f: Franchise, ticketId: number, patch: TicketPatch): Promise<TicketPlan> {
+  const [t, p, co, res] = await Promise.all([ticketNow(f, ticketId), picklists(f), companies(f), resources(f)])
+  const L = meta(f).label
   const body: Record<string, unknown> = { id: ticketId }
+  const changes: string[] = []
+  const coName = (id: number) => co.get(id)?.name ?? `company ${id}`
+  const resName = (id: number | null) => (id ? res.get(id) ?? `resource ${id}` : 'nobody')
+  const contactName = async (id: number | null) => {
+    if (!id) return 'none'
+    const c = await getContact(f, id).catch(() => null)
+    return c ? `${c.name}${c.email ? ` <${c.email}>` : ''}` : `contact ${id}`
+  }
+  const pick = (m: Map<number, string>, label: string, what: string) => {
+    const v = valueOf(m, label.trim())
+    if (v === null) throw new PsaError(400, `${L} Autotask has no ${what} "${label}"; autotask_labels lists them`)
+    return v
+  }
+
   if (patch.status) {
-    const v = valueOf(p.status, patch.status)
-    if (v === null) throw new PsaError(400, `no status "${patch.status}"`)
-    body.status = v
+    const v = pick(p.status, patch.status, 'status')
+    if (v !== t.status) { body.status = v; changes.push(`Status: ${p.status.get(v)} (was ${p.status.get(t.status) ?? t.status})`) }
   }
   if (patch.priority) {
-    const v = valueOf(p.priority, patch.priority)
-    if (v === null) throw new PsaError(400, `no priority "${patch.priority}"`)
-    body.priority = v
+    const v = pick(p.priority, patch.priority, 'priority')
+    if (v !== t.priority) { body.priority = v; changes.push(`Priority: ${p.priority.get(v)} (was ${p.priority.get(t.priority) ?? t.priority})`) }
   }
-  if (patch.assignToBrendon) {
+  if (patch.queue) {
+    const v = pick(p.queue, patch.queue, 'queue')
+    if (v !== t.queueID) { body.queueID = v; changes.push(`Queue: ${p.queue.get(v)} (was ${t.queueID ? p.queue.get(t.queueID) ?? t.queueID : 'none'})`) }
+  }
+
+  // the company first: a contact is checked against the company the ticket ends up in
+  let companyId = t.companyID
+  if (patch.companyId !== undefined && patch.companyId !== t.companyID) {
+    const c = co.get(patch.companyId)
+    if (!c) throw new PsaError(400, `no ${L} company ${patch.companyId}; company_find looks one up`)
+    if (!c.active) throw new PsaError(400, `${c.name} is inactive in ${L} Autotask`)
+    companyId = patch.companyId
+    body.companyID = companyId
+    changes.push(`Company: ${c.name} (was ${coName(t.companyID)})`)
+    const locs = (await query<{ id: number; name: string; isPrimary: boolean; isActive: boolean }>(f, 'CompanyLocations',
+      [{ op: 'eq', field: 'companyID', value: companyId }], { fields: ['id', 'name', 'isPrimary', 'isActive'], maxItems: 50 }))
+      .filter((l) => l.isActive !== false)
+    const loc = locs.find((l) => l.isPrimary) ?? locs[0]
+    if (loc?.id !== t.companyLocationID) body.companyLocationID = loc?.id ?? null
+    if (t.contractID) { body.contractID = null; changes.push('Contract: cleared (it was the old company\'s)') }
+    if (t.configurationItemID) { body.configurationItemID = null; changes.push('Configuration item: cleared (it was the old company\'s)') }
+    if (patch.contactId === undefined && t.contactID) {
+      body.contactID = null
+      changes.push(`Contact: none (was ${await contactName(t.contactID)}, of the old company)`)
+    }
+  }
+  if (patch.contactId !== undefined) {
+    const want = patch.contactId || null
+    if (want === null && t.contactID) {
+      body.contactID = null
+      changes.push(`Contact: none (was ${await contactName(t.contactID)})`)
+    } else if (want !== null && want !== t.contactID) {
+      const c = await getContact(f, want)
+      if (!c) throw new PsaError(400, `no ${L} contact ${want}; contact_find looks one up`)
+      if (c.companyId !== companyId) {
+        throw new PsaError(400, `${c.name} is a contact of ${c.company} (company ${c.companyId}), not of ${coName(companyId)}; pass companyId ${c.companyId} too`)
+      }
+      if (!c.active) throw new PsaError(400, `${c.name} is an inactive contact in ${L} Autotask`)
+      body.contactID = c.id
+      changes.push(`Contact: ${c.name}${c.email ? ` <${c.email}>` : ''} (was ${await contactName(t.contactID)})`)
+    }
+  }
+
+  const assignee = patch.assignTo ?? (patch.assignToBrendon ? meta(f).brendon : undefined)
+  if (assignee !== undefined && assignee !== t.assignedResourceID) {
+    if (!res.has(assignee)) throw new PsaError(400, `no ${L} resource ${assignee}; resource_find looks one up`)
     // both or the update 500s
-    body.assignedResourceID = meta(f).brendon
-    body.assignedResourceRoleID = await brendonRole(f)
+    body.assignedResourceID = assignee
+    body.assignedResourceRoleID = await resourceRole(f, assignee)
+    changes.push(`Assigned: ${resName(assignee)} (was ${resName(t.assignedResourceID)})`)
   }
-  if (patch.due) body.dueDateTime = new Date(patch.due).toISOString()
-  await at(f, '/Tickets', { method: 'PATCH', body })
-  return getTicket(f, ticketId)
+  if (patch.due?.trim()) {
+    const iso = nyTimeToIso(patch.due)
+    if (Date.parse(iso) !== Date.parse(t.dueDateTime ?? '')) { body.dueDateTime = iso; changes.push(`Due: ${nyLabel(iso)} (was ${nyLabel(t.dueDateTime)})`) }
+  }
+  const title = patch.title?.trim().slice(0, 255)
+  if (title && title !== (t.title ?? '').trim()) { body.title = title; changes.push(`Title: ${title} (was ${t.title || 'none'})`) }
+  const description = patch.description?.trim().slice(0, 8000)
+  if (description && description !== (t.description ?? '').trim()) {
+    body.description = description
+    changes.push(`Description, new: ${clip(description, 600)}`)
+  }
+  const resolution = patch.resolution?.trim().slice(0, 32_000)
+  if (resolution && resolution !== (t.resolution ?? '').trim()) { body.resolution = resolution; changes.push(`Resolution: ${clip(resolution, 600)}`) }
+
+  const closes = typeof body.status === 'number' && (p.status.get(body.status) ?? '').toLowerCase() === 'complete'
+  return { body, changes, number: t.ticketNumber, closes }
+}
+
+/** Applies a change, re-planned against the ticket as it is at that moment. */
+export async function updateTicket(f: Franchise, ticketId: number, patch: TicketPatch): Promise<{ ticket: Ticket; changes: string[] }> {
+  const plan = await planTicketUpdate(f, ticketId, patch)
+  if (plan.changes.length) await at(f, '/Tickets', { method: 'PATCH', body: plan.body })
+  return { ticket: await getTicket(f, ticketId), changes: plan.changes }
+}
+
+/**
+ * Time on a ticket, as Brendon: hours, the summary (what the contact sees on the ticket), optional
+ * internal notes. start is New York time; without it the entry ends at `nowMs`. The work type is
+ * by name, else the ticket's own.
+ */
+export type TimeEntryInput = { hours: number; summary: string; internalNotes?: string; workType?: string; start?: string; nonBillable?: boolean }
+
+export async function planTimeEntry(f: Franchise, ticketId: number, e: TimeEntryInput, nowMs = Date.now()): Promise<{ body: Record<string, unknown>; changes: string[]; number: string; start: string }> {
+  const hours = Math.round(Number(e.hours) * 100) / 100
+  if (!(hours >= 0.05 && hours <= 12)) throw new PsaError(400, 'hours must be between 0.05 and 12')
+  const summary = (e.summary ?? '').trim()
+  if (summary.length < 3) throw new PsaError(400, 'a time entry needs a summary of the work')
+  const [t, types, res, role] = await Promise.all([ticketNow(f, ticketId), workTypes(f), resources(f), brendonRole(f)])
+  const startMs = e.start?.trim() ? Date.parse(nyTimeToIso(e.start, 9)) : nowMs - hours * 3_600_000
+  const endMs = startMs + Math.round(hours * 3_600_000)
+  if (endMs > nowMs + 10 * 60_000) throw new PsaError(400, 'a time entry cannot end in the future')
+  let billingCodeID: number | null = null
+  if (e.workType?.trim()) {
+    billingCodeID = valueOf(types, e.workType.trim())
+    if (billingCodeID === null) throw new PsaError(400, `${meta(f).label} Autotask has no work type "${e.workType}"; autotask_labels lists them`)
+  } else if (t.billingCodeID && types.has(t.billingCodeID)) {
+    billingCodeID = t.billingCodeID
+  }
+  const internal = e.internalNotes?.trim()
+  const body: Record<string, unknown> = {
+    ticketID: ticketId, resourceID: meta(f).brendon, roleID: role,
+    dateWorked: `${nyDate(startMs)}T00:00:00Z`,
+    startDateTime: new Date(startMs).toISOString(), endDateTime: new Date(endMs).toISOString(),
+    hoursWorked: hours, summaryNotes: summary.slice(0, 32_000),
+    ...(internal ? { internalNotes: internal.slice(0, 32_000) } : {}),
+    ...(billingCodeID ? { billingCodeID } : {}),
+    ...(e.nonBillable ? { isNonBillable: true } : {}),
+  }
+  const endLabel = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(endMs)
+  const changes = [
+    `Time: ${hours} h as ${res.get(meta(f).brendon) ?? 'Brendon'}, ${nyLabel(new Date(startMs).toISOString()).replace(/ ET$/, '')} to ${endLabel} ET`,
+    `Work type: ${billingCodeID ? types.get(billingCodeID) : 'none'}${e.nonBillable ? ', non-billable' : ''}`,
+    `Summary: ${clip(summary, 600)}`,
+    ...(internal ? [`Internal notes: ${clip(internal, 400)}`] : []),
+  ]
+  return { body, changes, number: t.ticketNumber, start: new Date(startMs).toISOString() }
+}
+
+export async function addTimeEntry(f: Franchise, ticketId: number, e: TimeEntryInput): Promise<{ id: number; changes: string[] }> {
+  const plan = await planTimeEntry(f, ticketId, e)
+  const r = await at<{ itemId: number }>(f, '/TimeEntries', { method: 'POST', body: plan.body })
+  return { id: r.itemId, changes: plan.changes }
 }
 
 export type NewTicket = { companyId: number; title: string; description: string; priority?: string; contactId?: number | null; queue?: string }

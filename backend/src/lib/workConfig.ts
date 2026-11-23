@@ -16,7 +16,7 @@ import { homedir } from 'node:os'
 //     "envFile": "<PSA credentials file in this folder>", "web": "https://wwN.autotask.net",
 //     "brendonResource": 0, "brendonRole": 0, "ticketCategory": 0,
 //     "supportCc": "<address replies copy>", "ownDomains": ["<colleague mail domains>"],
-//     "teams": false,
+//     "teams": false, "mailbox": "<Brendon's own address: the triage agent may search it and send new mail from it>",
 //     "agent": { "id": "<key>-triage", "name": "...", "role": "...", "topic": "..." },
 //     "brief": "<what this franchise's triage agent must know>"
 //   }],
@@ -39,6 +39,8 @@ export type FranchiseConf = {
   supportCc: string
   ownDomains: string[]
   teams?: boolean
+  /** Brendon's mailbox this franchise's triage may search and send new mail from (thor reads and sends); none: no mailbox tools */
+  mailbox?: string
   agent: { id: string; name: string; role: string; topic: string }
   brief: string
 }
@@ -79,6 +81,7 @@ function parse(raw: unknown): WorkConf {
       supportCc: typeof f.supportCc === 'string' ? f.supportCc : '',
       ownDomains: strs(f.ownDomains),
       teams: f.teams === true,
+      mailbox: typeof f.mailbox === 'string' && /^[^\s@<>,;]+@[^\s@<>,;]+\.[a-z]{2,}$/i.test(f.mailbox) ? f.mailbox.toLowerCase() : undefined,
       agent: { id, name: String(agent.name ?? id), role: String(agent.role ?? ''), topic: String(agent.topic ?? '') },
       brief: typeof f.brief === 'string' ? f.brief : '',
     })
