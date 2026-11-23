@@ -24,7 +24,7 @@
 
 .rv-conv { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 
-/* ---------- the header: Raven, its live status, Stop, Connected ---------- */
+/* ---------- the header: Raven, its live status, Stop, the Connected button ---------- */
 .rv-head {
   flex: none;
   display: flex;
@@ -53,18 +53,31 @@
 .rv-status[data-busy] { color: var(--fg); }
 .rv-status[data-state='error'] { color: var(--hot); }
 .rv-stop.vl-link { flex: none; min-height: 32px; font-size: 12px; font-weight: 600; color: var(--hot); }
-.rv-conn-toggle {
+/* the button at the right end: the panel icon, how many sessions and agents are at work, the proposals waiting */
+.rv-panel-btn {
   position: relative;
   flex: none;
-  padding: 8px 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: .14em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--dim);
+  background: transparent;
+  transition: color .15s, border-color .15s, box-shadow .15s, transform .12s var(--ease);
 }
-.rv-conn-toggle::after { content: ''; position: absolute; inset: -4px -6px; }
-.rv-conn-toggle[data-on] { color: var(--fg); text-shadow: var(--text-glow); }
+.rv-panel-btn::after { content: ''; position: absolute; inset: -6px -4px; }
+.rv-panel-btn[data-on] { color: var(--fg); border-color: var(--panel-line); box-shadow: var(--glow); }
+.rv-panel-btn[data-pressed] { transform: scale(.94); }
+.rv-panel-n { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); text-shadow: var(--text-glow); }
+.rv-panel-n .rv-dot { width: 6px; height: 6px; }
+.rv-panel-wait.rv-n { min-width: 18px; padding: 0 5px; font-size: 10.5px; line-height: 16px; border-radius: 8px; background: var(--hot); }
+@media (hover: hover) and (pointer: fine) { .rv-panel-btn:hover { color: var(--fg); border-color: var(--panel-line); } }
 
 /* ---------- the thread ---------- */
 .rv-msgs {
@@ -305,14 +318,30 @@ html[data-motion='reduced'] .rv-pulse { animation: none; }
   scrollbar-width: none;
 }
 .rv-side::-webkit-scrollbar { display: none; }
-.rv-conn-drop {
-  flex: none;
-  max-height: 46%;
+/* the drawer (a narrow screen): over the thread from the header's right end, a dim layer under it; Escape, a
+   press outside it or the button closes it */
+.rv-drawer-back { position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, .5); animation: vl-fade .14s linear both; }
+.rv-drawer {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  z-index: 5;
+  width: min(22rem, 100%);
+  max-height: calc(100% - 12px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 2px 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 14px 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 40%), #000;
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .9), var(--glow);
+  scrollbar-width: none;
+  animation: rv-drawer-in .16s var(--ease) both;
 }
+.rv-drawer::-webkit-scrollbar { display: none; }
+@keyframes rv-drawer-in { from { opacity: 0; transform: translate3d(0, -6px, 0); } to { opacity: 1; transform: none; } }
+html[data-motion='reduced'] :is(.rv-drawer, .rv-drawer-back) { animation: none; }
+@media (prefers-reduced-motion: reduce) { :is(.rv-drawer, .rv-drawer-back) { animation: none; } }
 .rv-group h3 {
   margin: 12px 0 2px;
   font-size: 10px;
@@ -411,7 +440,7 @@ html[data-motion='reduced'] .rv-dot { animation: none; }
 @media (pointer: coarse) {
   .rv-stop.vl-link, .rv-prop-acts .vl-link, .rv-prop-decline .vl-link { position: relative; }
   .rv-stop.vl-link::after, .rv-prop-acts .vl-link::after, .rv-prop-decline .vl-link::after { content: ''; position: absolute; inset: -6px -8px; }
-  .rv-conn-toggle::after { inset: -7px -6px; }
+  .rv-panel-btn::after { inset: -8px -6px; }
   .rv-open::after { inset: -15px -6px; }
   .rv-ref { padding-block: 15px; margin-block: -15px; }
 }

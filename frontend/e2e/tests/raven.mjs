@@ -359,7 +359,8 @@ function threadSnap() {
     fab: !!q('.vl-shell > .rv-fab'),
     wide: !!q('.rv[data-wide]'),
     side: side && conv ? { right: side.left >= conv.right - 1, w: Math.round(side.width) } : null,
-    toggle: !!q('.rv-conn-toggle'),
+    toggle: !!q('.rv-panel-btn'),
+    toggleOn: q('.rv-panel-btn')?.getAttribute('aria-expanded') === 'true',
     conn: qa('.rv-conn .rv-group').map((g) => `${g.querySelector('h3')?.textContent}:${g.querySelectorAll('.rv-crow, .rv-wcard').length}`),
     watchRows: qa('.rv-conn .rv-wcard').map((r) => `${r.querySelector('.rv-wcard-name')?.textContent}|${r.querySelector('.rv-wcard-meta')?.textContent ?? ''}`),
     watchCard: (() => {
@@ -437,17 +438,17 @@ export function ravenTests() {
         t.check(s.select === 'text', `the thread's text cannot be selected (user-select ${s.select})`)
         t.check(!s.fab, 'the corner button shows on Raven')
         t.check(!s.dash, 'an em dash on Raven')
-        // Connected: a column on a wide screen, a toggle on a narrow one
+        // Connected: the header's button at the top right on every screen; a column on a wide one, a drawer on a narrow one
         const wantWide = ['ipadland', 'desktop', 'desk1440'].includes(device)
         t.check(s.wide === wantWide, `wide is ${s.wide} on ${device}`)
         let conn = s
         if (!wantWide) {
-          t.check(s.toggle && !s.conn.length, `narrow: the toggle ${s.toggle}, the list before it ${JSON.stringify(s.conn)}`)
-          await page.tap({ sel: '.rv-conn-toggle' }, { wait: 40_000 })
-          await until(page, () => !!document.querySelector('.rv-conn-drop .rv-crow'), 'the Connected toggle did not open the list')
+          t.check(s.toggle && !s.toggleOn && !s.conn.length, `narrow: the button ${s.toggle} (open ${s.toggleOn}), the list before it ${JSON.stringify(s.conn)}`)
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-drawer .rv-crow'), 'the top-right button did not open the drawer')
           conn = await page.eval(threadSnap)
         } else {
-          t.check(s.side?.right && s.side.w < 360 && !s.toggle, `the Connected column is not a narrow column on the right: ${JSON.stringify(s.side)}`)
+          t.check(s.side?.right && s.side.w < 360 && s.toggle && s.toggleOn, `the Connected column is not a narrow column on the right with its button lit: ${JSON.stringify(s.side)} button ${s.toggle} ${s.toggleOn}`)
         }
         t.check(JSON.stringify(conn.conn) === JSON.stringify(['Main terminals:3', 'Watching:2', 'Agents:2', 'Feeds:1']), `Connected reads ${JSON.stringify(conn.conn)}`)
         t.check(JSON.stringify(conn.watchOpen) === JSON.stringify(['/m/ai/term/vk-e2e00000b2']), `Watching's Open links are ${JSON.stringify(conn.watchOpen)} (a window on thor has none, a closed pane no card)`)
@@ -464,6 +465,21 @@ export function ravenTests() {
         t.check(/Sync stalled/.test(conn.feed ?? ''), `the feed line reads ${conn.feed}`)
         await fits(t, page, `${ROUTE} @${device}`)
         await t.shot(page, 'thread')
+        if (!wantWide) {
+          // the drawer closes on Escape, and on a tap outside it (the composer under the dim layer's edge)
+          await page.key('Escape')
+          await until(page, () => !document.querySelector('.rv-drawer'), 'Escape did not close the drawer')
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-drawer .rv-crow'), 'the button did not open the drawer again')
+          await page.tap({ sel: '.rv-compose textarea' }, { wait: 40_000 })
+          await until(page, () => !document.querySelector('.rv-drawer'), 'a tap outside did not close the drawer')
+        } else {
+          // the button hides the column, and shows it again
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !document.querySelector('.rv-side') && document.querySelector('.rv-panel-btn')?.getAttribute('aria-expanded') === 'false', 'the button did not hide the column')
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-side .rv-crow'), 'the button did not show the column again')
+        }
       },
     })
   }
@@ -1581,8 +1597,8 @@ export function ravenTests() {
         await page.goto(ROUTE)
         await threadUp(page)
         if (device === 'phone') {
-          await page.tap({ sel: '.rv-conn-toggle' }, { wait: 40_000 })
-          await until(page, () => !!document.querySelector('.rv-conn-drop .rv-crow'), 'the Connected toggle did not open the list')
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-drawer .rv-crow'), 'the top-right button did not open the drawer')
         }
         await until(page, () => !!document.querySelector('.rv-conn .rv-crow-act') && !!document.querySelector('.rv-conn .rv-h-act'), 'no Decline all on the agent row or by the Agents heading')
         await page.tap({ sel: '.rv-conn .rv-crow-act' }, { wait: 40_000 })
@@ -1633,8 +1649,8 @@ export function ravenTests() {
         await page.goto(ROUTE)
         await threadUp(page)
         if (device === 'phone') {
-          await page.tap({ sel: '.rv-conn-toggle' }, { wait: 40_000 })
-          await until(page, () => !!document.querySelector('.rv-conn-drop .rv-crow'), 'the Connected toggle did not open the list')
+          await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-drawer .rv-crow'), 'the top-right button did not open the drawer')
         }
         await until(page, () => !!document.querySelector('.rv-conn .rv-crow-line[data-feed="watchdog"]'), 'no Watchdog notice under the Watchdog agent row')
         const snap = () => {

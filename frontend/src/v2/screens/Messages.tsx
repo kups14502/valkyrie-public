@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowDown, ChevronRight, Copy, ExternalLink, Link2, Quote, Search, TextSelect, X } from 'lucide-react'
+import { ArrowDown, ChevronRight, Copy, ExternalLink, Link2, PanelRight, Quote, Search, TextSelect, X } from 'lucide-react'
 import { Button, Press, toast } from '../kit/ui'
 import { ago, useTick } from '../kit/data'
 import { useIntent, type ScreenProps } from '../kit/shell'
@@ -27,7 +27,8 @@ import './messages.css'
 // he decides. Newest at the bottom, older pages load on scroll-up, everything
 // updates through the Messages long-poll (/api/msg/changes). A wide screen
 // keeps a narrow "Connected" column on the right (main terminals, watched
-// sessions, agents, feeds); a narrow one opens it from the header. Old links
+// sessions, agents, feeds); the button at the header's right end hides or shows it there, and on a narrow
+// screen (a phone) opens the same list as a drawer over the thread. Old links
 // (/m/messages, ?c=<channel>) land here; ?compose=1 focuses the box. What he has typed, dictated or attached and
 // not sent is the thread's draft (kit/ravenDraft.ts): kept on this device across tab switches, reloads and
 // restarts, cleared only by the send.
@@ -56,6 +57,28 @@ function useWide(ref: RefObject<HTMLDivElement | null>, at: number): boolean {
     return () => ro.disconnect()
   }, [ref, at])
   return wide
+}
+
+/** The Connected column on a wide screen: shown unless he hid it, kept per device. */
+const SIDE_KEY = 'v2.raven.side'
+function useSideOpen(): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(SIDE_KEY) !== '0' } catch { return true }
+  })
+  const set = useCallback((v: boolean) => {
+    setOpen(v)
+    try { localStorage.setItem(SIDE_KEY, v ? '1' : '0') } catch { /* storage off */ }
+  }, [])
+  return [open, set]
+}
+
+/** At a glance on the header's button: the sessions and agents at work, and the proposals waiting for him. */
+function glanceOf(page: RavenPage): { working: number; waiting: number } {
+  const panes = new Set<string>()
+  for (const t of page.mains) if (t.state === 'working') panes.add(t.pane || t.target)
+  for (const w of page.watching) if (w.state === 'working') panes.add(w.pane || w.sessionId)
+  const agents = page.paused ? 0 : page.agents.filter((a) => a.status === 'working' || a.status === 'queued').length
+  return { working: panes.size + agents, waiting: page.agents.reduce((n, a) => n + a.pending, 0) }
 }
 
 /** The app is in front (an app brought back with the thread open reads it then). */
@@ -101,7 +124,14 @@ export default function Messages({ active }: ScreenProps) {
   const navigate = useNavigate()
   const q = useRaven(active)
   const page = q.data
+  // Connected: the drawer on a narrow screen, the column on a wide one
   const [showConn, setShowConn] = useState(false)
+  const [side, setSide] = useSideOpen()
+  const connBtn = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  // the drawer closes when the tab goes to the back or the screen grows wide (the column takes over)
+  if (showConn && (!active || wide)) setShowConn(false)
+  const drawer = showConn && active && !wide
   const draft = useRavenDraft()
   const ta = useRef<HTMLTextAreaElement>(null)
 
@@ -142,6 +172,30 @@ export default function Messages({ active }: ScreenProps) {
 
   // Ctrl+Shift+Space and the palette's "Message Raven" here: the box below, not the quick sheet
   useIntent('raven:compose', () => ta.current?.focus(), active)
+
+  // the drawer: Escape or a press anywhere outside it closes it (a menu, a toast or the find bar over it first)
+  useEffect(() => {
+    if (!drawer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.querySelector('.vk-menu, .vl-pal, [aria-modal="true"]') || (e.target as Element | null)?.closest?.('.vk-find')) return
+      e.preventDefault()
+      const inside = !!drawerRef.current?.contains(document.activeElement)
+      setShowConn(false)
+      if (inside) connBtn.current?.focus({ preventScroll: true })
+    }
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      if (!t || drawerRef.current?.contains(t) || connBtn.current?.contains(t) || t.closest?.('.vk-menu, .vl-toasts')) return
+      setShowConn(false)
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onDown, true)
+    }
+  }, [drawer])
 
   // ---- the list: stick to the newest, load older at the top ----
   // At the bottom the thread stays pinned there: new lines, Raven at work, a card or a picture that grows, the
@@ -467,7 +521,10 @@ export default function Messages({ active }: ScreenProps) {
 
   const status = page ? ravenStatusText(page) : ''
   const failed = q.isError && !page
-  const connected = page ? <Connected page={page} messages={messages} onOpen={(to) => navigate(to)} /> : null
+  const connected = page ? <Connected page={page} messages={messages} onOpen={(to) => { setShowConn(false); navigate(to) }} /> : null
+  const glance = page ? glanceOf(page) : { working: 0, waiting: 0 }
+  const connOpen = wide ? side : drawer
+  const connLabel = `Working, watching and agents${glance.working ? `, ${glance.working} working` : ''}${glance.waiting ? `, ${plural(glance.waiting, 'proposal')} waiting` : ''}`
 
   return (
     <div
@@ -501,12 +558,30 @@ export default function Messages({ active }: ScreenProps) {
           {/* a narrow header keeps the first word while Raven works; the live line at the end of the thread has the model and effort */}
           <span className="rv-status" data-state={page?.status} data-busy={busy || undefined} title={status || undefined}>{failed ? 'not answering' : busy && !wide ? status.split(' · ')[0] : status}</span>
           {busy && <Button kind="link" className="rv-stop" disabled={stop.isPending} onPress={() => stop.mutate()}>Stop</Button>}
-          {!wide && page && (
-            <Press className="rv-conn-toggle" data-on={showConn || undefined} aria-expanded={showConn} onPress={() => setShowConn((v) => !v)}>Connected</Press>
+          {page && (
+            <Press
+              ref={connBtn}
+              className="rv-panel-btn"
+              data-on={connOpen || undefined}
+              aria-expanded={connOpen}
+              aria-controls={wide ? 'rv-side' : 'rv-drawer'}
+              aria-label={connLabel}
+              title={wide ? (side ? 'Hide working, watching and agents' : 'Show working, watching and agents') : 'Working, watching and agents'}
+              onPress={() => (wide ? setSide(!side) : setShowConn((v) => !v))}
+            >
+              <PanelRight size={15} strokeWidth={1.7} aria-hidden />
+              {glance.working > 0 && <span className="rv-panel-n"><span className="rv-dot" data-state="working" aria-hidden />{glance.working}</span>}
+              {glance.waiting > 0 && <span className="rv-n rv-panel-wait">{glance.waiting}</span>}
+            </Press>
           )}
         </header>
-        {!wide && showConn && connected && <div className="rv-conn rv-conn-drop">{connected}</div>}
         <div className="rv-thread" data-read={lastRead} data-new={mark?.id} data-watch={watchSince ?? undefined}>
+        {drawer && connected && (
+          <>
+            <div className="rv-drawer-back" aria-hidden />
+            <aside id="rv-drawer" className="rv-conn rv-drawer" ref={drawerRef} aria-label="Working, watching and agents">{connected}</aside>
+          </>
+        )}
         <div className="rv-msgs" ref={listRef} onScroll={onScroll}>
           <div className="rv-col" ref={colRef}>
             {failed && <p className="rv-quiet">Raven is not answering: {apiErrorText(q.error, 'no reply from Valkyrie')}</p>}
@@ -536,7 +611,7 @@ export default function Messages({ active }: ScreenProps) {
         </div>
         <RavenComposer draft={draft} sending={send.isPending} onSend={() => send.mutate(draft.snapshot())} placeholder="Message Raven" taRef={ta} tools={<RavenPick page={page} />} voiceOn={active} />
       </section>
-      {wide && connected && <aside className="rv-conn rv-side" aria-label="Connected">{connected}</aside>}
+      {wide && side && connected && <aside id="rv-side" className="rv-conn rv-side" aria-label="Working, watching and agents">{connected}</aside>}
       {dragging && <div className="rv-drop" aria-hidden><span>Drop to attach to your message</span></div>}
     </div>
   )
