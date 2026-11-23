@@ -398,6 +398,37 @@ async function promptOrThrow(pane: string, label: string): Promise<void> {
 
 const withFiles = (text: string, paths: string[]) => (paths.length ? `${text} (attached, on thor: ${paths.join(', ')})` : text)
 
+/** thor's launch target by key, checked as session_start checks it. Answers its label. */
+export async function checkTarget(target: string): Promise<{ key: string; label: string }> {
+  const key = target.trim().toLowerCase()
+  const list = await targets()
+  const t = list?.find((x) => x.key === key)
+  if (list && !t) throw new RavenToolError(`thor has no launch target "${target}". Targets: ${list.filter((x) => x.exists).map((x) => x.key).join(', ')}`)
+  if (!list && !TARGET_RE.test(key)) throw new RavenToolError('target must be a launch-target key')
+  if (t && !t.exists) throw new RavenToolError(`the folder for "${key}" does not exist on thor`)
+  return { key, label: t?.label || key }
+}
+
+/**
+ * A job: a new Claude session on thor in a launch target, the prompt typed once its prompt shows, watched by Raven
+ * (every answer wakes Raven, followUp says what to do with it). session_start's non-main path, and what a feature
+ * hands work to (a feature agent's work order). Throws a RavenToolError with plain words.
+ */
+export async function startJob(o: { target: string; prompt: string; label?: string; followUp?: string; launch?: Launch }): Promise<{ pane: string; label: string; sessionId: string }> {
+  const text = checkText(o.prompt)
+  const t = await checkTarget(o.target)
+  const label = paneLabel(o.label, t.label)
+  const title = o.label ? oneLine(o.label).slice(0, 60) : undefined
+  const sessionId = randomUUID()
+  noteRavenStarted(sessionId, io.now())
+  const pane = await newPane({ mode: 'new', host: 'thor', target: t.key, newId: sessionId, label, cols: 120, rows: 40, ...(o.launch ?? {}) })
+  await startWatch({ pane, label, sessionId, followUp: o.followUp, fresh: true, title, job: true })
+  await promptOrThrow(pane, label)
+  noteRavenTouched(sessionId)
+  await typeInto(pane, label, text)
+  return { pane, label, sessionId }
+}
+
 // ------------------------------------------------------- for the run loop ----
 
 async function mainsNow(waitMs: number): Promise<{ known: boolean; mains: RavenMain[]; panes: TermSession[] }> {
