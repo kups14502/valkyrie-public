@@ -13,15 +13,18 @@ import { modelFor, modelKeys, ravenModels } from '../models.js'
 import type { RavenToolCtx } from '../types.js'
 import { io, onIoReset, type BoardRow } from './io.js'
 import { noteRavenTouched } from './owned.js'
+import { checkKeys, findOutside, outsideIo, outsideLabel, outsideSessions, plainRules, screenTail, screenVerdict, tmuxKeys, viaWords, type OutsideSession } from './outside.js'
 import { AUTO_CLOSE_MS, closesAt, getWatch, keepWatch, listWatches, removeWatch, startWatch, turnOpen, waitCounts, watchKey, type Watch } from './watch.js'
 import { ago, clip, et, needBrendon, RavenToolError, toolRun } from './util.js'
 
 // Brendon's Claude sessions, as Raven reaches them.
 //
 // A session Raven can TYPE into is a tmux pane on odin whose program is ssh to
-// thor (terminal/tmux.ts), the same panes the phone terminal opens. A session
-// running in a Windows Terminal window on thor is on the session board too,
-// and Raven can read its transcript but never type into it.
+// thor (terminal/tmux.ts), the same panes the phone terminal opens, or since
+// 2026-11-23 (his ask: every Claude terminal on thor and anywhere else) any
+// other Claude: a Windows Terminal window on thor, an ssh login on thor, a tmux
+// pane on odin outside Valkyrie (outside.ts says how each is reached). Only a
+// Claude in a bare terminal on odin stays read-only.
 //
 // "Main terminals" are thor's launch targets marked phone and not project:
 // Brendon's everyday Claude contexts (personal, work, the second work area).
@@ -214,6 +217,12 @@ async function resolve(session: string, panes: TermSession[], allowBoard: boolea
       return inPane ? { kind: 'pane', pane: inPane } : { kind: 'board', sessionId: String(rows[0].sessionId), title: boardTitle(rows[0]) }
     }
     if (rows.length > 1) throw new RavenToolError(`"${s}" matches ${rows.length} sessions on thor: ${rows.slice(0, 6).map((r) => `${boardTitle(r)} (${r.sessionId})`).join(', ')}. Use the session id.`)
+    // a Claude outside Valkyrie by its own name (thor's registry names a window /rename gave a name), on thor or odin
+    const inPanes = new Set(panes.map((p) => p.sessionId).filter(Boolean))
+    const { thor, odin } = await outsideSessions()
+    const out = [...(thor ?? []), ...odin].filter((o) => !inPanes.has(o.sessionId) && outsideLabel(o).toLowerCase().includes(frag))
+    if (out.length === 1) return { kind: 'board', sessionId: out[0].sessionId, title: outsideLabel(out[0]) }
+    if (out.length > 1) throw new RavenToolError(`"${s}" matches ${out.length} sessions: ${out.slice(0, 6).map((o) => `${outsideLabel(o)} (${o.sessionId}, ${o.host})`).join(', ')}. Use the session id.`)
   }
   throw new RavenToolError(`no session matches "${s}". sessions lists them.`)
 }
@@ -275,7 +284,28 @@ async function doneTarget(session: string): Promise<DoneTarget> {
   throw r
 }
 
-const BOARD_ONLY = 'runs in a window on thor, not in a pane here: Raven can read it (session_read) and relay it (session_watch) but cannot type into it or stop it'
+const BOARD_ONLY = 'runs outside Valkyrie, not in a pane here: Raven types into it with session_send and session_keys, reads it with session_read and session_screen, and watches it with session_watch, but never stops it'
+
+/**
+ * The outside session behind a conversation id (outside.ts), reachable for typing: a window or an ssh login on thor,
+ * or a tmux pane on odin. Throws plain words when none runs it or its terminal refuses typing.
+ */
+async function outsideFor(sessionId: string, title: string): Promise<OutsideSession> {
+  const o = await findOutside(sessionId)
+  if (!o) throw new RavenToolError(`${title}: no live Claude runs that conversation on thor or odin now (it ended, or thor's launcher is not answering)`)
+  if (o.via === 'none') throw new RavenToolError(`${title} runs in a bare terminal on odin; Linux refuses typed input into another terminal, so Raven can only read it`)
+  return o
+}
+
+/** An outside session Raven may type into now: at Claude's prompt, nothing half-typed (readyToType's rule, from its own screen). */
+async function outsideReady(o: OutsideSession, title: string): Promise<void> {
+  const screen = await outsideIo.screen(o)
+  const v = screenVerdict(screen)
+  if (!v.promptFound) throw new RavenToolError(`${title} is not at Claude's prompt (${v.state === 'working' ? 'it is working' : 'a question, a permission prompt or a menu is open'}). Nothing was typed. session_screen shows it; session_keys answers a prompt.`)
+  if (!v.promptEmpty) throw new RavenToolError(`${title} has text typed in its prompt, so Brendon is typing there. Nothing was typed.`)
+}
+
+const KEY_WAIT_MS = 1_200
 
 /** One line for typeLine: lines joined with spaces, control characters out. */
 export function oneLine(text: string): string {
@@ -303,7 +333,7 @@ async function waitForPrompt(pane: string): Promise<'ready' | 'dead' | 'timeout'
     const state = await io.paneState(pane)
     if (state === 'dead' || state === 'gone') return 'dead'
     const screen = await io.capturePrompt(pane)
-    if (screen && paneLimitState(screen).promptFound) return 'ready'
+    if (screen && paneLimitState(plainRules(screen)).promptFound) return 'ready'
     if (io.now() >= until) return 'timeout'
     await io.sleep(1_000)
   }
@@ -314,7 +344,7 @@ async function readyToType(p: TermSession): Promise<void> {
   if (p.dead) throw new RavenToolError(`${p.label} (${p.name}) has ended; start a new one`)
   if (p.mode === 'shell') throw new RavenToolError(`${p.label} (${p.name}) is a shell, not a Claude session; Raven types only into Claude`)
   if (await io.paneInMode(p.name)) await io.leaveMode(p.name)
-  const v = paneLimitState((await io.capturePrompt(p.name)) ?? '')
+  const v = paneLimitState(plainRules((await io.capturePrompt(p.name)) ?? ''))
   if (!v.promptFound) throw new RavenToolError(`${p.label} is not at Claude's prompt: a question, a permission prompt or a menu is open. Brendon can answer it at /m/ai/term/${p.name}. Nothing was typed.`)
   if (!v.promptEmpty) throw new RavenToolError(`${p.label} has text typed in its prompt, so Brendon is typing there. Nothing was typed.`)
 }
@@ -479,7 +509,11 @@ export async function sessionsState(): Promise<{ mains: RavenMain[]; watching: R
   const live = listWatches()
   const watching = await Promise.all(live.map(async (w): Promise<RavenWatch> => {
     let state: WatchState | null
-    if (!w.pane) state = boardState(rows, w.sessionId)
+    if (!w.pane && w.host === 'odin') {
+      // a terminal on odin outside Valkyrie: not on thor's board; its registry says busy or idle (outside.ts)
+      const o = (await outsideSessions()).odin.find((x) => x.sessionId === w.sessionId)
+      state = !o ? 'closed' : o.status === 'busy' ? 'working' : 'idle'
+    } else if (!w.pane) state = boardState(rows, w.sessionId)
     else {
       const m = mainState.get(w.pane)
       const p = panes.find((x) => x.name === w.pane)
@@ -543,6 +577,68 @@ export async function sessionsSnapshot(): Promise<string> {
   return lines.join('\n')
 }
 
+// ------------------------------------------------------------ the check ----
+
+export type SessionCheck = {
+  label: string
+  sessionId: string
+  /** a pane here, a window or ssh login on thor, a terminal on odin */
+  where: string
+  host: 'thor' | 'odin'
+  /** false: its Claude is no longer running */
+  alive: boolean
+  state: ScreenState | 'ended'
+  limit?: string
+  armed?: boolean
+  background?: boolean
+  lastAnswer?: string
+  lastAnswerAt?: string
+  lastPrompt?: string
+  /** the screen's last lines when they say more than the state: a prompt open, a limit, text typed, unreadable */
+  screen?: string
+}
+type ScreenState = ReturnType<typeof screenVerdict>['state']
+
+/**
+ * Where a session stands now, for the periodic check (tend.ts): its state from its own screen, its newest answer
+ * and prompt from its transcript. session is what the session tools take. Throws when nothing matches.
+ */
+export async function sessionCheck(session: string): Promise<SessionCheck> {
+  const r = await resolve(session, await io.listPanes(), true)
+  if (r.kind === 'main') return { label: r.target.label, sessionId: '', where: 'no main terminal open', host: 'thor', alive: false, state: 'ended' }
+  let screen: string | null = null
+  let page: Awaited<ReturnType<typeof io.paneTranscript>> = null
+  let base: Omit<SessionCheck, 'state' | 'alive'>
+  let alive = true
+  if (r.kind === 'pane') {
+    const p = r.pane
+    base = { label: p.label, sessionId: p.sessionId, where: `pane ${p.name}`, host: p.host === 'odin' ? 'odin' : 'thor' }
+    alive = !p.dead
+    if (alive) screen = await io.capture(p.name)
+    page = await io.paneTranscript(p.name, '').catch(() => null)
+  } else {
+    const o = await findOutside(r.sessionId)
+    base = { label: o ? outsideLabel(o) : r.title, sessionId: r.sessionId, where: o ? viaWords(o) : 'outside Valkyrie', host: o?.host ?? 'thor' }
+    alive = Boolean(o)
+    if (o && o.via !== 'none') screen = await outsideIo.screen(o).catch(() => null)
+    page = await io.boardTranscript(r.sessionId, '', base.host).catch(() => null)
+  }
+  const entries = (page?.entries ?? []).filter(userOrClaude)
+  const answer = [...entries].reverse().find((e) => e.kind === 'assistant')
+  const prompt = [...entries].reverse().find((e) => e.kind === 'user')
+  const told = {
+    ...(answer ? { lastAnswer: clip(answer.text!.trim(), 1500), lastAnswerAt: et(answer.at) } : {}),
+    ...(prompt ? { lastPrompt: clip(prompt.text!.trim(), 300) } : {}),
+  }
+  if (!alive) return { ...base, alive, state: 'ended', ...told }
+  const v = screenVerdict(screen)
+  const show = v.state === 'asking' || v.state === 'limit' || v.state === 'typed' || v.state === 'unknown'
+  return {
+    ...base, alive, state: v.state, ...(v.limit ? { limit: v.limit } : {}), ...(v.armed ? { armed: true } : {}), ...(v.background ? { background: true } : {}),
+    ...told, ...(show && screen ? { screen: screenTail(screen, 30) } : {}),
+  }
+}
+
 // --------------------------------------------------------------- tools ----
 
 const userOrClaude = (e: TranscriptEntry) => (e.kind === 'user' || e.kind === 'assistant') && Boolean(e.text?.trim())
@@ -559,13 +655,14 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
   }))
 
   server.registerTool('sessions', {
-    description: 'Open Claude sessions: panes here (Raven can type into these) and the sessions running in windows on thor (read-only for Raven). '
-      + 'idle is how long since the pane printed anything.',
+    description: 'Every open Claude session: panes here, and the ones outside Valkyrie (windows and ssh logins on thor, terminals on odin). '
+      + 'Raven types into all of them (session_send, session_keys) except a bare terminal on odin (typeable false). idle is how long since a pane printed anything.',
     inputSchema: {},
   }, () => toolRun(async () => {
-    const [panes, board] = await Promise.all([io.listPanes(), io.boardSessions()])
+    const [panes, board, outside] = await Promise.all([io.listPanes(), io.boardSessions(), outsideSessions(true)])
     const now = io.now()
     const inPane = new Set(panes.map((p) => p.sessionId).filter(Boolean))
+    const thorOut = new Map((outside.thor ?? []).map((o) => [o.sessionId, o]))
     return {
       panes: panes.map((p) => ({
         pane: p.name, label: p.label, target: p.target, sessionId: p.sessionId || undefined, idle: ago(now - p.activityAt),
@@ -576,8 +673,13 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
         ? "thor's session list is not answering"
         : boardRunning(board).filter((r) => !inPane.has(String(r.sessionId))).map((r) => ({
           title: boardTitle(r), sessionId: r.sessionId, area: r.area, activity: r.activity, lastActivity: et(String(r.lastActivityUtc ?? '')),
-          watched: Boolean(getWatch(watchKey('', String(r.sessionId)))) || undefined, typeable: false,
+          watched: Boolean(getWatch(watchKey('', String(r.sessionId)))) || undefined,
+          typeable: thorOut.has(String(r.sessionId)), in: thorOut.has(String(r.sessionId)) ? viaWords(thorOut.get(String(r.sessionId))!) : 'unknown (thor\'s launcher did not say)',
         })),
+      odin: outside.odin.filter((o) => !inPane.has(o.sessionId)).map((o) => ({
+        title: outsideLabel(o), sessionId: o.sessionId, cwd: o.cwd, status: o.status || undefined, in: viaWords(o),
+        watched: Boolean(getWatch(watchKey('', o.sessionId))) || undefined, typeable: o.via !== 'none',
+      })),
     }
   }))
 
@@ -661,13 +763,29 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     const text = checkText(a.text)
     const launch = launchPick(a.model, a.effort)
     const r = await resolve(a.session, await io.listPanes(), true)
-    if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
     if (r.kind === 'pane') notRunning(launch, r.pane.label)
-    const paths = a.files?.length ? await attach(a.files) : []
-    const line = withFiles(text, paths)
     const watch = a.watch !== false || Boolean(a.followUp)
     // the job's name on the Watching card: Raven's label; a follow-up with none keeps the name it has
     const title = a.label ? oneLine(a.label).slice(0, 60) : undefined
+    if (r.kind === 'board') {
+      // a Claude outside Valkyrie (outside.ts): a window or an ssh login on thor, a tmux pane on odin
+      notRunning(launch, r.title)
+      const o = await outsideFor(r.sessionId, r.title)
+      await outsideReady(o, r.title)
+      const paths = a.files?.length ? await attach(a.files) : []
+      const label = outsideLabel(o)
+      if (watch) await startWatch({ pane: '', label, sessionId: o.sessionId, followUp: a.followUp, title, host: o.host })
+      noteRavenTouched(o.sessionId)
+      try {
+        await outsideIo.type(o, withFiles(text, paths))
+      } catch (e) {
+        throw new RavenToolError(`could not type into ${label} (${words(e)})`)
+      }
+      ctx.acted()
+      return { session: label, sessionId: o.sessionId, in: viaWords(o), attached: paths.length ? paths : undefined, watching: watch }
+    }
+    const paths = a.files?.length ? await attach(a.files) : []
+    const line = withFiles(text, paths)
     if (r.kind === 'main') {
       const opened = await openMain(r.target, launch)
       ctx.acted()
@@ -693,7 +811,8 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     const r = await resolve(a.session, await io.listPanes(), true)
     if (r.kind === 'main') return `${r.target.label} has no main terminal open yet.`
     const label = r.kind === 'pane' ? r.pane.label : r.title
-    const page = await (r.kind === 'pane' ? io.paneTranscript(r.pane.name, '') : io.boardTranscript(r.sessionId, '')).catch((e: Error) => {
+    const host = r.kind === 'board' ? ((await findOutside(r.sessionId).catch(() => null))?.host ?? 'thor') : 'thor'
+    const page = await (r.kind === 'pane' ? io.paneTranscript(r.pane.name, '') : io.boardTranscript(r.sessionId, '', host)).catch((e: Error) => {
       throw new RavenToolError(`${label}: the transcript could not be read (${e.message.slice(0, 200)})`)
     })
     if (!page?.sessionId) return `${label}: no transcript yet (nothing has been typed into it, or thor's file service is not answering).`
@@ -703,6 +822,76 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
       ended: r.kind === 'pane' && r.pane.dead ? true : undefined,
       entries: entries.map((e) => ({ at: et(e.at), from: e.kind === 'user' ? 'prompt' : 'claude', text: clip(e.text!.trim(), 2000) })),
     }
+  }))
+
+  server.registerTool('session_screen', {
+    description: 'What a Claude session shows on its screen now (any session: a pane, a window or ssh login on thor, a terminal on odin), the last lines, '
+      + 'and its state read from it: working, asking (a question, permission prompt or menu is open: answer with session_keys), limit (stopped on '
+      + 'a usage limit; armed means it continues by itself when the limit resets), idle (at an empty prompt), typed (text sits in its prompt).',
+    inputSchema: { session: z.string().max(120), lines: z.number().int().min(5).max(120).optional() },
+  }, (a) => toolRun(async () => {
+    const r = await resolve(a.session, await io.listPanes(), true)
+    if (r.kind === 'main') return `${r.target.label} has no main terminal open yet.`
+    let screen: string | null
+    let label: string
+    let where: string
+    if (r.kind === 'pane') {
+      screen = await io.capture(r.pane.name)
+      label = r.pane.label
+      where = `pane ${r.pane.name}`
+    } else {
+      const o = await findOutside(r.sessionId)
+      if (!o) throw new RavenToolError(`${r.title}: no live Claude runs that conversation on thor or odin now`)
+      label = outsideLabel(o)
+      where = viaWords(o)
+      if (o.via === 'none') throw new RavenToolError(`${label} runs in a bare terminal on odin; its screen cannot be read (session_read reads its transcript)`)
+      screen = await outsideIo.screen(o)
+    }
+    if (!screen) throw new RavenToolError(`${label}: its screen could not be read`)
+    const v = screenVerdict(screen)
+    return { session: label, in: where, state: v.state, limit: v.limit ?? undefined, armed: v.armed || undefined, background: v.background || undefined, screen: screenTail(screen, a.lines ?? 45) }
+  }))
+
+  server.registerTool('session_keys', {
+    description: 'Press keys in a Claude session (a pane, a window or ssh login on thor, a tmux pane on odin): to answer a question, a permission prompt '
+      + 'or a menu that blocks it ("1", "2", "y", "enter", "esc", "down,enter"), or "esc" to interrupt a turn. keys: a list, each a letter or digit, '
+      + 'or enter, esc, tab, shift+tab, space, backspace, up, down, left, right, home, end, pageup, pagedown, delete, ctrl+u. Look first (session_screen) '
+      + 'and answer the way Brendon would: allow what the job needs, never a choice that deletes his data, spends money or turns off a safety check. '
+      + 'Answers the screen afterward. Text and messages go with session_send, not here.',
+    inputSchema: { session: z.string().max(120), keys: z.array(z.string().max(12)).min(1).max(20) },
+  }, (a) => toolRun(async () => {
+    const keys = checkKeys(a.keys)
+    const r = await resolve(a.session, await io.listPanes(), true)
+    if (r.kind === 'main') return `${r.target.label} has no main terminal open yet.`
+    let after: string | null
+    let label: string
+    if (r.kind === 'pane') {
+      const p = r.pane
+      if (p.dead) throw new RavenToolError(`${p.label} (${p.name}) has ended`)
+      label = p.label
+      try {
+        await io.paneKeys(p.name, tmuxKeys(keys))
+      } catch (e) {
+        throw new RavenToolError(`could not press keys in ${label} (${words(e)})`)
+      }
+      noteRavenTouched(p.sessionId)
+      await io.sleep(KEY_WAIT_MS)
+      after = await io.capture(p.name)
+    } else {
+      const o = await outsideFor(r.sessionId, r.title)
+      label = outsideLabel(o)
+      try {
+        await outsideIo.keys(o, keys)
+      } catch (e) {
+        throw new RavenToolError(`could not press keys in ${label} (${words(e)})`)
+      }
+      noteRavenTouched(o.sessionId)
+      await io.sleep(KEY_WAIT_MS)
+      after = await outsideIo.screen(o).catch(() => null)
+    }
+    ctx.acted()
+    const v = screenVerdict(after)
+    return { session: label, pressed: keys, state: v.state, screen: after ? screenTail(after, 25) : '(could not read it afterward)' }
   }))
 
   server.registerTool('session_watch', {
@@ -729,7 +918,7 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     if (r.kind === 'main') throw new RavenToolError(`${r.target.label} has no main terminal open yet`)
     const w = r.kind === 'pane'
       ? await startWatch({ pane: r.pane.name, label: r.pane.label, sessionId: r.pane.sessionId })
-      : await startWatch({ pane: '', label: r.title, sessionId: r.sessionId })
+      : await startWatch({ pane: '', label: r.title, sessionId: r.sessionId, host: (await findOutside(r.sessionId).catch(() => null))?.host })
     ctx.acted()
     return { watching: true, session: w.label, pane: w.pane || undefined, since: et(w.since) }
   }))

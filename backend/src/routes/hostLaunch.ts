@@ -464,6 +464,21 @@ export async function stopSessionOnHost(sessionId: string, host = 'thor'): Promi
   }
 }
 
+/**
+ * Raven's hands on thor (the launcher agent's /hands/* routes, Raven-Hands.ps1): console screens and typing for
+ * Claude windows, screenshots, clicks, keys, dialog buttons. null when thor has no launcher or does not answer.
+ */
+export async function thorHands(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = 25_000): Promise<{ status: number; body: Record<string, unknown> } | null> {
+  const launcher = LAUNCHERS.thor
+  if (!launcher?.token || !/^\/[a-z/]+$/.test(path)) return null
+  try {
+    const r = await callHostLauncher(launcher, `/hands${path}`, { method, body }, timeoutMs)
+    return { status: r.status, body: (r.body && typeof r.body === 'object' ? r.body : {}) as Record<string, unknown> }
+  } catch {
+    return null
+  }
+}
+
 // One copy of thor's board rows for this whole box. Every read of thor's
 // /sessions here refreshes it: GET /session-board, which the Sessions screens
 // poll, and boardSessions (Raven's tools). boardNow answers from the copy at

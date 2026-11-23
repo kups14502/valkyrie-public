@@ -11,6 +11,7 @@ import { brendonToRaven, ensureRavenChannel, postNotice, ravenStarted, ravenStat
 import { ravenPickView, setRavenSettings } from '../lib/raven/settings.js'
 import { readClip, transcribe } from '../lib/raven/voice.js'
 import { ravenRelayTitles, ravenSessionsState } from '../lib/raven/tools/index.js'
+import { dropTend, listTends, setTend } from '../lib/raven/tools/tend.js'
 import { RAVEN_CHANNEL, type RavenNotice, type RavenNoticeClear } from '../lib/raven/types.js'
 
 // Raven's thread (lib/raven/run.ts) for the app: the one conversation in the
@@ -257,6 +258,25 @@ router.post('/raven/notify', loopbackOnly, h((req, res) => {
 // the state a live notice reported moved or is over: { source, live, now?, note?, legacy? } (lib/raven/notices.ts)
 router.post('/raven/notify/clear', loopbackOnly, h((req, res) => {
   res.json({ ok: true, changed: clearNotice((req.body ?? {}) as RavenNoticeClear) })
+}))
+
+// Sessions Raven tends (lib/raven/tools/tend.ts), set from this host: { session, on, minutes?, note? }. Raven sets its own
+// with session_tend; this is for a session on odin that starts one for Brendon without a message in his thread.
+router.post('/raven/tend', loopbackOnly, h(async (req, res) => {
+  const b = (req.body ?? {}) as { session?: unknown; on?: unknown; minutes?: unknown; note?: unknown }
+  const session = typeof b.session === 'string' ? b.session.slice(0, 120) : ''
+  if (!session) return res.status(400).json({ error: 'session is required' })
+  if (b.on === false) return res.json({ ok: true, dropped: dropTend(session) })
+  try {
+    const t = await setTend(session, { every: typeof b.minutes === 'number' ? b.minutes : undefined, note: typeof b.note === 'string' ? b.note : undefined })
+    res.json({ ok: true, tend: t })
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+}))
+
+router.get('/raven/tend', loopbackOnly, h((_req, res) => {
+  res.json({ ok: true, tends: listTends() })
 }))
 
 export default router

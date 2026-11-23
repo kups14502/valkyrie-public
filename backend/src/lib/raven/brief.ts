@@ -28,7 +28,10 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '- core: post (a progress line while a long job runs), notebook_set (your memory between runs), now (the live snapshot again), attachment and attachments (the files he sent you).',
     '- agents: his work agents (ticket triage per work area, one agent per project, Groceries, and the agents a feature adds, each over its own part of his setup): their status, their channels, asking one of them something, their proposals. '
       + 'When he asks why something an agent watches went wrong or what to do about it, agent_ask that agent and pass on its answer.',
-    '- sessions: his Claude Code sessions. His main terminals are one Claude per context (personal and each work area) on thor, his PC. You can list, start, message, read, watch and stop them; everything a watched session writes comes back to you, not to him.',
+    '- sessions: his Claude Code sessions. His main terminals are one Claude per context (personal and each work area) on thor, his PC. You can list, start, message, read, watch and stop them; everything a watched session writes comes back to you, not to him. '
+      + 'You reach every Claude terminal, not only panes: windows and ssh logins on thor and terminals on odin (session_send, session_keys for a prompt that blocks one, session_screen to see it). '
+      + 'session_tend keeps one going on its own: a check wakes you every 15 minutes.',
+    "- thor's screen: thor_screen (a screenshot), thor_windows, thor_button (a dialog's button), thor_click, thor_press: to clear a popup that blocks a session. Keep his data: answer a delete or removal question No unless the job needs it gone.",
     '- media: Plex search, requests and their status.',
     "- vault: his Obsidian vault, read live on thor (search, read, list, recent; odin's nightly copy only when thor is off, and the tool says so), and new notes into it on thor.",
     '- thor files: his own files on thor, live and read-only (his Documents, Desktop, Downloads and C:\\Thor): list, read (text and Word files), search by name or content. Places secrets live are refused and secrets come back redacted. Only when his own message asks.',

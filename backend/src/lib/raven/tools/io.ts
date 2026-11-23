@@ -1,12 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import {
-  capturePane, capturePaneUndimmed, createSession, endScroll, killSession, listSessions, paneFacts, paneInMode, typeLine, serverUp,
+  capturePane, capturePaneUndimmed, createSession, endScroll, killSession, listSessions, paneFacts, paneInMode, sendPaneKeys, typeLine, serverUp,
   type CreateOpts, type TermSession,
 } from '../../../terminal/tmux.js'
 import { pageFrom, paneTranscript, readerFor } from '../../../terminal/transcriptFeed.js'
 import type { TranscriptPage } from '../../../terminal/transcript.js'
 import { boardNow, boardSessions, launchTargets, markSessionsDone, stopSessionOnHost, uploadToThor, type LaunchTargetInfo } from '../../../routes/hostLaunch.js'
 import { getRavenFile } from '../files.js'
+import { findOutside, outsideIo } from './outside.js'
 import type { RavenFile } from '../types.js'
 
 // Everything Raven's session tools and the relay watcher touch outside this
@@ -24,14 +25,18 @@ export type RavenToolsIo = {
   /** the screen without its dim text (the empty prompt's hint), for the checks before typing */
   capturePrompt: (pane: string) => Promise<string | null>
   typeLine: (pane: string, text: string) => Promise<void>
+  /** tmux key names (Enter, Escape, Up) and single letters or digits, one at a time */
+  paneKeys: (pane: string, keys: string[]) => Promise<void>
   killPane: (pane: string) => Promise<boolean>
   paneInMode: (pane: string) => Promise<boolean>
   leaveMode: (pane: string) => Promise<void>
   paneState: (pane: string) => Promise<PaneState>
   /** the pane's transcript after a cursor ('' = the newest page); null when there is no such pane */
   paneTranscript: (pane: string, after: string) => Promise<TranscriptPage | null>
-  /** a thor session that has no pane here (a Windows Terminal window on thor), by its conversation id */
-  boardTranscript: (sessionId: string, after: string) => Promise<TranscriptPage | null>
+  /** a session that has no pane here (a window or an ssh login on thor, a terminal on odin), by its conversation id */
+  boardTranscript: (sessionId: string, after: string, host?: 'thor' | 'odin') => Promise<TranscriptPage | null>
+  /** the screen of a session that has no pane here (outside.ts); null when it cannot be read */
+  outsideScreen: (sessionId: string) => Promise<string | null>
   launchTargets: () => Promise<LaunchTargetInfo[] | null>
   boardSessions: () => Promise<BoardRow[] | null>
   /** thor's board rows as last read (never waits; null when no read in the last minute worked) */
@@ -67,16 +72,22 @@ const real: RavenToolsIo = {
   capture: capturePane,
   capturePrompt: capturePaneUndimmed,
   typeLine,
+  paneKeys: sendPaneKeys,
   killPane: killSession,
   paneInMode,
   leaveMode: endScroll,
   paneState,
   paneTranscript,
-  boardTranscript: async (sessionId, after) => {
+  boardTranscript: async (sessionId, after, host = 'thor') => {
     if (!UUID.test(sessionId)) return null
-    // thor's file service reads it by id, as it does for a pane's conversation
-    const facts = { host: 'thor' as const, mode: 'resume', sessionId, panePid: 0, dead: false }
-    return pageFrom(readerFor(`sid-${sessionId}`, facts), after, `raven-board:${sessionId}`)
+    // thor's file service reads it by id, as it does for a pane's conversation; on odin the file is read here
+    const facts = { host, mode: 'resume', sessionId, panePid: 0, dead: false }
+    return pageFrom(readerFor(`sid-${sessionId}`, facts), after, `raven-${host === 'odin' ? 'odin' : 'board'}:${sessionId}`)
+  },
+  outsideScreen: async (sessionId) => {
+    const o = await findOutside(sessionId).catch(() => null)
+    if (!o || o.via === 'none') return null
+    return outsideIo.screen(o).catch(() => null)
   },
   launchTargets: () => launchTargets('thor', 8_000),
   boardSessions: () => boardSessions(20_000),

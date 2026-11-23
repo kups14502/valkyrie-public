@@ -5,6 +5,7 @@ import type { RavenSaid } from '../types.js'
 import type { TranscriptEntry, TranscriptPage } from '../../../terminal/transcript.js'
 import { screenBusy, screenWaiting } from '../../../terminal/paneState.js'
 import { io } from './io.js'
+import { plainRules } from './outside.js'
 import { clip } from './util.js'
 
 // The watcher: everything a watched Claude session writes goes to Raven, and
@@ -80,8 +81,10 @@ type EntryKind = TranscriptEntry['kind']
 export type Watch = {
   /** the pane name, or 'sid:<conversation id>' for a thor session with no pane here */
   key: string
-  /** the tmux pane, '' for a thor session in a Windows Terminal window */
+  /** the tmux pane, '' for a session with no pane here (a window or an ssh login on thor, a terminal on odin: outside.ts) */
   pane: string
+  /** where a session with no pane runs when it is not thor: its transcript is read there */
+  host?: 'odin'
   label: string
   sessionId: string
   /** ISO */
@@ -218,8 +221,8 @@ export function getWatch(key: string): Watch | null {
   return listWatches().find((w) => w.key === key) ?? null
 }
 
-async function readPage(w: Pick<Watch, 'pane' | 'sessionId'>, cursor: string): Promise<TranscriptPage | null> {
-  return w.pane ? io.paneTranscript(w.pane, cursor) : io.boardTranscript(w.sessionId, cursor)
+async function readPage(w: Pick<Watch, 'pane' | 'sessionId' | 'host'>, cursor: string): Promise<TranscriptPage | null> {
+  return w.pane ? io.paneTranscript(w.pane, cursor) : io.boardTranscript(w.sessionId, cursor, w.host ?? 'thor')
 }
 
 /**
@@ -228,7 +231,7 @@ async function readPage(w: Pick<Watch, 'pane' | 'sessionId'>, cursor: string): P
  * before anything is typed into it, so what it said before never reaches Raven
  * and an answer that comes back within seconds still does.
  */
-export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; title?: string; job?: boolean }): Promise<Watch> {
+export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; title?: string; job?: boolean; host?: 'thor' | 'odin' }): Promise<Watch> {
   const key = watchKey(w.pane, w.sessionId)
   const nowMs = io.now()
   const now = new Date(nowMs).toISOString()
@@ -249,6 +252,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
     key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: now, lastActivityAt: now,
     cursor: '', baselined: Boolean(w.fresh), lastNewAt: nowMs, lastSeenAt: 0, pending: [], pendingSince: 0, lastKind: '', settledAt: 0,
     followUp: w.followUp ?? '', title: w.title ?? '', status: '', ...(w.job ? { job: true } : {}),
+    ...(!w.pane && w.host === 'odin' ? { host: 'odin' as const } : {}),
   }
   if (!w.fresh) {
     try {
@@ -387,7 +391,7 @@ async function promptClosed(pane: string): Promise<boolean> {
     // scrolled back (he is reading it on the phone): the screen says nothing about the prompt
     if (await io.paneInMode(pane)) return false
     const screen = await io.capturePrompt(pane)
-    return Boolean(screen?.trim()) && !paneLimitState(screen!).promptFound
+    return Boolean(screen?.trim()) && !paneLimitState(plainRules(screen!)).promptFound
   } catch {
     return false
   }
@@ -442,10 +446,11 @@ async function tickOne(w: Watch, now: number): Promise<boolean> {
   // or the transcript says the turn is still going. A step still open with nothing written can be a permission prompt
   // waiting on him: that is handed over, as asking, open or not. An open turn is checked again on every pass.
   if ((claude || w.lastKind === 'tool') && now - w.lastNewAt >= QUIET_MS && w.settledAt !== w.lastNewAt) {
-    const screen = w.pane ? await io.capture(w.pane) : null
+    // a session with no pane here: its own screen when its host lets Raven read it (outside.ts), else thor's board
+    const screen = w.pane ? await io.capture(w.pane) : await io.outsideScreen(w.sessionId).catch(() => null)
     if (screenBusy(screen)) setFlag(w, 'asking', false)
     else {
-      const asking = w.pane ? await promptClosed(w.pane) : boardAsks(w.sessionId)
+      const asking = w.pane ? await promptClosed(w.pane) : screen ? !paneLimitState(plainRules(screen)).promptFound : boardAsks(w.sessionId)
       setFlag(w, 'asking', asking)
       if (asking || !turnOpen(w, now)) {
         w.settledAt = w.lastNewAt

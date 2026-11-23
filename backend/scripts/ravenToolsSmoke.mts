@@ -168,6 +168,7 @@ const tools = await import('../src/lib/raven/tools/index.ts')
 const ioMod = await import('../src/lib/raven/tools/io.ts')
 const watch = await import('../src/lib/raven/tools/watch.ts')
 const sessionsMod = await import('../src/lib/raven/tools/sessions.ts')
+const outsideMod = await import('../src/lib/raven/tools/outside.ts')
 const autoclose = await import('../src/lib/raven/tools/autoclose.ts')
 const utilMod = await import('../src/lib/raven/tools/util.ts')
 const paneStateMod = await import('../src/terminal/paneState.ts')
@@ -341,7 +342,7 @@ ioMod.setRavenToolsIo(fakeIo)
 {
   const listed = (await (await client({ fromBrendon: true })).listTools()).tools.map((t) => t.name)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
-    'session_send', 'session_read', 'session_watch', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
+    'session_send', 'session_read', 'session_screen', 'session_keys', 'session_watch', 'session_tend', 'thor_screen', 'thor_windows', 'thor_button', 'thor_click', 'thor_press', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
     'project_get', 'tickets', 'inbox', 'calendar', 'brief', 'thread_search', 'thread_read']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
@@ -681,8 +682,51 @@ agents.syncRoster()
   screensBy.set(mainPane, [IDLE])
   r = await call('session_send', { session: mainPane, text: '!rm -rf /' })
   check('session_send: a shell-mode line is refused', r.isError && /shell command/.test(r.text) && typed.length === 2, r)
-  r = await call('session_send', { session: 'router', text: 'hello' })
-  check('session_send: a window on thor is read-only', r.isError && /cannot type/.test(r.text), r)
+  // a window on thor (outside.ts): typed through thor's console once its own screen shows an empty prompt
+  {
+    const outTyped: { sid: string; text: string }[] = []
+    const outKeys: { sid: string; keys: string[] }[] = []
+    const outScreens = new Map<string, string>([[BOARD_ID, DIALOG]])
+    const ODIN_TMUX = '22222222-3333-4444-8555-666666666666'
+    const ODIN_BARE = '66666666-7777-4888-8999-000000000000'
+    outsideMod.setOutsideIo({
+      thorSessions: async () => [{ host: 'thor', sessionId: BOARD_ID, pid: 4242, name: 'Router firmware upgrade', cwd: 'C:\\Thor', status: 'idle', via: 'console' }],
+      odinSessions: async () => [
+        { host: 'odin', sessionId: ODIN_TMUX, pid: 99, name: 'odin backup check', cwd: '/home/brendon', status: 'idle', via: 'tmux', tmux: { socket: '/tmp/tmux-1000/default', pane: '%3' } },
+        { host: 'odin', sessionId: ODIN_BARE, pid: 98, name: 'odin bare shell', cwd: '/home/brendon', status: 'idle', via: 'none' },
+      ],
+      screen: async (o) => outScreens.get(o.sessionId) ?? IDLE,
+      type: async (o, text) => { outTyped.push({ sid: o.sessionId, text }) },
+      keys: async (o, keys) => { outKeys.push({ sid: o.sessionId, keys }) },
+    })
+    r = await call('session_send', { session: 'router', text: 'hello' })
+    check('session_send: a window on thor with a prompt open is refused', r.isError && /not at Claude's prompt/.test(r.text) && !outTyped.length, r)
+    r = await call('session_screen', { session: 'router' })
+    check('session_screen: a window on thor reads asking from its screen', !r.isError && r.json?.state === 'asking' && r.json.in === 'a window on thor', r)
+    r = await call('session_keys', { session: 'router', keys: ['1'] })
+    check('session_keys: a window on thor gets the keys', !r.isError && outKeys.length === 1 && outKeys[0].sid === BOARD_ID && outKeys[0].keys.join() === '1', { r, outKeys })
+    r = await call('session_keys', { session: 'router', keys: ['rm -rf'] })
+    check('session_keys: only named keys', r.isError && /no key/.test(r.text) && outKeys.length === 1, r)
+    outScreens.set(BOARD_ID, TYPED)
+    r = await call('session_send', { session: 'router', text: 'hello' })
+    check('session_send: a window with text typed in it is left alone', r.isError && /Brendon is typing/.test(r.text) && !outTyped.length, r)
+    outScreens.set(BOARD_ID, IDLE)
+    r = await call('session_send', { session: 'router', text: 'Carry on.\nThen report.', watch: false })
+    check('session_send: a window on thor is typed into, as one line', !r.isError && outTyped.length === 1 && outTyped[0].sid === BOARD_ID && outTyped[0].text === 'Carry on. Then report.' && r.json.in === 'a window on thor', { r, outTyped })
+    r = await call('sessions')
+    check('sessions: thor windows typeable, odin terminals listed', !r.isError && r.json.thor.find((x: { sessionId: string }) => x.sessionId === BOARD_ID)?.typeable === true
+      && r.json.odin.length === 2 && r.json.odin.find((x: { sessionId: string }) => x.sessionId === ODIN_BARE)?.typeable === false, r.json)
+    r = await call('session_send', { session: 'odin backup', text: 'status?', watch: false })
+    check('session_send: a tmux pane on odin outside Valkyrie', !r.isError && outTyped.at(-1)?.sid === ODIN_TMUX && /tmux pane on odin/.test(r.json.in), { r, outTyped })
+    r = await call('session_send', { session: 'odin bare', text: 'status?', watch: false })
+    check('session_send: a bare terminal on odin is read-only', r.isError && /bare terminal/.test(r.text), r)
+    const c = await sessionsMod.sessionCheck('router')
+    check('sessionCheck: a window on thor', c.alive && c.state === 'idle' && c.where === 'a window on thor', c)
+    outsideMod.setOutsideIo(null)
+  }
+  check('plainRules: a named rule loses its name, the prompt box stays', outsideMod.screenVerdict('──────────── Crewtastrophe ─\n❯\u00a0\n──────────────────────────').state === 'idle'
+    && outsideMod.screenVerdict('────────────\n❯ hi\n────────────').state === 'typed', outsideMod.plainRules('──────────── Crewtastrophe ─\n❯\n────────'))
+  check('checkKeys: names and single keys', outsideMod.checkKeys(['Enter', 'ESC', '1', 'down']).join() === 'enter,esc,1,down' && outsideMod.tmuxKeys(['enter', 'shift+tab', 'y']).join() === 'Enter,BTab,y')
   r = await call('session_send', { session: 'nothing like it', text: 'hello' })
   check('session_send: no match', r.isError && /no session matches/.test(r.text), r)
 
@@ -944,7 +988,7 @@ agents.syncRoster()
   r = await call('main_terminals')
   check('main_terminals: closed again', r.json[0].pane === null && r.json[0].state === 'closed', r.json)
   r = await call('session_stop', { session: 'router' })
-  check('session_stop: not for windows on thor', r.isError && /cannot type into it or stop it/.test(r.text), r)
+  check('session_stop: not for windows on thor', r.isError && /never stops it/.test(r.text), r)
   for (const w of watch.listWatches()) watch.removeWatch(w.key)
 }
 

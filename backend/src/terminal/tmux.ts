@@ -704,6 +704,20 @@ export async function typeLine(name: string, text: string): Promise<void> {
   await tmux(['send-keys', '-t', name, 'Enter'], 5_000)
 }
 
+/**
+ * Keys into a pane, one at a time: tmux key names (Enter, Escape, Up, BTab, C-u) as keys, a single letter or digit
+ * as text. Raven answers a question, a permission prompt or a menu this way (lib/raven/tools/sessions.ts session_keys).
+ */
+export async function sendPaneKeys(name: string, keys: string[]): Promise<void> {
+  if (!SESSION_NAME_RE.test(name)) throw new Error('not a Valkyrie session name')
+  for (const k of keys) {
+    if (/^[A-Za-z0-9]$/.test(k)) await tmux(['send-keys', '-t', name, '-l', '--', k], 5_000)
+    else if (/^(?:[A-Z][A-Za-z]+|C-[a-z]|BTab|BSpace|DC|PPage|NPage)$/.test(k)) await tmux(['send-keys', '-t', name, k], 5_000)
+    else throw new Error(`not a key: ${k}`)
+    await new Promise((r) => setTimeout(r, 80))
+  }
+}
+
 // Everything above is for Claude's inline renderer. A session started since
 // 2026-10-12 runs fullscreen (Remote-Session.ps1 forces it): it draws on the
 // alternate screen, so tmux keeps no history of it and copy-mode would scroll

@@ -298,6 +298,7 @@ const baseKind = (k: string) => k.replace(/^retry:/, '')
 const isBrendonEvent = (e: AgentEvent) => baseKind(e.kind) === 'message' && e.payload.from === 'brendon'
 /** What a watched session wrote (lib/raven/tools/watch.ts): Brendon has not seen it, only Raven reads it. */
 const isSessionEvent = (e: AgentEvent) => baseKind(e.kind) === 'session_reply' || baseKind(e.kind) === 'session_progress'
+const isTendEvent = (e: AgentEvent) => baseKind(e.kind) === 'session_tend'
 const brendonIds = (events: AgentEvent[]) => events.filter(isBrendonEvent).map((e) => Number(e.payload.messageId)).filter((n) => Number.isFinite(n) && n > 0)
 
 const capNoteKey = 'raven:cap-note'
@@ -627,6 +628,21 @@ function sessionCopies(events: AgentEvent[]): RavenSessionCopy[] {
   return out
 }
 
+/** A periodic check of a session Raven tends (lib/raven/tools/tend.ts). */
+function renderTend(p: Record<string, unknown>, retry: string): string {
+  const who = `${str(p.label) || 'a session'} (${str(p.session)}${str(p.where) ? `, ${str(p.where)}` : ''})`
+  if (str(p.error)) return `- Your ${str(p.every)}-minute check of ${who} could not read it: ${str(p.error)}${retry}`
+  const out = [`- Your ${str(p.every)}-minute check of ${who}, at ${str(p.checkedAt)}${retry}. State: ${str(p.state)}`
+    + `${str(p.limit) ? ` (${str(p.limit)} limit${p.armed ? ', armed to continue by itself at the reset' : ''})` : ''}`
+    + `${p.background ? ', with background work still out (a shell, a monitor, an agent or a workflow)' : ''}.`]
+  if (str(p.note)) out.push(`  What Brendon wants from it: ${str(p.note)}`)
+  if (str(p.lastPrompt)) out.push(`  Last prompt typed into it: ${indented(str(p.lastPrompt))}`)
+  if (str(p.lastAnswer)) out.push(`  Its last answer (${str(p.lastAnswerAt)}): ${indented(str(p.lastAnswer))}`)
+  if (str(p.switcher)) out.push(`  Account switcher: ${str(p.switcher)}`)
+  if (str(p.screen)) out.push(`  Its screen now:\n    ${indented(str(p.screen))}`)
+  return out.join('\n')
+}
+
 function renderEvent(e: AgentEvent, cut = 0): string {
   const p = e.payload
   const kind = baseKind(e.kind)
@@ -645,6 +661,8 @@ function renderEvent(e: AgentEvent, cut = 0): string {
     case 'session_reply':
     case 'session_progress':
       return renderSession(e, cut, retry)
+    case 'session_tend':
+      return renderTend(p, retry)
     case 'message':
       return `- A message from ${str(p.from) || 'someone'}: ${str(p.text)}${retry}`
     default:
@@ -724,6 +742,17 @@ export async function ravenLiveSnapshot(): Promise<string> {
 }
 
 // What a session wrote reaches him only through Raven: the bar for telling him, and the rest is silence.
+// Brendon, 2026-11-23 (Raven thread #950): Raven keeps his long sessions going overnight, and only real news reaches him.
+const TEND_NOW = 'A check of a session you tend woke you: Brendon is asleep or away and counts on you to keep it going. Decide from its state. '
+  + 'working: nothing. asking (a question, permission or removal prompt is open): session_screen it if the lines above do not show the choice, then '
+  + 'answer with session_keys the way the job needs; never a choice that deletes his data or work, spends money, or turns off a safety check. '
+  + 'limit: if the account switcher says a continue is safe, or the limit\'s reset time has passed, session_send it "continue" (once per check); '
+  + 'otherwise nothing until the next check. idle: if its last answer leaves work it can do on its own (a plan with steps left, a queue that stopped, '
+  + '"continuing" that never came), session_send it to carry on; if it says it is done, or waits on Brendon, leave it. idle or working with no change '
+  + 'for an hour, or an action that did nothing: a popup on thor can hold it, so look (thor_windows, thor_screen) and clear it (thor_button, thor_press). '
+  + 'ended: tell him in one line. Tell Brendon only what he must know when he is back (it failed for good, it needs his decision, it ended); '
+  + 'otherwise your whole final answer is exactly (no reply).'
+
 const SESSIONS_NOW = 'He has not seen what the watched sessions wrote: only you read it, and what you say is all he gets of it. '
   + 'Read every line. Tell him only what matters, in one to four plain lines in your own words: a job finished or shipped (say the version), '
   + 'failed or blocked, needs him (a question, a permission, an approval, a device update or an app reload), something risky '
@@ -734,7 +763,8 @@ async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswe
   const system = ravenBrief({ features: features.filter((f) => f.tools).map((f) => f.id) })
   const cuts = sessionCuts(events)
   const sessions = events.some(isSessionEvent)
-  const others = events.some((e) => !isBrendonEvent(e) && !isSessionEvent(e))
+  const tends = events.some(isTendEvent)
+  const others = events.some((e) => !isBrendonEvent(e) && !isSessionEvent(e) && !isTendEvent(e))
   const prompt = [
     `Now: ${nyNowLine()}.`,
     '## What woke you',
@@ -757,6 +787,7 @@ async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswe
       : [
         'Brendon did not write this time.',
         sessions ? SESSIONS_NOW : '',
+        tends ? TEND_NOW : '',
         // an agent's post and a notice are already in the thread: repeating them is a second row and a second buzz
         others ? 'An agent\'s post or a notice that woke you is already in the thread where he reads it: never repeat it. '
           + 'Answer it only when it needs a decision or a fact from you that the post does not give him, in one or two lines.' : '',

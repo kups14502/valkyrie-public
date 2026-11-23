@@ -6,6 +6,8 @@ import { registerSessionTools, sessionsSnapshot, sessionsState, sessionTitles, t
 import { registerThorFileTools } from './thorfiles.js'
 import { registerThreadTools } from './thread.js'
 import { registerVaultTools } from './vault.js'
+import { registerTendTools, startTender, tendsSnapshot } from './tend.js'
+import { registerThorScreenTools } from './thorscreen.js'
 import { startWatcher } from './watch.js'
 import { registerWorkTools } from './work.js'
 
@@ -15,7 +17,10 @@ import { registerWorkTools } from './work.js'
 // attachments) are registered by the endpoint itself.
 //
 //   agents.ts    the work agents: status, channels, a question to one, pause, check, pending proposals
-//   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, watch, stop
+//   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, screen, keys, watch, stop
+//   outside.ts   Claude sessions with no pane here (windows and ssh logins on thor, terminals on odin): find, screen, type, keys
+//   thorscreen.ts thor's screen: screenshot, windows, a dialog's button, click, keys
+//   tend.ts      sessions Raven keeps going: a check every 15 minutes wakes it
 //   watch.ts     the relay watcher: a watched session's answers come back into the DM
 //   autoclose.ts a job Raven started that stays quiet after its answer is closed and marked done
 //   media.ts     Plex requests: search, request, live status
@@ -30,6 +35,8 @@ export type { RavenMain, RavenWatch }
 export const registerRavenTools: RavenToolGroup = (server, ctx) => {
   registerAgentTools(server, ctx)
   registerSessionTools(server, ctx)
+  registerThorScreenTools(server, ctx)
+  registerTendTools(server, ctx)
   registerMediaTools(server, ctx)
   registerVaultTools(server, ctx)
   registerThorFileTools(server, ctx)
@@ -40,12 +47,14 @@ export const registerRavenTools: RavenToolGroup = (server, ctx) => {
 /** Starts what runs beside Raven: the relay watcher, and after each of its passes the jobs' auto-close. Called once by startRaven. */
 export function startRavenTools(): void {
   startWatcher(async () => { await closeQuietJobs() })
+  startTender()
 }
 
 /** Plain lines for Raven's prompt: main terminals and watched sessions. Never throws. */
 export async function ravenSnapshot(): Promise<string> {
   try {
-    return await sessionsSnapshot()
+    const tends = tendsSnapshot()
+    return [await sessionsSnapshot(), tends].filter(Boolean).join('\n')
   } catch (e) {
     return `Sessions: could not be read (${(e as Error).message.slice(0, 160)}).`
   }
