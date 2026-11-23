@@ -16,8 +16,18 @@
 // 1.7 and 1.9 s later, in send order). Commands sent faster only queue at the
 // hub and land late with an old color. So the session sends one command per
 // HUB_GAP_MS across all its bulbs, each time to the bulb furthest from the
-// screen, built from the newest frame at that moment. A scene change reaches
-// the first bulb in about half a second and walks through the rest.
+// screen, built from the newest frame at that moment.
+//
+// Fading: the bulbs cannot fade on their own (HA reports supported_features 0
+// for all five Cync bulbs, so a transition is dropped), and the hub's pace
+// leaves each bulb one command per hub gap per bulb in the session (about 2 s
+// with all five). So the session follows
+// a smoothed copy of the screen, by elapsed time: a scene change glides over
+// about three seconds (colorTauMs, levelTauMs), and each command is the next
+// step of that glide instead of a jump to whatever the last frame showed. A
+// quick flash or a fast cut back and forth barely moves the bulbs. thor posts
+// only every 2 s while its screen holds, so the session also steps the glide
+// on its own timer until it arrives.
 
 import type { Color, LightRow, Patch, RGB } from './lights.js'
 
@@ -68,9 +78,28 @@ export const SCREEN_TUNING = {
   /** ceiling for a bulb that was off when the session started */
   offCeiling: 80,
   neutralKelvin: 4000,
+  /** the bulbs' color follows the screen's with this time constant: about 63% of a change after it, 95% after three (0 = jump) */
+  colorTauMs: 1_500,
+  /** and their brightness with this one */
+  levelTauMs: 1_200,
+  /** while the glide is still moving, the session looks again this often */
+  glideTickMs: 250,
 }
 
+/**
+ * The smoothed screen the bulbs follow. rgb is a plain linear blend of frames
+ * (each with its brightest channel at 255, like thor's), so it can sit dimmer
+ * mid-blend; shown() brings it back to full. Blending unscaled keeps the pace
+ * the same however often it steps: 100 ms frames or a 2 s heartbeat.
+ */
+type Glide = { rgb: [number, number, number]; sat: number; level: number; at: number }
+
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
+/** brightest channel to 255, the shape thor's frames and the bulbs' colors take */
+function norm(rgb: readonly number[]): [number, number, number] {
+  const top = Math.max(...rgb)
+  return (top > 1e-3 ? rgb.map((v) => (v * 255) / top) : [255, 255, 255]) as [number, number, number]
+}
 const pctOf = (b: number | null) => (b == null ? null : clamp(Math.round(b / 2.55), 1, 100))
 
 function colorOfRow(r: LightRow): Color | null {
@@ -96,7 +125,44 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
   let since = 0
   let lastFrameAt = 0
   let lastFrame: ScreenFrame | null = null
+  let glide: Glide | null = null
   let starting: Promise<void> | null = null
+
+  const ease = (dt: number, tau: number) => (tau <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dt) / tau))
+
+  /**
+   * Moves the glide toward the newest frame by the time since its last step.
+   * frame() calls it before it swaps in a new frame, so each stretch of time
+   * pulls toward the frame that was on screen during it.
+   */
+  function advance(at: number): Glide | null {
+    const f = lastFrame
+    if (!f) return glide
+    const target = norm(f.rgb)
+    if (!glide) {
+      glide = { rgb: target, sat: f.sat, level: f.level, at }
+      return glide
+    }
+    const dt = at - glide.at
+    const kc = ease(dt, t.colorTauMs)
+    const kl = ease(dt, t.levelTauMs)
+    const rgb = glide.rgb.map((v, i) => v + (target[i] - v) * kc) as [number, number, number]
+    glide = { rgb, sat: glide.sat + (f.sat - glide.sat) * kc, level: glide.level + (f.level - glide.level) * kl, at }
+    return glide
+  }
+
+  /** The glide has reached the frame closely enough that a further step would never be sent. */
+  function settled(): boolean {
+    if (!glide || !lastFrame) return true
+    const f = lastFrame
+    const target = norm(f.rgb)
+    const seen = norm(glide.rgb)
+    return Math.max(...seen.map((v, i) => Math.abs(v - target[i]))) < 2
+      && Math.abs(glide.sat - f.sat) < 0.005 && Math.abs(glide.level - f.level) < 0.005
+  }
+
+  /** What a bulb gets: the glide at full brightness (red to blue passes a dark purple otherwise), rounded. */
+  const shown = (g: Glide): ScreenFrame => ({ rgb: norm(g.rgb).map((v) => clamp(Math.round(v), 0, 255)) as RGB, sat: g.sat, level: g.level })
   const failed = new Set<string>()
 
   async function start() {
@@ -167,13 +233,22 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
       pumpTimer.unref?.()
       return
     }
+    const g = advance(at)
+    if (g) for (const m of members.values()) follow(m, shown(g))
     let best: Member | null = null
     let most = 0
     for (const m of members.values()) {
       const n = need(m, at)
       if (n > most || (n > 0 && n === most && best && m.lastAt < best.lastAt)) { best = m; most = n }
     }
-    if (!best || !best.want) return
+    if (!best || !best.want) {
+      // nothing worth a command yet, but the glide is still moving: look again shortly
+      if (!settled()) {
+        pumpTimer ??= setTimeout(() => { pumpTimer = null; pump() }, t.glideTickMs)
+        pumpTimer.unref?.()
+      }
+      return
+    }
     hubAt = at
     send(best, best.want.pct, best.want.color)
     pumpTimer ??= setTimeout(() => { pumpTimer = null; pump() }, t.hubGapMs)
@@ -188,6 +263,7 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
     const back = [...members.values()]
     members = new Map()
     lastFrame = null
+    glide = null
     log('stopped, putting the bulbs back', { why, bulbs: back.map((m) => m.id) })
     await Promise.allSettled(back.map((m) => {
       const b = m.before
@@ -205,13 +281,15 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
 
   return {
     async frame(f: ScreenFrame) {
-      lastFrameAt = now()
+      const at = now()
+      if (active) advance(at)
+      lastFrameAt = at
       lastFrame = f
       if (!active) {
+        glide = null
         starting ??= start().finally(() => { starting = null })
         await starting
       }
-      for (const m of members.values()) follow(m, f)
       pump()
     },
     stop,
@@ -227,6 +305,7 @@ export function createScreenSync(d: ScreenSyncDeps, tuning: Partial<typeof SCREE
         lastFrameAt: lastFrameAt ? new Date(lastFrameAt).toISOString() : null,
         bulbs: [...members.keys()],
         frame: lastFrame,
+        shown: glide ? shown(glide) : null,
       }
     },
     /** test hook */
