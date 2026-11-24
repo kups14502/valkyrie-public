@@ -122,7 +122,13 @@ export type RavenMain = { target: string; label: string; pane: string | null; st
  * window on thor (absent from an older API); lastAt: its last activity.
  */
 export type RavenWatch = { pane: string; label: string; sessionId: string; since: string; title?: string; status?: string; state?: 'working' | 'idle' | 'closed' | null; lastAt?: string }
-export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number }
+/**
+ * One proposal waiting on Brendon (backend routes/raven.ts waitingView): its title, the ticket number or the mail
+ * subject, when it was made, and the thread message that holds its card (null when none does).
+ */
+export type RavenWaiting = { id: number; kind: string; title: string; at: string; msgId: number | null; ticket?: string; subject?: string }
+/** waiting: the oldest 50 of `pending`, oldest first (absent from an older backend). */
+export type RavenAgent = { id: string; name: string; area: string; status: string; pending: number; waiting?: RavenWaiting[] }
 /** A feed's newest line (a cleared one is left out by the API): its source key, name, the line, when, and the message. */
 export type RavenFeed = { from: string; label: string; text: string; at: string; id: number }
 

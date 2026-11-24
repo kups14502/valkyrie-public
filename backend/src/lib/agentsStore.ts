@@ -690,6 +690,24 @@ export function moveProposal(id: number, from: ProposalStatus[], to: ProposalSta
   return getProposal(id)
 }
 
+/**
+ * Where each proposal's card is in a channel: the message that carries it, as its own proposal or folded into an
+ * agent's relay (meta.relay.proposalIds). The oldest such message wins; a proposal with none is left out.
+ */
+export function proposalCards(channelId: string, ids: number[]): Map<number, number> {
+  const out = new Map<number, number>()
+  if (!ids.length) return out
+  const marks = ids.map(() => '?').join(',')
+  const own = db.prepare(`SELECT id, proposalId AS pid FROM messages WHERE channelId = ? AND proposalId IN (${marks})`)
+    .all(channelId, ...ids) as { id: number; pid: number }[]
+  const folded = db.prepare(`SELECT m.id AS id, CAST(j.value AS INTEGER) AS pid FROM messages m,
+      json_each(CASE WHEN json_valid(m.meta) THEN m.meta ELSE '{}' END, '$.relay.proposalIds') j
+    WHERE m.channelId = ? AND instr(m.meta, 'proposalIds') > 0 AND CAST(j.value AS INTEGER) IN (${marks})`)
+    .all(channelId, ...ids) as { id: number; pid: number }[]
+  for (const r of [...own, ...folded].sort((a, b) => a.id - b.id)) if (!out.has(r.pid)) out.set(r.pid, r.id)
+  return out
+}
+
 export function pendingProposals(agentId?: string): Proposal[] {
   const rows = agentId
     ? db.prepare("SELECT * FROM proposals WHERE status = 'pending' AND agentId = ? ORDER BY id").all(agentId)

@@ -476,3 +476,54 @@ html[data-motion='reduced'] .rv-dot { animation: none; }
 .rv-confirm-acts .vl-btn-line { min-height: 30px; font-size: 12px; border-color: var(--hot); color: var(--hot); }
 .rv-confirm-acts .vl-link { font-size: 12px; }
 @media (pointer: coarse) { .rv-h-act::after, .rv-crow-act::after { inset: -14px -6px; } }
+
+/* ---------- an agent's waiting list: its count is a button, the list drops under the row (Messages.tsx WaitingList) ---------- */
+.rv-crow { position: relative; }
+/* the card a row goes to: its head clear of the list's top edge */
+.rv-prop { scroll-margin: 12px 0; }
+/* the rows are positioned (the list anchors to one): the hit areas stay over the next row's box */
+.rv-crow-act { z-index: 1; }
+.rv-n-btn { position: relative; z-index: 1; cursor: pointer; transition: transform .12s var(--ease), box-shadow .15s; }
+.rv-n-btn::after { content: ''; position: absolute; inset: -10px -4px; }
+.rv-n-btn[aria-expanded='true'] { box-shadow: 0 0 0 2px #000, 0 0 0 3px var(--fg); }
+.rv-n-btn[data-pressed] { transform: scale(.92); }
+@media (hover: hover) and (pointer: fine) { .rv-n-btn:hover { box-shadow: var(--glow); } }
+@media (pointer: coarse) { .rv-n-btn::after { inset: -12px -4px; } }
+/* the outer box: placed under the row, its empty bottom padding the room left below the panel (presses go through it) */
+.rv-wait {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 2px);
+  left: -4px;
+  right: 0;
+  padding-bottom: 12px;
+  pointer-events: none;
+}
+.rv-wait-panel {
+  pointer-events: auto;
+  max-height: min(60vh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 60%), #000;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .9), var(--glow);
+  scrollbar-width: thin;
+  /* a fade, no slide: a moving panel changes the scroll range the drawer measures as it opens */
+  animation: vl-fade .12s linear both;
+}
+.rv-wait-head { padding: 2px 12px 6px; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+.rv-wait ul { margin: 0; padding: 0; list-style: none; }
+.rv-wait li + li { border-top: 1px solid var(--line); }
+.rv-wait-row { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-height: 44px; padding: 7px 12px; text-align: left; }
+.rv-wait-row[data-pressed] { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.rv-wait-row:focus-visible { outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) { .rv-wait-row:not(:disabled):hover { background: color-mix(in srgb, var(--fg) 7%, transparent); } }
+.rv-wait-title { font-size: 12.5px; line-height: 17px; color: var(--text); overflow-wrap: anywhere; }
+.rv-wait-meta { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 11px; line-height: 15px; color: var(--dim); }
+.rv-wait-what { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.rv-wait-at { flex: none; }
+.rv-wait-more { padding: 6px 12px 2px; font-size: 11px; color: var(--dim); }
+html[data-motion='reduced'] .rv-wait-panel { animation: none; }
+@media (prefers-reduced-motion: reduce) { .rv-wait-panel { animation: none; } }

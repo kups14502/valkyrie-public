@@ -917,6 +917,12 @@ check('proposal tool ran', rj('results-east-triage.json')?.[0] && !rj('results-e
 const card = rv.messages.find((m: any) => m.proposal?.kind === 'ticket_note')
 check('proposal mirrored with its card in GET /raven', card && card.author === 'east-triage' && card.proposal.status === 'pending' && card.meta.relay?.label === 'East Triage', card)
 check('state counts the pending proposal', rv.agents.find((a: any) => a.id === 'east-triage')?.pending === 1, rv.agents)
+{
+  const w = rv.agents.find((a: any) => a.id === 'east-triage')?.waiting
+  check('state lists the waiting proposal with its card', Array.isArray(w) && w.length === 1 && w[0].id === card.proposal.id && w[0].msgId === card.id
+    && w[0].kind === 'ticket_note' && w[0].ticket === 'T20261119.0001' && w[0].title === card.proposal.title && Number.isFinite(Date.parse(w[0].at)) && !('subject' in w[0]), w)
+  check('an agent with nothing waiting lists nothing', rv.agents.filter((a: any) => a.pending === 0).every((a: any) => Array.isArray(a.waiting) && a.waiting.length === 0), rv.agents)
+}
 await j('POST', `/msg/proposals/${card.proposal.id}/decline`, { reason: '' })
 ;[, rv] = await j('GET', '/raven')
 check('the card follows the decision', rv.messages.find((m: any) => m.proposal?.id === card.proposal.id)?.proposal.status === 'declined', rv.messages.find((m: any) => m.proposal?.id === card.proposal.id))
@@ -925,6 +931,21 @@ check('the card follows the decision', rv.messages.find((m: any) => m.proposal?.
 {
   const ch = card.proposal ? store.getProposal(card.proposal.id)!.channelId : 'east'
   const made = [1, 2, 3, 4].map((i) => store.addProposal({ agentId: 'east-triage', channelId: ch, kind: 'ticket_note', title: `Bulk ${i}`, payload: { ticketId: 900 + i, title: `n${i}`, text: 'x' } }))
+  // the list under the count: a card of its own, one folded into that relay, a mail's subject, none in the thread
+  const relay = store.addMessage({ channelId: 'raven', author: 'east-triage', text: 'Two notes', proposalId: made[0].id,
+    meta: { relay: { kind: 'agent', from: 'east-triage', label: 'East Triage', proposalIds: [made[1].id] } } })
+  store.addMessage({ channelId: 'raven', author: 'east-triage', text: 'Again', proposalId: made[0].id, meta: { relay: { kind: 'agent', from: 'east-triage', label: 'East Triage' } } })
+  const mailP = store.addProposal({ agentId: 'east-triage', channelId: ch, kind: 'mail_reply', title: 'Reply to Pat: Printer', payload: { subject: 'Printer offline', body: 'x' } })
+  {
+    const [, sv] = await j('GET', '/raven')
+    const w: any[] = sv.agents.find((a: any) => a.id === 'east-triage')?.waiting ?? []
+    const at = (id: number) => w.find((x) => x.id === id)
+    check('waiting: oldest first, every one listed', JSON.stringify(w.map((x) => x.id)) === JSON.stringify([...made.map((p) => p.id), mailP.id]), w)
+    check('waiting: a card of its own and a folded one both point at the relay (the oldest message wins)', at(made[0].id)?.msgId === relay.id && at(made[1].id)?.msgId === relay.id, w.slice(0, 2))
+    check('waiting: a proposal with no card in the thread has msgId null', at(made[2].id)?.msgId === null, at(made[2].id))
+    check('waiting: a mail names its subject and no ticket', at(mailP.id)?.subject === 'Printer offline' && !('ticket' in at(mailP.id)), at(mailP.id))
+  }
+  store.moveProposal(mailP.id, ['pending'], 'declined')
   const eventsBefore = store.openEvents('east-triage').length
   const runsBefore = store.listRuns('east-triage', 50).length
   let [dst, dr] = await j('POST', '/msg/proposals/decline-all', { agentId: 'east-triage' })

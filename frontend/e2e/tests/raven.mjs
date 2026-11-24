@@ -37,6 +37,8 @@
 //              and on the Raven tab, his own lines never counted, read on reaching the bottom with the tab in
 //              front (not while on another tab), no New line for a line read as it arrives, another device's
 //              read clearing it here (phone, desktop)
+//   waiting-list  an agent's waiting count opens the proposals waiting on him (title, ticket or mail subject, ET time);
+//              Escape, a tap outside or the count close it; a row brings its card into view, lit (phone, ipad, desktop)
 //   down       /api/raven not answering: one plain line, no crash
 
 import { sleep } from '../lib/cdp.mjs'
@@ -155,10 +157,18 @@ export function ravenBackend(page, { filler = 0, replyMs = 400, down = false, un
   }
   const bump = () => { st.seq++ }
   const unreadNow = () => (st.lastRead === undefined ? st.unread : st.messages.filter((m) => m.id > st.lastRead && m.author !== 'brendon').length)
+  // an agent's waiting list (backend routes/raven.ts waitingView): its pending cards in the thread, oldest first
+  const waitingOf = (id) => st.messages.flatMap((m) => (m.author === id || m.meta.relay?.from === id
+    ? (m.proposals ?? (m.proposal ? [m.proposal] : [])).filter((p) => p.status === 'pending').map((p) => ({
+      id: p.id, kind: p.kind, title: p.title, at: m.createdAt, msgId: m.id,
+      ...(/^ticket_/.test(p.kind) ? { ticket: p.payload?.number ?? /T\d{8}\.\d{4}/.exec(p.title)?.[0] } : {}),
+      ...(/^mail_/.test(p.kind) ? { subject: p.payload?.subject ?? '(no subject)' } : {}),
+    }))
+    : []))
   const body = () => ({
     seq: st.seq, status: st.status, statusNote: st.statusNote, tier: st.tier, model: st.model, effort: st.effort, unread: unreadNow(),
     ...(st.lastRead === undefined ? {} : { lastRead: st.lastRead }),
-    mains: st.mains, watching: st.watching, agents: st.agents, paused: st.paused, messages: st.messages.slice(-60),
+    mains: st.mains, watching: st.watching, agents: st.agents.map((a) => ({ ...a, waiting: a.waiting ?? waitingOf(a.id) })), paused: st.paused, messages: st.messages.slice(-60),
     settings: st.settings, models: st.models,
     // each feed's newest line, a cleared one left out (backend lib/raven/notices.ts); unset = an older backend
     ...(st.feeds ? { feeds: st.feeds } : {}),
@@ -482,7 +492,7 @@ export function ravenTests() {
         t.check(wc && wc.radius >= 12 && wc.fill && wc.inside, `the Watching card is not a rounded, filled card: ${JSON.stringify(wc)}`)
         t.check(conn.triage === '2', `the triage agent's pending count reads ${conn.triage}`)
         const tb = conn.triageBadge
-        t.check(tb?.title === '2 proposals waiting' && tb.label === '2 proposals waiting' && tb.px >= 12 && tb.h >= 18 && tb.shadow === 'none',
+        t.check(tb?.title === '2 proposals waiting: see them' && tb.label === '2 proposals waiting: see them' && tb.px >= 12 && tb.h >= 18 && tb.shadow === 'none',
           `the pending badge is not a large, crisp, labeled pill: ${JSON.stringify(tb)}`)
         t.check(/Sync stalled/.test(conn.feed ?? ''), `the feed line reads ${conn.feed}`)
         await fits(t, page, `${ROUTE} @${device}`)
@@ -1700,6 +1710,139 @@ export function ravenTests() {
         const cards = await page.eval(() => [...document.querySelectorAll('.rv-prop')].map((p) => p.dataset.status))
         t.check(cards.length === 2 && cards.every((s) => s === 'declined'), `the cards read ${JSON.stringify(cards)}`)
         await fits(t, page, `${ROUTE} decline all @${device}`)
+      },
+    })
+  }
+
+  // An agent's waiting list: its count is a button that opens the proposals waiting on him under its row (title, ticket
+  // number or mail subject, when, in ET); Escape, a tap outside and the count again close it, the drawer staying open; a
+  // row goes to that card in the thread (the drawer closing), one older than the loaded page too; Decline all stays
+  for (const device of ['phone', 'ipad', 'desktop']) {
+    tests.push({
+      name: `raven:waiting-list:${device}`,
+      group: 'raven',
+      device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page()
+        const st = ravenBackend(page, { filler: 80 })
+        // a third waiting proposal on a line older than the first page (the newest 60): its row loads back to it
+        Object.assign(st.messages.find((m) => m.id === 5), {
+          author: 'triage', text: 'Proposed closing the old ticket.', meta: { relay: { kind: 'agent', from: 'triage', label: 'Triage agent' } },
+          proposal: { id: 30, kind: 'ticket_update', title: 'T20261101.0007: status Complete', status: 'pending', result: null, decidedAt: null, payload: { number: 'T20261101.0007', changes: ['Status: Complete'] } },
+        })
+        st.agents = st.agents.map((a) => (a.id === 'triage' ? { ...a, pending: 3 } : a))
+        await page.goto(ROUTE)
+        await threadUp(page)
+        const touch = device !== 'desktop'
+        // Connected: the column on a wide screen, else the drawer (opened when it is closed)
+        const drawer = async () => {
+          if (await page.eval(() => !!document.querySelector('.rv-side'))) return false
+          if (!(await page.eval(() => !!document.querySelector('.rv-drawer')))) await page.tap({ sel: '.rv-panel-btn' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.rv-drawer .rv-crow'), 'the top-right button did not open the drawer')
+          return true
+        }
+        const narrow = await drawer()
+        t.check(narrow === (device !== 'desktop'), `Connected is ${narrow ? 'a drawer' : 'a column'} on ${device}`)
+        const COUNT = '.rv-conn .rv-n-btn'
+        await until(page, (sel) => !!document.querySelector(sel), 'the waiting count is not a button', [COUNT])
+        const btn = await page.eval((sel) => {
+          const b = document.querySelector(sel)
+          const r = b.getBoundingClientRect()
+          const cx = r.left + r.width / 2
+          const hit = (y) => document.elementFromPoint(cx, y)?.closest('.rv-n-btn') === b
+          return {
+            tag: b.tagName, text: b.textContent, popup: b.getAttribute('aria-haspopup'), expanded: b.getAttribute('aria-expanded'),
+            row: b.closest('.rv-crow')?.querySelector('.rv-crow-name')?.textContent, h: r.height, hitUp: hit(r.top - 10), hitDown: hit(r.bottom + 10),
+          }
+        }, COUNT)
+        t.check(btn.tag === 'BUTTON' && btn.text === '3' && btn.popup === 'dialog' && btn.expanded === 'false' && btn.row === 'Triage agent', `the count reads ${JSON.stringify(btn)}`)
+        if (touch) t.check(btn.hitUp && btn.hitDown, `the count's tap target is not 44 px tall: ${JSON.stringify(btn)}`)
+
+        // open: three rows, oldest first, each its title, its ticket or mail subject and when (ET)
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => document.querySelectorAll('.rv-conn .rv-wait .rv-wait-row').length === 3, 'the count did not open a list of the 3 waiting proposals')
+        await sleep(300)
+        const list = await page.eval(() => {
+          const w = document.querySelector('.rv-conn .rv-wait')
+          const r = w.querySelector('.rv-wait-panel').getBoundingClientRect()
+          const box = w.closest('.rv-conn').getBoundingClientRect()
+          return {
+            head: w.querySelector('.rv-wait-head')?.textContent,
+            label: w.getAttribute('aria-label'),
+            expanded: document.querySelector('.rv-conn .rv-n-btn')?.getAttribute('aria-expanded'),
+            rows: [...w.querySelectorAll('.rv-wait-row')].map((b) => ({
+              title: b.querySelector('.rv-wait-title')?.textContent, what: b.querySelector('.rv-wait-what')?.textContent ?? null,
+              at: b.querySelector('.rv-wait-at')?.textContent, h: Math.round(b.getBoundingClientRect().height), off: b.disabled,
+            })),
+            box: { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), boxTop: Math.round(box.top), boxBottom: Math.round(box.bottom), W: document.documentElement.clientWidth },
+          }
+        })
+        t.check(list.head === '3 proposals waiting on you' && list.label === 'Waiting on you from Triage agent' && list.expanded === 'true', `the list reads ${JSON.stringify({ head: list.head, label: list.label, expanded: list.expanded })}`)
+        const want = [['T20261101.0007: status Complete', 'T20261101.0007'], ['Reply to Pat Example', 'Mail: Printer offline'], ['Note on T20261119.0002', 'T20261119.0002']]
+        t.check(want.every(([title, what], i) => list.rows[i]?.title === title && list.rows[i]?.what === what && !list.rows[i]?.off), `the rows read ${JSON.stringify(list.rows)}`)
+        const AT = /^(Today|Yesterday|[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}) \d{1,2}:\d{2} [AP]M ET$/
+        t.check(list.rows.every((r) => AT.test(r.at ?? '')) && /^[A-Z][a-z]{2}, /.test(list.rows[0]?.at ?? '') && /^Today /.test(list.rows[2]?.at ?? ''),
+          `the rows' times are not day and ET time: ${JSON.stringify(list.rows.map((r) => r.at))}`)
+        if (touch) t.check(list.rows.every((r) => r.h >= 44), `a row is under 44 px tall: ${JSON.stringify(list.rows.map((r) => r.h))}`)
+        const b = list.box
+        t.check(b.left >= 0 && b.right <= b.W + 0.5 && b.top >= b.boxTop - 1 && b.bottom <= b.boxBottom + 1, `the list is not whole on screen inside Connected: ${JSON.stringify(b)}`)
+        await fits(t, page, `${ROUTE} waiting list @${device}`)
+        await t.shot(page, 'list')
+
+        // Escape closes it; the drawer stays
+        await page.key('Escape')
+        await until(page, () => !document.querySelector('.rv-wait'), 'Escape did not close the list')
+        t.check(await page.eval((n) => !n || !!document.querySelector('.rv-drawer'), narrow), 'Escape on the list closed the drawer too')
+        // a tap outside it closes it; the drawer stays
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.rv-wait'), 'the count did not open the list again')
+        await page.tap({ sel: '.rv-conn .rv-group h3' }, { wait: 40_000 })
+        await until(page, () => !document.querySelector('.rv-wait'), 'a tap outside the list did not close it')
+        t.check(await page.eval((n) => !n || !!document.querySelector('.rv-drawer'), narrow), 'a tap outside the list closed the drawer too')
+        // the count again closes it
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => !!document.querySelector('.rv-wait'), 'the count did not open the list a third time')
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => !document.querySelector('.rv-wait'), 'the count did not close its own list')
+        t.check(st.decisions.length === 0 && st.declineAlls.length === 0, `opening the list decided something: ${JSON.stringify([st.decisions, st.declineAlls])}`)
+        t.check(await page.eval(() => !!document.querySelector('.rv-conn .rv-crow-act')), 'Decline all is gone from the row')
+
+        // a row goes to its card: lit, its head in the thread's view, the address clean again; the drawer closes
+        await page.eval(() => {
+          window.__lit = []
+          new MutationObserver((ms) => {
+            for (const m of ms) if (m.target.hasAttribute('data-flash')) window.__lit.push(m.target.dataset.pid ?? `m${m.target.dataset.mid}`)
+          }).observe(document.querySelector('.rv-msgs'), { subtree: true, attributes: true, attributeFilter: ['data-flash'] })
+        })
+        const shown = (pid) => {
+          const el = document.querySelector(`.rv-msgs .rv-prop[data-pid="${pid}"]`)
+          const l = document.querySelector('.rv-msgs')
+          if (!el || !l) return false
+          const r = el.getBoundingClientRect()
+          const v = l.getBoundingClientRect()
+          return r.top >= v.top - 1 && r.top < v.bottom - 30 && (window.__lit ?? []).includes(String(pid)) && !/[?&](msg|prop)=/.test(location.search)
+        }
+        // scrolled up first (short of the top, which would read the older page), so the mail card near the end is off screen
+        await page.eval(() => { document.querySelector('.rv-msgs').scrollTop = 400 })
+        await sleep(400)
+        await drawer()
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => document.querySelectorAll('.rv-wait .rv-wait-row').length === 3, 'the list did not open for the mail row')
+        await page.tap({ sel: '.rv-wait .rv-wait-row', text: 'Reply to Pat Example' }, { wait: 40_000 })
+        await until(page, shown, 'the mail row did not bring its card into view, lit', [7])
+        t.check(await page.eval(() => !document.querySelector('.rv-wait') && !document.querySelector('.rv-drawer')), 'the list or the drawer is still open after the row')
+        // the oldest, on a line not loaded yet
+        t.check(await page.eval(() => !document.querySelector('[data-mid="5"]')), 'the old line was loaded before its row was pressed')
+        const gets = st.olderGets.length
+        await drawer()
+        await page.tap({ sel: COUNT }, { wait: 40_000 })
+        await until(page, () => document.querySelectorAll('.rv-wait .rv-wait-row').length === 3, 'the list did not open for the old row')
+        await page.tap({ sel: '.rv-wait .rv-wait-row', text: 'T20261101.0007: status Complete' }, { wait: 40_000 })
+        await until(page, shown, 'the old row did not load back to its card and bring it into view, lit', [30])
+        t.check(st.olderGets.length > gets, 'the old row read no older page')
+        await fits(t, page, `${ROUTE} waiting list reached @${device}`)
+        await t.shot(page, 'reached')
       },
     })
   }

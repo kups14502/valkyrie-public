@@ -74,6 +74,8 @@
 
 /* a Raven line reached by a link (?msg=) */
 .rv-item[data-flash] > .rv-msg { animation: vk-flash 2.2s ease-out both; }
+/* a proposal's card reached from an agent's waiting list (?msg=&prop=) */
+.rv-prop[data-flash] { animation: vk-flash 2.2s ease-out both; }
 @keyframes vk-flash {
   0%, 30% { background: color-mix(in srgb, var(--fg) 14%, transparent); box-shadow: -10px 0 0 color-mix(in srgb, var(--fg) 14%, transparent), 10px 0 0 color-mix(in srgb, var(--fg) 14%, transparent); }
   100% { background: transparent; box-shadow: none; }

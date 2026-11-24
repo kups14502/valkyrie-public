@@ -2,7 +2,8 @@ import path from 'node:path'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { isLoopbackReq, requireStrongAuth, viaCloudflare } from '../middleware/auth.js'
 import {
-  AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalsFor, searchMessages, unreadCounts, type Message,
+  AgentError, currentSeq, lastReadId, listAgents, listMessages, markChannelRead, pendingProposals, proposalCards, proposalsFor, searchMessages, unreadCounts,
+  type Message, type Proposal,
 } from '../lib/agentsStore.js'
 import { hiddenAreas, isPaused } from '../lib/agents.js'
 import { proposalView } from '../lib/mailDraft.js'
@@ -84,6 +85,22 @@ function messagesView(msgs: Message[]): RavenMsgView[] {
   })
 }
 
+/** The most waiting proposals listed per agent; the count stays whole. */
+const WAITING_MAX = 50
+const TICKET_KINDS = new Set(['ticket_note', 'ticket_update', 'ticket_time', 'ticket_complete'])
+
+/**
+ * One proposal waiting on Brendon, as the list under an agent's count shows it: its title, the ticket number or the
+ * mail subject, when it was made, and the thread message that holds its card (msgId; null when none does).
+ */
+function waitingView(p: Proposal, cards: Map<number, number>) {
+  const pl = p.payload
+  const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : undefined)
+  const ticket = TICKET_KINDS.has(p.kind) ? s(pl.number) : undefined
+  const subject = p.kind === 'mail_reply' || p.kind === 'mail_new' ? s(pl.subject) ?? '(no subject)' : undefined
+  return { id: p.id, kind: p.kind, title: p.title, at: p.createdAt, msgId: cards.get(p.id) ?? null, ...(ticket ? { ticket } : {}), ...(subject ? { subject } : {}) }
+}
+
 async function stateView(req: Request) {
   // first, so a change made while this answer is put together still refetches
   const seq = currentSeq()
@@ -91,6 +108,7 @@ async function stateView(req: Request) {
   const on = ravenStarted()
   const sessions = await withTimeout(ravenSessionsState(), 4_000, { mains: [], watching: [] })
   const pending = pendingProposals()
+  const cards = proposalCards(RAVEN_CHANNEL, pending.map((p) => p.id))
   const hidden = viaCloudflare(req) ? hiddenAreas() : new Set<string>()
   return {
     seq,
@@ -102,8 +120,10 @@ async function stateView(req: Request) {
     lastRead: lastReadId(RAVEN_CHANNEL),
     mains: sessions.mains,
     watching: sessions.watching,
-    agents: listAgents().filter((a) => a.enabled && !hidden.has(a.area))
-      .map((a) => ({ id: a.id, name: a.name, area: a.area, status: a.status, pending: pending.filter((p) => p.agentId === a.id).length })),
+    agents: listAgents().filter((a) => a.enabled && !hidden.has(a.area)).map((a) => {
+      const mine = pending.filter((p) => p.agentId === a.id)
+      return { id: a.id, name: a.name, area: a.area, status: a.status, pending: mine.length, waiting: mine.slice(0, WAITING_MAX).map((p) => waitingView(p, cards)) }
+    }),
     paused: isPaused(),
     // each feed's newest line (lib/raven/notices.ts), a cleared one left out
     feeds: ravenFeeds(),

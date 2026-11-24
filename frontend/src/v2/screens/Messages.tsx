@@ -16,7 +16,7 @@ import { isTauri } from '../../lib/auth'
 import { TERM_NAME_RE, v2TermPath } from '../../lib/term'
 import {
   RAVEN_OLDER, approveProposal, declineAllProposals, declineProposal, etTime, fetchRavenOlder, markRavenRead, ravenBusy, ravenStatusText, replyMetaLine,
-  replyMetaTitle, searchRaven, sendRaven, stopRaven, type MailDraft, type Proposal, type RavenFeed, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
+  replyMetaTitle, searchRaven, sendRaven, stopRaven, type MailDraft, type Proposal, type RavenAgent, type RavenFeed, type RavenMsg, type RavenPage, type RavenSessionCopy, type Ref,
 } from '../../lib/ravenApi'
 import './messages.css'
 
@@ -397,8 +397,10 @@ export default function Messages({ active }: ScreenProps) {
     lineEl: (id) => listRef.current?.querySelector(`[data-mid="${id}"]`) ?? null,
   }, active)
 
-  // ?msg=<id>: load to that line, bring it to the middle and light it a moment
+  // ?msg=<id>: load to that line, bring it to the middle and light it a moment. &prop=<id> (a row of an agent's
+  // waiting list): that proposal's card in the line instead, its head in view when it is taller than the screen
   const msgParam = Number(params.get('msg')) || 0
+  const propParam = Number(params.get('prop')) || 0
   const hasPage = !!page
   useEffect(() => {
     if (!active || !hasPage || !msgParam) return
@@ -409,9 +411,12 @@ export default function Messages({ active }: ScreenProps) {
         const row = listRef.current?.querySelector<HTMLElement>(`[data-mid="${msgParam}"]`)
         if (row) {
           stick.current = false
-          row.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior })
-          row.dataset.flash = ''
-          window.setTimeout(() => { delete row.dataset.flash }, 2400)
+          const card = propParam ? row.querySelector<HTMLElement>(`.rv-prop[data-pid="${propParam}"]`) : null
+          const el = card ?? row
+          const tall = el.getBoundingClientRect().height > (listRef.current?.clientHeight ?? 0) * 0.8
+          el.scrollIntoView({ block: tall ? 'start' : 'center', behavior: 'instant' as ScrollBehavior })
+          el.dataset.flash = ''
+          window.setTimeout(() => { delete el.dataset.flash }, 2400)
           break
         }
         await new Promise((r) => requestAnimationFrame(r))
@@ -420,11 +425,22 @@ export default function Messages({ active }: ScreenProps) {
       setParams((cur) => {
         const p = new URLSearchParams(cur)
         p.delete('msg')
+        p.delete('prop')
         return p
       }, { replace: true })
     })()
     return () => { gone = true }
-  }, [active, hasPage, msgParam, loadTo, setParams])
+  }, [active, hasPage, msgParam, propParam, loadTo, setParams])
+  // a row of an agent's waiting list: the drawer closes and the thread goes to that proposal's card
+  const reach = useCallback((msg: number, prop: number) => {
+    setShowConn(false)
+    setParams((cur) => {
+      const p = new URLSearchParams(cur)
+      p.set('msg', String(msg))
+      p.set('prop', String(prop))
+      return p
+    }, { replace: true })
+  }, [setParams])
 
   // a Raven line's Quote: its words in the box, his caret under them
   const quote = useCallback((text: string) => {
@@ -521,7 +537,7 @@ export default function Messages({ active }: ScreenProps) {
 
   const status = page ? ravenStatusText(page) : ''
   const failed = q.isError && !page
-  const connected = page ? <Connected page={page} messages={messages} onOpen={(to) => { setShowConn(false); navigate(to) }} /> : null
+  const connected = page ? <Connected page={page} messages={messages} onOpen={(to) => { setShowConn(false); navigate(to) }} onReach={reach} /> : null
   const glance = page ? glanceOf(page) : { working: 0, waiting: 0 }
   const connOpen = wide ? side : drawer
   const connLabel = `Working, watching and agents${glance.working ? `, ${glance.working} working` : ''}${glance.waiting ? `, ${plural(glance.waiting, 'proposal')} waiting` : ''}`
@@ -899,7 +915,7 @@ function ProposalCard({ p }: { p: Proposal }) {
   const ccLine = draft ? [...draft.cc, ...(draft.ccNote ? [draft.ccNote] : [])].join(', ') : ''
 
   return (
-    <div className="rv-prop" data-status={p.status}>
+    <div className="rv-prop" data-status={p.status} data-pid={p.id}>
       <div className="rv-prop-head">
         <b>{p.title}</b>
         <span className="rv-prop-state">{
@@ -995,6 +1011,86 @@ function DeclineAll({ agentId, count, who, onDone }: { agentId?: string; count: 
   )
 }
 
+/** When a waiting proposal was made, New York time: "Today 3:04 PM ET", "Tue, Nov 17 3:04 PM ET". */
+const madeAt = (at: string, now: number) => `${dayLabel(Date.parse(at), now)} ${etTime(at)}`
+
+/**
+ * What an agent has waiting on him, under its row: a tap on the count opens it. Each row: the proposal's title, the
+ * ticket number or the mail's subject, when it was made; a press goes to its card in the thread, where he decides.
+ * Escape, a press outside it or the count again closes it.
+ */
+function WaitingList({ agent, now, anchor, onClose, onReach }: {
+  agent: RavenAgent; now: number; anchor: RefObject<HTMLButtonElement | null>; onClose: () => void; onReach: (msg: number, prop: number) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const list = agent.waiting ?? []
+  const more = agent.pending - list.length
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      // first, so the drawer under it stays open
+      e.preventDefault()
+      const inside = !!ref.current?.contains(document.activeElement)
+      onClose()
+      if (inside) anchor.current?.focus({ preventScroll: true })
+    }
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      if (!t || ref.current?.contains(t) || anchor.current?.contains(t) || t.closest?.('.vk-menu, .vl-toasts')) return
+      onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    document.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('pointerdown', onDown, true)
+    }
+  }, [onClose, anchor])
+  // all of it in view: the column or the drawer scrolls (never the page). The outer box's empty bottom padding is
+  // the room left under the panel: the scroll range ends there, so the panel never meets the drawer's edge.
+  useLayoutEffect(() => {
+    const el = ref.current
+    const box = el?.closest('.rv-conn')
+    if (!el || !box) return
+    const r = el.getBoundingClientRect()
+    const b = box.getBoundingClientRect()
+    if (r.bottom > b.bottom) box.scrollTop += Math.min(r.bottom - b.bottom, Math.max(0, r.top - b.top - 40))
+  }, [])
+  return (
+    <div className="rv-wait" id={`rv-wait-${agent.id}`} ref={ref} role="dialog" aria-label={`Waiting on you from ${agent.name}`} onContextMenu={(e) => e.stopPropagation()}>
+      <div className="rv-wait-panel">
+        <div className="rv-wait-head">{plural(agent.pending, 'proposal')} waiting on you</div>
+        <ul>
+          {list.map((w) => {
+            const what = w.ticket ?? (w.subject !== undefined ? `Mail: ${w.subject}` : '')
+            return (
+              <li key={w.id}>
+                <Press
+                  className="rv-wait-row"
+                  disabled={w.msgId === null}
+                  title={w.msgId === null ? 'No card in the thread' : `Go to the card · ${ago(Date.parse(w.at), now)} ago`}
+                  onPress={() => {
+                    if (w.msgId === null) return
+                    onClose()
+                    onReach(w.msgId, w.id)
+                  }}
+                >
+                  <span className="rv-wait-title">{w.title}</span>
+                  <span className="rv-wait-meta">
+                    {what && <span className="rv-wait-what">{what}</span>}
+                    <span className="rv-wait-at">{madeAt(w.at, now)}</span>
+                  </span>
+                </Press>
+              </li>
+            )
+          })}
+        </ul>
+        {more > 0 && <div className="rv-wait-more">and {more} newer</div>}
+      </div>
+    </div>
+  )
+}
+
 /** What Raven reaches: his main terminals, the sessions it watches, the agents, the feeds. */
 /** One line of text that shows only while it fits whole: never cut off with an ellipsis, left out instead. */
 function FitLine({ className, text }: { className: string; text: string }) {
@@ -1012,12 +1108,20 @@ function FitLine({ className, text }: { className: string; text: string }) {
   return <div ref={ref} className={className} data-fit={fits ? undefined : 'no'} aria-hidden={fits ? undefined : true}>{text}</div>
 }
 
-function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void }) {
+function Connected({ page, messages, onOpen, onReach }: {
+  page: RavenPage; messages: RavenMsg[]; onOpen: (to: string) => void; onReach: (msg: number, prop: number) => void
+}) {
   const now = useTick(60_000)
   // each feed's newest line (a cleared one left out); an agent's own feed goes under its row, not under Feeds
   const { byAgent, rest: feeds } = splitFeeds(page.feeds ?? feedsFromThread(messages), page.agents)
   // which Decline all is asking: an agent's id, 'all', or none
   const [asking, setAsking] = useState<string | null>(null)
+  // whose waiting list is open (one at a time), and its count, which the list gives the focus back to
+  const [listing, setListing] = useState<string | null>(null)
+  const countRef = useRef<HTMLButtonElement>(null)
+  const closeList = useCallback(() => setListing(null), [])
+  const listed = page.agents.find((a) => a.id === listing && a.pending > 0 && a.waiting)
+  if (listing && !listed) setListing(null)
   const waiting = page.agents.reduce((n, a) => n + a.pending, 0)
   const withPending = page.agents.filter((a) => a.pending > 0).length
   const open = (pane: string) => (
@@ -1091,13 +1195,25 @@ function Connected({ page, messages, onOpen }:{ page: RavenPage; messages: Raven
                 <span className="rv-dot" data-state={page.paused ? 'off' : a.status} aria-hidden />
                 <span className="rv-crow-name">{a.name}</span>
                 <span className="rv-crow-note">{AGENT_WORD[a.status] ?? a.status}</span>
-                {a.pending > 0 && (
+                {a.pending > 0 && (a.waiting ? (
+                  <Press
+                    ref={listing === a.id ? countRef : undefined}
+                    className="rv-n rv-n-btn"
+                    title={`${plural(a.pending, 'proposal')} waiting: see them`}
+                    aria-label={`${plural(a.pending, 'proposal')} waiting: see them`}
+                    aria-haspopup="dialog"
+                    aria-expanded={listing === a.id}
+                    aria-controls={listing === a.id ? `rv-wait-${a.id}` : undefined}
+                    onPress={() => setListing((v) => (v === a.id ? null : a.id))}
+                  >{a.pending}</Press>
+                ) : (
                   <span className="rv-n" role="img" title={`${plural(a.pending, 'proposal')} waiting`} aria-label={`${plural(a.pending, 'proposal')} waiting`}>{a.pending}</span>
-                )}
+                ))}
                 {a.pending > 0 && (
                   <Press className="rv-crow-act" aria-expanded={asking === a.id} onPress={() => setAsking((v) => (v === a.id ? null : a.id))}>Decline all</Press>
                 )}
                 {byAgent.has(a.id) && <AgentFeedLine feed={byAgent.get(a.id)!} now={now} />}
+                {listed?.id === a.id && <WaitingList agent={a} now={now} anchor={countRef} onClose={closeList} onReach={onReach} />}
               </div>
               {asking === a.id && a.pending > 0 && <DeclineAll agentId={a.id} count={a.pending} who={a.name} onDone={() => setAsking(null)} />}
             </div>
