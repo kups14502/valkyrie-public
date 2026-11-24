@@ -13,11 +13,12 @@ import {
   odinClaudeReady, odinTargets, paneTakesWheel, remoteLabel, scrollPane, serverUp, sshPresent, tmuxVersion, wheelInput,
   type TermHost, type TermMode, type TermSession,
 } from '../terminal/tmux.js'
-import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession, projectsForSession } from '../lib/projectsStore.js'
+import { attachRun, createRun, failRun, failRunsForTmux, getProject, linkSession } from '../lib/projectsStore.js'
 import { KEY_RE, ProjError, type Ctx, type Project, type Run } from '../lib/projectTypes.js'
 import { DESK_PROMPT_MAX, createDeskBrief, noteDeskPane } from '../lib/projectDesk.js'
 import { originOf, ravenStartedIds } from '../lib/sessionOrigin.js'
 import { paneTranscript } from '../terminal/transcriptFeed.js'
+import { resumeProject } from '../terminal/resume.js'
 import { paneStateTracker } from '../terminal/paneState.js'
 import { boardNow, launchTargets } from './hostLaunch.js'
 
@@ -197,11 +198,8 @@ router.post('/terminal/sessions', async (req, res) => {
     // app) would otherwise come back with no MCP channel and nothing on screen
     // to say so. Only an unambiguous link counts: a conversation linked to two
     // projects is left alone.
-    if (!project) {
-      const ids = projectsForSession(resumeId)
-      const p = ids.length === 1 ? getProject(ids[0]) : null
-      if (p && p.status !== 'archived' && !hidden(p.id)) project = p
-    }
+    // (terminal/resume.ts, which Raven's session_recover reopens through too)
+    if (!project) project = resumeProject(resumeId, hidden)
   } else {
     // A project session always runs in the project's own folder, whatever the
     // client sent: the pinned relPaths and the session's work are relative to it.

@@ -200,7 +200,8 @@ async function resolve(session: string, panes: TermSession[], allowBoard: boolea
     return p ? { kind: 'pane', pane: p } : { kind: 'main', target: main }
   }
   if (UUID_RE.test(s)) {
-    const p = panes.find((x) => x.sessionId === s)
+    // a resumed conversation can sit in an ended pane too: the live one is the one to reach
+    const p = panes.find((x) => x.sessionId === s && !x.dead) ?? panes.find((x) => x.sessionId === s)
     if (p) return { kind: 'pane', pane: p }
     if (allowBoard) return { kind: 'board', sessionId: s, title: s.slice(0, 8) }
     throw new RavenToolError(`no pane runs conversation ${s}`)
@@ -228,11 +229,12 @@ async function resolve(session: string, panes: TermSession[], allowBoard: boolea
 }
 
 /**
- * A pane Raven opened with session_start: its conversation is on Raven's record (lib/sessionOrigin.ts) and it is
- * not one of Brendon's main terminals, now or before. Raven may close these on its own.
+ * A pane Raven opened with session_start, or reopened with session_recover: its conversation is on Raven's record
+ * (lib/sessionOrigin.ts, or kv raven:recovered for this pane) and it is not one of Brendon's main terminals, now or
+ * before. Raven may close these on its own.
  */
 function ravenLaunched(p: TermSession): boolean {
-  return !mainOf(p.name) && ravenOwnSession(p.sessionId)
+  return !mainOf(p.name) && ravenOwnSession(p.sessionId, p.name)
 }
 
 /** A pane the auto-close may close (autoclose.ts): one Raven opened with session_start, never a main terminal or one he opened. */
@@ -244,23 +246,72 @@ export const isRavenJob = (p: TermSession): boolean => !p.dead && p.mode !== 'sh
  * Desk. session_stop and the auto-close both close one this way. Killing the pane alone ends Claude but leaves what
  * it runs in the background on thor (Kill-Session.ps1), so thor goes first.
  */
-export async function closeJob(p: TermSession): Promise<{ killed: boolean; markedDone: boolean }> {
+export async function closeJob(p: TermSession): Promise<{ killed: boolean; markedDone: boolean; reopened: boolean }> {
+  // one of his Raven only reopened goes back to his closed list as it was: done is his call, or session_done's
+  const reopened = reopenedOnly(p)
   removeWatch(p.name)
   if (p.sessionId) removeWatch(watchKey('', p.sessionId))
   const onThor = p.sessionId ? await io.stopOnThor(p.sessionId).catch(() => 'failed' as const) : 'none'
   const killed = (await io.killPane(p.name).catch(() => false)) || onThor === 'stopped'
-  if (!killed) return { killed, markedDone: false }
+  if (!killed) return { killed, markedDone: false, reopened }
   // a project run in that pane never reports now, as when the page stops it (routes/terminal.ts)
   try { failRunsForTmux(p.name, 'stopped before it reported') } catch (e) { console.error('[raven-tools] runs for', p.name, words(e)) }
-  const markedDone = p.sessionId ? await io.markDone([p.sessionId]).catch(() => false) : false
-  return { killed, markedDone }
+  const markedDone = p.sessionId && !reopened ? await io.markDone([p.sessionId]).catch(() => false) : false
+  return { killed, markedDone, reopened }
 }
 
-/** A conversation Raven started with session_start: on Raven's record and never a main terminal's. */
-function ravenOwnSession(sessionId: string | undefined): boolean {
+// ---------------------------------------------------- reopened by Raven ----
+//
+// session_recover reopens a closed conversation the way the Desk's Recover
+// does. One of his that Raven reopened counts as Raven's while it runs in that
+// pane, for watching and closing (session_stop, session_keep, the auto-close),
+// and for session_done for a week after. It stays his on the Desk: the origin
+// record (lib/sessionOrigin.ts) is left alone, so it comes back as one of his
+// tabs, and closing it leaves it on his closed list, not done.
+
+const RECOVERED_KEY = 'raven:recovered'
+const RECOVERED_KEEP_MS = 7 * 86_400_000
+const RECOVERED_MAX = 300
+type RecoveredRec = { pane: string; at: string }
+
+function recoveredMap(): Record<string, RecoveredRec> {
+  try {
+    const v = JSON.parse(getKv(RECOVERED_KEY) ?? '{}') as Record<string, RecoveredRec>
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+function noteRecovered(sessionId: string, pane: string): void {
+  const now = io.now()
+  const m = recoveredMap()
+  m[sessionId] = { pane, at: new Date(now).toISOString() }
+  const live = Object.entries(m).filter(([, r]) => now - Date.parse(r.at) <= RECOVERED_KEEP_MS)
+  live.sort((a, b) => Date.parse(b[1].at) - Date.parse(a[1].at))
+  setKv(RECOVERED_KEY, JSON.stringify(Object.fromEntries(live.slice(0, RECOVERED_MAX))))
+}
+
+/** Raven reopened this conversation lately: in this pane when one is named, at all when none is. */
+function ravenRecovered(sessionId: string, pane?: string): boolean {
+  const r = recoveredMap()[sessionId]
+  if (!r || io.now() - Date.parse(r.at) > RECOVERED_KEEP_MS) return false
+  return pane === undefined || r.pane === pane
+}
+
+/** A pane of his that Raven only reopened: Raven's to close, never Raven's to mark done on closing. */
+function reopenedOnly(p: TermSession): boolean {
+  return Boolean(p.sessionId) && !ravenStartedIds().has(p.sessionId) && ravenRecovered(p.sessionId, p.name)
+}
+
+/**
+ * A conversation that is Raven's to close or mark done: one it started with session_start, or one it reopened with
+ * session_recover (in that pane, when a pane is named). Never a main terminal's.
+ */
+function ravenOwnSession(sessionId: string | undefined, pane?: string): boolean {
   if (!sessionId) return false
   if (Object.values(mainsMap()).some((r) => r.sessionId === sessionId)) return false
-  return ravenStartedIds().has(sessionId)
+  return ravenStartedIds().has(sessionId) || ravenRecovered(sessionId, pane)
 }
 
 type DoneTarget = { sessionId: string; label: string; pane?: TermSession }
@@ -547,7 +598,10 @@ function jobLine(w: Watch): string {
   if (!w.job) return ''
   const at = closesAt(w)
   const kept = (w.keepUntil ?? 0) > io.now() ? `, kept open until ${et(w.keepUntil!)}` : ''
-  return `, a job you started (session_stop it once it reports the job done)${kept}${at !== null ? `, closes on its own at ${et(at)}` : ''}`
+  const what = w.reopened
+    ? 'one of his you reopened (session_stop it once his ask is answered: it stays not done; session_done only when its own work is finished)'
+    : 'a job you started (session_stop it once it reports the job done)'
+  return `, ${what}${kept}${at !== null ? `, closes on its own at ${et(at)}` : ''}`
 }
 
 /** Plain lines for Raven's prompt: main terminals, watched sessions, other panes. */
@@ -639,6 +693,203 @@ export async function sessionCheck(session: string): Promise<SessionCheck> {
   }
 }
 
+// ------------------------------------------------ closed, not done ----
+//
+// The Desk's "closed, not done" list (v2/screens/Desk.tsx): on thor's board,
+// not marked done, not running anywhere, no live pane here holding it. Areas
+// read as the Desk names them: personal is Thor, server is Odin, the others
+// take the name of his main terminal for that area.
+
+const FIXED_AREA_NAMES: Readonly<Record<string, string>> = { personal: 'Thor', server: 'Odin' }
+const RECOVER_GAP_MS = 700
+const RECOVER_COLS = 120
+const RECOVER_ROWS = 40
+const ANSWER_SNIPPET = 300
+const ANSWER_WAIT_MS = 10_000
+const BULK_READY_MS = 30_000
+
+type ClosedRow = { sessionId: string; title: string; area: string; raven: boolean; closedAt: string; cwd: string }
+type AreaNames = { name: (area: string) => string; names: Map<string, string> }
+
+/** Area key to the Desk's name for it: the fixed two, then his main terminals' names by key or label (kit/data areaNamesOf). */
+async function areaNamer(): Promise<AreaNames> {
+  const names = new Map<string, string>()
+  for (const t of (await targets(4_000)) ?? []) {
+    if (!t.phone || t.project || !t.label) continue
+    names.set(t.key.toLowerCase(), t.label)
+    names.set(t.label.toLowerCase(), t.label)
+  }
+  const name = (area: string) => {
+    if (!area || area === 'other') return 'Other'
+    return FIXED_AREA_NAMES[area] ?? names.get(area.toLowerCase()) ?? area[0].toUpperCase() + area.slice(1)
+  }
+  return { name, names }
+}
+
+/** An area as Raven names it (its name on the Desk, its area key, or its main terminal's target key) against a row's area key. */
+function areaMatch(input: string, n: AreaNames): (area: string) => boolean {
+  const want = input.trim().toLowerCase()
+  const alias = n.names.get(want) ?? FIXED_AREA_NAMES[want]
+  return (area) => area.toLowerCase() === want || n.name(area).toLowerCase() === want || (Boolean(alias) && n.name(area) === alias)
+}
+
+const rowId = (r: BoardRow) => (typeof r.sessionId === 'string' && UUID_RE.test(r.sessionId) ? r.sessionId : '')
+
+/** The Desk's closed, not done sessions, newest first. */
+function closedRows(rows: BoardRow[], panes: TermSession[]): ClosedRow[] {
+  const held = new Set(panes.filter((p) => !p.dead).map((p) => p.sessionId).filter(Boolean))
+  const raven = ravenStartedIds()
+  const out: ClosedRow[] = []
+  for (const r of rows) {
+    const id = rowId(r)
+    if (!id || r.disposition === 'done' || r.live === true || r.activity !== 'closed' || (r.host ?? 'thor') !== 'thor' || held.has(id)) continue
+    out.push({
+      sessionId: id, title: boardTitle(r), area: typeof r.area === 'string' && r.area !== 'other' ? r.area : '', raven: raven.has(id),
+      closedAt: typeof r.lastActivityUtc === 'string' ? r.lastActivityUtc : '', cwd: typeof r.cwd === 'string' ? r.cwd : '',
+    })
+  }
+  return out.sort((a, b) => (Date.parse(b.closedAt) || 0) - (Date.parse(a.closedAt) || 0))
+}
+
+/** Closed counts per area, in the Desk's Recover-button form. */
+function areaCounts(list: ClosedRow[], n: AreaNames): { area: string; key: string; n: number }[] {
+  const by = new Map<string, number>()
+  for (const r of list) by.set(r.area, (by.get(r.area) ?? 0) + 1)
+  return [...by].sort((a, b) => b[1] - a[1]).map(([key, k]) => ({ area: n.name(key), key: key || 'other', n: k }))
+}
+
+/** The first part of a closed session's newest answer, from its transcript on thor; '' when it cannot be read in time. */
+async function lastAnswer(sessionId: string): Promise<string> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<null>((r) => { timer = setTimeout(() => r(null), ANSWER_WAIT_MS); timer.unref?.() })
+  try {
+    const page = await Promise.race([io.boardTranscript(sessionId, '', 'thor').catch(() => null), late])
+    const e = [...(page?.entries ?? [])].reverse().find((x) => x.kind === 'assistant' && x.text?.trim())
+    return e ? clip(oneLine(e.text!), ANSWER_SNIPPET) : ''
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** fn over every item, at most `n` at once; answers in the items' order. */
+async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }))
+  return out
+}
+
+const folderOf = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop() ?? ''
+
+type RecoverPick =
+  | { kind: 'running'; pane: TermSession }
+  | { kind: 'outside'; sessionId: string; title: string }
+  | { kind: 'closed'; row: BoardRow; done: boolean }
+
+const pickWords = (r: BoardRow) => `${boardTitle(r)} (${rowId(r)}, ${r.live === true ? 'running' : 'closed'})`
+
+/**
+ * session_recover's session: a pane name, a conversation id, or part of a title. A running one (in a pane here or a
+ * window on thor) answers as running, so nothing opens it twice. A session marked done counts only by its exact
+ * conversation id (or the ended pane that held it).
+ */
+async function recoverPick(session: string, panes: TermSession[]): Promise<RecoverPick> {
+  const s = session.trim()
+  if (!s) throw new RavenToolError('name a session: its conversation id, pane name, or part of its title')
+  const livePane = (sid: string) => panes.find((p) => p.sessionId === sid && !p.dead && p.mode !== 'shell')
+  let id = ''
+  if (SESSION_NAME_RE.test(s)) {
+    const p = panes.find((x) => x.name === s)
+    if (!p) throw new RavenToolError(`no pane ${s}. sessions_closed lists the closed sessions by conversation id.`)
+    if (p.mode === 'shell') throw new RavenToolError(`${p.label} (${p.name}) is a shell, not a Claude session`)
+    if (!p.dead) return { kind: 'running', pane: p }
+    if (!p.sessionId) throw new RavenToolError(`${p.label} (${p.name}) has ended and named no conversation to reopen`)
+    id = p.sessionId
+  } else if (UUID_RE.test(s)) id = s
+  if (id) {
+    const p = livePane(id)
+    if (p) return { kind: 'running', pane: p }
+    const rows = await board()
+    if (!rows) throw new RavenToolError("thor's session list is not answering, so whether it is closed is unknown. Nothing was opened.")
+    const row = rows.find((r) => rowId(r) === id)
+    if (!row) throw new RavenToolError(`thor's session list has no conversation ${id}`)
+    if (row.live === true) return { kind: 'outside', sessionId: id, title: boardTitle(row) }
+    return { kind: 'closed', row, done: row.disposition === 'done' }
+  }
+  const frag = s.toLowerCase()
+  const hits = panes.filter((p) => !p.dead && p.mode !== 'shell' && p.label.toLowerCase().includes(frag))
+  if (hits.length === 1) return { kind: 'running', pane: hits[0] }
+  if (hits.length > 1) throw new RavenToolError(`"${s}" matches ${hits.length} open panes: ${hits.map((p) => `${p.name} (${p.label})`).join(', ')}. Use the pane name or the conversation id.`)
+  const rows = await board()
+  if (!rows) throw new RavenToolError("thor's session list is not answering, so the closed sessions are unknown. Nothing was opened.")
+  const hex = /^[0-9a-f-]{8,}$/.test(frag)
+  const all = rows.filter((r) => rowId(r) && (boardTitle(r).toLowerCase().includes(frag) || (hex && rowId(r).startsWith(frag))))
+  const open = all.filter((r) => r.disposition !== 'done')
+  if (open.length === 1) {
+    const id1 = rowId(open[0])
+    const p = livePane(id1)
+    if (p) return { kind: 'running', pane: p }
+    if (open[0].live === true) return { kind: 'outside', sessionId: id1, title: boardTitle(open[0]) }
+    return { kind: 'closed', row: open[0], done: false }
+  }
+  if (open.length > 1) {
+    throw new RavenToolError(`"${s}" matches ${open.length} sessions: ${open.slice(0, 8).map(pickWords).join(', ')}${open.length > 8 ? ', ...' : ''}. Use the conversation id.`)
+  }
+  if (all.length) {
+    throw new RavenToolError(`"${s}" matches only sessions marked done: ${all.slice(0, 6).map((r) => `${boardTitle(r)} (${rowId(r)})`).join(', ')}. `
+      + 'Reopen one of those only when Brendon asks for that one: pass its conversation id.')
+  }
+  throw new RavenToolError(`no session matches "${s}". sessions_closed lists the closed ones, sessions the open ones.`)
+}
+
+type ReadyState = ScreenState | 'starting' | 'ended'
+
+/** Where a pane Raven just reopened stands: waits for Claude's prompt until `until`. */
+async function readyState(pane: string, until: number): Promise<ReadyState> {
+  for (;;) {
+    const st = await io.paneState(pane)
+    if (st === 'dead' || st === 'gone') return 'ended'
+    const screen = await io.capturePrompt(pane)
+    if (screen && paneLimitState(plainRules(screen)).promptFound) return screenVerdict(screen).state
+    if (io.now() >= until) return screen && screenBusy(screen) ? 'working' : 'starting'
+    await io.sleep(1_000)
+  }
+}
+
+type Reopened = { pane: string; label: string; sessionId: string; main?: string }
+
+class RecoverFull extends RavenToolError {}
+
+/**
+ * Reopens one closed conversation in a pane on thor (the Desk's Recover, terminal/resume.ts), then puts it on Raven's
+ * record: a main terminal's conversation becomes that main's pane again; any other counts as Raven's for watching and
+ * closing (one Raven started stays a job as before). Watched unless watch is false.
+ */
+async function reopenOne(row: BoardRow, o: { watch: boolean; followUp?: string; title?: string }): Promise<Reopened> {
+  const sessionId = rowId(row)
+  const label = paneLabel(typeof row.title === 'string' ? row.title : '', boardTitle(row))
+  let pane: string
+  try {
+    pane = await io.resumePane({ sessionId, label, cols: RECOVER_COLS, rows: RECOVER_ROWS })
+  } catch (e) {
+    if ((e as { status?: number }).status === 409) throw new RecoverFull(`Valkyrie has no room for more terminals (${words(e)})`)
+    throw new RavenToolError(`could not reopen ${label}: ${words(e)}`)
+  }
+  const main = Object.entries(mainsMap()).find(([, r]) => r.sessionId === sessionId)?.[0]
+  if (main) setMain(main, { pane, label: mainsMap()[main].label, sessionId, at: new Date(io.now()).toISOString() })
+  else noteRecovered(sessionId, pane)
+  if (o.watch) {
+    // what it said before it closed is not news: the watch reads on from the end of its transcript
+    await startWatch({ pane, label, sessionId, followUp: o.followUp, title: o.title, job: !main, reopened: !main && !ravenStartedIds().has(sessionId) })
+  }
+  return { pane, label, sessionId, ...(main ? { main } : {}) }
+}
+
 // --------------------------------------------------------------- tools ----
 
 const userOrClaude = (e: TranscriptEntry) => (e.kind === 'user' || e.kind === 'assistant') && Boolean(e.text?.trim())
@@ -656,10 +907,12 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
 
   server.registerTool('sessions', {
     description: 'Every open Claude session: panes here, and the ones outside Valkyrie (windows and ssh logins on thor, terminals on odin). '
-      + 'Raven types into all of them (session_send, session_keys) except a bare terminal on odin (typeable false). idle is how long since a pane printed anything.',
+      + 'Raven types into all of them (session_send, session_keys) except a bare terminal on odin (typeable false). idle is how long since a pane printed anything. '
+      + 'closed counts his closed, not done sessions per area: sessions_closed lists them, session_recover reopens one.',
     inputSchema: {},
   }, () => toolRun(async () => {
-    const [panes, board, outside] = await Promise.all([io.listPanes(), io.boardSessions(), outsideSessions(true)])
+    const [panes, board, outside, names] = await Promise.all([io.listPanes(), io.boardSessions(), outsideSessions(true), areaNamer()])
+    const closed = board === null ? null : closedRows(board, panes)
     const now = io.now()
     const inPane = new Set(panes.map((p) => p.sessionId).filter(Boolean))
     const thorOut = new Map((outside.thor ?? []).map((o) => [o.sessionId, o]))
@@ -680,11 +933,14 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
         title: outsideLabel(o), sessionId: o.sessionId, cwd: o.cwd, status: o.status || undefined, in: viaWords(o),
         watched: Boolean(getWatch(watchKey('', o.sessionId))) || undefined, typeable: o.via !== 'none',
       })),
+      ...(closed ? { closed: { total: closed.length, byArea: areaCounts(closed, names).map((x) => `${x.area} ${x.n}`).join(', ') || undefined } } : {}),
     }
   }))
 
   server.registerTool('session_start', {
     description: 'Start a new Claude session on thor in a launch target and type the prompt into it once its prompt shows (up to 45 s). '
+      + 'Never a duplicate: when an existing session fits (he names one, or says the existing session), session_send it if it runs, '
+      + 'or session_recover it if it is closed (sessions_closed lists those). '
       + 'main: true makes it that target\'s main terminal (if one is open, the prompt goes there instead). Everything it writes comes to you '
       + '(not to Brendon) unless watch is false; followUp is what you do with its next answer (you get woken with it). label names the job: the pane\'s name, '
       + 'and the title on Brendon\'s Watching card. '
@@ -923,15 +1179,148 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     return { watching: true, session: w.label, pane: w.pane || undefined, since: et(w.since) }
   }))
 
+  server.registerTool('sessions_closed', {
+    description: 'Brendon\'s closed, not done Claude sessions: the Desk\'s "closed, not done" list that its Recover buttons bring back. Each with its conversation id, '
+      + 'title, area (its name on the Desk: Thor, Odin, or a work area by its main terminal\'s name), when it closed (ET), its folder, startedBy raven for one you started, and the start of its last answer. '
+      + 'area filters by an area name or key; query by part of the title. byArea counts them per area, as the Recover buttons do. '
+      + 'session_recover reopens one (or a whole area) when an existing session fits what he asks.',
+    inputSchema: {
+      area: z.string().max(40).optional(), query: z.string().max(120).optional(),
+      limit: z.number().int().min(1).max(50).optional(), answers: z.boolean().optional(),
+    },
+  }, (a) => toolRun(async () => {
+    const [rows, panes, names] = await Promise.all([board(), io.listPanes().catch(() => [] as TermSession[]), areaNamer()])
+    if (!rows) return "thor's session list is not answering, so the closed sessions are unknown."
+    const all = closedRows(rows, panes)
+    let list = all
+    if (a.area?.trim()) {
+      const hit = areaMatch(a.area, names)
+      list = list.filter((r) => hit(r.area))
+      if (!list.length) {
+        const have = areaCounts(all, names)
+        return `No closed, not done sessions in "${a.area}". ${have.length ? `Closed ones by area: ${have.map((x) => `${x.area} ${x.n}`).join(', ')}.` : 'There are none at all.'}`
+      }
+    }
+    const q = a.query?.trim().toLowerCase()
+    if (q) list = list.filter((r) => r.title.toLowerCase().includes(q) || r.sessionId.startsWith(q))
+    const shown = list.slice(0, a.limit ?? 20)
+    const answers = a.answers === false ? shown.map(() => '') : await pool(shown, 4, (r) => lastAnswer(r.sessionId))
+    return {
+      closed: list.length,
+      byArea: areaCounts(list, names),
+      sessions: shown.map((r, i) => ({
+        sessionId: r.sessionId, title: r.title, area: names.name(r.area), closed: et(r.closedAt) || undefined, folder: folderOf(r.cwd) || undefined,
+        startedBy: r.raven ? 'raven' : undefined, lastAnswer: answers[i] || undefined,
+      })),
+      ...(list.length > shown.length ? { more: list.length - shown.length } : {}),
+    }
+  }))
+
+  server.registerTool('session_recover', {
+    description: 'Reopen a closed Claude session, exactly as the Desk\'s Recover does: claude --resume of that conversation in a new pane on thor, in its own folder and '
+      + 'context, under its own title, as one of Brendon\'s Desk tabs. Waits for its prompt (up to 45 s), so session_send and session_screen work on it right after. '
+      + 'session: its conversation id, a pane name, or part of its title (sessions_closed lists them). If it is already running, that pane comes back and nothing new opens. '
+      + 'A session marked done is reopened only by its exact conversation id. Or area (Thor, Odin, or a work area by its name on the Desk) reopens every closed, not done session there, '
+      + 'like that area\'s Recover button on the Desk. Use it instead of session_start whenever an existing session fits: he names one, or says "the existing session". '
+      + 'Only when Brendon\'s message in this run asks for that session, the existing session, or updates on his open sessions. '
+      + 'A reopened session is yours to watch and close: everything it writes comes to you and it shows on his Watching card (unless watch is false). '
+      + 'Once what he asked of it is answered, session_stop it: that puts it back on his closed list, not done. session_done it only when its own work is finished. '
+      + `One that stays quiet ${AUTO_CLOSE_MIN} minutes after an answer is closed on its own, still not done. label names your job in it on the Watching card; followUp is what you do with its next answer.`,
+    inputSchema: {
+      session: z.string().max(120).optional(), area: z.string().max(40).optional(),
+      watch: z.boolean().optional(), followUp: z.string().max(1000).optional(), label: z.string().max(60).optional(),
+    },
+  }, (a) => toolRun(async () => {
+    needBrendon(ctx, 'Reopening a session')
+    const session = a.session?.trim() ?? ''
+    const area = a.area?.trim() ?? ''
+    if (!session === !area) throw new RavenToolError('give one of them: session (one session) or area (every closed one there)')
+    const watch = a.watch !== false || Boolean(a.followUp)
+    const title = a.label ? oneLine(a.label).slice(0, 60) : undefined
+    const panes = await io.listPanes()
+
+    if (session) {
+      const pick = await recoverPick(session, panes)
+      if (pick.kind === 'running') {
+        const p = pick.pane
+        return {
+          pane: p.name, label: p.label, sessionId: p.sessionId || undefined, already: true, state: (await busy(p)) ? 'working' : 'idle',
+          watched: Boolean(getWatch(p.name)) || undefined, note: 'already open in this pane, so nothing new was opened: session_send types into it', open: `/m/ai/term/${p.name}`,
+        }
+      }
+      if (pick.kind === 'outside') {
+        return {
+          session: pick.title, sessionId: pick.sessionId, already: true,
+          note: 'already running outside Valkyrie (a window or an ssh login on thor), so nothing was opened: session_send types into it by this id',
+        }
+      }
+      const r = await reopenOne(pick.row, { watch, followUp: a.followUp, title })
+      ctx.acted()
+      const state = await readyState(r.pane, io.now() + PROMPT_WAIT_MS)
+      if (state === 'ended') {
+        removeWatch(r.pane)
+        throw new RavenToolError(`${r.label} (${r.pane}) ended right after it opened: thor can be asleep or refusing the login, or the conversation is gone. session_screen ${r.pane} shows why.`)
+      }
+      const names = await areaNamer()
+      return {
+        pane: r.pane, label: r.label, sessionId: r.sessionId, area: names.name(typeof pick.row.area === 'string' ? pick.row.area : ''), state,
+        ...(r.main ? { main: r.main, note: `the conversation of the ${r.main} main terminal: it is that main terminal again` } : {}),
+        ...(pick.done ? { wasDone: true } : {}),
+        ...(state === 'starting' ? { note: `opened, but Claude's prompt did not show within ${PROMPT_WAIT_MS / 1000} s: session_screen shows it` } : {}),
+        watching: watch, open: `/m/ai/term/${r.pane}`,
+      }
+    }
+
+    // a whole area, as the Desk's Recover <area>: newest first, one at a time, a full pane list stops it
+    const [rows, names] = await Promise.all([board(), areaNamer()])
+    if (!rows) throw new RavenToolError("thor's session list is not answering, so the closed sessions are unknown. Nothing was opened.")
+    const hit = areaMatch(area, names)
+    const all = closedRows(rows, panes)
+    const list = all.filter((r) => hit(r.area))
+    if (!list.length) {
+      const have = areaCounts(all, names)
+      return `No closed, not done sessions in "${area}" to reopen. ${have.length ? `Closed ones by area: ${have.map((x) => `${x.area} ${x.n}`).join(', ')}.` : 'There are none at all.'}`
+    }
+    const byId = new Map(rows.map((r) => [rowId(r), r]))
+    const opened: Reopened[] = []
+    const failed: { title: string; sessionId: string; error: string }[] = []
+    let full = ''
+    for (const [i, c] of list.entries()) {
+      try {
+        opened.push(await reopenOne(byId.get(c.sessionId)!, { watch }))
+        ctx.acted()
+      } catch (e) {
+        if (e instanceof RecoverFull) {
+          full = e.message
+          break
+        }
+        failed.push({ title: c.title, sessionId: c.sessionId, error: (e as Error).message })
+      }
+      // each is an ssh login to thor, and sshd drops logins that pile up (the Desk's RECOVER_GAP)
+      if (i < list.length - 1) await io.sleep(RECOVER_GAP_MS)
+    }
+    const until = io.now() + BULK_READY_MS
+    const states = await pool(opened, 4, (r) => readyState(r.pane, until))
+    for (const [i, r] of opened.entries()) if (states[i] === 'ended') removeWatch(r.pane)
+    return {
+      area: names.name(list[0].area), reopened: opened.length, of: list.length,
+      sessions: opened.map((r, i) => ({ pane: r.pane, label: r.label, sessionId: r.sessionId, state: states[i], ...(r.main ? { main: r.main } : {}) })),
+      ...(failed.length ? { failed } : {}),
+      ...(full ? { stopped: `${full}: ${list.length - opened.length - failed.length} left closed` } : {}),
+      watching: watch,
+    }
+  }))
+
   server.registerTool('session_done', {
     description: "Mark a session done on Brendon's Sessions tab and Desk, the same flag as his done checkbox: it leaves the closed list and Recover all "
       + '(a running one stays under running until it closes). session is a pane name, a conversation id, or part of its label or title, closed ones too. '
-      + 'One you started with session_start you may mark on your own; any other only when Brendon\'s message asks.',
+      + 'One you started with session_start you may mark on your own; one you reopened with session_recover too, once it says its own work is finished '
+      + '(not because his question to it is answered); any other only when Brendon\'s message asks.',
     inputSchema: { session: z.string().max(120) },
   }, (a) => toolRun(async () => {
     // without Brendon, a name that matches nothing still gets the gate's answer
     const t = await doneTarget(a.session).catch((e) => { if (ctx.fromBrendon) throw e; return null })
-    if (!t || !ravenOwnSession(t.sessionId) || (t.pane && mainOf(t.pane.name))) needBrendon(ctx, 'Marking a session done other than one Raven started')
+    if (!t || !ravenOwnSession(t.sessionId, t.pane?.name) || (t.pane && mainOf(t.pane.name))) needBrendon(ctx, 'Marking a session done other than one Raven started or reopened')
     if (!t) throw new RavenToolError(`no session matches "${a.session}"`)
     if (!(await io.markDone([t.sessionId]).catch(() => false))) throw new RavenToolError(`thor did not answer, so ${t.label} is not marked done`)
     ctx.acted()
@@ -942,22 +1331,25 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
     description: 'Stop a session in a pane here: closes the pane, which ends its Claude on thor (the conversation stays resumable). Not for windows on thor. '
       + 'A session you started with session_start you close on your own, in any run (a relay too): in the same run its answer reports the job done, '
       + 'stop it. That ends its background shells and monitors first and marks it done on the Desk. '
+      + 'One you reopened with session_recover you close on your own the same way once his ask of it is answered, but it is not marked done: it goes back on his closed list. '
       + 'Any other (a main terminal, one Brendon opened) only when Brendon\'s message asks.',
     inputSchema: { session: z.string().max(120) },
   }, (a) => toolRun(async () => {
     // without Brendon, a name that matches nothing still gets the gate's answer, never a hint of what is open
     const r = await resolve(a.session, await io.listPanes(), true).catch((e) => { if (ctx.fromBrendon) throw e; return null })
     const own = r?.kind === 'pane' && ravenLaunched(r.pane)
-    if (!own) needBrendon(ctx, 'Stopping a session other than one Raven started')
+    if (!own) needBrendon(ctx, 'Stopping a session other than one Raven started or reopened')
     if (!r) throw new RavenToolError(`no session matches "${a.session}"`)
     if (r.kind === 'board') throw new RavenToolError(`${r.title} ${BOARD_ONLY}`)
     if (r.kind === 'main') return `${r.target.label} has no main terminal open.`
     const p = r.pane
     if (own) {
-      // Raven's own session is finished work: done on the board, so the Desk's closed list and Recover all skip it
+      // Raven's own session is finished work: done on the board, so the Desk's closed list and Recover all skip it.
+      // One of his Raven only reopened goes back on that list as it was.
       const c = await closeJob(p)
       if (!c.killed) throw new RavenToolError(`${p.label} (${p.name}) could not be stopped; it may have ended already`)
       ctx.acted()
+      if (c.reopened) return { stopped: p.name, label: p.label, markedDone: false, note: 'one of his you reopened: it is back on his closed list, not done. session_done marks it done if its own work is finished.' }
       return { stopped: p.name, label: p.label, markedDone: c.markedDone, ...(c.markedDone ? {} : { note: 'thor did not answer, so it is not marked done on the Desk yet' }) }
     }
     // stopped on purpose: no "ended" line for it; it leaves Watching, whichever way it was watched
@@ -977,14 +1369,14 @@ export function registerSessionTools(server: McpServer, ctx: RavenToolCtx): void
   }))
 
   server.registerTool('session_keep', {
-    description: 'Keep a session you started with session_start open while it waits on something long (a release, a build, a long test run): '
+    description: 'Keep a session you started with session_start (or reopened with session_recover) open while it waits on something long (a release, a build, a long test run): '
       + `nothing closes it on its own until minutes from now (default ${KEEP_DEFAULT_MIN}, at most ${KEEP_MAX_MIN}), and its background wait shows `
       + `Working on Brendon's Watching card meanwhile. Without it, a session you started that stays quiet ${AUTO_CLOSE_MIN} minutes after an answer `
       + 'is closed and marked done on its own. Use it in the run whose answer says it still waits; a job that is done gets session_stop instead.',
     inputSchema: { session: z.string().max(120), minutes: z.number().int().min(1).max(KEEP_MAX_MIN).optional() },
   }, (a) => toolRun(async () => {
     const r = await resolve(a.session, await io.listPanes(), false)
-    if (r.kind !== 'pane' || !ravenLaunched(r.pane)) throw new RavenToolError('session_keep is only for a session you started with session_start; nothing closes the others on its own')
+    if (r.kind !== 'pane' || !ravenLaunched(r.pane)) throw new RavenToolError('session_keep is only for a session you started with session_start or reopened with session_recover; nothing closes the others on its own')
     const w = getWatch(r.pane.name)
     if (!w?.job) throw new RavenToolError(`${r.pane.label} is not watched as a job, so nothing closes it on its own`)
     const until = io.now() + (a.minutes ?? KEEP_DEFAULT_MIN) * 60_000

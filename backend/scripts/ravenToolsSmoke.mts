@@ -249,6 +249,9 @@ const quiet = new Set<string>()
 const away = new Set<string>()
 const typed: { pane: string; text: string }[] = []
 const created: Record<string, unknown>[] = []
+// session_recover's reopens (the Desk's Recover, terminal/resume.ts), and an answer to throw instead
+const resumed: { sessionId: string; label: string; cols: number; rows: number }[] = []
+let resumeThrows: Error | null = null
 const killed: string[] = []
 const uploads: { name: string; size: number }[] = []
 let uploadFails = false
@@ -319,6 +322,19 @@ const fakeIo = {
     screensBy.set(name, ['', '', IDLE])
     return name
   },
+  resumePane: async (o: { sessionId: string; label: string; cols: number; rows: number }) => {
+    if (resumeThrows) throw resumeThrows
+    resumed.push(o)
+    const name = `vk-${String(++paneSeq).padStart(10, '0')}`
+    const p = pane(name, o.label, o.sessionId, o.sessionId)
+    p.mode = 'resume'
+    screensBy.set(name, ['', IDLE])
+    // the pane reads the same conversation its board row does
+    const t = transcripts.get(`sid:${o.sessionId}`) ?? { sessionId: o.sessionId, entries: [] }
+    transcripts.set(`sid:${o.sessionId}`, t)
+    transcripts.set(name, t)
+    return name
+  },
   capture: async (p: string) => fakeCapture(p),
   // the fake screens carry no colors: the read without dim text is the same read
   capturePrompt: async (p: string) => fakeCapture(p),
@@ -355,7 +371,7 @@ ioMod.setRavenToolsIo(fakeIo)
 {
   const listed = (await (await client({ fromBrendon: true })).listTools()).tools.map((t) => t.name)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
-    'session_send', 'session_read', 'session_screen', 'session_keys', 'session_watch', 'session_tend', 'thor_screen', 'thor_windows', 'thor_button', 'thor_click', 'thor_press', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
+    'session_send', 'session_read', 'session_screen', 'session_keys', 'session_watch', 'session_tend', 'thor_screen', 'thor_windows', 'thor_button', 'thor_click', 'thor_press', 'session_stop', 'session_keep', 'session_done', 'sessions_closed', 'session_recover', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
     'project_get', 'tickets', 'inbox', 'calendar', 'calendar_add', 'brief', 'thread_search', 'thread_read']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
@@ -370,6 +386,7 @@ ioMod.setRavenToolsIo(fakeIo)
     ['agents_pause', { paused: true }], ['agent_check', { agent: 'east-triage' }],
     ['session_start', { target: 'work', prompt: 'hi' }],
     ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }], ['session_done', { session: 'personal' }],
+    ['session_recover', { session: 'closed one' }], ['session_recover', { area: 'Thor' }],
     ['media_request', { kind: 'movie', title: 'Heat 2', tmdbId: 5000 }], ['vault_note', { title: 'x', text: 'y' }],
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
     ['calendar_add', { title: 'Haircut', start: '2026-12-02T12:00' }], ['calendar_add', { title: 'Standup', start: '2026-12-02T15:00', calendar: 'work' }],
@@ -383,7 +400,7 @@ ioMod.setRavenToolsIo(fakeIo)
   check('gate: nothing acted', acted === before, acted - before)
   check('gate: no media add, no vault note', adds.length === 0 && notes.length === 0)
   check('gate: no calendar event, personal or work', localPosts.length === 0 && workAdds.length === 0, { localPosts, workAdds })
-  check('gate: no pane opened, nothing typed or stopped, no watch, no task', created.length === 0 && typed.length === 0 && killed.length === 0
+  check('gate: no pane opened, nothing typed or stopped, no watch, no task', created.length === 0 && resumed.length === 0 && typed.length === 0 && killed.length === 0
     && watch.listWatches().length === 0 && tasks.listTasks({ view: 'open', hideTailnet: false }).length === 0 && !agents.isPaused(),
   { created, typed, killed, watches: watch.listWatches().length })
   const off = await call('session_watch', { session: 'nothing-watched', on: false }, false)
@@ -1555,6 +1572,169 @@ agents.syncRoster()
   doneFails = false
 
   for (const w of watch.listWatches()) watch.removeWatch(w.key)
+}
+
+// --------------------------------------- closed sessions: list and recover ---
+// 2026-11-24, Brendon: "use the existing X session" when X is closed made Raven start a duplicate or ask him to tap
+// Recover. sessions_closed lists the Desk's closed, not done sessions; session_recover reopens one, or a whole area.
+
+{
+  posts.length = 0
+  wakes.length = 0
+  const MIN = 60_000
+  const iso = (agoMs: number) => new Date(clock - agoMs).toISOString()
+  const ids = {
+    laptop: 'aaaaaaaa-1111-4111-8111-000000000001', printer: 'aaaaaaaa-1111-4111-8111-000000000002',
+    garden: 'aaaaaaaa-1111-4111-8111-000000000003', old: 'aaaaaaaa-1111-4111-8111-000000000004',
+    mine: 'aaaaaaaa-1111-4111-8111-000000000005', live: 'aaaaaaaa-1111-4111-8111-000000000006',
+  }
+  const rows = [
+    { sessionId: ids.laptop, title: 'Laptop data recovery', area: 'work', live: false, activity: 'closed', disposition: 'open', host: 'thor', lastActivityUtc: iso(1 * 3_600_000), cwd: 'C:\\Work\\Docs' },
+    { sessionId: ids.printer, title: 'Printer queue cleanup', area: 'work', live: false, activity: 'closed', disposition: 'open', host: 'thor', lastActivityUtc: iso(2 * 3_600_000) },
+    { sessionId: ids.garden, title: 'Garden irrigation plan', area: 'north', live: false, activity: 'closed', disposition: 'open', host: 'thor', lastActivityUtc: iso(3 * 3_600_000) },
+    { sessionId: ids.old, title: 'Old finished printer thing', area: 'work', live: false, activity: 'closed', disposition: 'done', host: 'thor', lastActivityUtc: iso(4 * 3_600_000) },
+    { sessionId: ids.mine, title: 'Raven research job', area: 'personal', live: false, activity: 'closed', disposition: 'open', host: 'thor', lastActivityUtc: iso(5 * 3_600_000) },
+    { sessionId: ids.live, title: 'Live printer window', area: 'work', live: true, activity: 'idle', disposition: 'open', host: 'thor', lastActivityUtc: iso(60_000) },
+  ]
+  const added = rows.length
+  board.push(...rows)
+  originMod.noteRavenStarted(ids.mine, clock)
+  say(`sid:${ids.laptop}`, ids.laptop, entry('user', 'recover the photos'), entry('assistant', 'Recovered 4,210 photos to the NAS.\nThe Desktop folder is next.'))
+
+  // the list
+  let r = await call('sessions_closed', {}, false)
+  const listed = (r.json?.sessions ?? []).map((x: { sessionId: string }) => x.sessionId)
+  check('sessions_closed: no gate, the Desk\'s closed not done, newest first', !r.isError && listed[0] === ids.laptop && listed.includes(ids.garden) && listed.includes(ids.mine)
+    && !listed.includes(ids.old) && !listed.includes(ids.live), r.json)
+  const v = r.json.sessions[0]
+  check('sessions_closed: id, title, area by the Desk\'s name, closed in ET, folder, last answer', v.title === 'Laptop data recovery' && v.area === 'Work'
+    && / ET$/.test(v.closed) && v.folder === 'Docs' && v.lastAnswer === 'Recovered 4,210 photos to the NAS. The Desktop folder is next.', v)
+  check('sessions_closed: personal reads Thor, one Raven started says so', r.json.sessions.some((x: { sessionId: string; area: string; startedBy?: string }) => x.sessionId === ids.mine && x.area === 'Thor' && x.startedBy === 'raven'), r.json.sessions)
+  check('sessions_closed: counts per area', r.json.byArea.some((x: { area: string; n: number }) => x.area === 'Work' && x.n === 2), r.json.byArea)
+  r = await call('sessions_closed', { area: 'work' })
+  check('sessions_closed: by area key', !r.isError && r.json.closed === 2 && r.json.sessions.every((x: { area: string }) => x.area === 'Work'), r.json)
+  r = await call('sessions_closed', { area: 'Thor' })
+  check('sessions_closed: by area name (personal is Thor)', !r.isError && r.json.sessions.some((x: { sessionId: string }) => x.sessionId === ids.mine) && r.json.sessions.every((x: { area: string }) => x.area === 'Thor'), r.json)
+  r = await call('sessions_closed', { area: 'Mars' })
+  check('sessions_closed: an unknown area says which have closed ones', r.json === null && /No closed, not done sessions in "Mars"\. Closed ones by area: .*Work 2/.test(r.text), r.text)
+  r = await call('sessions_closed', { query: 'printer', answers: false })
+  check('sessions_closed: by part of the title, no answers read', r.json?.closed === 1 && r.json.sessions[0].sessionId === ids.printer && r.json.sessions[0].lastAnswer === undefined, r.json)
+  r = await call('sessions')
+  check('sessions: counts the closed ones per area', /Work 2/.test(r.json?.closed?.byArea ?? '') && r.json.closed.total >= 4, r.json?.closed)
+
+  // one session, by part of its title
+  const before = acted
+  r = await call('session_recover', { session: 'laptop', label: 'Photo recovery status' })
+  const lPane = r.json?.pane as string
+  check('session_recover: reopens it as the Desk does, at its prompt', !r.isError && /^vk-/.test(lPane) && r.json.state === 'idle' && r.json.sessionId === ids.laptop
+    && r.json.area === 'Work' && r.json.watching === true && acted > before, r)
+  check('session_recover: a resume of that conversation under its own title', resumed.at(-1)?.sessionId === ids.laptop && resumed.at(-1)?.label === 'Laptop data recovery'
+    && resumed.at(-1)?.cols === 120 && resumed.at(-1)?.rows === 40 && !created.some((c) => c.newId === ids.laptop), resumed.at(-1))
+  const wv = watch.getWatch(lPane)
+  check('session_recover: watched as a job of his it reopened, old answers not news', wv?.job === true && wv.reopened === true && wv.baselined === true && wv.title === 'Photo recovery status', wv)
+  check('session_recover: his session stays his on the Desk', !originMod.ravenStartedIds().has(ids.laptop))
+  let state = await tools.ravenSessionsState()
+  check('session_recover: on the Watching card', state.watching.some((w) => w.pane === lPane && w.title === 'Photo recovery status' && w.state === 'idle'), state.watching)
+  r = await call('sessions_closed', { area: 'Work' })
+  check('sessions_closed: a reopened one leaves the list', r.json.closed === 1 && r.json.sessions[0].sessionId === ids.printer, r.json)
+
+  // already running: the same pane, nothing new
+  const n0 = resumed.length
+  r = await call('session_recover', { session: 'laptop' })
+  check('session_recover: already open answers that pane', !r.isError && r.json.pane === lPane && r.json.already === true && resumed.length === n0, r)
+  r = await call('session_recover', { session: ids.laptop })
+  check('session_recover: by conversation id too', r.json?.pane === lPane && r.json.already === true && resumed.length === n0, r)
+  r = await call('session_recover', { session: 'live printer' })
+  check('session_recover: running in a window on thor opens nothing', !r.isError && r.json.already === true && r.json.sessionId === ids.live && /session_send/.test(r.json.note) && resumed.length === n0, r)
+
+  // work in it, then close it: Raven's to close, his to keep not done
+  r = await call('session_send', { session: lPane, text: 'status?' }, false)
+  check('session_recover: session_send types into it right after', !r.isError && typed.at(-1)?.pane === lPane && typed.at(-1)?.text === 'status?', r)
+  away.add(lPane)
+  say(lPane, ids.laptop, entry('tool'), entry('assistant', 'Status: 4,210 photos recovered, the Desktop folder copy is at 60%.'))
+  await watch.tickWatches()
+  clock += 13_000
+  await watch.tickWatches()
+  const wk = wakes.at(-1)
+  check('session_recover: its answer wakes Raven as a job it reopened', wk?.kind === 'session_reply' && wk.payload.pane === lPane && wk.payload.job === true && wk.payload.reopened === true, wakes)
+  const m0 = doneMarks.length
+  r = await call('session_keep', { session: lPane, minutes: 30 }, false)
+  check('session_keep: allowed for one it reopened', !r.isError && r.json.kept === lPane, r)
+  r = await call('session_stop', { session: lPane }, false)
+  check('session_stop: one it reopened closes without Brendon, not marked done', !r.isError && r.json.stopped === lPane && r.json.markedDone === false && /closed list/.test(r.json.note)
+    && doneMarks.length === m0 && killed.includes(lPane) && thorStops.some((x) => x.sid === ids.laptop) && !watch.getWatch(lPane), r)
+  r = await call('session_done', { session: ids.laptop }, false)
+  check('session_done: one it reopened, closed again, it may mark without Brendon', !r.isError && doneMarks.at(-1) === ids.laptop, r)
+  doneMarks.splice(m0)
+  r = await call('session_done', { session: ids.printer }, false)
+  check('session_done: a closed one it never reopened stays gated', r.isError && /Brendon's own message/.test(r.text), r)
+
+  // a session marked done: only by its exact id
+  r = await call('session_recover', { session: 'old finished' })
+  check('session_recover: a done one is refused by its title', r.isError && /marked done/.test(r.text) && r.text.includes(ids.old) && resumed.length === n0, r)
+  r = await call('session_recover', { session: 'printer' })
+  check('session_recover: two that match are refused with their ids', r.isError && /matches 2 sessions/.test(r.text) && r.text.includes(ids.printer) && r.text.includes(ids.live), r)
+  r = await call('session_recover', { session: ids.old, watch: false })
+  const oPane = r.json?.pane as string
+  check('session_recover: a done one by its exact id, said so, unwatched', !r.isError && r.json.wasDone === true && resumed.at(-1)?.sessionId === ids.old && !watch.getWatch(oPane), r)
+  r = await call('session_stop', { session: oPane }, false)
+  check('session_stop: unwatched, it is still Raven\'s to close', !r.isError && r.json.markedDone === false, r)
+  r = await call('session_recover', { session: 'nothing like it' })
+  check('session_recover: no match says where to look', r.isError && /sessions_closed/.test(r.text), r)
+  r = await call('session_recover', {})
+  check('session_recover: a session or an area', r.isError && /one of them/.test(r.text), r)
+
+  // a pane that dies at once: refused, unwatched
+  const realResume = fakeIo.resumePane
+  fakeIo.resumePane = async (o) => { const name = await realResume(o); states.set(name, 'dead'); return name }
+  ioMod.setRavenToolsIo(fakeIo)
+  r = await call('session_recover', { session: 'garden' })
+  const dPane = resumed.at(-1) && watch.listWatches().find((w) => w.sessionId === ids.garden)
+  check('session_recover: a pane that ends at once is an error, not watched', r.isError && /ended right after it opened/.test(r.text) && !dPane, r)
+  fakeIo.resumePane = realResume
+  ioMod.setRavenToolsIo(fakeIo)
+
+  // a whole area, as the Desk's Recover Work
+  const k0 = resumed.length
+  const c0 = clock
+  r = await call('session_recover', { area: 'Work' })
+  const got = (r.json?.sessions ?? []) as { pane: string; sessionId: string; state: string }[]
+  check('session_recover area: every closed, not done one there, newest first', !r.isError && r.json.area === 'Work' && r.json.reopened === 2 && r.json.of === 2
+    && got[0].sessionId === ids.laptop && got[1].sessionId === ids.printer && got.every((x) => x.state === 'idle') && resumed.length === k0 + 2, r.json)
+  check('session_recover area: a gap between the logins', clock - c0 >= 700, clock - c0)
+  check('session_recover area: each watched as one it reopened', got.every((x) => watch.getWatch(x.pane)?.reopened === true), watch.listWatches())
+  state = await tools.ravenSessionsState()
+  check('session_recover area: all on the Watching card', got.every((x) => state.watching.some((w) => w.pane === x.pane)), state.watching)
+
+  // auto-close: quiet 15 minutes after an answer, closed and left not done
+  const pw = got[1]
+  away.add(pw.pane)
+  screensBy.set(pw.pane, [IDLE])
+  say(pw.pane, ids.printer, entry('user', 'status?'), entry('tool'), entry('assistant', 'The queue is clear.'))
+  await watch.tickWatches()
+  clock += 13_000
+  await watch.tickWatches()
+  const d0 = doneMarks.length
+  const pc = posts.length
+  const shut = await autoclose.closeQuietJobs().then(async () => { clock += 15 * MIN; await watch.tickWatches(); return autoclose.closeQuietJobs() })
+  check('auto-close: one it reopened closes on its own, not marked done', shut.includes(pw.pane) && doneMarks.length === d0
+    && /back on the Desk's closed list, not marked done\.$/.test(posts.slice(pc).at(-1)?.text ?? ''), { shut, posts: posts.slice(pc) })
+
+  // a full pane list stops an area recover
+  for (const x of got) if (states.get(x.pane) !== 'gone') { states.set(x.pane, 'gone'); watch.removeWatch(x.pane) }
+  resumeThrows = Object.assign(new Error('32 sessions already open (max 32) \u2014 close one first'), { status: 409 })
+  r = await call('session_recover', { area: 'work' })
+  check('session_recover area: a full pane list stops it and says so', !r.isError && r.json.reopened === 0 && /no room for more terminals/.test(r.json.stopped), r.json)
+  resumeThrows = null
+  boardUp = false
+  // past the 20 s copy of thor's list
+  clock += 21_000
+  r = await call('session_recover', { session: ids.garden })
+  check('session_recover: thor\'s list not answering opens nothing', r.isError && /not answering/.test(r.text), r)
+  boardUp = true
+
+  for (const w of watch.listWatches()) watch.removeWatch(w.key)
+  board.splice(board.length - added, added)
 }
 
 // ------------------------------------------- a turn the transcript holds open ---

@@ -681,7 +681,12 @@ function renderSession(e: AgentEvent, cut: number, retry: string): string {
   const kind = baseKind(e.kind)
   const follow = str(p.followUp) ? `\n  Your follow-up instruction for this answer: ${str(p.followUp)}` : ''
   // a job Raven started (lib/raven/tools/watch.ts): this run decides whether it is finished
-  const job = p.job === true
+  // one of his it reopened (session_recover): closing never marks it done, that is session_done's once its own work is finished
+  const job = p.job === true && p.reopened === true
+    ? `\n  You reopened this session of Brendon's with session_recover${str(p.title) ? ` for "${clip(str(p.title), 80)}"` : ''}. Once what he asked of it is answered, `
+      + `session_stop ${str(p.pane)} in this run: that closes it and leaves it on his closed list, not done. Only if this turn says the session's own work is finished, `
+      + 'session_done it as well. If it waits on something long (a release, a build), session_keep it. Otherwise it is closed on its own 15 minutes after this turn, still not done.'
+    : p.job === true
     ? `\n  You started this session for a job${str(p.title) ? ` ("${clip(str(p.title), 80)}")` : ''}. If this turn reports the job done, or it failed with nothing left to try, `
       + `session_stop ${str(p.pane)} now, in this run: that ends it and marks it done. If it is still on the job and waits on something long `
       + `(a release, a build), session_keep it. Otherwise it is closed and marked done on its own 15 minutes after this turn.`
@@ -869,7 +874,8 @@ const SESSIONS_NOW = 'He has not seen what the watched sessions wrote: only you 
   + 'Read every line. Tell him only what matters, in one to four plain lines in your own words: a job finished or shipped (say the version), '
   + 'failed or blocked, needs him (a question, a permission, an approval, a device update or an app reload), something risky '
   + '(odin\'s CPU or load, data loss, a stuck build) or a real change of plan. Routine progress, narration and steps that went fine get nothing. '
-  + 'Never paste what a session wrote. A job you started that reports it is done: session_stop it in this run (that marks it done) and tell him the result in one line.'
+  + 'Never paste what a session wrote. A job you started that reports it is done: session_stop it in this run (that marks it done) and tell him the result in one line. '
+  + 'One of his you reopened (session_recover) whose answer settles what he asked: session_stop it too (it stays not done) and tell him the answer.'
 
 async function buildPrompt(events: AgentEvent[], fromBrendon: boolean, mustAnswer = false): Promise<{ system: string; prompt: string }> {
   const system = ravenBrief({ features: features.filter((f) => f.tools).map((f) => f.id) })

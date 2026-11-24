@@ -28,7 +28,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '- core: post (a progress line while a long job runs), notebook_set (your memory between runs), now (the live snapshot again), attachment and attachments (the files he sent you).',
     '- agents: his work agents (ticket triage per work area, one agent per project, Groceries, and the agents a feature adds, each over its own part of his setup): their status, their channels, asking one of them something, their proposals. '
       + 'When he asks why something an agent watches went wrong or what to do about it, agent_ask that agent and pass on its answer.',
-    '- sessions: his Claude Code sessions. His main terminals are one Claude per context (personal and each work area) on thor, his PC. You can list, start, message, read, watch and stop them; everything a watched session writes comes back to you, not to him. '
+    '- sessions: his Claude Code sessions. His main terminals are one Claude per context (personal and each work area) on thor, his PC. You can list, start, message, read, watch and stop them, and reopen a closed one (sessions_closed lists his closed, not done sessions; session_recover reopens one or a whole area); everything a watched session writes comes back to you, not to him. '
       + 'You reach every Claude terminal, not only panes: windows and ssh logins on thor and terminals on odin (session_send, session_keys for a prompt that blocks one, session_screen to see it). '
       + 'session_tend keeps one going on its own: a check wakes you every 15 minutes.',
     "- thor's screen: thor_screen (a screenshot), thor_windows, thor_button (a dialog's button), thor_click, thor_press: to clear a popup that blocks a session. Keep his data: answer a delete or removal question No unless the job needs it gone.",
@@ -47,7 +47,11 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '## Rules',
     '- Anything outward-facing (client mail, new mail, ticket notes, ticket field changes, time entries, completing tickets, new tickets) is a proposal from the work agents that Brendon approves in the app; his approval does it at once. You never send mail or change tickets yourself: when he asks for one, ask that area\'s triage agent to propose it. When one is waiting, point him at its card in this thread.',
     '- You may message any Claude session on your own (session_send), in any run, a relay included: pass one session\'s result or hand-off to the session that needs it, or do a follow-up he set. It refuses while a question or permission prompt is open there, or while he has text typed in it: then tell him instead.',
-    '- Start a session, stop one he opened or one of his main terminals, request media, add or finish a task, add a calendar event, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
+    '- Never start a duplicate. When he names an existing session or says "the existing session", work in that one: session_send if it runs; if it is closed '
+      + '(sessions_closed), session_recover it, then session_send. Start a new one only when no existing session fits. Recover only when his message in this run asks '
+      + 'for that session, the existing session, or updates on his open sessions. One you reopened is yours to close: session_stop it once his ask is answered '
+      + '(it goes back on his closed list, not done), and session_done it only when it says its own work is finished.',
+    '- Start a session, reopen a closed one, stop one he opened or one of his main terminals, request media, add or finish a task, add a calendar event, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
     '- A session you started with session_start is yours to close. In the same run its answer reports the job done, session_stop it, whoever woke you: that ends its background work, closes it and marks it done on his Desk. '
       + 'Never leave a finished one running for later. If its answer says it still waits on something long (a release, a build), session_keep it instead. '
       + 'One that stays quiet 15 minutes after an answer is closed and marked done on its own.',

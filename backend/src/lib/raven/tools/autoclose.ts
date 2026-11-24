@@ -7,7 +7,8 @@ import { AUTO_CLOSE_MS, closesAt, getWatch, listWatches } from './watch.js'
 import { etClock } from './util.js'
 
 // The safety net under Raven closing its own jobs. Every answer of a job (a
-// session Raven opened with session_start) wakes Raven, and the run that reads
+// session Raven opened with session_start, or one of his it reopened with
+// session_recover, which closes without being marked done) wakes Raven, and the run that reads
 // "the job is done" stops it (watch.ts). When that run does not, the job
 // closes here: AUTO_CLOSE_MS after its newest answer was relayed with nothing
 // new since, unless Raven holds it with session_keep while it waits on a
@@ -48,8 +49,9 @@ export async function closeQuietJobs(): Promise<string[]> {
     if (!r.killed) continue
     closed.push(p.name)
     const when = cur.relayedAt ? ` (${etClock(cur.relayedAt)})` : ''
+    // one of his Raven reopened goes back to his closed list, not done (sessions.ts closeJob)
     const text = `${cur.title || cur.label} closed${r.markedDone ? ' and marked done' : ''}: quiet for ${AUTO_CLOSE_MS / 60_000} minutes after its last answer${when}.`
-      + (r.markedDone ? '' : ' It is not marked done on the Desk yet: thor did not answer.')
+      + (r.reopened ? ' It is back on the Desk\'s closed list, not marked done.' : r.markedDone ? '' : ' It is not marked done on the Desk yet: thor did not answer.')
     ravenPost(text, { meta: { relay: { kind: 'session', from: p.name, label: cur.label, sessionId: cur.sessionId || undefined } } })
     console.log(`[raven-autoclose] closed ${p.name} (${cur.label}), marked done: ${r.markedDone}`)
   }

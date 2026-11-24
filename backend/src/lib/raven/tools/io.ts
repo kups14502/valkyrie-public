@@ -6,6 +6,7 @@ import {
 import { pageFrom, paneTranscript, readerFor } from '../../../terminal/transcriptFeed.js'
 import type { TranscriptPage } from '../../../terminal/transcript.js'
 import { boardNow, boardSessions, launchTargets, markSessionsDone, stopSessionOnHost, uploadToThor, type LaunchTargetInfo } from '../../../routes/hostLaunch.js'
+import { resumeOnThor } from '../../../terminal/resume.js'
 import { getRavenFile } from '../files.js'
 import { findOutside, outsideIo } from './outside.js'
 import type { RavenFile } from '../types.js'
@@ -21,6 +22,8 @@ export type BoardRow = Record<string, unknown>
 export type RavenToolsIo = {
   listPanes: () => Promise<TermSession[]>
   createPane: (o: CreateOpts) => Promise<string>
+  /** a closed conversation reopened in a new pane on thor, as the Desk's Recover does (terminal/resume.ts); the pane's name */
+  resumePane: (o: { sessionId: string; label: string; cols: number; rows: number }) => Promise<string>
   capture: (pane: string) => Promise<string | null>
   /** the screen without its dim text (the empty prompt's hint), for the checks before typing */
   capturePrompt: (pane: string) => Promise<string | null>
@@ -69,6 +72,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const real: RavenToolsIo = {
   listPanes: listSessions,
   createPane: createSession,
+  resumePane: (o) => resumeOnThor({ ...o, ctx: { actor: 'raven', via: 'mcp' } }),
   capture: capturePane,
   capturePrompt: capturePaneUndimmed,
   typeLine,

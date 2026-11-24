@@ -17,7 +17,7 @@ import { registerWorkTools } from './work.js'
 // attachments) are registered by the endpoint itself.
 //
 //   agents.ts    the work agents: status, channels, a question to one, pause, check, pending proposals
-//   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, screen, keys, watch, stop
+//   sessions.ts  Brendon's Claude sessions: main terminals, start, send (with attachments), read, screen, keys, watch, stop, his closed ones and recover
 //   outside.ts   Claude sessions with no pane here (windows and ssh logins on thor, terminals on odin): find, screen, type, keys
 //   thorscreen.ts thor's screen: screenshot, windows, a dialog's button, click, keys
 //   tend.ts      sessions Raven keeps going: a check every 15 minutes wakes it

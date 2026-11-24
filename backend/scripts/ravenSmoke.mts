@@ -922,7 +922,24 @@ await ravenIdle()
   check('job answer: a finished job is stopped in the run, and he gets the result in one line',
     jp.includes('A job you started that reports it is done: session_stop it in this run (that marks it done) and tell him the result in one line.'), jp.slice(-700))
   check('brief: a session Raven started is its to close, in the same run', lastRaven().sys.includes('is yours to close. In the same run its answer reports the job done, session_stop it')
-    && lastRaven().sys.includes('Start a session, stop one he opened or one of his main terminals'), lastRaven().sys)
+    && lastRaven().sys.includes('Start a session, reopen a closed one, stop one he opened or one of his main terminals'), lastRaven().sys)
+  check('brief: an existing session is recovered, never a duplicate', lastRaven().sys.includes('Never start a duplicate.') && lastRaven().sys.includes('session_recover it, then session_send'), lastRaven().sys)
+}
+
+// one of his Raven reopened (session_recover) answered: closing it leaves it not done
+queue({ result: '(no reply)' })
+runsAt = runsOf()
+hooks.wakeRavenWith('session_reply', {
+  pane: 'vk-0000000010', label: 'Laptop data recovery', sessionId: '3c2608cc-c46d-4710-a697-0e6e79248682', turnEnded: true,
+  said: [{ at: Date.now(), from: 'claude', text: 'Status: 4,210 photos recovered.' }], job: true, reopened: true, title: 'Photo recovery status',
+})
+await until(() => runsOf() > runsAt)
+await ravenIdle()
+{
+  const jp = lastRaven().prompt ?? ''
+  check('reopened answer: stop it once his ask is answered, never marked done by that', jp.includes('Status: 4,210 photos recovered.')
+    && jp.includes(`You reopened this session of Brendon's with session_recover for "Photo recovery status"`) && jp.includes('session_stop vk-0000000010 in this run')
+    && jp.includes('leaves it on his closed list, not done') && jp.includes('still not done') && !jp.includes('You started this session for a job'), jp.slice(0, 1400))
 }
 
 // Brendon naming an agent in the thread wakes it as well as Raven

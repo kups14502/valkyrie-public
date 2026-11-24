@@ -118,6 +118,8 @@ export type Watch = {
   status?: string
   /** a session Raven opened with session_start (never a main): Raven closes it once it reports done, or it closes on its own once quiet */
   job?: boolean
+  /** a job that is one of his Raven reopened with session_recover: closing it leaves it not done, on his closed list */
+  reopened?: boolean
   /** ms: when its newest turn's end (with Claude's lines) was handed to Raven */
   relayedAt?: number
   /** ms: session_keep holds the auto-close (and a background wait's Working) until then */
@@ -231,7 +233,7 @@ async function readPage(w: Pick<Watch, 'pane' | 'sessionId' | 'host'>, cursor: s
  * before anything is typed into it, so what it said before never reaches Raven
  * and an answer that comes back within seconds still does.
  */
-export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; title?: string; job?: boolean; host?: 'thor' | 'odin' }): Promise<Watch> {
+export async function startWatch(w: { pane: string; label: string; sessionId: string; followUp?: string; fresh?: boolean; title?: string; job?: boolean; reopened?: boolean; host?: 'thor' | 'odin' }): Promise<Watch> {
   const key = watchKey(w.pane, w.sessionId)
   const nowMs = io.now()
   const now = new Date(nowMs).toISOString()
@@ -244,6 +246,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
     if (w.followUp !== undefined) x.followUp = w.followUp
     if (w.title) x.title = w.title
     if (w.job) x.job = true
+    if (w.reopened) x.reopened = true
     x.lastActivityAt = now
     saveWatches(list)
     return x
@@ -251,7 +254,7 @@ export async function startWatch(w: { pane: string; label: string; sessionId: st
   const next: Watch = {
     key, pane: w.pane, label: w.label, sessionId: w.sessionId, since: now, lastActivityAt: now,
     cursor: '', baselined: Boolean(w.fresh), lastNewAt: nowMs, lastSeenAt: 0, pending: [], pendingSince: 0, lastKind: '', settledAt: 0,
-    followUp: w.followUp ?? '', title: w.title ?? '', status: '', ...(w.job ? { job: true } : {}),
+    followUp: w.followUp ?? '', title: w.title ?? '', status: '', ...(w.job ? { job: true } : {}), ...(w.job && w.reopened ? { reopened: true } : {}),
     ...(!w.pane && w.host === 'odin' ? { host: 'odin' as const } : {}),
   }
   if (!w.fresh) {
@@ -373,7 +376,7 @@ function handOff(w: Watch, f: HandOff, now: number): void {
     pane: w.pane, label: w.label, title: w.title || undefined, sessionId: w.sessionId || undefined,
     said: said.map(({ at, from, text }) => ({ at, from, text })),
     turnEnded: f.turnEnded, ended: f.ended || undefined, asking: f.asking || undefined, background: f.background || undefined,
-    followUp: followUp || undefined, job: job || undefined,
+    followUp: followUp || undefined, job: job || undefined, reopened: (job && w.reopened) || undefined,
   })
   if (!took) {
     if (!f.turnEnded) return
