@@ -39,12 +39,16 @@
 //              read clearing it here (phone, desktop)
 //   waiting-list  an agent's waiting count opens the proposals waiting on him (title, ticket or mail subject, ET time);
 //              Escape, a tap outside or the count close it; a row brings its card into view, lit (phone, ipad, desktop)
+//   photo      a thumbnail opens the picture full size in the app, not as a page; the X (44 px, top-right), a tap on the
+//              dark, Escape and a swipe down close it; a tap on the picture or a short drag does not; in the desktop app
+//              it starts under the strip (phone, ipad, desktop, app)
 //   down       /api/raven not answering: one plain line, no crash
 
 import { sleep } from '../lib/cdp.mjs'
 import { layoutReport } from '../lib/checks.mjs'
 import { fixtures } from './upload.mjs'
 import { quietThor } from '../lib/fixtures.mjs'
+import { TAURI_DRAG, tauriStub } from '../lib/tauri.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const ROUTE = '/m/raven'
@@ -1916,6 +1920,131 @@ export function ravenTests() {
         t.check(s2.moved?.flag && /^Cleared .* · All reviewed$/.test(s2.moved.live ?? ''), `after the clear the notice reads ${JSON.stringify(s2.moved)}`)
         await t.shot(page, 'cleared')
         await fits(t, page, `${ROUTE} feeds @${device}`)
+      },
+    })
+  }
+
+  // A picture in the thread opens full size in the app (kit/photo.tsx), never as a page of its own: the iOS app had
+  // no way back from one. Out: the X (top-right, a 44 px target, whole on screen, nothing over it), a tap on the dark,
+  // Escape, and on touch a swipe down; a tap on the picture, a short drag, or a mouse drag off it keeps it open, and
+  // closing taps nothing under it. In the desktop app it starts under the strip, so the window's buttons stay in reach
+  for (const device of ['phone', 'ipad', 'desktop', 'app']) {
+    const app = device === 'app'
+    tests.push({
+      name: `raven:photo:${device}`,
+      group: 'raven',
+      device: app ? 'desktop' : device,
+      timeout: 300_000,
+      async run(t) {
+        const page = await t.page(app ? { scripts: [tauriStub(), TAURI_DRAG] } : {})
+        ravenBackend(page)
+        // a phone camera's portrait photo, far larger than any screen: it must fit whole
+        const BIG = '<svg xmlns="http://www.w3.org/2000/svg" width="3024" height="4032"><rect width="3024" height="4032" fill="#0a3"/><circle cx="1512" cy="2016" r="900" fill="#fd0"/></svg>'
+        page.mock('/api/raven/files/f1', () => ({ status: 200, body: BIG, type: 'image/svg+xml' }))
+        await page.goto(ROUTE)
+        await threadUp(page)
+        await until(page, () => !!document.querySelector('.rv-msgs .rv-thumb img')?.complete, 'the thumbnail did not show')
+        const touch = device === 'phone' || device === 'ipad'
+        const path = await page.path()
+        // a plain tap on the thumbnail must not follow its link (a new page, or the iOS app's dead end)
+        await page.eval(() => {
+          window.__thumbFollowed = []
+          document.addEventListener('click', (e) => { if (e.target.closest?.('.rv-thumb')) window.__thumbFollowed.push(!e.defaultPrevented) })
+        })
+        const shown = () => page.eval(() => !!document.querySelector('.vk-photo'))
+        const open = async (why) => {
+          await page.tap({ sel: '.rv-msgs .rv-thumb' }, { wait: 40_000 })
+          await until(page, () => !!document.querySelector('.vk-photo .vk-photo-img')?.complete, `${why}: the picture did not open full size`)
+          await sleep(300)
+        }
+        const closed = async (why) => {
+          await until(page, () => !document.querySelector('.vk-photo'), why, [], 10_000)
+          await sleep(300)
+          const after = await page.eval(() => ({ drawer: !!document.querySelector('.rv-drawer'), pal: !!document.querySelector('.vl-pal'), rows: document.querySelectorAll('.rv .rv-msg').length }))
+          t.check(!after.drawer && !after.pal && after.rows > 0, `${why}: closing it pressed something under it: ${JSON.stringify(after)}`)
+          t.check((await page.path()) === path, `${why}: the page moved to ${await page.path()}`)
+        }
+
+        await open('the first tap')
+        const v = await page.eval(() => {
+          const root = document.querySelector('.vk-photo')
+          const x = root.querySelector('.vk-photo-x')
+          const img = root.querySelector('.vk-photo-img')
+          const thumb = document.querySelector('.rv-msgs .rv-thumb img')
+          const W = document.documentElement.clientWidth
+          const H = window.innerHeight
+          const box = (el) => { const r = el.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) } }
+          const xr = x.getBoundingClientRect()
+          const strip = document.querySelector('.vl-strip')?.getBoundingClientRect()
+          const winctl = document.querySelector('.vl-winctl')
+          const wr = winctl?.getBoundingClientRect()
+          return {
+            role: root.getAttribute('role'), modal: root.getAttribute('aria-modal'), label: x.getAttribute('aria-label'),
+            src: img.getAttribute('src') === thumb.getAttribute('src'), W, H,
+            root: box(root), x: box(x), img: box(img),
+            xHit: x.contains(document.elementFromPoint(xr.left + xr.width / 2, xr.top + xr.height / 2)),
+            focus: document.activeElement === x,
+            stripBottom: strip ? Math.round(strip.bottom) : null,
+            winctl: wr ? winctl.contains(document.elementFromPoint(wr.left + wr.width / 2, wr.top + wr.height / 2)) : null,
+          }
+        })
+        t.check(v.role === 'dialog' && v.modal === 'true' && v.label === 'Close' && v.src, `the viewer reads ${JSON.stringify({ role: v.role, modal: v.modal, label: v.label, src: v.src })}`)
+        t.check(v.x.w >= 44 && v.x.h >= 44 && v.xHit, `the X is ${v.x.w}x${v.x.h} px${v.xHit ? '' : ', with something over it'}`)
+        t.check(v.x.l >= 0 && v.x.t >= v.root.t && v.x.r <= v.W && v.x.b <= v.H && v.x.r >= v.W - 80, `the X is not whole in the top-right corner: ${JSON.stringify(v.x)} in ${v.W}x${v.H}`)
+        t.check(v.img.l >= 0 && v.img.r <= v.W && v.img.t >= v.root.t && v.img.b <= v.H && v.img.w > 0, `the picture is not whole on screen: ${JSON.stringify(v.img)}`)
+        t.check(v.focus, 'the X does not have the focus')
+        if (app) t.check(v.stripBottom !== null && v.root.t >= v.stripBottom - 1 && v.winctl === true, `the viewer covers the strip or the window buttons: top ${v.root.t}, strip ${v.stripBottom}, buttons clear ${v.winctl}`)
+        else t.check(v.root.t === 0 && v.root.l === 0 && v.root.r === v.W && v.root.b === v.H, `the viewer does not cover the screen: ${JSON.stringify(v.root)}`)
+        t.check((await page.path()) === path, `the tap moved the page to ${await page.path()}`)
+        await fits(t, page, `${ROUTE} photo @${device}`)
+        await t.shot(page, 'open')
+
+        // the X
+        await page.tap({ sel: '.vk-photo-x' }, { wait: 10_000 })
+        await closed('the X did not close it')
+
+        // a tap on the picture keeps it; a tap on the dark closes it
+        await open('the second tap')
+        await page.tap({ sel: '.vk-photo-img' }, { wait: 10_000 })
+        await sleep(500)
+        t.check(await shown(), 'a tap on the picture closed it')
+        const dark = await page.eval(() => {
+          const r = document.querySelector('.vk-photo').getBoundingClientRect()
+          const p = { x: r.left + 8, y: r.bottom - 10 }
+          return { ...p, hit: document.elementFromPoint(p.x, p.y)?.className }
+        })
+        t.check(dark.hit === 'vk-photo', `the bottom-left corner is ${dark.hit}, not the dark around the picture`)
+        await page.tap({ x: dark.x, y: dark.y })
+        await closed('a tap on the dark did not close it')
+
+        // Escape
+        await open('the third tap')
+        await page.key('Escape')
+        await closed('Escape did not close it')
+
+        const c = await page.eval(() => ({ H: window.innerHeight }))
+        await open('the fourth tap')
+        const mid = await page.eval(() => { const r = document.querySelector('.vk-photo-img').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })
+        if (touch) {
+          // a short, slow drag springs back
+          await page.swipe(mid.x, mid.y, mid.x, mid.y + 30, { steps: 10, ms: 600 })
+          await sleep(500)
+          const back = await page.eval(() => ({ open: !!document.querySelector('.vk-photo'), tf: document.querySelector('.vk-photo-img')?.style.transform ?? '' }))
+          t.check(back.open && (back.tf === '' || back.tf === 'none'), `a 30 px drag closed it or left the picture moved: ${JSON.stringify(back)}`)
+          // a swipe down closes it
+          await page.swipe(mid.x, mid.y, mid.x, Math.min(c.H - 4, mid.y + 240), { steps: 12, ms: 240 })
+          await closed('a swipe down did not close it')
+        } else {
+          // the mouse drags nothing: a drag from the picture to the dark keeps it open
+          await page.swipe(mid.x, mid.y, mid.x, Math.min(c.H - 4, mid.y + 240))
+          await sleep(500)
+          t.check(await shown(), 'a mouse drag from the picture to the dark closed it')
+          await page.key('Escape')
+          await closed('Escape after the drag did not close it')
+        }
+        const followed = await page.eval(() => window.__thumbFollowed)
+        t.check(followed.length >= 4 && followed.every((f) => !f), `a tap on the thumbnail followed its link: ${JSON.stringify(followed)}`)
+        await fits(t, page, `${ROUTE} photo closed @${device}`)
       },
     })
   }

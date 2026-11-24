@@ -20,6 +20,7 @@ import { useTick } from './data'
 import { setRavenWidgetOn, useRavenWidgetOn } from '../../lib/ravenWidget'
 import { requestIntent } from './shell'
 import { Icon } from './icons'
+import { PhotoViewer } from './photo'
 import { Press, cx, toast } from './ui'
 import './raven.css'
 
@@ -441,17 +442,38 @@ export function RavenWidgetRow() {
 
 // ------------------------------------------------------------ attachments ---
 
-/** A message's files: pictures as thumbnails, anything else as a name chip; each opens the file. */
+/**
+ * A message's files: pictures as thumbnails, anything else as a name chip. A picture opens full size in the app
+ * (kit/photo.tsx; Ctrl or a middle click still opens it in a tab), any other file opens the file.
+ */
 export function RavenFiles({ files }: { files: RavenFile[] }) {
   const url = useRavenFileUrl()
+  const [shown, setShown] = useState<RavenFile | null>(null)
   if (!files.length) return null
+  const shownSrc = shown ? url(shown.id) : null
   return (
     <div className="rv-files">
       {files.map((f) => {
         const href = url(f.id)
         if (isImageFile(f)) {
           return href
-            ? <a key={f.id} className="rv-thumb" href={href} target="_blank" rel="noopener noreferrer" title={f.name}><img src={href} alt={f.name} loading="lazy" draggable={false} /></a>
+            ? (
+              <a
+                key={f.id}
+                className="rv-thumb"
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={f.name}
+                onClick={(e) => {
+                  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+                  e.preventDefault()
+                  setShown(f)
+                }}
+              >
+                <img src={href} alt={f.name} loading="lazy" draggable={false} />
+              </a>
+            )
             : <span key={f.id} className="rv-thumb" title={f.name} />
         }
         const label = <><FileText size={13} strokeWidth={1.6} className="vl-icon vl-icon-dim" aria-hidden /><span>{f.name}</span><i>{fmtSize(f.size)}</i></>
@@ -459,6 +481,7 @@ export function RavenFiles({ files }: { files: RavenFile[] }) {
           ? <a key={f.id} className="rv-file" href={href} target="_blank" rel="noopener noreferrer">{label}</a>
           : <span key={f.id} className="rv-file">{label}</span>
       })}
+      {shown && shownSrc && <PhotoViewer src={shownSrc} name={shown.name} onClose={() => setShown(null)} />}
     </div>
   )
 }
