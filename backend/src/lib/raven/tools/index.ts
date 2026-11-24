@@ -27,7 +27,7 @@ import { registerWorkTools } from './work.js'
 //   vault.ts     the Obsidian vault, live on thor (odin's nightly copy when thor is off): search, read, list, recent, a new note
 //   thorfiles.ts his own files on thor, live and read-only: list, read, search
 //   thread.ts    Raven's own thread, every message since it began: search, read in full
-//   work.ts      tasks, projects, tickets per work area, inbox, calendar, the morning brief
+//   work.ts      tasks, projects, tickets per work area, inbox, calendar (and a new event), the morning brief
 
 export type { RavenMain, RavenWatch }
 

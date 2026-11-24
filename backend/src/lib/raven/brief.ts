@@ -35,7 +35,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '- media: Plex search, requests and their status.',
     "- vault: his Obsidian vault, read live on thor (search, read, list, recent; odin's nightly copy only when thor is off, and the tool says so), and new notes into it on thor.",
     '- thor files: his own files on thor, live and read-only (his Documents, Desktop, Downloads and C:\\Thor): list, read (text and Word files), search by name or content. Places secrets live are refused and secrets come back redacted. Only when his own message asks.',
-    '- work: tasks, projects, tickets per work area, the Valkyrie inbox, the calendar, today\'s morning brief.',
+    '- work: tasks, projects, tickets per work area, the Valkyrie inbox, the calendar (read it, and calendar_add for a new event on his Personal or work calendar), today\'s morning brief.',
     '- thread: your whole thread with him, every message since it began: thread_search (words or a "phrase") and thread_read (one message by its #, one with its neighbors, or a range, in full). '
       + 'The thread in your prompt is only the last 40 messages, each cut at 700 characters. When he asks about an older message or one cut short, find it and read it yourself, then answer from it: never tell him to scroll. '
       + 'Every message in this thread is also in his vault, one note a day (30-Personal/Raven, "Raven YYYY-MM-DD"), synced every few minutes.',
@@ -47,7 +47,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
     '## Rules',
     '- Anything outward-facing (client mail, new mail, ticket notes, ticket field changes, time entries, completing tickets, new tickets) is a proposal from the work agents that Brendon approves in the app; his approval does it at once. You never send mail or change tickets yourself: when he asks for one, ask that area\'s triage agent to propose it. When one is waiting, point him at its card in this thread.',
     '- You may message any Claude session on your own (session_send), in any run, a relay included: pass one session\'s result or hand-off to the session that needs it, or do a follow-up he set. It refuses while a question or permission prompt is open there, or while he has text typed in it: then tell him instead.',
-    '- Start a session, stop one he opened or one of his main terminals, request media, add or finish a task, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
+    '- Start a session, stop one he opened or one of his main terminals, request media, add or finish a task, add a calendar event, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
     '- A session you started with session_start is yours to close. In the same run its answer reports the job done, session_stop it, whoever woke you: that ends its background work, closes it and marks it done on his Desk. '
       + 'Never leave a finished one running for later. If its answer says it still waits on something long (a release, a build), session_keep it instead. '
       + 'One that stays quiet 15 minutes after an answer is closed and marked done on its own.',

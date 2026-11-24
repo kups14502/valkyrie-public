@@ -9,6 +9,7 @@ import type { ChecklistItem, Ctx } from '../../projectTypes.js'
 import { addTask, listTasks, nyToday, updateTask, type Task, type TaskRef } from '../../tasksStore.js'
 import { franchiseLabel } from '../../psa.js'
 import { workConf } from '../../workConfig.js'
+import { workCalendarAdd } from '../../thorMail.js'
 import type { RavenToolCtx } from '../types.js'
 import { apiJson, clip, dueLabel, et, etClock, etDay, needBrendon, RavenToolError, routeError, toolRun } from './util.js'
 
@@ -37,6 +38,22 @@ const taskView = (t: Task) => ({
 const dayOf = (due: string | null) => (due ? due.slice(0, 10) : '')
 
 type CalEvent = { summary: string; start: string; end: string; allDay: boolean; location?: string; url?: string; sourceLabel?: string; status?: string }
+type LocalEvent = { id: string; title: string; allDay: boolean; start: string; end: string }
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
+// wall-clock math on a New York 'YYYY-MM-DDTHH:mm' read as if it were UTC, so no zone ever shifts it
+const wallMs = (s: string) => Date.parse(`${s.length === 10 ? `${s}T00:00` : s}:00Z`)
+const realWall = (s: string, re: RegExp) => re.test(s) && Number.isFinite(wallMs(s)) && new Date(wallMs(s)).toISOString().slice(0, s.length) === s
+
+/** "Wed, Nov 25, 12:00 PM to 1:00 PM ET", "Wed, Nov 25, all day", "Wed, Nov 25 to Fri, Nov 27, all day" for New York wall clock. */
+function whenLabel(start: string, end: string, allDay: boolean): string {
+  if (allDay) return start === end ? `${dueLabel(start)}, all day` : `${dueLabel(start)} to ${dueLabel(end)}, all day`
+  const endClock = dueLabel(end).replace(/^.*, (\d{1,2}:\d{2} [AP]M ET)$/, '$1')
+  return start.slice(0, 10) === end.slice(0, 10)
+    ? `${dueLabel(start).replace(/ ET$/, '')} to ${endClock}`
+    : `${dueLabel(start).replace(/ ET$/, '')} to ${dueLabel(end)}`
+}
 
 export function registerWorkTools(server: McpServer, ctx: RavenToolCtx): void {
   server.registerTool('tasks', {
@@ -160,6 +177,55 @@ export function registerWorkTools(server: McpServer, ctx: RavenToolCtx): void {
         where: e.location || undefined, link: e.url || undefined, calendar: e.sourceLabel || undefined,
       }
     })
+  }))
+
+  server.registerTool('calendar_add', {
+    description: "Add one event to Brendon's calendar, the calendar the dashboard shows. calendar: personal (default; Valkyrie's own Personal "
+      + 'calendar, shows at once) or work (his own work Outlook calendar, written on thor; the dashboard shows it once Outlook republishes its '
+      + 'feed, which can take a while). start is New York wall clock, YYYY-MM-DDTHH:mm, or YYYY-MM-DD with allDay true. end is the same shape '
+      + '(all-day end is the last day, inclusive); without end, minutes sets the length (default 60; all day: one day). Never invites anyone. '
+      + 'The same title at the same start is not added twice. Never changes or removes an event. Only when Brendon\'s message asks.',
+    inputSchema: {
+      title: z.string().min(1).max(200), start: z.string().max(16), end: z.string().max(16).optional(), minutes: z.number().int().min(5).max(1440).optional(),
+      allDay: z.boolean().optional(), location: z.string().max(300).optional(), notes: z.string().max(4000).optional(),
+      calendar: z.enum(['personal', 'work']).optional(),
+    },
+  }, (a) => toolRun(async () => {
+    needBrendon(ctx, 'Adding a calendar event')
+    const title = a.title.trim()
+    if (!title) throw new RavenToolError('title is empty')
+    const allDay = a.allDay === true
+    const re = allDay ? DATE_RE : DATETIME_RE
+    const shape = allDay ? 'YYYY-MM-DD (allDay)' : 'YYYY-MM-DDTHH:mm'
+    const start = a.start.trim()
+    if (!realWall(start, re)) throw new RavenToolError(`start must be a real ${shape} in New York time`)
+    let end = a.end?.trim() || ''
+    if (end && !realWall(end, re)) throw new RavenToolError(`end must be a real ${shape} in New York time`)
+    if (!end) end = allDay ? start : new Date(wallMs(start) + (a.minutes ?? 60) * 60_000).toISOString().slice(0, 16)
+    if (allDay ? end < start : end <= start) throw new RavenToolError('end must be after start')
+    const calendar = a.calendar ?? 'personal'
+    const where = a.location?.trim() || undefined
+    const out = (added: boolean, extra: Record<string, unknown>) => ({
+      added, calendar: calendar === 'work' ? 'Work' : 'Personal', title, when: whenLabel(start, end, allDay), where, ...extra,
+    })
+
+    if (calendar === 'work') {
+      const r = await workCalendarAdd({ subject: title, start, end, allDay, location: where, notes: a.notes })
+      if (r.already) return out(false, { note: 'Already on his work calendar at that time; nothing was added.', link: r.webLink || undefined })
+      ctx.acted()
+      return out(true, { link: r.webLink || undefined, note: 'Added to his work Outlook calendar. The dashboard shows it once Outlook republishes the feed.' })
+    }
+
+    const list = await apiJson<{ events?: LocalEvent[] }>('/calendar/local-events')
+    if (list.status !== 200) throw new RavenToolError(`the calendar did not answer: ${routeError(list.body, list.status)}`)
+    const same = (list.body?.events ?? []).find((e) => e.start === start && e.allDay === allDay && e.title.trim().toLowerCase() === title.toLowerCase())
+    if (same) return out(false, { id: same.id, note: 'Already on his Personal calendar at that time; nothing was added.' })
+    const r = await apiJson<{ event?: LocalEvent }>('/calendar/local-events', {
+      method: 'POST', body: { title, allDay, start, end, location: where ?? '', notes: a.notes ?? '' },
+    })
+    if (r.status !== 200 || !r.body?.event) throw new RavenToolError(`the calendar did not add it: ${routeError(r.body, r.status)}`)
+    ctx.acted()
+    return out(true, { id: r.body.event.id })
   }))
 
   server.registerTool('brief', {

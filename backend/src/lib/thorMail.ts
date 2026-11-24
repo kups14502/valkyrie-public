@@ -8,6 +8,10 @@ import { AgentError } from './agentsStore.js'
 // out now instead of at the next minute. Sends never go through here: they
 // stay queued actions that thor claims (lib/agentActions.ts), where the send
 // helper's duplicate guard runs.
+//
+// POST /calendar/add adds one event to his own work calendar there (Raven's
+// calendar_add): no attendees, so nothing goes to anyone, and the same subject
+// at the same start is never added twice.
 
 const URL_BASE = () => process.env.PROJECT_FILES_URL || 'http://100.118.7.57:8767'
 const TOKEN = () => process.env.PROJECT_FILES_TOKEN || ''
@@ -73,4 +77,16 @@ export async function mailboxRead(mailbox: string, messageId: string): Promise<M
 export function kickThor(): void {
   if (!TOKEN()) return
   void call('/mail/kick', {}, 10_000).catch(() => { /* the next scheduled run picks it up */ })
+}
+
+export type WorkCalendarAdd = { subject: string; start: string; end: string; allDay: boolean; location?: string; notes?: string }
+export type WorkCalendarAnswer = { added: boolean; already: boolean; eventId: string; webLink: string; start: string; end: string }
+
+/** One event on his work calendar, New York wall clock. already: the same subject at the same start was there, nothing was added. */
+export async function workCalendarAdd(o: WorkCalendarAdd): Promise<WorkCalendarAnswer> {
+  const r = await call<Record<string, unknown>>('/calendar/add', o, 45_000)
+  return {
+    added: r.added === true, already: r.already === true, eventId: String(r.event_id ?? ''), webLink: String(r.web_link ?? ''),
+    start: String(r.start ?? ''), end: String(r.end ?? ''),
+  }
 }

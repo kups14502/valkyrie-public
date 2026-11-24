@@ -95,6 +95,19 @@ api.get('/api/plex/requests', (_q, r) => r.json({ requests: [
 ] }))
 let calendarQuery: Record<string, unknown> = {}
 api.get('/api/calendar/events', (q, r) => { calendarQuery = q.query; r.json({ events: calEvents }) })
+// the Personal calendar's own routes, and thor's work calendar add (project-files calendar.mjs)
+const localEvents: Record<string, unknown>[] = [{ id: 'old-1', title: 'Dentist', allDay: false, start: '2026-12-01T09:00', end: '2026-12-01T10:00' }]
+const localPosts: Record<string, unknown>[] = []
+api.get('/api/calendar/local-events', (_q, r) => r.json({ events: localEvents }))
+api.post('/api/calendar/local-events', (q, r) => {
+  localPosts.push(q.body)
+  const ev = { id: `new-${localPosts.length}`, ...q.body }
+  localEvents.push(ev)
+  r.json({ ok: true, event: ev })
+})
+const workAdds: { auth: string | undefined; body: Record<string, unknown> }[] = []
+let workAnswer: { status: number; body: unknown } = { status: 200, body: { ok: true, added: true, event_id: 'AAMk1', web_link: 'https://outlook.example/ev/1', start: '2026-12-02T15:00:00', end: '2026-12-02T15:30:00' } }
+api.post('/calendar/add', (q, r) => { workAdds.push({ auth: q.header('authorization'), body: q.body }); r.status(workAnswer.status).json(workAnswer.body) })
 api.post('/vault/note', (q, r) => { notes.push({ auth: q.header('authorization'), body: q.body }); r.json({ path: `C:\\Vault\\00-Inbox\\${q.body.title}.md` }) })
 // thor's live read routes (project-files reader.mjs): off until the live block turns them on, so the vault tests above
 // first see an older service (a bare 404) and read odin's copy
@@ -344,7 +357,7 @@ ioMod.setRavenToolsIo(fakeIo)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
     'session_send', 'session_read', 'session_screen', 'session_keys', 'session_watch', 'session_tend', 'thor_screen', 'thor_windows', 'thor_button', 'thor_click', 'thor_press', 'session_stop', 'session_keep', 'session_done', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
-    'project_get', 'tickets', 'inbox', 'calendar', 'brief', 'thread_search', 'thread_read']
+    'project_get', 'tickets', 'inbox', 'calendar', 'calendar_add', 'brief', 'thread_search', 'thread_read']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
   check('the core tools are left to the endpoint', !['post', 'notebook_set', 'now', 'attachment', 'attachments'].some((n) => listed.includes(n)), listed)
   check('no extra tools', listed.length === want.length, listed)
@@ -359,6 +372,7 @@ ioMod.setRavenToolsIo(fakeIo)
     ['session_watch', { session: 'personal', on: true }], ['session_stop', { session: 'personal' }], ['session_done', { session: 'personal' }],
     ['media_request', { kind: 'movie', title: 'Heat 2', tmdbId: 5000 }], ['vault_note', { title: 'x', text: 'y' }],
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
+    ['calendar_add', { title: 'Haircut', start: '2026-12-02T12:00' }], ['calendar_add', { title: 'Standup', start: '2026-12-02T15:00', calendar: 'work' }],
     ['thor_files', {}], ['thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\x.txt' }], ['thor_files_search', { query: 'resume' }],
   ]
   const before = acted
@@ -368,6 +382,7 @@ ioMod.setRavenToolsIo(fakeIo)
   }
   check('gate: nothing acted', acted === before, acted - before)
   check('gate: no media add, no vault note', adds.length === 0 && notes.length === 0)
+  check('gate: no calendar event, personal or work', localPosts.length === 0 && workAdds.length === 0, { localPosts, workAdds })
   check('gate: no pane opened, nothing typed or stopped, no watch, no task', created.length === 0 && typed.length === 0 && killed.length === 0
     && watch.listWatches().length === 0 && tasks.listTasks({ view: 'open', hideTailnet: false }).length === 0 && !agents.isPaused(),
   { created, typed, killed, watches: watch.listWatches().length })
@@ -484,6 +499,60 @@ agents.syncRoster()
   check('calendar: ET times, place and link', / ET$/.test(standup?.when ?? '') && standup.where === 'Teams' && standup.link === 'https://teams.example/join', standup)
   check('calendar: all day', Array.isArray(r.json) && /all day$/.test(r.json.find((e: { title: string }) => e.title === 'Trash day')?.when ?? ''), r.json)
   check('calendar: two days from New York midnight', Number(calendarQuery.to) - Number(calendarQuery.from) === 2 * 86_400_000, calendarQuery)
+
+  // calendar_add: Personal through the local-events route, work through thor
+  let before = acted
+  r = await call('calendar_add', { title: 'AK Studio barber haircut', start: '2026-11-25T12:00' })
+  show('calendar_add personal', r.json)
+  check('calendar_add: personal by default, one hour', !r.isError && r.json.added === true && r.json.calendar === 'Personal' && r.json.id === 'new-1'
+    && localPosts[0]?.start === '2026-11-25T12:00' && localPosts[0]?.end === '2026-11-25T13:00' && localPosts[0]?.allDay === false, { r, localPosts })
+  check('calendar_add: New York words', r.json?.when === 'Wed, Nov 25, 12:00 PM to 1:00 PM ET', r.json)
+  check('calendar_add: counts as acted', acted === before + 1, acted - before)
+  before = acted
+  r = await call('calendar_add', { title: 'ak studio barber haircut ', start: '2026-11-25T12:00', minutes: 30 })
+  check('calendar_add: the same title at the same start is not added twice', !r.isError && r.json.added === false && /Already/.test(r.json.note)
+    && localPosts.length === 1 && acted === before, { r, localPosts })
+  r = await call('calendar_add', { title: 'Late call', start: '2026-11-25T23:30', minutes: 90, location: 'Home', notes: 'bring the notes' })
+  check('calendar_add: minutes past midnight', !r.isError && localPosts[1]?.end === '2026-11-26T01:00' && localPosts[1]?.location === 'Home'
+    && localPosts[1]?.notes === 'bring the notes' && r.json.when === 'Wed, Nov 25, 11:30 PM to Thu, Nov 26, 1:00 AM ET', { r, post: localPosts[1] })
+  r = await call('calendar_add', { title: 'Trip', start: '2026-12-04', end: '2026-12-06', allDay: true })
+  check('calendar_add: all day, several days', !r.isError && localPosts[2]?.allDay === true && localPosts[2]?.end === '2026-12-06'
+    && r.json.when === 'Fri, Dec 4 to Sun, Dec 6, all day', { r, post: localPosts[2] })
+  r = await call('calendar_add', { title: 'Garbage', start: '2026-12-07', allDay: true })
+  check('calendar_add: all day, one day', !r.isError && localPosts[3]?.end === '2026-12-07' && r.json.when === 'Mon, Dec 7, all day', r.json)
+  const bad: [string, Record<string, unknown>, RegExp][] = [
+    ['a date for a timed event', { title: 'x', start: '2026-12-02' }, /start must be/],
+    ['a time for an all-day event', { title: 'x', start: '2026-12-02T10:00', allDay: true }, /start must be/],
+    ['no such day', { title: 'x', start: '2026-02-30T10:00' }, /start must be a real/],
+    ['no such hour', { title: 'x', start: '2026-12-02T25:00' }, /start must be a real/],
+    ['end before start', { title: 'x', start: '2026-12-02T10:00', end: '2026-12-02T09:00' }, /end must be after start/],
+    ['end equal to start', { title: 'x', start: '2026-12-02T10:00', end: '2026-12-02T10:00' }, /end must be after start/],
+    ['a blank title', { title: '   ', start: '2026-12-02T10:00' }, /title is empty/],
+  ]
+  for (const [what, args, want] of bad) {
+    r = await call('calendar_add', args)
+    check(`calendar_add: refuses ${what}`, r.isError && want.test(r.text), r)
+  }
+  check('calendar_add: nothing posted for a refused one', localPosts.length === 4 && workAdds.length === 0, { localPosts, workAdds })
+  check('calendar_add: no existing event touched', localEvents[0].title === 'Dentist' && localEvents[0].start === '2026-12-01T09:00', localEvents[0])
+
+  before = acted
+  r = await call('calendar_add', { title: 'Client call', start: '2026-12-02T15:00', minutes: 30, location: 'Teams', calendar: 'work' })
+  show('calendar_add work', r.json)
+  check('calendar_add: work goes to thor with the token', !r.isError && r.json.added === true && r.json.calendar === 'Work'
+    && workAdds[0]?.auth === 'Bearer files-token' && r.json.link === 'https://outlook.example/ev/1' && acted === before + 1, { r, workAdds })
+  check('calendar_add: thor gets New York wall clock and no mailbox', workAdds[0]?.body.subject === 'Client call' && workAdds[0]?.body.start === '2026-12-02T15:00'
+    && workAdds[0]?.body.end === '2026-12-02T15:30' && workAdds[0]?.body.allDay === false && workAdds[0]?.body.location === 'Teams'
+    && !('mailbox' in (workAdds[0]?.body ?? {})), workAdds[0])
+  check('calendar_add: the Personal calendar is not touched for work', localPosts.length === 4, localPosts.length)
+  workAnswer = { status: 200, body: { ok: true, added: false, already: true, event_id: 'AAMk1', web_link: 'https://outlook.example/ev/1' } }
+  before = acted
+  r = await call('calendar_add', { title: 'Client call', start: '2026-12-02T15:00', calendar: 'work' })
+  check('calendar_add: work already there is not acted', !r.isError && r.json.added === false && /Already/.test(r.json.note) && acted === before, r)
+  workAnswer = { status: 400, body: { error: 'end must be after start' } }
+  r = await call('calendar_add', { title: 'Client call', start: '2026-12-02T16:00', calendar: 'work' })
+  check('calendar_add: a refusal from thor comes back as text', r.isError && /end must be after start/.test(r.text), r)
+
   r = await call('brief')
   check('brief: none yet', /No brief yet/.test(r.text), r)
 }

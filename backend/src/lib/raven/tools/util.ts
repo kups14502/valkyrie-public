@@ -24,7 +24,7 @@ export async function toolRun(fn: () => unknown): Promise<CallToolResult> {
   }
 }
 
-/** Session start/stop, media requests, task changes and vault notes run only when Brendon's own message asked (session_send never asks). */
+/** Session start/stop, media requests, task changes, calendar events and vault notes run only when Brendon's own message asked (session_send never asks). */
 export function needBrendon(ctx: RavenToolCtx, what: string): void {
   if (!ctx.fromBrendon) {
     throw new RavenToolError(`${what} only runs when Brendon's own message asks for it. This run was not woken by him: tell him what you would do and let him ask.`)
