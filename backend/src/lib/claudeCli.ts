@@ -21,16 +21,19 @@ import { poolTokensByRoom } from './accountSwitch.js'
 
 /**
  * execFile with stdin closed at once: an open stdin makes `claude -p` wait 3 s
- * for piped input before it starts.
+ * for piped input before it starts. input: written to stdin first, which
+ * `claude -p` with no prompt argument reads as the prompt.
  */
-function run(file: string, args: string[], opts: { cwd: string; timeout: number; env: NodeJS.ProcessEnv; signal?: AbortSignal }): Promise<{ stdout: string }> {
+function run(file: string, args: string[], opts: { cwd: string; timeout: number; env: NodeJS.ProcessEnv; signal?: AbortSignal; input?: string }): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
-    const { signal, ...rest } = opts
+    const { signal, input, ...rest } = opts
     const child = execFile(file, args, { ...rest, ...(signal ? { signal } : {}), maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(Object.assign(err, { stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }))
       else resolve({ stdout: String(stdout) })
     })
-    child.stdin?.end()
+    // a CLI that exits before it read it all (a bad flag, a kill) is reported by the callback, never as an EPIPE throw
+    child.stdin?.on('error', () => {})
+    child.stdin?.end(input)
   })
 }
 
@@ -182,7 +185,8 @@ export type CliRun = { text: string; cred: string; costUsd: number | null; turns
  * environment. A run that fails after it spent (a budget stop) throws with
  * that cost on the error.
  */
-export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: (why: string) => boolean; signal?: AbortSignal; env?: 'inherit' | 'minimal' }): Promise<CliRun> {
+/** input: the prompt on stdin, for args that hold no prompt (one past the 128 KB a Linux argument can carry). */
+export async function runClaude(args: string[], opts: { cwd: string; scratch: string; timeoutMs: number; retryable: (why: string) => boolean; signal?: AbortSignal; env?: 'inherit' | 'minimal'; input?: string }): Promise<CliRun> {
   const cli = CLI_CANDIDATES.find((c) => existsSync(c))
   if (!cli) throw new ClaudeCliError('the claude CLI is not installed on this host')
   const errors: string[] = []
@@ -196,6 +200,7 @@ export async function runClaude(args: string[], opts: { cwd: string; scratch: st
         timeout: opts.timeoutMs,
         env: { ...baseEnv(opts.env), ...p.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' },
         signal: opts.signal,
+        input: opts.input,
       })
       const env = extractJson(stdout) as { result?: unknown; is_error?: unknown; total_cost_usd?: unknown; num_turns?: unknown; duration_ms?: unknown } | null
       if (env && env.is_error === true) {

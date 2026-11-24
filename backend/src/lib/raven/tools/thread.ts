@@ -33,9 +33,11 @@ export function registerThreadTools(server: McpServer, _ctx: RavenToolCtx): void
   server.registerTool('thread_read', {
     description: 'Read messages of your thread in full, by number (the # in your thread and in thread_search): id for one, '
       + 'around for one with the messages before and after it (context each side, default 3), or from and to for a range, oldest first '
-      + '(up to 50 a call, 60 KB). sessions adds the session lines kept under your replies.',
+      + '(up to 50 a call, 60 KB). A message longer than 60 KB (a long paste) comes in parts: id with start, as its note says. '
+      + 'sessions adds the session lines kept under your replies.',
     inputSchema: {
       id: id.optional(),
+      start: z.number().int().min(0).optional().describe('with id: the character to read on from in a long message'),
       around: id.optional(),
       context: z.number().int().min(0).max(20).optional(),
       from: id.optional(),

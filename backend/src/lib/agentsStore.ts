@@ -443,12 +443,15 @@ const toMessage = (r: MessageRow): Message => ({
 })
 
 export const MAX_TEXT = 12_000
+/** Brendon's own messages: he pastes long text to Raven (lib/raven/run.ts RAVEN_TEXT_MAX refuses past this). */
+export const BRENDON_TEXT_MAX = 100_000
+const textMax = (author: string) => (author === 'brendon' ? BRENDON_TEXT_MAX : MAX_TEXT)
 
 export function addMessage(m: { channelId: string; author: string; text: string; refs?: Ref[]; mentions?: string[]; notify?: boolean; hop?: number; proposalId?: number | null; meta?: RavenMeta }): Message {
   const at = nowIso()
   const r = db.prepare(`INSERT INTO messages (channelId, author, text, refs, mentions, notify, hop, proposalId, createdAt, meta)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(m.channelId, m.author, m.text.slice(0, MAX_TEXT), JSON.stringify(m.refs ?? []), JSON.stringify(m.mentions ?? []),
+    .run(m.channelId, m.author, m.text.slice(0, textMax(m.author)), JSON.stringify(m.refs ?? []), JSON.stringify(m.mentions ?? []),
       m.notify ? 1 : 0, m.hop ?? 0, m.proposalId ?? null, at, JSON.stringify(m.meta ?? {}))
   db.prepare('UPDATE channels SET lastMessageAt = ? WHERE id = ?').run(at, m.channelId)
   bump()
@@ -460,7 +463,7 @@ export function updateMessage(id: number, m: { text?: string; refs?: Ref[]; meta
   const cur = getMessage(id)
   if (!cur) return null
   db.prepare('UPDATE messages SET text = ?, refs = ?, meta = ?, proposalId = ? WHERE id = ?').run(
-    (m.text ?? cur.text).slice(0, MAX_TEXT), JSON.stringify(m.refs ?? cur.refs), JSON.stringify(m.meta ?? cur.meta),
+    (m.text ?? cur.text).slice(0, textMax(cur.author)), JSON.stringify(m.refs ?? cur.refs), JSON.stringify(m.meta ?? cur.meta),
     m.proposalId === undefined ? cur.proposalId : m.proposalId, id)
   bump()
   return getMessage(id)

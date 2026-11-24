@@ -103,14 +103,27 @@ export function searchThread(q: string, opts: { limit?: number; before?: number;
   return { terms, mode, total: found.length, hits, more: found.length > limit || undefined }
 }
 
-/** One message in full, as thread_read shows it. */
-function render(m: Message, sessions: boolean): string {
+const num = (n: number) => n.toLocaleString('en-US')
+
+/** A message's text from start: all of it, or READ_MAX_CHARS of a long one with where the next part starts. */
+function textPart(m: Message, start: number): string {
+  const len = m.text.length
+  if (!len) return '(no text)'
+  if (start >= len) return `[the text ends at character ${num(len)}]`
+  if (!start && len <= READ_MAX_CHARS) return m.text
+  const end = Math.min(len, start + READ_MAX_CHARS)
+  const note = end < len ? `thread_read id ${m.id} start ${end} reads on` : 'the end'
+  return `${m.text.slice(start, end)}\n[characters ${num(start + 1)} to ${num(end)} of ${num(len)}: ${note}]`
+}
+
+/** One message in full (a long one in parts from start), as thread_read shows it. */
+function render(m: Message, sessions: boolean, start = 0): string {
   const head = [`#${m.id}`, et(m.createdAt), threadAuthor(m)]
   if (m.meta.replyTo) head.push(`reply to #${m.meta.replyTo}`)
   if (m.meta.error) head.push('failed')
   const out = [head.join(' · ') + liveTag(m, et)]
   if (m.meta.files?.length) out.push(`[files: ${m.meta.files.map((f) => `${f.name} (id ${f.id})`).join(', ')}]`)
-  out.push(m.text || '(no text)')
+  out.push(textPart(m, start))
   if (sessions) {
     for (const s of m.meta.sessions ?? []) {
       out.push(`[what session ${s.title || s.label} wrote, read in this run${s.more ? `, ${s.more} older lines left out` : ''}]`)
@@ -122,9 +135,9 @@ function render(m: Message, sessions: boolean): string {
 
 /**
  * Thread messages in full, oldest first: one (id), one with its neighbors (around, context each side), or a range
- * (from, to). Stops before 60 KB and says where to go on.
+ * (from, to). Stops before 60 KB and says where to go on; a message longer than that reads in parts (id with start).
  */
-export function readThread(opts: { id?: number; around?: number; context?: number; from?: number; to?: number; sessions?: boolean }): string {
+export function readThread(opts: { id?: number; start?: number; around?: number; context?: number; from?: number; to?: number; sessions?: boolean }): string {
   let msgs: Message[]
   if (opts.id !== undefined) {
     const m = getMessage(opts.id)
@@ -149,7 +162,7 @@ export function readThread(opts: { id?: number; around?: number; context?: numbe
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i]
     if (i === READ_MAX_MSGS) { out.push(`[more: call again with from ${m.id}]`); break }
-    const block = render(m, opts.sessions === true)
+    const block = render(m, opts.sessions === true, opts.id !== undefined ? Math.max(0, opts.start ?? 0) : 0)
     if (out.length && size + block.length > READ_MAX_CHARS) { out.push(`[stopped at 60 KB: call again with from ${m.id}]`); break }
     out.push(block)
     size += block.length

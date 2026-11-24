@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  addEvent, addMessage, AgentError, bump, claimEvents, endRun, failStaleRuns, getAgent, getKv, listAgents, listMessages,
+  addEvent, addMessage, AgentError, BRENDON_TEXT_MAX, bump, claimEvents, endRun, failStaleRuns, getAgent, getKv, listAgents, listMessages,
   nowIso, openEvents, pendingProposals, runsSince, setKv, startRun, trackerCounts,
   type AgentEvent, type Message, type Ref,
 } from '../agentsStore.js'
@@ -68,6 +68,16 @@ const DISALLOWED = 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,Task,TodoWrite'
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
+/** The longest message Brendon can send Raven: a long paste (an email chain, a log, a document) fits. */
+export const RAVEN_TEXT_MAX = BRENDON_TEXT_MAX
+/**
+ * His message in a tool result or the Stop hook (a follow-up taken in mid-run) stops here: the CLI keeps a tool
+ * result to about 25,000 tokens. The rest is one thread_read away.
+ */
+const NEWS_TEXT_MAX = 20_000
+/** Past this the prompt goes to the CLI on stdin: Linux refuses one command-line argument past 128 KB. */
+const ARG_PROMPT_MAX = 100_000
+
 // -------------------------------------------------------------- state ----
 
 const STATE_KEY = 'raven:state'
@@ -123,7 +133,7 @@ export function brendonToRaven(input: { text?: unknown; files?: unknown; source?
   const files = ravenFilesFor(ids)
   if (files.length !== ids.length) throw new AgentError(400, 'an attached file is missing; attach it again')
   if (!body && !files.length) throw new AgentError(400, 'empty message')
-  if (body.length > 8000) throw new AgentError(400, 'keep a message under 8,000 characters')
+  if (body.length > RAVEN_TEXT_MAX) throw new AgentError(400, `keep a message under ${RAVEN_TEXT_MAX.toLocaleString('en-US')} characters`)
   const source: Source = isSource(input.source) ? input.source : 'app'
   ensureRavenChannel()
   const mentions = body ? mentionsIn(body).filter((m) => m !== 'brendon') : []
@@ -131,8 +141,9 @@ export function brendonToRaven(input: { text?: unknown; files?: unknown; source?
   if (files.length) meta.files = files
   if (source !== 'app') meta.source = source
   const msg = addMessage({ channelId: RAVEN_CHANNEL, author: 'brendon', text: body, mentions, meta })
+  // whole: the run's prompt shows all of it (a paste he wants read is the point of the message)
   addEvent(RAVEN_ID, 'message', {
-    messageId: msg.id, from: 'brendon', text: clip(body, 4000), source,
+    messageId: msg.id, from: 'brendon', text: body, source,
     files: files.map((f) => ({ id: f.id, name: f.name, mime: f.mime, size: f.size })),
   }, 0)
   wake(BRENDON_DELAY)
@@ -488,6 +499,7 @@ async function runModel(run: RavenRun, route: Route, onUse: (u: { model: string;
     // each CLI process starts from this prompt alone: one that replaces a failed one is shown his later messages again
     const fresh = () => { run.seen = new Set(inPrompt); run.said = [] }
     const { system, prompt } = await buildPrompt(run.events, run.fromBrendon, run.mustAnswer)
+    const viaStdin = Buffer.byteLength(prompt, 'utf8') > ARG_PROMPT_MAX
     const hooks = run.fromBrendon ? await writeStopHook(dir, token) : []
     let model = modelFor(route.tier)
     let effort = effortFor(route.effort)
@@ -500,7 +512,7 @@ async function runModel(run: RavenRun, route: Route, onUse: (u: { model: string;
       })
       try {
         return await runClaude([
-          '-p', prompt,
+          '-p', ...(viaStdin ? [] : [prompt]),
           '--model', model,
           ...(effort ? ['--effort', effort] : []),
           '--append-system-prompt', system,
@@ -515,7 +527,7 @@ async function runModel(run: RavenRun, route: Route, onUse: (u: { model: string;
           '--no-session-persistence',
           ...hooks,
         ], {
-          cwd: work, scratch: dir, timeoutMs: RUN_TIMEOUT_MS, signal: run.ac.signal,
+          cwd: work, scratch: dir, timeoutMs: RUN_TIMEOUT_MS, signal: run.ac.signal, input: viaStdin ? prompt : undefined,
           retryable: (why) => {
             const again = run.acted === 0 && !isUnknownModelError(why) && !isEffortError(why)
             if (again) fresh()
@@ -570,7 +582,7 @@ function takeNews(run: RavenRun): AgentEvent[] {
   return news
 }
 
-const newsLines = (news: AgentEvent[]) => news.map((e) => renderEvent(e)).join('\n')
+const newsLines = (news: AgentEvent[]) => news.map((e) => renderEvent(e, 0, NEWS_TEXT_MAX)).join('\n')
 
 /** Under a raven tool's result: his messages since the run started, or ''. */
 export function ravenNewsForToken(token: string): string {
@@ -640,8 +652,8 @@ const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
 
 // ---- what a watched session wrote ----
 // Every line Claude wrote reaches the prompt whole. Only when one run holds more than this (Raven held at a cap
-// for a long while) are the oldest lines left out, with a note: the prompt goes to the CLI as one argument, and
-// Linux refuses one past 128 KB.
+// for a long while) are the oldest lines left out, with a note, so one run's prompt stays a size a model reads well
+// (a prompt past ARG_PROMPT_MAX goes to the CLI on stdin).
 const SESSION_TEXT_MAX = 48_000
 /** the copy kept under Raven's message, per session: the newest lines, enough to look back at */
 const COPY_MAX = 6_000
@@ -760,14 +772,24 @@ function renderTend(p: Record<string, unknown>, retry: string): string {
   return out.join('\n')
 }
 
-function renderEvent(e: AgentEvent, cut = 0): string {
+/** His words, whole, or cut at max with the thread_read call that reads on. */
+function brendonText(p: Record<string, unknown>, max: number): string {
+  const text = str(p.text)
+  if (!text) return '(no text, only files)'
+  if (text.length <= max) return text
+  const n = (v: number) => v.toLocaleString('en-US')
+  return `${text.slice(0, max)}… [cut at ${n(max)} of ${n(text.length)} characters: thread_read id ${str(p.messageId)} start ${max} reads on]`
+}
+
+/** textMax: where his words stop (a tool result or the Stop hook); the prompt shows them whole. */
+function renderEvent(e: AgentEvent, cut = 0, textMax = Infinity): string {
   const p = e.payload
   const kind = baseKind(e.kind)
   const retry = e.kind.startsWith('retry:') ? ' (a retry: Valkyrie restarted during the first try)' : ''
   if (isBrendonEvent(e)) {
     const files = Array.isArray(p.files) ? p.files as { id: string; name: string; mime: string; size: number }[] : []
     const via = str(p.source) && str(p.source) !== 'app' ? `, sent ${p.source === 'siri' ? 'by voice through Siri' : `from ${str(p.source)}`}` : ''
-    const lines = [`- Brendon wrote (message ${str(p.messageId)}${via}): ${str(p.text) || '(no text, only files)'}${retry}`]
+    const lines = [`- Brendon wrote (message ${str(p.messageId)}${via}): ${brendonText(p, textMax)}${retry}`]
     for (const f of files) lines.push(`  Attached: ${f.name} (id ${f.id}, ${f.mime}, ${humanSize(Number(f.size) || 0)}). Look at it with attachment.`)
     if (p.source === 'siri') lines.push('  Your reply is spoken aloud to him: one or two plain sentences, no lists, no links.')
     return lines.join('\n')

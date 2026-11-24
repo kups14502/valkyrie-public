@@ -94,10 +94,11 @@ app.use(cors<express.Request>((req, callback) => {
 }))
 // 1mb everywhere, except the endpoints that carry a photo: a meal snapshot is
 // a few megabytes of base64 and the global limit would 413 it before the route
-// ever ran.
+// ever ran. A Raven message is one too: an over-long paste gets the route's own
+// "keep a message under" answer, never a 413 the app shows as an internal error.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonLarge = express.json({ limit: '12mb' })
-const LARGE_BODY_PATHS = new Set(['/api/meals/estimate', ...FEATURES.flatMap((f) => f.largeBodyPaths ?? [])])
+const LARGE_BODY_PATHS = new Set(['/api/meals/estimate', '/api/raven/messages', ...FEATURES.flatMap((f) => f.largeBodyPaths ?? [])])
 app.use((req, res, next) => {
   // a Raven attachment upload is the raw file (up to 50 MB), streamed to disk by its route
   if (req.method === 'POST' && (req.path === RAVEN_UPLOAD_PATH || req.path === RAVEN_TRANSCRIBE_PATH)) return next()

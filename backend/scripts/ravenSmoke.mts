@@ -66,7 +66,9 @@ const fs = require('fs'), path = require('path')
 const dir = ${JSON.stringify(stub)}
 const args = process.argv.slice(2)
 const val = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null }
-const model = val('--model'), effort = val('--effort'), prompt = val('-p') || '', sys = val('--append-system-prompt') || ''
+// -p with no prompt after it: the prompt comes on stdin, the way the CLI reads one past the 128 KB argument limit
+const pArg = val('-p'), stdin = !pArg || pArg.startsWith('--')
+const model = val('--model'), effort = val('--effort'), prompt = stdin ? fs.readFileSync(0, 'utf8') : pArg, sys = val('--append-system-prompt') || ''
 const cfgArg = args.find((a) => a.startsWith('--mcp-config='))
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return d } }
 const out = (o) => process.stdout.write(JSON.stringify(o))
@@ -89,6 +91,7 @@ fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, e
   }
   if (kind === 'brief') { out({ type: 'result', is_error: false, result: 'Light day. Dentist at 2:30 PM ET.' }); return }
   if (kind === 'ask') {
+    fs.writeFileSync(path.join(dir, 'last-ask.json'), JSON.stringify({ prompt }))
     const r = readJson('router.json', {})
     if (r.sleep) await sleep(r.sleep)
     if (r.exit) { process.stdout.write('router boom'); process.exit(r.exit) }
@@ -121,7 +124,7 @@ fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, model, e
   fs.writeFileSync(path.join(dir, 'queue-raven.json'), JSON.stringify(queue))
   const n = readJson('raven-count.json', 0) + 1
   fs.writeFileSync(path.join(dir, 'raven-count.json'), JSON.stringify(n))
-  fs.writeFileSync(path.join(dir, 'last-raven.json'), JSON.stringify({ prompt, sys, model, effort }))
+  fs.writeFileSync(path.join(dir, 'last-raven.json'), JSON.stringify({ prompt, sys, model, effort, stdin }))
   const results = []
   const steps = async (list) => {
     for (const s of list || []) {
@@ -167,7 +170,7 @@ const router = (r: unknown) => w('router.json', JSON.stringify(r))
 const agentScript = (id: string, steps: unknown[]) => { w(`script-${id}.json`, JSON.stringify(steps)); try { fs.unlinkSync(path.join(stub, `results-${id}.json`)) } catch { /* none */ } }
 const ravenCount = (): number => rj('raven-count.json', 0)
 const ravenResults = (n = ravenCount()): any[] => rj(`results-raven-${n}.json`, [])
-const lastRaven = (): { prompt: string; sys: string; model: string; effort: string | null } => rj('last-raven.json', {})
+const lastRaven = (): { prompt: string; sys: string; model: string; effort: string | null; stdin: boolean } => rj('last-raven.json', {})
 
 // ----------------------------------------------------------------- the app ---
 
@@ -650,6 +653,68 @@ check('relay run: no Stop hook, and his message stays out of its tool results', 
   && tr[0]?.texts?.length === 1 && JSON.stringify(stopsOf(bgN)) === '[]', { bgCalls, tr })
 check('relay run: his message gets its own run and reply', runsOf() - runsBefore === 2 && lastRavenMsg()?.text === 'his own run' && lastRavenMsg()?.meta.replyTo === relayMsg.message.id,
   { runs: runsOf() - runsBefore, last: lastRavenMsg()?.text })
+queue()
+
+// --------------------------------------------------------- a long paste ---
+// He pastes long text (a mail chain, a log). Up to 100,000 characters is kept whole and reaches the run's prompt
+// whole, on stdin once the prompt passes what one Linux argument carries. The router sees its start and its end.
+// A long follow-up taken in mid-run is cut in the tool result with the thread_read call that reads on, and
+// thread_read reads a long message in parts.
+
+const history = await import('../src/lib/raven/history.ts')
+const LONG_HEAD = 'PASTE-HEAD the chain starts here.\n'
+const LONG_TAIL = '\nPASTE-TAIL: what do they want from me?'
+// é is two bytes in UTF-8: the prompt passes 100 KB with room to spare
+const longText = (n: number) => LONG_HEAD + 'Re: the quote, see below é\n'.repeat(Math.ceil(n / 27)).slice(0, n - LONG_HEAD.length - LONG_TAIL.length) + LONG_TAIL
+check('long: the limit is 100,000 characters', raven.RAVEN_TEXT_MAX === 100_000 && longText(100_000).length === 100_000, raven.RAVEN_TEXT_MAX)
+let threadLen = thread().length
+const [overSt, overBody] = await j('POST', '/raven/messages', { text: longText(100_001) })
+check('long: one past 100,000 characters is refused with the limit, nothing posted', overSt === 400 && overBody?.error === 'keep a message under 100,000 characters'
+  && thread().length === threadLen, { overSt, overBody })
+
+router({ answer: '{"kind":"simple","why":"read a paste"}' })
+queue({ result: 'They want the quote by Friday.' })
+const long = longText(100_000)
+const [longSt, longPosted] = await j('POST', '/raven/messages', { text: long })
+await ravenIdle()
+const longId: number = longPosted?.message?.id
+check('long: 100,000 characters taken and kept whole', longSt === 200 && store.getMessage(longId)?.text === long, { longSt, len: store.getMessage(longId)?.text.length })
+lr = lastRaven()
+check('long: the run prompt holds all of it, on stdin', lr.stdin === true && lr.prompt.includes(`message ${longId}): ${long}`), { stdin: lr.stdin, len: lr.prompt?.length })
+const routerAsk: string = rj('last-ask.json', {}).prompt ?? ''
+check('long: the router sees its start and its end, with how much is left out', routerAsk.includes('PASTE-HEAD') && routerAsk.includes('PASTE-TAIL: what do they want from me?')
+  && routerAsk.includes('more characters of the 100,000') && routerAsk.length < 6000, routerAsk.length)
+check('long: answered', lastRavenMsg()?.text === 'They want the quote by Friday.' && lastRavenMsg()?.meta.replyTo === longId, lastRavenMsg())
+router({})
+
+queue({ result: 'short answer' })
+const [, shortPosted] = await j('POST', '/raven/messages', { text: 'a short one' })
+await ravenIdle()
+check('long: the next prompt cuts it in the thread at 700 and goes as an argument, as before', lastRaven().stdin === false
+  && lastRaven().prompt.includes(`[cut at 700 of 100000 characters: thread_read id ${longId} reads all of it]`), lastRaven().stdin)
+
+const part1 = history.readThread({ id: longId })
+const part2 = history.readThread({ id: longId, start: 60_000 })
+check('thread_read: a long message comes in parts', part1.includes('PASTE-HEAD') && !part1.includes('PASTE-TAIL') && part1.length < 61_000
+  && part1.endsWith(`[characters 1 to 60,000 of 100,000: thread_read id ${longId} start 60000 reads on]`), part1.slice(-200))
+check('thread_read: start reads on to the end', !part2.includes('PASTE-HEAD') && part2.endsWith('PASTE-TAIL: what do they want from me?\n[characters 60,001 to 100,000 of 100,000: the end]'), part2.slice(-200))
+check('thread_read: past the end says so', history.readThread({ id: longId, start: 100_000 }).endsWith('[the text ends at character 100,000]'))
+check('thread_read: a short message reads whole, as before', history.readThread({ id: shortPosted.message.id }).endsWith('\na short one'))
+const ranged = history.readThread({ from: longId, to: shortPosted.message.id })
+check('thread_read: a range cuts the long one and goes on from the next', ranged.includes(`start 60000 reads on]`) && ranged.includes('[stopped at 60 KB: call again with from')
+  && !ranged.includes('PASTE-TAIL'), ranged.slice(-300))
+
+// a long follow-up while a run works: its next tool result carries the first 20,000 characters and the read-on call
+queue({ steps: [{ sleep: 800 }, { tool: 'now' }], result: 'read both' })
+await j('POST', '/raven/messages', { text: 'start on this' })
+await until(() => raven.ravenState().status === 'working')
+const [, longFollow] = await j('POST', '/raven/messages', { text: longText(50_000) })
+await ravenIdle()
+const news: string = ravenResults()[0]?.texts?.[1] ?? ''
+check('long follow-up: the tool result cuts it at 20,000 with the call that reads on', news.startsWith('Brendon wrote again while you work') && news.includes('PASTE-HEAD')
+  && !news.includes('PASTE-TAIL') && news.includes(`[cut at 20,000 of 50,000 characters: thread_read id ${longFollow.message.id} start 20000 reads on]`)
+  && news.length < 21_000, news.slice(-300))
+check('long follow-up: kept whole in the thread', store.getMessage(longFollow.message.id)?.text.length === 50_000, store.getMessage(longFollow.message.id)?.text.length)
 queue()
 
 // ---------------------------------------------------------------- stop ---

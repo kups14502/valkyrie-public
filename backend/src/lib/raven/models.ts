@@ -172,6 +172,14 @@ export type Sorted = { kind: RouteKind; why: string; routed: boolean }
 /** What the router does when it cannot read the message: the complex rule, so a hard ask never runs light. */
 export const UNSORTED: RouteKind = 'complex'
 
+/** A long paste: its start and its end (his ask is often under or over the pasted text), with how much is left out. */
+export function routerSample(text: string, max = 4000): string {
+  if (text.length <= max) return text
+  const half = Math.floor(max / 2)
+  const left = text.length - half * 2
+  return `${text.slice(0, half)}\n[… ${left.toLocaleString('en-US')} more characters of the ${text.length.toLocaleString('en-US')} …]\n${text.slice(-half)}`
+}
+
 function routerPrompt(text: string, files: number): string {
   return [
     "You sort messages for Raven, Brendon's assistant, so it runs on the right model. Decide if the work his message asks for is simple or complex.",
@@ -181,7 +189,7 @@ function routerPrompt(text: string, files: number): string {
     '',
     'His message:',
     '<<<',
-    text.slice(0, 4000) || '(no text)',
+    routerSample(text) || '(no text)',
     '>>>',
     files ? `He attached ${files} file${files === 1 ? '' : 's'}.` : '',
   ].join('\n').trim()
