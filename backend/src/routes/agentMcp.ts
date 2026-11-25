@@ -479,7 +479,7 @@ function register(server: McpServer, loc: Loc): void {
     })
   }
 
-  // ------------------------------------------------------ groceries ---
+  // ------------------------------------------------------- shopping ---
 
   if (agent.kind === 'shopping') {
     server.registerTool('browser_viewer', {

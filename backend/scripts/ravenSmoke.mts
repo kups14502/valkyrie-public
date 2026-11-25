@@ -898,7 +898,7 @@ await agentIdle('groceries')
 let gm = store.listMessages('groceries').filter((m) => m.author === 'groceries').pop()
 let mirror = thread().filter((m) => m.author === 'groceries').pop()
 check('notify post mirrored into the thread', mirror && mirror.text === gm?.text && mirror.meta.relay?.kind === 'agent' && mirror.meta.relay.from === 'groceries'
-  && mirror.meta.relay.label === 'Groceries' && mirror.meta.relay.sourceMessageId === gm?.id && mirror.refs[0]?.type === 'link' && mirror.notify, mirror)
+  && mirror.meta.relay.label === 'Amazon & Whole Foods' && mirror.meta.relay.sourceMessageId === gm?.id && mirror.refs[0]?.type === 'link' && mirror.notify, mirror)
 await sleep(200)
 check('a mirror does not wake Raven', runsOf() === runsAt && !raven.ravenBusy(), runsOf() - runsAt)
 

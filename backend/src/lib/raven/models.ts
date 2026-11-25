@@ -183,7 +183,7 @@ export function routerSample(text: string, max = 4000): string {
 function routerPrompt(text: string, files: number): string {
   return [
     "You sort messages for Raven, Brendon's assistant, so it runs on the right model. Decide if the work his message asks for is simple or complex.",
-    '- simple: a quick fact or lookup, a greeting, a yes or no, a status one look answers, one quick action: add to the grocery list, add a task or a reminder, request a movie, start or message one session, read one file or photo.',
+    '- simple: a quick fact or lookup, a greeting, a yes or no, a status one look answers, one quick action: add to his Amazon or Whole Foods cart, add a task or a reminder, request a movie, start or message one session, read one file or photo.',
     '- complex: several steps that build on each other, work across sessions or agents, a work ticket or client mail, planning, debugging, a careful write-up he will send to someone, a long investigation.',
     'Answer with only this JSON and nothing else: {"kind":"simple|complex","why":"at most 12 words"}',
     '',

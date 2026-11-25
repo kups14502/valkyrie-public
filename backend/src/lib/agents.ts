@@ -29,7 +29,8 @@ import { ensureRavenChannel } from './raven/channel.js'
 //                                   Autotask, plus the work mail and Teams
 //                                   messages that belong to it
 //   one agent per project           keeps its project page moving
-//   Groceries                       Whole Foods carts on odin's Chromium
+//   Amazon & Whole Foods            his Amazon and Whole Foods carts on
+//     (id groceries)                odin's Chromium
 //   a feature's agents              brief, tools and actions from the feature
 //                                   (lib/featureAgents.ts)
 //
@@ -66,15 +67,15 @@ export const hiddenAreas = (): Set<string> => new Set([
 
 type Fixed = { id: string; name: string; role: string; kind: Agent['kind']; area: string; franchise: Franchise | null; sortOrder: number; topic: string }
 
-/** One triage agent per franchise in work-agents.json, then Groceries. */
+/** One triage agent per franchise in work-agents.json, then the shopping agent (Amazon & Whole Foods, id groceries). */
 function fixedAgents(): Fixed[] {
   const triage = workConf().franchises.map((f, i): Fixed => ({
     id: f.agent.id, name: f.agent.name, role: f.agent.role, kind: 'triage', area: f.key, franchise: f.key,
     sortOrder: 10 + i, topic: f.agent.topic,
   }))
   return [...triage, {
-    id: 'groceries', name: 'Groceries', role: 'Whole Foods orders through Amazon', kind: 'shopping',
-    area: 'personal', franchise: null, sortOrder: 30, topic: 'Recipes in, a filled Whole Foods cart out; you place the order',
+    id: 'groceries', name: 'Amazon & Whole Foods', role: 'Fills his Amazon and Whole Foods carts', kind: 'shopping',
+    area: 'personal', franchise: null, sortOrder: 30, topic: 'A list, a recipe or a link in, a filled Amazon or Whole Foods cart out; you place the order',
   }]
 }
 
@@ -411,7 +412,7 @@ async function runAgent(agentId: string): Promise<void> {
       '--output-format', 'json',
       '--strict-mcp-config', `--mcp-config=${mcpFile}`,
       '--permission-mode', 'bypassPermissions',
-      // the valkyrie tools (and the browser for Groceries) are all an agent acts with: no built-in tool at all
+      // the valkyrie tools (and the browser for the shopping agent) are all an agent acts with: no built-in tool at all
       // (the deny list alone leaves Monitor, which runs shell commands, and the tools that message other sessions)
       '--tools', '',
       '--disallowed-tools', 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite',
