@@ -1,0 +1,230 @@
+{
+ "id": "sunrise_bedroom_2026_11_26",
+ "alias": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+ "description": "One-time sunrise on light.dresser, 2026-11-26 10:30:00 to 11:00:00 New York time: 1% 2200K up to 100% 6500K in steps every 15 s, then it stays on. A tick every minute resumes it after an HA restart or a failed step. It stops (and disables itself) if the light is turned off or changed by hand during the ramp, and disables itself when done.",
+ "mode": "single",
+ "max_exceeded": "silent",
+ "trace": {
+  "stored_traces": 100
+ },
+ "triggers": [
+  {
+   "trigger": "time_pattern",
+   "minutes": "/1",
+   "id": "tick"
+  },
+  {
+   "trigger": "homeassistant",
+   "event": "start",
+   "id": "ha_start"
+  }
+ ],
+ "conditions": [
+  {
+   "condition": "template",
+   "value_template": "{{ now().strftime('%Y-%m-%d') == '2026-11-26' and today_at('10:30:00') <= now() < today_at('11:05:00') }}"
+  }
+ ],
+ "actions": [
+  {
+   "repeat": {
+    "while": [
+     {
+      "condition": "template",
+      "value_template": "{{ now() < today_at('11:00:00') }}"
+     }
+    ],
+    "sequence": [
+     {
+      "if": [
+       {
+        "condition": "template",
+        "value_template": "{{ (is_state('light.dresser', 'off') and states['light.dresser'].last_changed > today_at('10:30:00') + timedelta(seconds=5) and states['light.dresser'].last_changed > states[this.entity_id].last_changed + timedelta(seconds=120)) or (states['light.dresser'].context.user_id is not none and states['light.dresser'].last_updated > today_at('10:30:00') + timedelta(seconds=5)) }}"
+       }
+      ],
+      "then": [
+       {
+        "action": "logbook.log",
+        "data": {
+         "name": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+         "message": "stopped mid-ramp: the light was changed by hand during the sunrise",
+         "entity_id": "{{ this.entity_id }}"
+        }
+       },
+       {
+        "action": "automation.turn_off",
+        "target": {
+         "entity_id": "{{ this.entity_id }}"
+        },
+        "data": {
+         "stop_actions": false
+        }
+       },
+       {
+        "stop": "the light was changed by hand during the sunrise"
+       }
+      ]
+     },
+     {
+      "variables": {
+       "f": "{% set x = (now() - today_at('10:30:00')).total_seconds() / ((today_at('11:00:00')) - (today_at('10:30:00'))).total_seconds() %}{{ [[x, 0] | max, 1] | min }}",
+       "p": "{{ (1 + 99 * f) | round(0) | int }}",
+       "b": "{{ ((255 * p + 99) // 100) | int }}",
+       "k": "{{ (2200 + 4300 * f) | round(0) | int }}"
+      }
+     },
+     {
+      "action": "light.turn_on",
+      "continue_on_error": true,
+      "target": {
+       "entity_id": "light.dresser"
+      },
+      "data": {
+       "brightness": "{{ b }}",
+       "color_temp_kelvin": "{{ k }}"
+      }
+     },
+     {
+      "delay": {
+       "seconds": 15
+      }
+     }
+    ]
+   }
+  },
+  {
+   "if": [
+    {
+     "condition": "template",
+     "value_template": "{{ now() >= today_at('11:00:00') + timedelta(minutes=10) }}"
+    }
+   ],
+   "then": [
+    {
+     "action": "logbook.log",
+     "data": {
+      "name": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+      "message": "stopped late: the ramp was held up past its end",
+      "entity_id": "{{ this.entity_id }}"
+     }
+    },
+    {
+     "action": "automation.turn_off",
+     "target": {
+      "entity_id": "{{ this.entity_id }}"
+     },
+     "data": {
+      "stop_actions": false
+     }
+    },
+    {
+     "stop": "the ramp was held up past its end"
+    }
+   ]
+  },
+  {
+   "if": [
+    {
+     "condition": "template",
+     "value_template": "{{ (is_state('light.dresser', 'off') and states['light.dresser'].last_changed > today_at('10:30:00') + timedelta(seconds=5) and states['light.dresser'].last_changed > states[this.entity_id].last_changed + timedelta(seconds=120)) or (states['light.dresser'].context.user_id is not none and states['light.dresser'].last_updated > today_at('10:30:00') + timedelta(seconds=5)) }}"
+    }
+   ],
+   "then": [
+    {
+     "action": "logbook.log",
+     "data": {
+      "name": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+      "message": "stopped at the end: the light was changed by hand during the sunrise",
+      "entity_id": "{{ this.entity_id }}"
+     }
+    },
+    {
+     "action": "automation.turn_off",
+     "target": {
+      "entity_id": "{{ this.entity_id }}"
+     },
+     "data": {
+      "stop_actions": false
+     }
+    },
+    {
+     "stop": "the light was changed by hand during the sunrise"
+    }
+   ]
+  },
+  {
+   "action": "light.turn_on",
+   "continue_on_error": true,
+   "target": {
+    "entity_id": "light.dresser"
+   },
+   "data": {
+    "brightness": 255,
+    "color_temp_kelvin": 6500
+   }
+  },
+  {
+   "delay": {
+    "seconds": 60
+   }
+  },
+  {
+   "if": [
+    {
+     "condition": "template",
+     "value_template": "{{ (is_state('light.dresser', 'off') and states['light.dresser'].last_changed > today_at('10:30:00') + timedelta(seconds=5) and states['light.dresser'].last_changed > states[this.entity_id].last_changed + timedelta(seconds=120)) or (states['light.dresser'].context.user_id is not none and states['light.dresser'].last_updated > today_at('10:30:00') + timedelta(seconds=5)) }}"
+    }
+   ],
+   "then": [
+    {
+     "action": "logbook.log",
+     "data": {
+      "name": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+      "message": "stopped after the end: the light was changed by hand during the sunrise",
+      "entity_id": "{{ this.entity_id }}"
+     }
+    },
+    {
+     "action": "automation.turn_off",
+     "target": {
+      "entity_id": "{{ this.entity_id }}"
+     },
+     "data": {
+      "stop_actions": false
+     }
+    },
+    {
+     "stop": "the light was changed by hand during the sunrise"
+    }
+   ]
+  },
+  {
+   "action": "light.turn_on",
+   "continue_on_error": true,
+   "target": {
+    "entity_id": "light.dresser"
+   },
+   "data": {
+    "brightness": 255,
+    "color_temp_kelvin": 6500
+   }
+  },
+  {
+   "action": "logbook.log",
+   "data": {
+    "name": "Sunrise: Bedroom, Thu 2026-11-26 10:30-11:00 AM",
+    "message": "finished: 100% 6500K, staying on",
+    "entity_id": "{{ this.entity_id }}"
+   }
+  },
+  {
+   "action": "automation.turn_off",
+   "target": {
+    "entity_id": "{{ this.entity_id }}"
+   },
+   "data": {
+    "stop_actions": false
+   }
+  }
+ ]
+}

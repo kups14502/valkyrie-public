@@ -1,10 +1,13 @@
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import { readFileSync } from 'node:fs'
+import { apiBrightness, haBrightnessFor, pctFromApi, pctFromHa } from '../lib/lightScale.js'
+import { buildSunrise, checkSunrise, nyInstant, ownSunrise, sunriseId, sunriseOf, SunriseError, sunriseWindowEnd, SUNRISE_ID_RE, type SunriseMeta } from '../lib/sunrise.js'
 import { createScreenSync } from './screenSync.js'
 
 const router = Router()
-const AUTH_FILE = '/home/brendon/.config/homeassistant/claude_auth.json'
+// HA_AUTH_FILE: the sunrise smoke points it at a fake Home Assistant
+const AUTH_FILE = process.env.HA_AUTH_FILE || '/home/brendon/.config/homeassistant/claude_auth.json'
 const LIGHTS = [
   'light.office_lamp',
   'light.dresser',
@@ -41,7 +44,7 @@ function makeToken(): string {
 
 const HA_TIMEOUT_MS = 8_000
 
-export async function haRequest(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+export async function haRequest(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<unknown> {
   const cfg = getConfig()
   const r = await fetch(`${cfg.ha_url}${path}`, {
     method,
@@ -64,7 +67,7 @@ export async function haRequest(method: 'GET' | 'POST', path: string, body?: unk
  * about 40 s while Home Assistant wakes the car, and its error text matters).
  * A timeout or a dead connection still throws.
  */
-export async function haFetch(method: 'GET' | 'POST', path: string, body: unknown, timeoutMs: number): Promise<{ status: number; text: string }> {
+export async function haFetch(method: 'GET' | 'POST' | 'DELETE', path: string, body: unknown, timeoutMs: number): Promise<{ status: number; text: string }> {
   const cfg = getConfig()
   const r = await fetch(`${cfg.ha_url}${path}`, {
     method,
@@ -113,11 +116,13 @@ export type Color = { rgb: RGB } | { kelvin: number }
 export type Full = { on: boolean; pct: number | null; color: Color | null }
 /** What one /lights/turn asks of one bulb: anything left out is completed from the bulb's target. */
 export type Patch = { state: 'on' | 'off'; pct?: number; color?: Color }
-export type HAState = { entity_id?: string; state?: string; attributes?: Record<string, any>; last_updated?: string }
+export type HAState = { entity_id?: string; state?: string; attributes?: Record<string, any>; last_updated?: string; last_changed?: string }
 
 export type LightRow = {
   entity_id: string
   name: string
+  /** Home Assistant's own name for the bulb, when it reports one (Raven finds a light by either name) */
+  friendly_name?: string
   on: boolean
   unavailable: boolean
   brightness: number | null
@@ -135,33 +140,10 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 
 // ---- brightness ----
 //
-// Three scales: the API's 0-255 (what the frontend's pctFromBrightness reads),
-// the bulb's own 0-100 level, and HA's 0-255 for this integration. The API
-// figure is round(pct * 2.55), so the frontend reads back exactly the percent
-// the bulb is at.
+// The API's 0-255, the bulb's own percent and HA's 0-255 for this
+// integration: lib/lightScale.ts, shared with the sunrises and Raven.
 
-/** HA's Cync light: the level it sends for a brightness. */
-const cyncLevelSent = (b: number) => Math.trunc((b / 255) * 100)
-/** HA's Cync light: the brightness it reports for a level. No .5 ties exist, so Math.round matches Python's round. */
-const haReported = (level: number) => clamp(Math.round(((level + 1) * 255) / 101), 1, 255)
-
-/** The brightness to send HA so the bulb lands on exactly this percent. */
-export function haBrightnessFor(pct: number): number {
-  const p = clamp(Math.round(pct), 1, 100)
-  const start = Math.max(1, Math.floor(p * 2.55) - 1)
-  for (let b = start; b <= Math.min(255, start + 4); b++) if (cyncLevelSent(b) === p) return b
-  return clamp(Math.round(p * 2.55), 1, 255)
-}
-
-/** The bulb's percent from the brightness HA reports. */
-export function pctFromHa(b: number): number {
-  const v = Math.round((b * 101) / 255) - 1
-  if (v >= 0 && v <= 100 && haReported(v) === b) return Math.max(1, v)
-  return clamp(Math.round(b / 2.55), 1, 100)
-}
-
-export const apiBrightness = (pct: number) => clamp(Math.round(pct * 2.55), 1, 255)
-export const pctFromApi = (b: number) => clamp(Math.round(b / 2.55), 1, 100)
+export { haBrightnessFor, pctFromHa, apiBrightness, pctFromApi }
 
 // ---- color ----
 //
@@ -465,6 +447,7 @@ export function createLightEngine(o: EngineOptions) {
     return {
       entity_id: b.id,
       name: names[b.id] ?? a.friendly_name ?? b.id,
+      ...(typeof a.friendly_name === 'string' ? { friendly_name: a.friendly_name } : {}),
       on,
       unavailable: r ? r.unavailable : true,
       brightness: on && shown?.pct != null ? apiBrightness(shown.pct) : null,
@@ -599,9 +582,10 @@ router.get('/lights', async (_req, res) => {
     res.json(await engine.lights())
   } catch (err) {
     // The last rows beat a 503 that blanks the page: the client can tell the
-    // difference from the timestamps it already polls on.
+    // difference from the timestamps it already polls on. Raven has none of
+    // those, so the header says it.
     const rows = engine.lastRows()
-    if (rows) return res.json(rows)
+    if (rows) return res.set('x-lights-stale', '1').json(rows)
     res.status(503).json({ error: 'HA unreachable', detail: (err as Error).message })
   }
 })
@@ -674,6 +658,158 @@ router.post('/lights/screen/frame', async (req, res) => {
 router.post('/lights/screen/stop', async (_req, res) => {
   await screenSync.stop('thor ended the sync')
   res.json({ ok: true })
+})
+
+// ---------------------------------------------------------------------------
+// Sunrises: one-time Home Assistant automations that ramp a bulb up by a wake
+// time (lib/sunrise.ts builds them; Raven's light_sunrise plans them). They
+// live in HA's own automation config, one id per light per date, so they run
+// with Valkyrie down. Saving an id again replaces that one; HA reloads only it.
+// ---------------------------------------------------------------------------
+
+export type SunriseRow = {
+  id: string
+  /** the automation's entity id */
+  automation: string
+  /** enabled: a sunrise switches itself off when it is done or when the light was changed by hand during it */
+  on: boolean
+  running: boolean
+  /** when it was last switched on or off (HA's last_changed, which every HA restart also sets) */
+  changedAt: string | null
+  lastTriggered: string | null
+  /** what it does; null when its config cannot be read as a sunrise */
+  sunrise: SunriseMeta | null
+  /** it carries this feature's facts block (made by Valkyrie, not by hand) */
+  own: boolean
+  /** an off one: how its run ended, from the line it wrote in HA's logbook; null with no such line */
+  outcome: SunriseOutcome
+}
+export type SunriseOutcome = 'finished' | 'stopped' | null
+
+const automationPath = (id: string) => `/api/config/automation/config/${id}`
+const haStates = async () => await haRequest('GET', '/api/states') as HAState[]
+const automationOf = (states: HAState[], id: string) =>
+  states.find((s) => s.entity_id?.startsWith('automation.') && s.attributes?.id === id)
+
+/**
+ * The last "finished:" or "stopped ..." line the sunrise wrote in HA's logbook, from its start to well past its window.
+ * HA's last_changed cannot tell: every restart sets it anew.
+ */
+async function sunriseOutcome(automation: string, m: SunriseMeta): Promise<SunriseOutcome> {
+  const from = new Date(nyInstant(m.date, m.start) - 60_000).toISOString()
+  const to = new Date(nyInstant(m.date, sunriseWindowEnd(m.end)) + 30 * 60_000).toISOString()
+  const r = await haFetch('GET', `/api/logbook/${encodeURIComponent(from)}?entity=${encodeURIComponent(automation)}&end_time=${encodeURIComponent(to)}`, undefined, HA_TIMEOUT_MS)
+  if (r.status !== 200) return null
+  const lines = (JSON.parse(r.text) as { message?: unknown }[]).map((e) => (typeof e?.message === 'string' ? e.message : ''))
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith('finished:')) return 'finished'
+    if (lines[i].startsWith('stopped ')) return 'stopped'
+  }
+  return null
+}
+
+async function automationConfig(id: string): Promise<Record<string, unknown> | null> {
+  const r = await haFetch('GET', automationPath(id), undefined, HA_TIMEOUT_MS)
+  if (r.status === 404) return null
+  if (r.status !== 200) throw new Error(`HA GET ${automationPath(id)} -> ${r.status} ${r.text}`.trim())
+  return JSON.parse(r.text) as Record<string, unknown>
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * HA reloads a saved automation after it answers, and a reloaded automation keeps the on or off it had: a sunrise
+ * that switched itself off when it finished would stay off. So wait for the reload (the state is written anew),
+ * then switch it on. True when it is on. The wait has a deadline, not a count of reads: with the reads and the save
+ * before it, the route answers inside Raven's 60 s.
+ */
+const SUNRISE_ENABLE_MS = 10_000
+async function enableSunrise(id: string, before: string | null): Promise<boolean> {
+  const until = Date.now() + SUNRISE_ENABLE_MS
+  let s: HAState | undefined
+  while (Date.now() < until) {
+    await pause(500)
+    const r = await haFetch('GET', '/api/states', undefined, Math.max(500, Math.min(HA_TIMEOUT_MS, until - Date.now())))
+    if (r.status !== 200) throw new Error(`HA GET /api/states -> ${r.status} ${r.text}`.trim())
+    s = automationOf(JSON.parse(r.text) as HAState[], id)
+    if (s && s.last_updated !== before) break
+  }
+  if (!s) return false
+  if (s.state !== 'on') await haRequest('POST', '/api/services/automation/turn_on', { entity_id: s.entity_id })
+  return true
+}
+
+router.get('/lights/sunrises', async (_req, res) => {
+  try {
+    const autos = (await haStates()).filter((s) => s.entity_id?.startsWith('automation.') && SUNRISE_ID_RE.test(String(s.attributes?.id ?? '')))
+    const sunrises: SunriseRow[] = await Promise.all(autos.map(async (s) => {
+      const id = String(s.attributes!.id)
+      const config = await automationConfig(id).catch(() => null)
+      const sunrise = config ? sunriseOf(config) : null
+      const on = s.state === 'on'
+      return {
+        id,
+        automation: s.entity_id!,
+        on,
+        running: Number(s.attributes?.current) > 0,
+        changedAt: s.last_changed ?? null,
+        lastTriggered: typeof s.attributes?.last_triggered === 'string' ? s.attributes.last_triggered : null,
+        sunrise,
+        own: ownSunrise(config),
+        outcome: !on && sunrise ? await sunriseOutcome(s.entity_id!, sunrise).catch(() => null) : null,
+      }
+    }))
+    const key = (r: SunriseRow) => (r.sunrise ? `${r.sunrise.date}T${r.sunrise.start}` : `~${r.id}`)
+    res.json({ sunrises: sunrises.sort((a, b) => key(a).localeCompare(key(b))) })
+  } catch (err) {
+    res.status(503).json({ error: 'HA unreachable', detail: (err as Error).message })
+  }
+})
+
+// body: { sunrise: SunriseMeta }. The automation is always built here, from those facts, never taken whole from a caller.
+router.post('/lights/sunrise', async (req, res) => {
+  let m: SunriseMeta
+  try {
+    m = checkSunrise(req.body?.sunrise, LIGHTS)
+  } catch (err) {
+    if (err instanceof SunriseError) return res.status(400).json({ error: err.message })
+    throw err
+  }
+  let id: string
+  let replaced: boolean
+  let before: string | null
+  try {
+    // the light's own name names the id, so one light has one sunrise per date whoever asks
+    const row = (await engine.lights()).find((r) => r.entity_id === m.entity)
+    m = { ...m, light: row?.name ?? m.light }
+    id = sunriseId(m.light, m.date)
+    replaced = (await automationConfig(id)) !== null
+    before = automationOf(await haStates(), id)?.last_updated ?? null
+    await haRequest('POST', automationPath(id), buildSunrise(m))
+  } catch (err) {
+    return res.status(503).json({ error: 'HA did not take the sunrise', detail: (err as Error).message })
+  }
+  // saved: from here a failure only means HA has not switched it on
+  try {
+    res.json({ ok: true, id, replaced, enabled: await enableSunrise(id, before), sunrise: m })
+  } catch (err) {
+    res.json({ ok: true, id, replaced, enabled: false, sunrise: m, warning: `switching it on failed: ${(err as Error).message}` })
+  }
+})
+
+// Deleting a running sunrise stops it where it is: the light keeps its last step.
+router.delete('/lights/sunrise/:id', async (req, res) => {
+  const id = String(req.params.id)
+  if (!SUNRISE_ID_RE.test(id)) return res.status(400).json({ error: `${id} is not a sunrise id (sunrise_<light>_<YYYY>_<MM>_<DD>)` })
+  try {
+    const config = await automationConfig(id)
+    if (!config) return res.status(404).json({ error: `no sunrise ${id}` })
+    const wasRunning = Number(automationOf(await haStates(), id)?.attributes?.current) > 0
+    await haRequest('DELETE', automationPath(id))
+    res.json({ ok: true, id, wasRunning, sunrise: sunriseOf(config) })
+  } catch (err) {
+    res.status(503).json({ error: 'HA did not remove the sunrise', detail: (err as Error).message })
+  }
 })
 
 export default router

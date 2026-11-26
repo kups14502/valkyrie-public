@@ -24,7 +24,7 @@ export async function toolRun(fn: () => unknown): Promise<CallToolResult> {
   }
 }
 
-/** Session start/stop, media requests, task changes, calendar events and vault notes run only when Brendon's own message asked (session_send never asks). */
+/** Session start/stop, media requests, task changes, calendar events, light changes, sunrises and vault notes run only when Brendon's own message asked (session_send never asks). */
 export function needBrendon(ctx: RavenToolCtx, what: string): void {
   if (!ctx.fromBrendon) {
     throw new RavenToolError(`${what} only runs when Brendon's own message asks for it. This run was not woken by him: tell him what you would do and let him ask.`)
@@ -75,7 +75,7 @@ export function ago(ms: number): string {
 export const apiBase = (): string => process.env.RAVEN_API_BASE || `http://127.0.0.1:${process.env.PORT || 3001}/api`
 
 /** A JSON call to the loopback API. Throws RavenToolError with the route's own error text. */
-export async function apiJson<T>(p: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<{ status: number; body: T }> {
+export async function apiJson<T>(p: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<{ status: number; body: T; headers: Headers }> {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), init.timeoutMs ?? 30_000)
   try {
@@ -86,7 +86,7 @@ export async function apiJson<T>(p: string, init: { method?: string; body?: unkn
       signal: ac.signal,
     })
     const body = await r.json().catch(() => null) as T
-    return { status: r.status, body }
+    return { status: r.status, body, headers: r.headers }
   } catch (e) {
     throw new RavenToolError(`Valkyrie's own ${p.split('?')[0]} did not answer (${(e as Error).name === 'AbortError' ? 'timed out' : (e as Error).message})`)
   } finally {

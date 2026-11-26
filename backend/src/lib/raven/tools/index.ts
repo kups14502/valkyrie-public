@@ -1,6 +1,7 @@
 import type { RavenToolGroup } from '../types.js'
 import { registerAgentTools } from './agents.js'
 import { closeQuietJobs } from './autoclose.js'
+import { registerLightTools } from './lights.js'
 import { registerMediaTools } from './media.js'
 import { registerSessionTools, sessionsSnapshot, sessionsState, sessionTitles, titleFor, type RavenMain, type RavenWatch } from './sessions.js'
 import { registerThorFileTools } from './thorfiles.js'
@@ -27,6 +28,7 @@ import { registerWorkTools } from './work.js'
 //   vault.ts     the Obsidian vault, live on thor (odin's nightly copy when thor is off): search, read, list, recent, a new note
 //   thorfiles.ts his own files on thor, live and read-only: list, read, search
 //   thread.ts    Raven's own thread, every message since it began: search, read in full
+//   lights.ts    the Home Assistant lights through Valkyrie's light engine: list, set, and one-time sunrise ramps
 //   work.ts      tasks, projects, tickets per work area, inbox, calendar (and a new event), the morning brief
 
 export type { RavenMain, RavenWatch }
@@ -41,6 +43,7 @@ export const registerRavenTools: RavenToolGroup = (server, ctx) => {
   registerVaultTools(server, ctx)
   registerThorFileTools(server, ctx)
   registerThreadTools(server, ctx)
+  registerLightTools(server, ctx)
   registerWorkTools(server, ctx)
 }
 

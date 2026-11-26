@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { homedir } from 'node:os'
+import { isDeepStrictEqual } from 'node:util'
 import express from 'express'
 import type { TranscriptEntry, TranscriptPage } from '../src/terminal/transcript.ts'
 import type { TermSession } from '../src/terminal/tmux.ts'
@@ -109,6 +110,66 @@ const workAdds: { auth: string | undefined; body: Record<string, unknown> }[] = 
 let workAnswer: { status: number; body: unknown } = { status: 200, body: { ok: true, added: true, event_id: 'AAMk1', web_link: 'https://outlook.example/ev/1', start: '2026-12-02T15:00:00', end: '2026-12-02T15:30:00' } }
 api.post('/calendar/add', (q, r) => { workAdds.push({ auth: q.header('authorization'), body: q.body }); r.status(workAnswer.status).json(workAnswer.body) })
 api.post('/vault/note', (q, r) => { notes.push({ auth: q.header('authorization'), body: q.body }); r.json({ path: `C:\\Vault\\00-Inbox\\${q.body.title}.md` }) })
+// the light engine's routes (routes/lights.ts): its rows, a turn that lands on them as a pending target, and the sunrises
+const lightRow = (entity_id: string, name: string, friendly_name: string, o: Record<string, unknown> = {}) => ({
+  entity_id, name, friendly_name, on: false, unavailable: false, brightness: null as number | null, rgb_color: null as number[] | null,
+  color_temp_kelvin: null as number | null, color_mode: null as string | null, supported_color_modes: ['color_temp', 'rgb'], min_kelvin: 2000, max_kelvin: 7000, pending: false, ...o,
+})
+const lightRows = [
+  lightRow('light.office_lamp', 'Office lamp', 'Office lamp', { on: true, brightness: 128, rgb_color: [255, 0, 0], color_mode: 'rgb' }),
+  lightRow('light.dresser', 'Bedroom', 'Dresser'),
+  lightRow('light.nightsand', 'Table', 'Nightsand', { on: true, brightness: 51, color_temp_kelvin: 2200, color_mode: 'color_temp', max_kelvin: 6500 }),
+  lightRow('light.tv_strip', 'TV Strip', 'TV Strip'),
+  lightRow('light.kitche_light', 'Kitchen Light', 'Kitchen Light', { unavailable: true, supported_color_modes: [] }),
+]
+const lightCalls: string[] = []
+const turnPosts: Record<string, any>[] = []
+let turnAnswer: { status: number; body: unknown } | null = null
+// the engine's last copy when HA does not answer: the route marks it with a header
+let lightsStale = false
+// this turn call (1-based, counted from when it is set) drops the connection, the way a timeout does
+let turnDropAt = 0
+api.get('/api/lights', (_q, r) => { lightCalls.push('GET /lights'); if (lightsStale) r.set('x-lights-stale', '1'); r.json(structuredClone(lightRows)) })
+api.post('/api/lights/turn', (q, r) => {
+  lightCalls.push('POST /lights/turn')
+  turnPosts.push(q.body)
+  if (turnDropAt && --turnDropAt === 0) return q.socket.destroy()
+  if (turnAnswer) return r.status(turnAnswer.status).json(turnAnswer.body)
+  for (const id of q.body.entity_id as string[]) {
+    const row = lightRows.find((x) => x.entity_id === id)!
+    if (q.body.state === 'off') Object.assign(row, { on: false, brightness: null, rgb_color: null, color_temp_kelvin: null, pending: true })
+    else Object.assign(row, { on: true, pending: true }, q.body.brightness !== undefined ? { brightness: q.body.brightness } : {},
+      q.body.color_temp_kelvin !== undefined ? { color_temp_kelvin: q.body.color_temp_kelvin, rgb_color: null } : {})
+  }
+  r.json({ ok: true })
+})
+type FakeSunrise = { id: string; automation: string; on: boolean; running: boolean; changedAt: string | null; lastTriggered: string | null; sunrise: any; own: boolean; outcome: 'finished' | 'stopped' | null }
+const sunriseRows: FakeSunrise[] = []
+const sunrisePosts: Record<string, any>[] = []
+const sunriseDeletes: string[] = []
+let sunriseAnswer: Record<string, unknown> | null = null
+let sunriseDeleteAnswer: { status: number; body: unknown } | null = null
+api.get('/api/lights/sunrises', (_q, r) => { lightCalls.push('GET /lights/sunrises'); r.json({ sunrises: sunriseRows }) })
+api.post('/api/lights/sunrise', (q, r) => {
+  lightCalls.push('POST /lights/sunrise')
+  sunrisePosts.push(q.body)
+  const m = sunriseMod.checkSunrise(q.body.sunrise)
+  const id = sunriseMod.sunriseId(m.light, m.date)
+  const i = sunriseRows.findIndex((x) => x.id === id)
+  const row: FakeSunrise = { id, automation: `automation.${id}`, on: true, running: false, changedAt: null, lastTriggered: null, sunrise: m, own: true, outcome: null }
+  if (i >= 0) sunriseRows.splice(i, 1, row)
+  else sunriseRows.push(row)
+  r.json({ ok: true, id, replaced: i >= 0, enabled: true, sunrise: m, ...sunriseAnswer })
+})
+api.delete('/api/lights/sunrise/:id', (q, r) => {
+  lightCalls.push('DELETE /lights/sunrise')
+  sunriseDeletes.push(q.params.id)
+  if (sunriseDeleteAnswer) return r.status(sunriseDeleteAnswer.status).json(sunriseDeleteAnswer.body)
+  const i = sunriseRows.findIndex((x) => x.id === q.params.id)
+  if (i < 0) return r.status(404).json({ error: `no sunrise ${q.params.id}` })
+  const [row] = sunriseRows.splice(i, 1)
+  r.json({ ok: true, id: row.id, wasRunning: row.running, sunrise: row.sunrise })
+})
 // thor's live read routes (project-files reader.mjs): off until the live block turns them on, so the vault tests above
 // first see an older service (a bare 404) and read odin's copy
 let thorLive = false
@@ -187,6 +248,9 @@ const utilMod = await import('../src/lib/raven/tools/util.ts')
 const paneStateMod = await import('../src/terminal/paneState.ts')
 const originMod = await import('../src/lib/sessionOrigin.ts')
 const vaultMod = await import('../src/lib/raven/tools/vault.ts')
+const sunriseMod = await import('../src/lib/sunrise.ts')
+const scaleMod = await import('../src/lib/lightScale.ts')
+const cliMod = await import('../src/lib/claudeCli.ts')
 const screens = JSON.parse(fs.readFileSync(new URL('./fixtures/pane-screens.json', import.meta.url), 'utf8')).screens as { name: string; screen: string }[]
 const screen = (name: string) => screens.find((s) => s.name === name)!.screen
 
@@ -373,7 +437,8 @@ ioMod.setRavenToolsIo(fakeIo)
   const want = ['agents', 'agent_channel', 'agent_ask', 'agents_pause', 'agent_check', 'proposals', 'main_terminals', 'sessions', 'session_start',
     'session_send', 'session_read', 'session_screen', 'session_keys', 'session_watch', 'session_tend', 'thor_screen', 'thor_windows', 'thor_button', 'thor_click', 'thor_press', 'session_stop', 'session_keep', 'session_done', 'sessions_closed', 'session_recover', 'media_search', 'media_requests', 'media_request', 'vault_search', 'vault_read',
     'vault_recent', 'vault_list', 'vault_note', 'thor_files', 'thor_file_read', 'thor_files_search', 'tasks', 'task_add', 'task_done', 'projects',
-    'project_get', 'tickets', 'inbox', 'calendar', 'calendar_add', 'brief', 'thread_search', 'thread_read']
+    'project_get', 'tickets', 'inbox', 'calendar', 'calendar_add', 'brief', 'thread_search', 'thread_read',
+    'lights', 'light_set', 'light_sunrise', 'light_sunrise_cancel']
   check('every tool is registered', want.every((n) => listed.includes(n)), want.filter((n) => !listed.includes(n)))
   check('the core tools are left to the endpoint', !['post', 'notebook_set', 'now', 'attachment', 'attachments'].some((n) => listed.includes(n)), listed)
   check('no extra tools', listed.length === want.length, listed)
@@ -391,6 +456,8 @@ ioMod.setRavenToolsIo(fakeIo)
     ['task_add', { text: 'buy milk' }], ['task_done', { id: 'loose/abc' }],
     ['calendar_add', { title: 'Haircut', start: '2026-12-02T12:00' }], ['calendar_add', { title: 'Standup', start: '2026-12-02T15:00', calendar: 'work' }],
     ['thor_files', {}], ['thor_file_read', { path: 'C:\\Users\\Brendon\\Documents\\x.txt' }], ['thor_files_search', { query: 'resume' }],
+    ['light_set', { lights: 'Bedroom', state: 'on' }], ['light_set', { lights: ['all'], percent: 50 }],
+    ['light_sunrise', { end: '07:00' }], ['light_sunrise_cancel', { light: 'Bedroom', date: '2026-11-27' }], ['light_sunrise_cancel', { id: 'sunrise_bedroom_2026_11_26' }],
   ]
   const before = acted
   for (const [tool, args] of gated) {
@@ -400,6 +467,8 @@ ioMod.setRavenToolsIo(fakeIo)
   check('gate: nothing acted', acted === before, acted - before)
   check('gate: no media add, no vault note', adds.length === 0 && notes.length === 0)
   check('gate: no calendar event, personal or work', localPosts.length === 0 && workAdds.length === 0, { localPosts, workAdds })
+  check('gate: no light changed, no sunrise saved or removed, nothing even read', turnPosts.length === 0 && sunrisePosts.length === 0
+    && sunriseDeletes.length === 0 && lightCalls.length === 0, { turnPosts, sunrisePosts, sunriseDeletes, lightCalls })
   check('gate: no pane opened, nothing typed or stopped, no watch, no task', created.length === 0 && resumed.length === 0 && typed.length === 0 && killed.length === 0
     && watch.listWatches().length === 0 && tasks.listTasks({ view: 'open', hideTailnet: false }).length === 0 && !agents.isPaused(),
   { created, typed, killed, watches: watch.listWatches().length })
@@ -594,6 +663,254 @@ agents.syncRoster()
   check('media_request: needs its id', r.isError && /foreignAlbumId/.test(r.text), r)
   r = await call('media_requests')
   check('media_requests: live status', Array.isArray(r.json) && r.json[0].status === 'downloading 40%' && r.json[1].stuck === true && / ET$/.test(r.json[0].asked), r.json)
+}
+
+// ------------------------------------------------------------- lights ---
+
+{
+  const savedClock = clock
+  const ny = (wall: string) => cliMod.nyWallToMs(wall)
+  const iso = (wall: string) => new Date(ny(wall)).toISOString()
+  const sm = (light: string, entity: string, date: string, start: string, end: string) => ({
+    version: 1, entity, light, date, start, end, armed: `${start}:00`, fromPercent: 1, toPercent: 100, fromKelvin: 2200, toKelvin: 6500,
+  })
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/sunrise-bedroom-2026-11-26.json', import.meta.url), 'utf8'))
+  const row = (id: string, o: Partial<FakeSunrise>): FakeSunrise => ({ id, automation: `automation.${id}`, on: true, running: false, changedAt: null, lastTriggered: null, sunrise: null, own: true, outcome: null, ...o })
+  sunriseRows.push(
+    // the live one, saved by hand before the facts block: the route reads it from its description
+    row('sunrise_bedroom_2026_11_26', { automation: 'automation.sunrise_bedroom_thu_2026_11_26_10_30_11_00_am', sunrise: sunriseMod.sunriseOf(fixture), own: false }),
+    row('sunrise_table_2026_11_20', { on: false, changedAt: iso('2026-11-20T07:01'), outcome: 'finished', sunrise: sm('Table', 'light.nightsand', '2026-11-20', '06:30', '07:00') }),
+    // stopped mid-ramp, then an HA restart after its end set last_changed anew: the logbook line still says stopped
+    row('sunrise_office_lamp_2026_11_25', { on: false, changedAt: iso('2026-11-26T01:00'), outcome: 'stopped', sunrise: sm('Office lamp', 'light.office_lamp', '2026-11-25', '06:30', '07:00') }),
+    // off after its end with no line in the logbook: how it ended is not known
+    row('sunrise_tv_strip_2026_11_01', { on: false, changedAt: iso('2026-11-01T08:00'), sunrise: sm('TV Strip', 'light.tv_strip', '2026-11-01', '07:00', '07:30'), own: false }),
+  )
+  clock = ny('2026-11-26T02:30')
+
+  // lights: any run
+  let before = acted
+  let r = await call('lights', {}, false)
+  show('lights', r.json)
+  const L = (name: string) => r.json?.lights?.find((l: { name: string }) => l.name === name)
+  check('lights: any run, every light', !r.isError && r.json.lights.length === 5 && acted === before, r)
+  check('lights: on with its percent and rgb', L('Office lamp')?.state === 'on' && L('Office lamp').percent === 50 && isDeepStrictEqual(L('Office lamp').rgb, [255, 0, 0])
+    && L('Office lamp').kelvin === undefined, L('Office lamp'))
+  check('lights: kelvin with the preset name', L('Table')?.percent === 20 && L('Table').kelvin === 2200 && L('Table').preset === 'Warm' && L('Table').haName === 'Nightsand', L('Table'))
+  check('lights: off and unavailable', L('Bedroom')?.state === 'off' && L('Bedroom').percent === undefined && L('Bedroom').entity === 'light.dresser'
+    && L('Bedroom').haName === 'Dresser' && L('Kitchen Light')?.state === 'unavailable' && L('TV Strip')?.haName === undefined, r.json?.lights)
+  const S = (id: string) => r.json?.sunrises?.find((s: { id: string }) => s.id === id)
+  check('lights: the live sunrise, scheduled, in ET words', S('sunrise_bedroom_2026_11_26')?.status === 'scheduled' && S('sunrise_bedroom_2026_11_26').light === 'Bedroom'
+    && S('sunrise_bedroom_2026_11_26').when === 'Thu, Nov 26, 10:30 to 11:00 AM ET' && S('sunrise_bedroom_2026_11_26').from === '1% 2200K'
+    && S('sunrise_bedroom_2026_11_26').to === '100% 6500K', S('sunrise_bedroom_2026_11_26'))
+  check('lights: done and stopped from the logbook line, never from last_changed', S('sunrise_table_2026_11_20')?.status === 'done'
+    && S('sunrise_office_lamp_2026_11_25')?.status === 'stopped' && S('sunrise_tv_strip_2026_11_01')?.status === 'off', r.json?.sunrises)
+  check('lights: live, no note', r.json?.note === undefined, r.json?.note)
+  lightsStale = true
+  r = await call('lights')
+  lightsStale = false
+  check('lights: the engine\'s last copy says so', !r.isError && r.json.lights.length === 5 && /Home Assistant is not answering: these are the last states Valkyrie saw/.test(r.json.note ?? ''), r.json?.note)
+  clock = ny('2026-11-26T10:40')
+  r = await call('lights')
+  check('lights: inside its window it is running', S('sunrise_bedroom_2026_11_26')?.status === 'running', S('sunrise_bedroom_2026_11_26'))
+  clock = ny('2026-11-26T11:30')
+  r = await call('lights')
+  check('lights: still on after its window it was missed', S('sunrise_bedroom_2026_11_26')?.status === 'missed', S('sunrise_bedroom_2026_11_26'))
+  clock = ny('2026-11-26T02:30')
+
+  // light_set: reads first, then the engine's own /lights/turn
+  lightCalls.length = 0
+  before = acted
+  r = await call('light_set', { lights: 'Bedroom', percent: 40 })
+  show('light_set', r.json)
+  check('light_set: reads the lights and the sunrises, turns, reads them back', isDeepStrictEqual(lightCalls, ['GET /lights', 'GET /lights/sunrises', 'POST /lights/turn', 'GET /lights']), lightCalls)
+  check('light_set: a percent alone turns it on, on the API scale', isDeepStrictEqual(turnPosts[0], { entity_id: ['light.dresser'], state: 'on', brightness: 102 }), turnPosts[0])
+  check('light_set: that brightness is exactly the percent to the engine, for every percent',
+    scaleMod.pctFromApi(102) === 40 && Array.from({ length: 100 }, (_, i) => i + 1).every((p) => scaleMod.pctFromApi(scaleMod.apiBrightness(p)) === p))
+  check('light_set: the light as it stands after', r.json?.lights?.length === 1 && r.json.lights[0].name === 'Bedroom' && r.json.lights[0].state === 'on'
+    && r.json.lights[0].percent === 40 && r.json.lights[0].pending === true && /not confirmed/.test(r.json.note ?? ''), r.json)
+  check('light_set: counts as acted', acted === before + 1, acted - before)
+
+  r = await call('light_set', { lights: ['office', 'Nightsand'], state: 'off', percent: 50, kelvin: 3000 })
+  check('light_set: off by a word and an HA name, ignoring the rest', isDeepStrictEqual(turnPosts[1], { entity_id: ['light.office_lamp', 'light.nightsand'], state: 'off' })
+    && /Off ignores/.test(r.json?.note ?? '') && r.json.lights.every((l: { state: string }) => l.state === 'off'), { post: turnPosts[1], r })
+  r = await call('light_set', { lights: 'all', kelvin: 2200 })
+  check('light_set: all, a kelvin alone, the unavailable one left out', isDeepStrictEqual(turnPosts[2], { entity_id: ['light.office_lamp', 'light.dresser', 'light.nightsand', 'light.tv_strip'], state: 'on', color_temp_kelvin: 2200 })
+    && /Kitchen Light left out/.test(r.json?.note ?? ''), { post: turnPosts[2], r })
+  check('light_set: a kelvin keeps the percent it had', r.json?.lights?.find((l: { name: string }) => l.name === 'Bedroom')?.percent === 40, r.json)
+  r = await call('light_set', { lights: 'light.nightsand', kelvin: 9000 })
+  check('light_set: an entity id, the kelvin held to the bulb', isDeepStrictEqual(turnPosts[3], { entity_id: ['light.nightsand'], state: 'on', color_temp_kelvin: 6500 })
+    && /cannot show 9000K/.test(r.json?.note ?? ''), { post: turnPosts[3], r })
+  r = await call('light_set', { lights: 'office lamp, tv', state: 'on', percent: 100, kelvin: 6500 })
+  check('light_set: two names in one string, full and Cool', isDeepStrictEqual(turnPosts[4], { entity_id: ['light.office_lamp', 'light.tv_strip'], state: 'on', brightness: 255, color_temp_kelvin: 6500 }), turnPosts[4])
+
+  const posted = turnPosts.length
+  before = acted
+  const refused: [string, Record<string, unknown>, RegExp][] = [
+    ['an ambiguous name', { lights: 't', state: 'on' }, /"t" matches Table, TV Strip: name one/],
+    ['an unknown name', { lights: 'garage', state: 'on' }, /No light is called "garage"\. The lights: Office lamp, Bedroom, Table, TV Strip, Kitchen Light/],
+    ['nothing to change', { lights: 'Bedroom' }, /Say what to change/],
+    ['an unavailable light', { lights: 'Kitchen Light', state: 'on' }, /Kitchen Light is unavailable/],
+    ['one of them ambiguous', { lights: ['Bedroom', 't'], state: 'off' }, /matches/],
+  ]
+  for (const [what, args, want] of refused) {
+    r = await call('light_set', args)
+    check(`light_set: refuses ${what}`, r.isError && want.test(r.text), r)
+  }
+  turnAnswer = { status: 503, body: { error: 'HA call failed', detail: 'timed out' } }
+  r = await call('light_set', { lights: 'Bedroom', state: 'off' })
+  check('light_set: Home Assistant down is an error', r.isError && /did not take it: HA call failed: timed out/.test(r.text), r)
+  turnAnswer = null
+  check('light_set: refused ones post nothing and act on nothing', turnPosts.length === posted + 1 && acted === before, { posts: turnPosts.length - posted, acted: acted - before })
+
+  // two kelvin groups (Table tops out at 6500K); the second call's connection drops after the first landed
+  const keepRows = structuredClone(lightRows)
+  turnDropAt = 2
+  before = acted
+  r = await call('light_set', { lights: 'all', kelvin: 6800 })
+  turnDropAt = 0
+  check('light_set: a group that drops after one landed still counts as acted and names the one that failed', !r.isError && acted === before + 1
+    && isDeepStrictEqual(turnPosts.slice(-2).map((p) => p.entity_id), [['light.office_lamp', 'light.dresser', 'light.tv_strip'], ['light.nightsand']])
+    && /Home Assistant did not take it for Table\./.test(r.json?.note ?? '') && /Table cannot show 6800K/.test(r.json?.note ?? ''), { r, acted: acted - before })
+  turnDropAt = 1
+  r = await call('light_set', { lights: 'Bedroom', state: 'off' })
+  turnDropAt = 0
+  check('light_set: the only call dropping is an error, not acted', r.isError && /did not take it: Valkyrie's own \/lights\/turn did not answer/.test(r.text)
+    && /Nothing was changed/.test(r.text) && acted === before + 1, r)
+  lightsStale = true
+  r = await call('light_set', { lights: 'Bedroom', state: 'on' })
+  lightsStale = false
+  check('light_set: a stale read back is not shown as the result', !r.isError && r.json?.sent === 'Bedroom' && /could not be read back/.test(r.json?.note ?? '') && r.json.lights === undefined, r.json)
+  lightRows.splice(0, lightRows.length, ...keepRows)
+
+  // the builder is the live automation
+  const live = sm('Bedroom', 'light.dresser', '2026-11-26', '10:30', '11:00')
+  const built = sunriseMod.buildSunrise(live, { stepS: 15, settleS: 60, windowEnd: '11:05:00' })
+  const { variables, ...rest } = built
+  check('sunrise: the builder makes the live Bedroom automation exactly, plus only its facts block',
+    isDeepStrictEqual(rest, fixture) && isDeepStrictEqual(variables, { sunrise: live }), rest)
+  check('sunrise: with the defaults too', isDeepStrictEqual(sunriseMod.buildSunrise(live), built))
+
+  // light_sunrise
+  lightCalls.length = 0
+  before = acted
+  r = await call('light_sunrise', { end: '07:15', minutes: 45, date: '2026-11-27' })
+  show('light_sunrise', r.json)
+  check('light_sunrise: Bedroom by default, the facts posted', !r.isError && isDeepStrictEqual(sunrisePosts[0]?.sunrise, sm('Bedroom', 'light.dresser', '2026-11-27', '06:30', '07:15')), { r, post: sunrisePosts[0] })
+  check('light_sunrise: in ET words', r.json?.scheduled?.startsWith('Scheduled the Bedroom sunrise for Fri, Nov 27, 6:30 to 7:15 AM ET: 1% 2200K up to 100% 6500K, then it stays on.')
+    && r.json.id === 'sunrise_bedroom_2026_11_27' && r.json.replaced === false, r.json)
+  check('light_sunrise: reads the light first, never a light service', lightCalls[0] === 'GET /lights' && !lightCalls.includes('POST /lights/turn'), lightCalls)
+  check('light_sunrise: removes only its own past ones', isDeepStrictEqual([...sunriseDeletes].sort(), ['sunrise_office_lamp_2026_11_25', 'sunrise_table_2026_11_20'])
+    && sunriseRows.some((x) => x.id === 'sunrise_tv_strip_2026_11_01') && sunriseRows.some((x) => x.id === 'sunrise_bedroom_2026_11_26')
+    && /Removed 2 past sunrises/.test(r.json?.scheduled ?? ''), { sunriseDeletes, scheduled: r.json?.scheduled })
+  check('light_sunrise: counts as acted', acted === before + 1, acted - before)
+
+  r = await call('light_sunrise', { end: '7:30', date: '2026-11-27' })
+  check('light_sunrise: the same light and date replaces it', !r.isError && r.json.replaced === true && /replaces the one Bedroom had/.test(r.json.scheduled)
+    && sunrisePosts[1]?.sunrise.start === '07:00' && sunriseRows.filter((x) => x.id === 'sunrise_bedroom_2026_11_27').length === 1, r)
+  r = await call('light_sunrise', { light: 'Table', end: '10:00' })
+  check('light_sunrise: today while the end is ahead', !r.isError && sunrisePosts[2]?.sunrise.date === '2026-11-26' && sunrisePosts[2].sunrise.start === '09:30', { r, post: sunrisePosts[2] })
+  clock = ny('2026-11-26T12:00')
+  r = await call('light_sunrise', { light: 'Table', end: '10:00' })
+  check('light_sunrise: tomorrow once it is past', !r.isError && sunrisePosts[3]?.sunrise.date === '2026-11-27', { r, post: sunrisePosts[3] })
+  r = await call('light_sunrise', { light: 'tv strip', end: '08:00', date: '2026-11-28', toKelvin: 9000, fromPercent: 5, toPercent: 80 })
+  check('light_sunrise: kelvin held to the bulb, levels passed', !r.isError && sunrisePosts[4]?.sunrise.toKelvin === 7000 && sunrisePosts[4].sunrise.fromPercent === 5
+    && sunrisePosts[4].sunrise.toPercent === 80 && /cannot show 9000K/.test(r.json.scheduled) && /5% 2200K up to 80% 7000K/.test(r.json.scheduled), { r, post: sunrisePosts[4] })
+  clock = ny('2026-11-26T10:45') + 20_000
+  r = await call('light_sunrise', { light: 'Office lamp', end: '11:00' })
+  check('light_sunrise: a start already past begins partway, and only an off after the ask stops it', !r.isError && sunrisePosts[5]?.sunrise.start === '10:30'
+    && sunrisePosts[5].sunrise.armed === '10:45:20' && /begins at the next minute, partway along \(about 52% 4398K now\)/.test(r.json.scheduled), { r, post: sunrisePosts[5] })
+  // saved but not switched on (the route's warning), on a bulb that is unavailable now
+  sunriseAnswer = { enabled: false, warning: 'switching it on failed: HA POST /api/services/automation/turn_on -> 500' }
+  before = acted
+  r = await call('light_sunrise', { light: 'Kitchen Light', end: '08:00', date: '2026-11-29' })
+  sunriseAnswer = null
+  check('light_sunrise: saved but not switched on is scheduled and acted, with the reason', !r.isError && acted === before + 1
+    && /Home Assistant does not show it switched on yet \(switching it on failed: HA POST \/api\/services\/automation\/turn_on -> 500\): check it with lights\./.test(r.json?.scheduled ?? ''), r)
+  check('light_sunrise: an unavailable bulb must be back before the start, and coming back off stops it',
+    /Kitchen Light is unavailable in Home Assistant right now: it runs if the bulb is back before 7:30 AM; if it comes back off later, that counts as switched off and stops it\./.test(r.json?.scheduled ?? ''), r.json?.scheduled)
+
+  const saved = sunrisePosts.length
+  before = acted
+  const bad: [string, Record<string, unknown>, RegExp][] = [
+    ['an end already past', { end: '10:00', date: '2026-11-26' }, /Thu, Nov 26, 9:30 to 10:00 AM ET is already past/],
+    ['a past day', { end: '07:00', date: '2026-11-20' }, /already past/],
+    ['no such hour', { end: '25:00' }, /real HH:mm/],
+    ['no such day', { end: '07:00', date: '2026-02-30' }, /real YYYY-MM-DD/],
+    ['a start the day before', { end: '00:10', minutes: 30, date: '2026-11-28' }, /start the day before/],
+    ['all the lights', { light: 'all', end: '07:00', date: '2026-11-28' }, /one light/],
+    ['an unknown light', { light: 'porch', end: '07:00', date: '2026-11-28' }, /No light is called "porch"/],
+    ['an end past 23:53', { end: '23:59', date: '2026-11-28' }, /the end must be 23:53 or earlier/],
+    ['the hour the clocks skip', { end: '02:30', date: '2027-03-14' }, /the clocks go forward on 2027-03-14 and 02:00 to 03:00 does not happen/],
+    ['the hour the clocks repeat', { end: '01:45', date: '2027-11-07' }, /the clocks go back on 2027-11-07 and 01:00 to 02:00 happens twice/],
+  ]
+  for (const [what, args, want] of bad) {
+    r = await call('light_sunrise', args)
+    check(`light_sunrise: refuses ${what}`, r.isError && want.test(r.text) && /Nothing was/.test(r.text), r)
+  }
+  const clockWas = clock
+  clock = ny('2027-03-14T01:10')
+  r = await call('light_sunrise', { end: '02:30' })
+  clock = clockWas
+  check('light_sunrise: asked on the night the clocks skip, the plain reason', r.isError && /clocks go forward/.test(r.text) && !/armed/.test(r.text), r)
+  check('light_sunrise: refused ones save nothing', sunrisePosts.length === saved && acted === before, sunrisePosts.length - saved)
+
+  clock = ny('2026-11-26T12:00')
+  r = await call('lights')
+  check('lights: a new sunrise is listed as scheduled', S('sunrise_bedroom_2026_11_27')?.status === 'scheduled' && S('sunrise_bedroom_2026_11_27').when === 'Fri, Nov 27, 7:00 to 7:30 AM ET', r.json?.sunrises)
+
+  // light_sunrise_cancel
+  const dels = sunriseDeletes.length
+  for (const id of ['automation.coffee', 'wake_up_2026_11_27', 'sunrise_bedroom']) {
+    r = await call('light_sunrise_cancel', { id })
+    check(`light_sunrise_cancel: refuses ${id}`, r.isError && /is not a sunrise id/.test(r.text), r)
+  }
+  check('light_sunrise_cancel: a refused id removes nothing', sunriseDeletes.length === dels, sunriseDeletes)
+  before = acted
+  r = await call('light_sunrise_cancel', { light: 'Bedroom', date: '2026-11-27' })
+  check('light_sunrise_cancel: by light and date', !r.isError && sunriseDeletes.at(-1) === 'sunrise_bedroom_2026_11_27'
+    && r.text === 'Canceled the Bedroom sunrise for Fri, Nov 27, 7:00 to 7:30 AM ET.' && acted === before + 1, r)
+  r = await call('light_sunrise_cancel', { id: 'sunrise_bedroom_2026_12_25' })
+  check('light_sunrise_cancel: none there is said plainly', !r.isError && /No sunrise sunrise_bedroom_2026_12_25 is set/.test(r.text) && acted === before + 1, r)
+  r = await call('light_sunrise_cancel', {})
+  check('light_sunrise_cancel: more than one upcoming asks for which', r.isError && /More than one fits/.test(r.text), r)
+  r = await call('light_sunrise_cancel', { date: '2026-11-28' })
+  check('light_sunrise_cancel: the one upcoming that fits', !r.isError && sunriseDeletes.at(-1) === 'sunrise_tv_strip_2026_11_28' && /Canceled the TV Strip sunrise for Sat, Nov 28/.test(r.text), r)
+  clock = ny('2026-11-26T10:40')
+  sunriseRows.find((x) => x.id === 'sunrise_bedroom_2026_11_26')!.running = true
+  r = await call('light_sunrise_cancel', { light: 'bedroom', date: '2026-11-26' })
+  check('light_sunrise_cancel: a running one stops where it is', !r.isError && sunriseDeletes.at(-1) === 'sunrise_bedroom_2026_11_26'
+    && /It was running: it stopped, and the light stays where it is \(40% 2200K\)\./.test(r.text), r)
+
+  // light_set on a light with a sunrise running: the ramp's next step would undo a percent or kelvin, so it goes first
+  sunriseRows.splice(0, sunriseRows.length, ...sunriseRows.filter((x) => x.id !== 'sunrise_table_2026_11_26'),
+    row('sunrise_table_2026_11_26', { running: true, sunrise: sm('Table', 'light.nightsand', '2026-11-26', '10:30', '11:00') }))
+  lightCalls.length = 0
+  before = acted
+  r = await call('light_set', { lights: 'Table', percent: 20 })
+  check('light_set: cancels a running sunrise on that light first, and says so', !r.isError && sunriseDeletes.at(-1) === 'sunrise_table_2026_11_26'
+    && isDeepStrictEqual(lightCalls, ['GET /lights', 'GET /lights/sunrises', 'DELETE /lights/sunrise', 'POST /lights/turn', 'GET /lights'])
+    && /Canceled the running Table sunrise for Thu, Nov 26, 10:30 to 11:00 AM ET: its next step, within 15 seconds, would have undone this\./.test(r.json?.note ?? '')
+    && acted === before + 2, { r, lightCalls })
+  lightCalls.length = 0
+  r = await call('light_set', { lights: 'Office lamp', state: 'off' })
+  check('light_set: off leaves a sunrise alone (its own check stops it)', !r.isError && !lightCalls.includes('GET /lights/sunrises') && !lightCalls.includes('DELETE /lights/sunrise'), lightCalls)
+  // the Office lamp one from above is on and inside its window: running between two ticks
+  sunriseDeleteAnswer = { status: 503, body: { error: 'HA did not remove the sunrise', detail: 'timed out' } }
+  const turns = turnPosts.length
+  before = acted
+  r = await call('light_set', { lights: 'office', kelvin: 3000 })
+  sunriseDeleteAnswer = null
+  check('light_set: a running sunrise that cannot be canceled changes nothing', r.isError
+    && /^The Office lamp sunrise for Thu, Nov 26, 10:30 to 11:00 AM ET is running, its next step would undo this, and it could not be canceled: HA did not remove the sunrise: timed out\. No light was changed\.$/.test(r.text)
+    && turnPosts.length === turns && acted === before, r)
+  r = await call('light_set', { lights: 'office', kelvin: 3000 })
+  check('light_set: one on between two ticks is running too', !r.isError && sunriseDeletes.at(-1) === 'sunrise_office_lamp_2026_11_26' && /Canceled the running Office lamp sunrise/.test(r.json?.note ?? ''), r)
+  r = await call('light_sunrise', { end: '07:00' }, false)
+  check('light_sunrise: the gate names the action', r.isError && r.text.startsWith("Scheduling a sunrise only runs when Brendon's own message asks for it."), r)
+
+  check('lights: no dash in any answer', !/\u2014/.test(JSON.stringify(sunrisePosts)) && !/\u2014/.test(r.text))
+  sunriseRows.length = 0
+  clock = savedClock
 }
 
 // ------------------------------------------------------------- thread ---

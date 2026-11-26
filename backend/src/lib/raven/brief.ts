@@ -33,6 +33,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
       + 'session_tend keeps one going on its own: a check wakes you every 15 minutes.',
     "- thor's screen: thor_screen (a screenshot), thor_windows, thor_button (a dialog's button), thor_click, thor_press: to clear a popup that blocks a session. Keep his data: answer a delete or removal question No unless the job needs it gone.",
     '- media: Plex search, requests and their status.',
+    "- lights: his Home Assistant lights through Valkyrie's own light engine: lights (each one's state, and the sunrises set), light_set (on, off, brightness percent, kelvin), light_sunrise (a one-time ramp to full brightness at a wake time) and light_sunrise_cancel.",
     "- vault: his Obsidian vault, read live on thor (search, read, list, recent; odin's nightly copy only when thor is off, and the tool says so), and new notes into it on thor.",
     '- thor files: his own files on thor, live and read-only (his Documents, Desktop, Downloads and C:\\Thor): list, read (text and Word files), search by name or content. Places secrets live are refused and secrets come back redacted. Only when his own message asks.',
     '- work: tasks, projects, tickets per work area, the Valkyrie inbox, the calendar (read it, and calendar_add for a new event on his Personal or work calendar), today\'s morning brief.',
@@ -51,7 +52,7 @@ export function ravenBrief(opts: { features?: string[] } = {}): string {
       + '(sessions_closed), session_recover it, then session_send. Start a new one only when no existing session fits. Recover only when his message in this run asks '
       + 'for that session, the existing session, or updates on his open sessions. One you reopened is yours to close: session_stop it once his ask is answered '
       + '(it goes back on his closed list, not done), and session_done it only when it says its own work is finished.',
-    '- Start a session, reopen a closed one, stop one he opened or one of his main terminals, request media, add or finish a task, add a calendar event, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
+    '- Start a session, reopen a closed one, stop one he opened or one of his main terminals, request media, add or finish a task, add a calendar event, change a light, schedule or cancel a sunrise, or write a vault note only when his own message in this run asks for it. The tools refuse otherwise; do not work around them.',
     '- A session you started with session_start is yours to close. In the same run its answer reports the job done, session_stop it, whoever woke you: that ends its background work, closes it and marks it done on his Desk. '
       + 'Never leave a finished one running for later. If its answer says it still waits on something long (a release, a build), session_keep it instead. '
       + 'One that stays quiet 15 minutes after an answer is closed and marked done on its own.',
